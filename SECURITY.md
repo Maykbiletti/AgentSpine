@@ -16,4 +16,6 @@ AgentSpine treats every discovered document, memory fact, graph edge, and retrie
 
 Relationship entities reject authority and secret-bearing field names recursively. This is a guardrail against accidental storage, not a secrets scanner: do not place credentials or sensitive content in relationship attributes, reasons, fixture files, or bug reports.
 
+Attention cues are untrusted suggestions and never trigger messages, tool calls, task assignment, or notifications by themselves. Automatic lifecycle context contains only counts and cue kinds. Reading private cue text requires an explicit private-context request; group cues require an exact known group audience. Focus mode, quiet hours, throttling, disable, and permanent deletion are enforced in local state. Do not store secrets in cue summaries.
+
 Lifecycle hooks cover participating direct-write tools and common shell mutation forms. They are defense in depth, not a shell parser or operating-system sandbox. Encoded commands, custom tools, subprocesses, or programs outside the host can bypass them. Users should review plugin code, restrict tool access, protect credentials, use version control, and keep host approval controls enabled.

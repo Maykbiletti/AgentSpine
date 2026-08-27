@@ -11,6 +11,11 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Append-only history for superseded document annotations, document links, entities, and relationships
 - Broken-link and competing-candidate findings in every catalog
 - Large-tree, manifest-consistency, CLI-MCP, privacy, authority, and shell-guard tests
+- Local sparse-attention state for unanswered questions, promises, check-ins, and meaningful changes
+- Relationship-silence cues based on minimal interaction timestamps rather than conversation capture
+- Attention CLI and MCP surfaces with quiet hours, focus suppression, throttling, disable, resolve, and permanent deletion controls
+- Exact group-audience binding for group-scoped cues and activity timestamps
+- Cross-process locking for concurrent local attention updates
 
 ### Changed
 
@@ -22,15 +27,17 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - CI runs the repository's own ten-gate audit and uses the current maintained GitHub action majors
 - Syntax checks and protected-path comparisons are portable across Linux, macOS, and Windows
 - External-state auditing handles Windows project and state directories on different drives
+- Session hooks expose only due attention counts and kinds; cue text remains behind an explicit privacy-filtered read
+- The ten-gate audit now validates attention authority, privacy, configuration, and external-state placement
 
 ### Security
 
 - Relationship attributes recursively reject permissions, rights, authorization, credentials, secrets, tokens, and API keys
 - Every relationship and history record is explicitly context-only
+- Every attention cue and activity is context-only; corrupt attention policy fails closed
 
 ### Planned
 
-- Attention and open-thread signals
 - Optional shared-memory adapters
 
 ## [0.1.0] - 2026-08-27

@@ -32,7 +32,7 @@ flowchart TB
     A["Existing Markdown sources"] --> B["Read-only discovery"]
     B --> C["Provenance catalog"]
     C --> D["Host-aware resolver"]
-    F["Context-only relationship graph"] --> D
+    F["Relationships + sparse attention"] --> D
     D --> E["Claude Code · Codex · MCP"]
 ```
 
@@ -127,6 +127,11 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine entity …` | Add or update a person, agent, group, channel, or project |
 | `agentspine relate …` | Connect two known entities with privacy and confidence |
 | `agentspine relationships …` | Read one privacy-filtered relationship neighborhood |
+| `agentspine attention [root]` | Read sparse due cues after privacy, focus, quiet-hour, and repeat filters |
+| `agentspine attention-add …` | Record an unanswered question, promise, check-in, or meaningful change |
+| `agentspine attention-touch …` | Record only that an entity interaction occurred |
+| `agentspine attention-config …` | Configure limits, quiet hours, silence threshold, or disable attention |
+| `agentspine attention-delete …` | Permanently remove a cue and its retained attention history |
 | `agentspine audit [root]` | Run ten deterministic quality and preservation gates |
 | `agentspine doctor` | Check runtime and preservation mode |
 | `agentspine mcp` | Start the stdio MCP server |
@@ -150,9 +155,12 @@ flowchart LR
 - `verify` proves whether source bytes changed since the last scan.
 - `link_documents` and `annotate_document` let agents build their own semantic map without editing sources.
 - `upsert_entity`, `link_entities`, and `relationship_context` maintain a privacy-scoped social and responsibility map outside the project.
+- `upsert_attention`, `record_activity`, `attention_context`, `resolve_attention`, `configure_attention`, and `delete_attention` provide sparse follow-up suggestions without sending messages or granting authority.
 - `audit` runs the same ten gates available through the CLI.
 
 Relationship updates supersede the active view but retain the previous observation in append-only graph history. Permission-like and credential-like attributes are rejected recursively. See [relationships and learning](docs/relationships.md).
+
+Attention is deliberately restrained: the current task wins, private cues require an explicit private read, quiet hours and presentation throttles suppress repetition, and deletion removes retained attention history. Lifecycle hooks inject only counts and cue kinds—never the cue text. See [attention](docs/attention.md).
 
 ## Optional four-layer starter
 
@@ -178,7 +186,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.1` establishes the preservation kernel, context resolver, relationship foundation, MCP surface, dual-host plugin layout, and executable tests. Attention signals, deeper candidate promotion, and pluggable shared memory remain staged in the [roadmap](docs/roadmap.md) behind the same permission boundary.
+AgentSpine is in active early development. `v0.1` establishes the preservation kernel, context resolver, relationship and sparse-attention foundations, MCP surface, dual-host plugin layout, and executable tests. Deeper candidate promotion and pluggable shared memory remain staged in the [roadmap](docs/roadmap.md) behind the same permission boundary.
 
 ## Documentation
 
@@ -188,6 +196,7 @@ AgentSpine is in active early development. `v0.1` establishes the preservation k
 | Audit non-destructive behavior | [Preservation contract](docs/preservation-contract.md) |
 | Integrate a host | [Claude Code and Codex](docs/host-integration.md) |
 | Understand relationships and history | [Relationships](docs/relationships.md) |
+| Configure sparse follow-ups | [Attention](docs/attention.md) |
 | Run the Definition of Done | [Ten quality gates](docs/quality-gates.md) |
 | See planned capabilities | [Roadmap](docs/roadmap.md) |
 | Cut a release | [Release process](docs/releasing.md) |

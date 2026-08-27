@@ -3,6 +3,10 @@ import { scanAndSave, verifyCatalog } from "./lib/catalog.js";
 import { readDocument, resolveContext } from "./lib/context.js";
 import { runAudit } from "./lib/audit.js";
 import {
+  attentionContext, configureAttention, deleteAttention, loadAttention,
+  recordActivity, resolveAttention, upsertAttention
+} from "./lib/attention.js";
+import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
@@ -36,6 +40,13 @@ function output(value, json = false) {
   else process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function booleanFlag(value, fallback = false) {
+  if (value === undefined) return fallback;
+  if (value === true || value === "true" || value === "1") return true;
+  if (value === false || value === "false" || value === "0") return false;
+  throw new Error(`expected boolean flag, received: ${value}`);
+}
+
 function help() {
   return `AgentSpine ${VERSION}
 
@@ -49,6 +60,13 @@ Usage:
   agentspine entity <id> --kind person [--name text] [--privacy private]
   agentspine relate <from> <to> --relation works-with [--privacy private]
   agentspine relationships <entity-id> [--include-private] [--json]
+  agentspine attention [root] [--group id] [--include-private] [--focus-active] [--mark-presented]
+  agentspine attention-add [id] --kind promise --summary text [--entity id] [--group id] [--due date]
+  agentspine attention-resolve <id> [--status completed|dismissed|open]
+  agentspine attention-touch <entity-id> [--kind interaction] [--at date]
+  agentspine attention-delete <signal-id>
+  agentspine attention-purge <entity-id>
+  agentspine attention-config [root] [--enabled true|false] [--quiet-start 22 --quiet-end 7 --utc-offset 120]
   agentspine audit [root] [--json]
   agentspine doctor [--json]
   agentspine mcp
@@ -142,6 +160,66 @@ export async function run(argv = process.argv.slice(2)) {
       root: flags.root || process.cwd(), entityId: positional[0],
       includePrivate: Boolean(flags["include-private"])
     }), json);
+  }
+
+  if (command === "attention") {
+    return output(await attentionContext({
+      root: positional[0] || process.cwd(),
+      includePrivate: booleanFlag(flags["include-private"]),
+      focusActive: booleanFlag(flags["focus-active"]),
+      markPresented: booleanFlag(flags["mark-presented"]),
+      groupId: flags.group || null,
+      maxItems: flags["max-items"] === undefined ? null : Number(flags["max-items"])
+    }), json);
+  }
+
+  if (command === "attention-add") {
+    return output(await upsertAttention({
+      root: flags.root || process.cwd(), id: positional[0], kind: flags.kind,
+      summary: flags.summary, entityId: flags.entity || null, dueAt: flags.due || null,
+      priority: Number(flags.priority ?? 50), privacy: flags.privacy || "private",
+      groupId: flags.group || null,
+      sourceDocument: flags.source || null, confidence: Number(flags.confidence ?? 0.5)
+    }), json);
+  }
+
+  if (command === "attention-resolve") {
+    return output(await resolveAttention({
+      root: flags.root || process.cwd(), id: positional[0], status: flags.status || "completed"
+    }), json);
+  }
+
+  if (command === "attention-touch") {
+    return output(await recordActivity({
+      root: flags.root || process.cwd(), entityId: positional[0], kind: flags.kind || "interaction",
+      at: flags.at || new Date(), privacy: flags.privacy || "private", groupId: flags.group || null
+    }), json);
+  }
+
+  if (command === "attention-delete") {
+    return output(await deleteAttention({ root: flags.root || process.cwd(), signalId: positional[0] }), json);
+  }
+
+  if (command === "attention-purge") {
+    return output(await deleteAttention({ root: flags.root || process.cwd(), entityId: positional[0] }), json);
+  }
+
+  if (command === "attention-config") {
+    const root = positional[0] || process.cwd();
+    const config = {};
+    if (flags.enabled !== undefined) config.enabled = booleanFlag(flags.enabled);
+    if (flags["min-interval-hours"] !== undefined) config.minIntervalHours = Number(flags["min-interval-hours"]);
+    if (flags["silence-days"] !== undefined) config.entitySilenceDays = Number(flags["silence-days"]);
+    if (flags["max-items"] !== undefined) config.maxItems = Number(flags["max-items"]);
+    if (flags["quiet-off"] !== undefined) config.quietHours = null;
+    else if (flags["quiet-start"] !== undefined || flags["quiet-end"] !== undefined) {
+      config.quietHours = {
+        start: Number(flags["quiet-start"]), end: Number(flags["quiet-end"]),
+        utcOffsetMinutes: Number(flags["utc-offset"] ?? 0)
+      };
+    }
+    if (!Object.keys(config).length) return output((await loadAttention(root)).attention.config, json);
+    return output(await configureAttention({ root, config }), json);
   }
 
   if (command === "doctor") {

@@ -3,6 +3,10 @@ import { scanAndSave, verifyCatalog } from "./lib/catalog.js";
 import { readDocument, resolveContext } from "./lib/context.js";
 import { runAudit } from "./lib/audit.js";
 import {
+  attentionContext, configureAttention, deleteAttention,
+  recordActivity, resolveAttention, upsertAttention
+} from "./lib/attention.js";
+import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
@@ -104,6 +108,99 @@ const tools = [
     }
   },
   {
+    name: "upsert_attention",
+    description: "Create or update a local attention cue for an unanswered question, promise, check-in, or meaningful change. Cues are context-only and never send messages.",
+    inputSchema: {
+      type: "object", required: ["kind", "summary"],
+      properties: {
+        root: { type: "string" }, id: { type: "string" },
+        kind: { type: "string", enum: ["unanswered-question", "promise", "check-in", "meaningful-change"] },
+        summary: { type: "string", maxLength: 500 }, entityId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        dueAt: { anyOf: [{ type: "string" }, { type: "null" }] }, priority: { type: "number", minimum: 0, maximum: 100 },
+        privacy: { type: "string", enum: ["private", "shared", "group"] },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        sourceDocument: { anyOf: [{ type: "string" }, { type: "null" }] },
+        confidence: { type: "number", minimum: 0, maximum: 1 }
+      }
+    }
+  },
+  {
+    name: "record_activity",
+    description: "Record a minimal interaction timestamp for a known entity so check-in suggestions reflect recent contact without storing conversation content.",
+    inputSchema: {
+      type: "object", required: ["entityId"],
+      properties: {
+        root: { type: "string" }, entityId: { type: "string" },
+        kind: { type: "string", enum: ["message", "interaction", "task", "check-in"] },
+        at: { type: "string" }, privacy: { type: "string", enum: ["private", "shared", "group"] },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] }
+      }
+    }
+  },
+  {
+    name: "attention_context",
+    description: "Return a sparse, privacy-filtered list of due attention suggestions. Focus mode, quiet hours, and presentation throttling can suppress all output.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" }, includePrivate: { type: "boolean" }, focusActive: { type: "boolean" },
+        markPresented: { type: "boolean" }, maxItems: { type: "integer", minimum: 0, maximum: 20 },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] }, now: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "resolve_attention",
+    description: "Mark an attention cue open, completed, or dismissed while retaining its previous state in private history.",
+    inputSchema: {
+      type: "object", required: ["id"],
+      properties: {
+        root: { type: "string" }, id: { type: "string" },
+        status: { type: "string", enum: ["open", "completed", "dismissed"] }
+      }
+    }
+  },
+  {
+    name: "configure_attention",
+    description: "Configure local attention limits, silence threshold, quiet hours, or the global on/off switch.",
+    inputSchema: {
+      type: "object", required: ["config"],
+      properties: {
+        root: { type: "string" },
+        config: {
+          type: "object", additionalProperties: false,
+          properties: {
+            enabled: { type: "boolean" }, minIntervalHours: { type: "number", minimum: 1, maximum: 720 },
+            entitySilenceDays: { type: "number", minimum: 1, maximum: 3650 }, maxItems: { type: "integer", minimum: 1, maximum: 20 },
+            quietHours: {
+              anyOf: [
+                { type: "null" },
+                {
+                  type: "object", required: ["start", "end"], additionalProperties: false,
+                  properties: {
+                    start: { type: "integer", minimum: 0, maximum: 23 }, end: { type: "integer", minimum: 0, maximum: 23 },
+                    utcOffsetMinutes: { type: "integer", minimum: -720, maximum: 840 }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    name: "delete_attention",
+    description: "Permanently delete one cue or all attention data for one entity, including retained attention history and presentation timestamps.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" }, signalId: { type: "string" }, entityId: { type: "string" }
+      },
+      oneOf: [{ required: ["signalId"] }, { required: ["entityId"] }]
+    }
+  },
+  {
     name: "audit",
     description: "Run AgentSpine's ten deterministic quality gates for discovery, hierarchy, links, authority, privacy, budget, and source preservation.",
     inputSchema: { type: "object", properties: { root: { type: "string" } } }
@@ -133,6 +230,12 @@ async function callTool(name, args = {}) {
   if (name === "upsert_entity") return textResult(await upsertEntity({ ...args, root }));
   if (name === "link_entities") return textResult(await linkEntities({ ...args, root }));
   if (name === "relationship_context") return textResult(await relationshipContext({ ...args, root }));
+  if (name === "upsert_attention") return textResult(await upsertAttention({ ...args, root }));
+  if (name === "record_activity") return textResult(await recordActivity({ ...args, root }));
+  if (name === "attention_context") return textResult(await attentionContext({ ...args, root }));
+  if (name === "resolve_attention") return textResult(await resolveAttention({ ...args, root }));
+  if (name === "configure_attention") return textResult(await configureAttention({ ...args, root }));
+  if (name === "delete_attention") return textResult(await deleteAttention({ ...args, root }));
   if (name === "audit") return textResult(await runAudit(root));
   throw new Error(`Unknown tool: ${name}`);
 }

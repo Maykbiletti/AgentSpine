@@ -64,4 +64,4 @@ The MCP tools expose additional attributes, aliases, source-document provenance,
 - The graph is local user state and is not synchronized automatically.
 - A 5 MiB graph ceiling stops unbounded growth instead of discarding history.
 - Attribute-key rejection cannot determine whether innocent-looking prose contains a secret.
-- Group-specific recipient policy and attention scheduling are roadmap features.
+- Group-specific recipient policy and notification delivery are not implemented.

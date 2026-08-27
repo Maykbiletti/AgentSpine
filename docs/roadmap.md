@@ -41,10 +41,13 @@ Status: foundation implemented; delegation policy and open-thread UX remain plan
 
 ## 4. Attention
 
+Status: sparse local foundation implemented; host-specific notification adapters remain out of scope.
+
 - low-cost signals for neglected teammates, unanswered questions, promises, and meaningful changes;
-- sparse, natural follow-ups rather than interview behavior;
-- task focus always outranks social curiosity;
-- configurable quiet periods and user-controlled disable/delete paths.
+- sparse ranking and presentation throttling rather than interview behavior;
+- task focus and quiet periods suppress all suggestions;
+- private reads are explicit, automatic hooks disclose no cue text;
+- user-controlled disable, resolve, per-cue deletion, and per-entity purge paths.
 
 ## 5. Safe learning
 

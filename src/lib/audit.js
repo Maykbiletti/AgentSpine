@@ -1,20 +1,25 @@
 import { isInside } from "./paths.js";
 import { buildCatalog, saveCatalog, verifyCatalog } from "./catalog.js";
 import { loadGraph } from "./graph.js";
+import { loadAttention } from "./attention.js";
 import { resolveContext } from "./context.js";
 
 function gate(id, name, ok, detail, severity = "error") {
   return { id, name, ok, severity, detail };
 }
 
-function authorityViolations(graph) {
+function authorityViolations(graph, attention) {
   const records = [
     ...graph.edges,
     ...graph.annotations,
     ...graph.entities,
     ...graph.entityEdges,
     ...graph.history,
-    ...graph.history.map((entry) => entry.value).filter(Boolean)
+    ...graph.history.map((entry) => entry.value).filter(Boolean),
+    ...attention.signals,
+    ...attention.activities,
+    ...attention.history,
+    ...attention.history.map((entry) => entry.value).filter(Boolean)
   ];
   return records.filter((record) => record.authority !== "context-only");
 }
@@ -32,6 +37,7 @@ export async function runAudit(root = process.cwd()) {
   const catalog = before;
   const catalogPath = await saveCatalog(catalog);
   const { graph, graphPath } = await loadGraph(before.root, catalog);
+  const { attention, attentionPath } = await loadAttention(before.root, catalog);
   const context = await resolveContext({ root: before.root, cwd: before.root, host: "generic", maxBytes: 16384, includeContent: true, catalog });
   const verification = await verifyCatalog(before.root);
   const after = await buildCatalog(before.root);
@@ -39,28 +45,54 @@ export async function runAudit(root = process.cwd()) {
   const byteStable = after.documents.length === before.documents.length && after.documents.every((document) => beforeHashes.get(document.relativePath) === document.sha256);
   const brokenLinks = catalog.conflicts.filter((conflict) => conflict.type === "broken-link");
   const reviewConflicts = catalog.conflicts.filter((conflict) => conflict.type !== "broken-link");
-  const authority = authorityViolations(graph);
+  const authority = authorityViolations(graph, attention);
   const forbidden = forbiddenEntityKeys(graph);
   const privacyValues = new Set(["private", "shared", "group"]);
   const privateRecords = [
     ...graph.entities,
     ...graph.entityEdges,
     ...graph.history,
-    ...graph.history.map((entry) => entry.value).filter((value) => value && "privacy" in value)
+    ...graph.history.map((entry) => entry.value).filter((value) => value && "privacy" in value),
+    ...attention.signals,
+    ...attention.activities,
+    ...attention.history,
+    ...attention.history.map((entry) => entry.value).filter((value) => value && "privacy" in value)
   ];
   const privacyInvalid = privateRecords.filter((record) => !privacyValues.has(record.privacy));
+  const knownGroups = new Set(graph.entities.filter((entity) => entity.kind === "group").map((entity) => entity.id));
+  const isKnownGroupMember = (record) => !record.entityId || record.entityId === record.groupId || graph.entityEdges.some((edge) => (
+    edge.relation === "member-of" && edge.privacy !== "private" && (
+      (edge.from === record.entityId && edge.to === record.groupId)
+      || (edge.to === record.entityId && edge.from === record.groupId)
+    )
+  ));
+  const attentionGroupInvalid = [
+    ...attention.signals,
+    ...attention.activities,
+    ...attention.history.map((entry) => entry.value).filter(Boolean)
+  ].filter((record) => record.privacy === "group" && (!knownGroups.has(record.groupId) || !isKnownGroupMember(record)));
+  const attentionConfigValid = typeof attention.config.enabled === "boolean"
+    && Number.isFinite(attention.config.minIntervalHours) && attention.config.minIntervalHours >= 1 && attention.config.minIntervalHours <= 720
+    && Number.isFinite(attention.config.entitySilenceDays) && attention.config.entitySilenceDays >= 1 && attention.config.entitySilenceDays <= 3650
+    && Number.isInteger(attention.config.maxItems) && attention.config.maxItems >= 1 && attention.config.maxItems <= 20
+    && (attention.config.quietHours === null || (
+      Number.isInteger(attention.config.quietHours?.start) && attention.config.quietHours.start >= 0 && attention.config.quietHours.start <= 23
+      && Number.isInteger(attention.config.quietHours?.end) && attention.config.quietHours.end >= 0 && attention.config.quietHours.end <= 23
+      && Number.isFinite(attention.config.quietHours?.utcOffsetMinutes)
+      && attention.config.quietHours.utcOffsetMinutes >= -720 && attention.config.quietHours.utcOffsetMinutes <= 840
+    ));
   const nativeMapped = catalog.documents.filter((document) => document.hosts.some((host) => host !== "generic"));
   const loadedBytes = context.documents.filter((document) => document.loaded).reduce((sum, document) => sum + document.bytes, 0);
 
   const gates = [
     gate(1, "Runtime", Number(process.versions.node.split(".")[0]) >= 20, `Node ${process.versions.node}`),
     gate(2, "Discovery", catalog.schema === "agentspine.catalog/v1", `${catalog.documents.length} Markdown documents indexed`),
-    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath), `State remains outside ${catalog.root}`),
+    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath), `State remains outside ${catalog.root}`),
     gate(4, "Native hierarchy", nativeMapped.every((document) => document.hosts.length > 0), `${nativeMapped.length} host-native documents mapped`),
     gate(5, "Link integrity", brokenLinks.length === 0, brokenLinks.length ? `${brokenLinks.length} broken Markdown links` : "All indexed Markdown links resolve"),
     gate(6, "Conflict visibility", Array.isArray(catalog.conflicts), `${reviewConflicts.length} precedence or classification findings exposed`, "warning"),
     gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0, `${authority.length} authority violations; ${forbidden.length} forbidden entity records`),
-    gate(8, "Relationship privacy", privacyInvalid.length === 0, `${graph.entities.length} entities and ${graph.entityEdges.length} relationships checked`),
+    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, and ${attention.signals.length} attention cues checked`),
     gate(9, "Context budget", loadedBytes <= context.budget.maxBytes, `${loadedBytes}/${context.budget.maxBytes} bytes loaded`),
     gate(10, "Byte preservation", byteStable && verification.ok, verification.ok ? "Sources remained byte-for-byte unchanged" : "Source drift detected")
   ];
@@ -72,6 +104,7 @@ export async function runAudit(root = process.cwd()) {
     total: gates.length,
     gates,
     catalogPath,
-    graphPath
+    graphPath,
+    attentionPath
   };
 }

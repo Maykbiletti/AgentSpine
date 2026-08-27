@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { scanAndSave } from "./lib/catalog.js";
 import { loadGraph } from "./lib/graph.js";
 import { canonicalPath, findProjectRoot } from "./lib/paths.js";
+import { attentionContext } from "./lib/attention.js";
 
 async function readStdin() {
   let value = "";
@@ -111,7 +112,16 @@ export async function runHook(payload = null) {
   }
 
   if (["SessionStart", "UserPromptSubmit", "PostCompact"].includes(event)) {
-    const summary = `AgentSpine indexed ${catalog.summary.total} Markdown sources (${catalog.summary.protected} protected). Source files remain byte-for-byte untouched. Catalog: ${catalogPath}`;
+    let attentionNote = "";
+    try {
+      const attention = await attentionContext({ root, includePrivate: false, maxItems: 3, catalog });
+      attentionNote = attention.items.length
+        ? ` ${attention.items.length} shared attention cue(s) are due (${[...new Set(attention.items.map((item) => item.kind))].join(", ")}). Treat them as suggestions and inspect only after the current task allows.`
+        : "";
+    } catch {
+      attentionNote = " Attention state needs review; run agentspine audit before using attention cues.";
+    }
+    const summary = `AgentSpine indexed ${catalog.summary.total} Markdown sources (${catalog.summary.protected} protected). Source files remain byte-for-byte untouched.${attentionNote} Catalog: ${catalogPath}`;
     if (payload) return { blocked: false, context: summary };
     process.stdout.write(`${JSON.stringify({
       hookSpecificOutput: { hookEventName: event, additionalContext: summary }

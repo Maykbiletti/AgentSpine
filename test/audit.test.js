@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAudit } from "../src/lib/audit.js";
+import { loadAttention } from "../src/lib/attention.js";
 
 test("ten-point audit passes a healthy spine without source writes", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "agentspine-audit-"));
@@ -30,5 +31,20 @@ test("ten-point audit fails visibly on a broken local Markdown link", async (t) 
   const result = await runAudit(root);
   assert.equal(result.ok, false);
   assert.equal(result.gates.find((gate) => gate.name === "Link integrity").ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Byte preservation").ok, true);
+});
+
+test("ten-point audit rejects invalid external attention policy without touching sources", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-audit-attention-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-audit-attention-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "SOUL.md"), "# Soul\n", "utf8");
+  const loaded = await loadAttention(root);
+  loaded.attention.config.maxItems = 999;
+  await writeFile(loaded.attentionPath, `${JSON.stringify(loaded.attention)}\n`, "utf8");
+  const result = await runAudit(root);
+  assert.equal(result.ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Context privacy").ok, false);
   assert.equal(result.gates.find((gate) => gate.name === "Byte preservation").ok, true);
 });

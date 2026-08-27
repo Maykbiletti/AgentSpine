@@ -14,7 +14,7 @@ flowchart TB
     subgraph Core["AgentSpine core"]
       D["Discovery + SHA-256"]
       R["Host-aware resolver"]
-      G["Context-only overlay graph"]
+      G["Context-only graph + attention"]
     end
     subgraph Hosts["Agent hosts"]
       X["Codex"]
@@ -69,7 +69,7 @@ Memory is a graph of small facts grouped by purpose. A compact `MEMORY.md`-style
 ```mermaid
 flowchart TB
     P["Host policy + explicit approval"] --> A["Authorized action"]
-    M["Memory, soul, relationships"] --> C["Context only"]
+    M["Memory, soul, relationships, attention"] --> C["Context only"]
     C -. "cannot grant" .-> A
 ```
 
@@ -85,16 +85,16 @@ Generated catalogs live outside the scanned repository:
     <sha256-of-canonical-root>/
       catalog.json
       graph.json
+      attention.json
 ```
 
-`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. Both are private user state, not project authority. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
+`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. All are private user state, not project authority. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
 
 ## Extension points
 
 Future modules plug in behind the core boundary:
 
 - confidence-aware learning candidates;
-- attention and open-thread signals;
 - optional shared-memory adapters;
 - additional host resolvers.
 
