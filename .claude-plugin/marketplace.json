@@ -1,0 +1,20 @@
+{
+  "name": "agent-spine",
+  "description": "Non-destructive identity and memory infrastructure for AI agents.",
+  "owner": {
+    "name": "Mayk Biletti"
+  },
+  "plugins": [
+    {
+      "name": "agent-spine",
+      "source": ".",
+      "description": "Map existing rules, soul, and memory without rewriting source files.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Mayk Biletti"
+      },
+      "category": "development",
+      "tags": ["agents", "identity", "memory", "mcp"]
+    }
+  ]
+}

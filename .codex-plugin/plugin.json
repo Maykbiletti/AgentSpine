@@ -1,0 +1,34 @@
+{
+  "name": "agent-spine",
+  "version": "0.1.0",
+  "description": "A non-destructive identity and memory spine for Codex agents.",
+  "author": {
+    "name": "Mayk Biletti",
+    "url": "https://github.com/Maykbiletti"
+  },
+  "homepage": "https://github.com/Maykbiletti/AgentSpine",
+  "repository": "https://github.com/Maykbiletti/AgentSpine",
+  "license": "Apache-2.0",
+  "keywords": ["identity", "memory", "mcp", "agents"],
+  "skills": "./skills/",
+  "mcpServers": {
+    "agent-spine": {
+      "command": "node",
+      "args": ["${PLUGIN_ROOT}/src/mcp.js"]
+    }
+  },
+  "interface": {
+    "displayName": "AgentSpine",
+    "shortDescription": "Identity and memory without rewriting your files.",
+    "longDescription": "Maps existing rules, soul, memory, and linked Markdown into a verifiable context spine while preserving every source byte.",
+    "developerName": "Mayk Biletti",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "MCP", "Hooks"],
+    "websiteURL": "https://github.com/Maykbiletti/AgentSpine",
+    "defaultPrompt": [
+      "Map this project's existing agent identity.",
+      "Show the active rules, soul, and memory layers.",
+      "Verify that protected sources are unchanged."
+    ]
+  }
+}

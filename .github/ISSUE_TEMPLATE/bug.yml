@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible AgentSpine problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping make AgentSpine dependable. Remove private memory and identity content from logs before posting.
+  - type: input
+    id: version
+    attributes:
+      label: AgentSpine version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options: [Claude Code, Codex, Direct CLI or MCP, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include the smallest safe fixture and exact commands.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed private identity, relationship, and memory content.
+          required: true

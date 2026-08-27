@@ -1,58 +1,183 @@
-# AgentSpine
+<p align="center">
+  <img src="assets/agentspine-banner.svg" alt="AgentSpine — identity that persists, memory that stays grounded" width="100%">
+</p>
 
-A layered identity and memory spine for AI agents.
+<p align="center">
+  <a href="https://github.com/Maykbiletti/AgentSpine/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Maykbiletti/AgentSpine/ci.yml?branch=main&amp;style=flat-square&amp;label=CI" alt="CI status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-22c55e?style=flat-square" alt="Apache-2.0 license"></a>
+  <img src="https://img.shields.io/badge/Node.js-%E2%89%A520.9-3c873a?style=flat-square" alt="Node.js 20.9 or newer">
+  <img src="https://img.shields.io/badge/sources-read--only-67e8f9?style=flat-square" alt="Source documents are read-only">
+</p>
 
-An agent that starts every session as a stranger is a tool. An agent that
-knows who it is, how it speaks, how it works and what it has lived through
-is a colleague. AgentSpine gives an agent that continuity as four plain
-Markdown files — versioned, auditable, portable across runtimes.
+<p align="center">
+  A local-first, host-neutral context spine for agents that already have a history.
+</p>
 
-## The four layers
+AgentSpine discovers the Markdown files an agent already relies on, fingerprints them, preserves the host's native hierarchy, follows explicit links, and serves only the relevant context through a CLI, lifecycle hooks, and MCP.
 
-| # | File | Holds | Changes |
-|---|------|-------|---------|
-| 1 | `spine/1-identity.md` | Who the agent is: name, owner, purpose, non-negotiable principles | Almost never |
-| 2 | `spine/2-voice.md` | How it speaks: tone, language, length, what it never says | Rarely |
-| 3 | `spine/3-conduct.md` | How it works: verification before claims, honesty over confidence, escalation rules | On owner feedback |
-| 4 | `spine/4-history.md` | What it has lived through: dated entries, lessons, corrections | Append-only, grows |
+It does **not** replace your agent. It gives existing identity and memory a dependable structure without rewriting a single source byte.
 
-Rules of the spine:
+## Why AgentSpine
 
-- **Load order is 1 to 4.** Later layers refine earlier ones; none may
-  contradict layer 1.
-- **Layer 4 is append-only.** History is never rewritten, only extended.
-  Each entry carries a date.
-- **Tasks, credentials and permissions never live in the spine.** The spine
-  is who the agent is, not what it is currently doing or allowed to touch.
-- **One spine per agent.** Shared values belong in each agent's layer 1,
-  not in a shared file — agents diverge, and that is the point.
+Most agent memory systems begin by asking you to migrate everything into a new database or a new canonical file. AgentSpine begins with a stricter promise:
 
-## Use with Claude Code
+> Your existing `SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`, and linked Markdown remain where they are, exactly as they are.
 
-Copy `skill/` to `~/.claude/skills/agentspine/`:
+That makes AgentSpine suitable for long-lived agents, mixed Claude Code/Codex environments, repositories with nested instruction files, and teams that cannot afford silent identity drift.
 
+## How it fits together
+
+```mermaid
+flowchart TB
+    A["Existing Markdown sources"] --> B["Read-only discovery"]
+    B --> C["Provenance catalog"]
+    C --> D["Host-aware resolver"]
+    D --> E["CLI · MCP · hooks"]
 ```
-mkdir -p ~/.claude/skills/agentspine
-cp skill/SKILL.md ~/.claude/skills/agentspine/SKILL.md
+
+The resolver keeps three concerns separate:
+
+| Layer | Purpose | Typical sources | Can grant rights? |
+|---|---|---|---|
+| Constitution | Fixed instructions and dated directives | `CLAUDE.md`, `AGENTS.md`, `RULES.md` | Only the real host policy can |
+| Soul | Stable voice, identity, goals, character | `SOUL.md`, existing persona files | No |
+| Memory | Small linked facts and an index | `MEMORY.md`, `memory/**/*.md` | Never |
+
+Other Markdown remains discoverable as reference material. Names and folders provide initial hints only: the agent itself can classify documents and connect them in a reversible overlay graph. A document becomes protected when it is a native instruction, soul, memory source, or is explicitly linked from one.
+
+## Quick start
+
+Requires Node.js 20.9 or newer.
+
+```bash
+git clone https://github.com/Maykbiletti/AgentSpine.git
+cd AgentSpine
+npm install
+npm test
+npm link
 ```
 
-Then in any session:
+Then point AgentSpine at any existing project:
 
-- `/agentspine init` — scaffold the four layers for this agent
-- `/agentspine` — load all layers into the current session, in order
-- `/agentspine remember <text>` — append a dated entry to layer 4
-- `/agentspine audit` — check layer sizes, order and append-only history
+```bash
+agentspine scan /path/to/project
+agentspine context /path/to/project --host codex
+agentspine verify /path/to/project
+```
 
-## Use with any other runtime
+The generated catalog is written to the operating system's user state directory, never into the scanned project. Set `AGENTSPINE_STATE_DIR` if you want a custom location.
 
-The spine is plain Markdown. Any agent runtime that can read files can load
-`spine/1-identity.md` through `spine/4-history.md` at session start and
-append to `4-history.md` when the owner teaches it something. The format is
-the contract; the skill is just one loader.
+## Install for Claude Code
 
-## Why layers instead of one file
+Add this repository as a marketplace and install the plugin:
 
-One big identity file rots: rules, moods and history blur together, and
-every edit risks the whole. Layers separate what must stay stable (identity)
-from what must stay current (history), so each can be maintained — and
-reviewed — at its own pace.
+```text
+/plugin marketplace add Maykbiletti/AgentSpine
+/plugin install agent-spine@agent-spine
+```
+
+For local development:
+
+```bash
+claude --plugin-dir .
+```
+
+Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
+
+## Install for Codex
+
+AgentSpine ships a native `.codex-plugin/plugin.json`. Add the repository to a configured marketplace, open the Codex plugin browser with `/plugins`, install AgentSpine, and start a fresh session. For development, the CLI and MCP server can be used directly:
+
+```bash
+npm link
+agentspine-mcp
+```
+
+See [host integration](docs/host-integration.md) for exact component paths and trust behavior.
+
+## Preservation contract
+
+AgentSpine's first release is intentionally narrow and testable:
+
+- source Markdown is opened read-only;
+- symlinks are not followed during discovery;
+- generated state is stored outside the project;
+- every source receives a SHA-256 fingerprint, byte size, path, layer, and provenance;
+- native host precedence is retained rather than flattened;
+- linked files are resolved transitively without loading unrelated Markdown;
+- oversized context stays available through exact ranged reads;
+- agent write tools are blocked from protected sources by lifecycle hooks;
+- uninstalling AgentSpine leaves every source file untouched.
+
+Read the full [preservation contract](docs/preservation-contract.md), including threat boundaries and deliberate non-goals.
+
+## CLI
+
+| Command | Outcome |
+|---|---|
+| `agentspine scan [root]` | Discover, classify, fingerprint, and save an external catalog |
+| `agentspine context [root] --host …` | Resolve relevant sources in deterministic order |
+| `agentspine read <path>` | Read an indexed source range with SHA-256 provenance |
+| `agentspine verify [root]` | Report added, removed, or byte-changed Markdown |
+| `agentspine link …` | Add an agent-inferred document relationship to the overlay graph |
+| `agentspine annotate …` | Add a reversible semantic classification with confidence |
+| `agentspine doctor` | Check runtime and preservation mode |
+| `agentspine mcp` | Start the stdio MCP server |
+
+Every command supports `--json` where structured output is useful.
+
+## MCP tools
+
+```mermaid
+flowchart LR
+    S["scan"] --> R["resolve_context"]
+    R --> Q["read_document"]
+    Q --> V["verify"]
+```
+
+- `scan` builds the source map.
+- `resolve_context` selects constitution, soul, memory index, and linked facts for the current host and directory.
+- `read_document` retrieves exact byte ranges that did not fit the context budget.
+- `verify` proves whether source bytes changed since the last scan.
+- `link_documents` and `annotate_document` let agents build their own semantic map without editing sources.
+
+## Optional four-layer starter
+
+New agents that do not have identity files yet can start with the included [`spine-example/`](spine-example/) template:
+
+| Layer | Holds | Expected change rate |
+|---|---|---|
+| Identity | Name, purpose, stable principles | Almost never |
+| Voice | Tone, language, and expression | Rarely |
+| Conduct | Working behavior and verification habits | On explicit feedback |
+| Grown history | Dated experience and corrections | Append-only |
+
+The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this optional layout. It is only for an agent with no existing spine. AgentSpine never migrates an established agent into the example, and the normal plugin resolver continues to discover and preserve whatever files already exist.
+
+## Design principles
+
+1. **Preserve before learning.** No useful memory feature justifies destroying the history it is meant to protect.
+2. **Memory is data, never authority.** A remembered sentence cannot create permissions, bypass review, or widen access.
+3. **Relevance changes; history does not disappear.** New information adjusts confidence and relevance instead of silently overwriting old records.
+4. **Identity is contextual.** People, agents, groups, and channels receive separate stable identities until an explicit link proves otherwise.
+5. **Human warmth cannot outrank the task.** Relationship context stays small and yields first when context is tight.
+6. **Local operation is complete.** Remote or shared-memory adapters are optional extensions, not hidden requirements.
+
+## Project status
+
+AgentSpine is in active early development. `v0.1` establishes the preservation kernel, context resolver, MCP surface, dual-host plugin layout, and executable tests. Relationship graphs, confidence-aware learning, attention signals, and pluggable shared memory are staged in the [roadmap](docs/roadmap.md) behind the same permission boundary.
+
+## Documentation
+
+| Goal | Start here |
+|---|---|
+| Understand the system | [Architecture](docs/architecture.md) |
+| Audit non-destructive behavior | [Preservation contract](docs/preservation-contract.md) |
+| Integrate a host | [Claude Code and Codex](docs/host-integration.md) |
+| See planned capabilities | [Roadmap](docs/roadmap.md) |
+| Contribute safely | [Contributing](CONTRIBUTING.md) |
+| Report a vulnerability | [Security policy](SECURITY.md) |
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

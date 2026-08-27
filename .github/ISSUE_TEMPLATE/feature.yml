@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a focused AgentSpine capability
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What observable limitation should change?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+    validations:
+      required: true
+  - type: textarea
+    id: preservation
+    attributes:
+      label: Preservation and authority impact
+      description: Explain how source files remain untouched and why the feature cannot grant permissions.
+    validations:
+      required: true

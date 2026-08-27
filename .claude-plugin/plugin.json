@@ -1,0 +1,13 @@
+{
+  "name": "agent-spine",
+  "version": "0.1.0",
+  "description": "A non-destructive identity and memory spine for Claude Code agents.",
+  "author": {
+    "name": "Mayk Biletti",
+    "url": "https://github.com/Maykbiletti"
+  },
+  "homepage": "https://github.com/Maykbiletti/AgentSpine",
+  "repository": "https://github.com/Maykbiletti/AgentSpine",
+  "license": "Apache-2.0",
+  "keywords": ["identity", "memory", "mcp", "agents"]
+}

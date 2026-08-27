@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">AgentSpine</title>
+  <desc id="desc">A layered identity and memory spine for AI agents</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#07111f"/>
+      <stop offset="1" stop-color="#111c35"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#67e8f9"/>
+      <stop offset=".52" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#f472b6"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="1200" height="360" rx="30" fill="url(#bg)"/>
+  <g opacity=".13" stroke="#9cc8ff"><path d="M0 64h1200M0 128h1200M0 192h1200M0 256h1200M0 320h1200"/><path d="M96 0v360M192 0v360M288 0v360M384 0v360M480 0v360M576 0v360M672 0v360M768 0v360M864 0v360M960 0v360M1056 0v360"/></g>
+  <g transform="translate(116 42)" filter="url(#glow)">
+    <path d="M74 14c-26 24-26 48 0 72s26 48 0 72-26 48 0 72 26 48 0 72" fill="none" stroke="url(#line)" stroke-width="12" stroke-linecap="round"/>
+    <path d="M74 14c26 24 26 48 0 72s-26 48 0 72 26 48 0 72-26 48 0 72" fill="none" stroke="#eef7ff" stroke-opacity=".68" stroke-width="5" stroke-linecap="round"/>
+    <g fill="#07111f" stroke="#baf5ff" stroke-width="4"><circle cx="74" cy="14" r="10"/><circle cx="74" cy="86" r="10"/><circle cx="74" cy="158" r="10"/><circle cx="74" cy="230" r="10"/><circle cx="74" cy="302" r="10"/></g>
+  </g>
+  <g fill="#f8fbff" font-family="Inter,Segoe UI,Arial,sans-serif">
+    <text x="286" y="139" font-size="76" font-weight="750" letter-spacing="-3">AgentSpine</text>
+    <text x="290" y="194" font-size="26" fill="#b9c9e5">Identity that persists. Memory that stays grounded.</text>
+    <g transform="translate(290 238)" font-size="16" font-weight="600">
+      <rect width="150" height="38" rx="19" fill="#67e8f9" fill-opacity=".13" stroke="#67e8f9" stroke-opacity=".5"/><text x="75" y="25" text-anchor="middle" fill="#9af2fb">NON-DESTRUCTIVE</text>
+      <rect x="166" width="112" height="38" rx="19" fill="#8b5cf6" fill-opacity=".15" stroke="#a78bfa" stroke-opacity=".55"/><text x="222" y="25" text-anchor="middle" fill="#c4b5fd">LOCAL-FIRST</text>
+      <rect x="294" width="136" height="38" rx="19" fill="#f472b6" fill-opacity=".13" stroke="#f9a8d4" stroke-opacity=".5"/><text x="362" y="25" text-anchor="middle" fill="#fbcfe8">HOST-NEUTRAL</text>
+    </g>
+  </g>
+</svg>

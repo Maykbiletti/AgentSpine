@@ -1,0 +1,60 @@
+{
+  "name": "agent-spine",
+  "version": "0.1.0",
+  "description": "A non-destructive identity and memory spine for AI agents.",
+  "type": "module",
+  "bin": {
+    "agentspine": "./bin/agentspine.js",
+    "agentspine-mcp": "./bin/agentspine-mcp.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    ".claude-plugin",
+    ".codex-plugin",
+    ".mcp.json",
+    "assets",
+    "bin",
+    "docs",
+    "hooks",
+    "skill",
+    "skills",
+    "spine-example",
+    "src",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "npm run lint && npm test && npm run smoke",
+    "lint": "node --check src/*.js && node --check src/lib/*.js && node --check bin/*.js",
+    "smoke": "node bin/agentspine.js doctor --json",
+    "test": "node --test",
+    "prepack": "npm run check"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "keywords": [
+    "agent",
+    "memory",
+    "identity",
+    "mcp",
+    "claude-code",
+    "codex"
+  ],
+  "author": {
+    "name": "Mayk Biletti",
+    "url": "https://github.com/Maykbiletti"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Maykbiletti/AgentSpine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Maykbiletti/AgentSpine/issues"
+  },
+  "homepage": "https://github.com/Maykbiletti/AgentSpine#readme"
+}
