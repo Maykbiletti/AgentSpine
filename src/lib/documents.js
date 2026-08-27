@@ -29,6 +29,11 @@ function classify(relativePath) {
   return { layer: "reference", protected: false };
 }
 
+function authorityFor(layer) {
+  if (layer === "constitution") return "host-instruction-candidate";
+  return "context-only";
+}
+
 function hostsFor(name) {
   if (name === "AGENTS.md" || name === "AGENTS.override.md") return ["codex"];
   if (name === "CLAUDE.md" || name === "CLAUDE.local.md") return ["claude"];
@@ -74,23 +79,32 @@ async function walk(directory, found) {
 export async function discoverDocuments(root) {
   const files = [];
   await walk(root, files);
-  const documents = [];
-  for (const path of files) {
-    const [buffer, metadata] = await Promise.all([readFile(path), stat(path)]);
-    const relativePath = relative(root, path).replaceAll("\\", "/");
-    const classification = classify(relativePath);
-    documents.push({
-      path,
-      relativePath,
-      name: basename(path),
-      ...classification,
-      hosts: hostsFor(basename(path)),
-      bytes: buffer.byteLength,
-      modifiedAt: metadata.mtime.toISOString(),
-      sha256: sha256(buffer),
-      links: extractMarkdownLinks(buffer.toString("utf8"), path, root)
-    });
+  const documents = new Array(files.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < files.length) {
+      const index = cursor++;
+      const path = files[index];
+      const [buffer, metadata] = await Promise.all([readFile(path), stat(path)]);
+      const relativePath = relative(root, path).replaceAll("\\", "/");
+      const classification = classify(relativePath);
+      documents[index] = {
+        path,
+        relativePath,
+        name: basename(path),
+        ...classification,
+        authority: authorityFor(classification.layer),
+        classificationSource: "filename-and-path-hint",
+        hosts: hostsFor(basename(path)),
+        bytes: buffer.byteLength,
+        modifiedAt: metadata.mtime.toISOString(),
+        sha256: sha256(buffer),
+        links: extractMarkdownLinks(buffer.toString("utf8"), path, root)
+      };
+    }
   }
+  const concurrency = Math.max(1, Math.min(16, files.length));
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
   const byPath = new Map(documents.map((document) => [document.relativePath, document]));
   const queue = documents.filter((document) => document.protected);

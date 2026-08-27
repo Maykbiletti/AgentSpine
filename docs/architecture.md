@@ -14,6 +14,7 @@ flowchart TB
     subgraph Core["AgentSpine core"]
       D["Discovery + SHA-256"]
       R["Host-aware resolver"]
+      G["Context-only overlay graph"]
     end
     subgraph Hosts["Agent hosts"]
       X["Codex"]
@@ -23,6 +24,7 @@ flowchart TB
     S --> D
     M --> D
     D --> R
+    G --> R
     R --> X
     R --> L
 ```
@@ -82,15 +84,15 @@ Generated catalogs live outside the scanned repository:
   projects/
     <sha256-of-canonical-root>/
       catalog.json
+      graph.json
 ```
 
-This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
+`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. Both are private user state, not project authority. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
 
 ## Extension points
 
 Future modules plug in behind the core boundary:
 
-- relationship graph and group-specific context;
 - confidence-aware learning candidates;
 - attention and open-thread signals;
 - optional shared-memory adapters;

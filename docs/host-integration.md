@@ -48,4 +48,13 @@ Any MCP client that supports stdio can launch:
 }
 ```
 
-The server implements `initialize`, `ping`, `tools/list`, and `tools/call`. It has no network dependency and does not expose write tools.
+The server implements `initialize`, `ping`, `tools/list`, and `tools/call`. It has no network dependency and exposes no source-file write tool. Overlay tools write only private AgentSpine state outside the scanned project.
+
+Verify either installation against a synthetic or real project without changing its Markdown:
+
+```bash
+agentspine doctor --json
+agentspine audit /path/to/project --json
+```
+
+The audit exits non-zero when a required gate fails, making it suitable for installation smoke tests and CI.

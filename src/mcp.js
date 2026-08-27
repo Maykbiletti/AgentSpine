@@ -1,7 +1,11 @@
 import { resolve } from "node:path";
 import { scanAndSave, verifyCatalog } from "./lib/catalog.js";
 import { readDocument, resolveContext } from "./lib/context.js";
-import { annotateDocument, linkDocuments } from "./lib/graph.js";
+import { runAudit } from "./lib/audit.js";
+import {
+  annotateDocument, linkDocuments, linkEntities,
+  relationshipContext, upsertEntity
+} from "./lib/graph.js";
 
 const tools = [
   {
@@ -55,10 +59,54 @@ const tools = [
     inputSchema: {
       type: "object", required: ["path", "layer"],
       properties: {
-        root: { type: "string" }, path: { type: "string" }, layer: { type: "string" },
+        root: { type: "string" }, path: { type: "string" },
+        layer: { type: "string", enum: ["soul", "memory-index", "memory-fact", "reference", "project-reference", "identity", "voice", "conduct", "history"] },
         reason: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 }
       }
     }
+  },
+  {
+    name: "upsert_entity",
+    description: "Create or update a person, agent, group, channel, or project in the local relationship graph. Authority fields are rejected.",
+    inputSchema: {
+      type: "object", required: ["id", "kind"],
+      properties: {
+        root: { type: "string" }, id: { type: "string" },
+        kind: { type: "string", enum: ["person", "agent", "group", "channel", "project"] },
+        displayName: { type: "string" }, aliases: { type: "array", items: { type: "string" } },
+        attributes: { type: "object" }, sourceDocument: { anyOf: [{ type: "string" }, { type: "null" }] },
+        confidence: { type: "number", minimum: 0, maximum: 1 },
+        privacy: { type: "string", enum: ["private", "shared", "group"] }
+      }
+    }
+  },
+  {
+    name: "link_entities",
+    description: "Record a contextual relationship between known entities. Relationships never grant permissions or delegation authority.",
+    inputSchema: {
+      type: "object", required: ["from", "to", "relation"],
+      properties: {
+        root: { type: "string" }, from: { type: "string" }, to: { type: "string" },
+        relation: { type: "string", enum: ["knows", "works-with", "member-of", "communicates-via", "responsible-for", "reports-to", "related"] },
+        reason: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 },
+        privacy: { type: "string", enum: ["private", "shared", "group"] }
+      }
+    }
+  },
+  {
+    name: "relationship_context",
+    description: "Return the privacy-filtered local relationship neighborhood for one entity. Private data is excluded unless explicitly requested.",
+    inputSchema: {
+      type: "object", required: ["entityId"],
+      properties: {
+        root: { type: "string" }, entityId: { type: "string" }, includePrivate: { type: "boolean" }
+      }
+    }
+  },
+  {
+    name: "audit",
+    description: "Run AgentSpine's ten deterministic quality gates for discovery, hierarchy, links, authority, privacy, budget, and source preservation.",
+    inputSchema: { type: "object", properties: { root: { type: "string" } } }
   }
 ];
 
@@ -82,6 +130,10 @@ async function callTool(name, args = {}) {
   if (name === "verify") return textResult(await verifyCatalog(root));
   if (name === "link_documents") return textResult(await linkDocuments({ ...args, root }));
   if (name === "annotate_document") return textResult(await annotateDocument({ ...args, root }));
+  if (name === "upsert_entity") return textResult(await upsertEntity({ ...args, root }));
+  if (name === "link_entities") return textResult(await linkEntities({ ...args, root }));
+  if (name === "relationship_context") return textResult(await relationshipContext({ ...args, root }));
+  if (name === "audit") return textResult(await runAudit(root));
   throw new Error(`Unknown tool: ${name}`);
 }
 
@@ -113,20 +165,23 @@ async function dispatch(message) {
 export function startMcpServer(input = process.stdin, output = process.stdout) {
   input.setEncoding("utf8");
   let buffer = "";
-  input.on("data", async (chunk) => {
+  let queue = Promise.resolve();
+  input.on("data", (chunk) => {
     buffer += chunk;
     let newline;
     while ((newline = buffer.indexOf("\n")) >= 0) {
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
       if (!line) continue;
-      let response;
-      try {
-        response = await dispatch(JSON.parse(line));
-      } catch (error) {
-        response = { jsonrpc: "2.0", id: null, error: { code: -32700, message: error.message } };
-      }
-      if (response) output.write(`${JSON.stringify(response)}\n`);
+      queue = queue.then(async () => {
+        let response;
+        try {
+          response = await dispatch(JSON.parse(line));
+        } catch (error) {
+          response = { jsonrpc: "2.0", id: null, error: { code: -32700, message: error.message } };
+        }
+        if (response) output.write(`${JSON.stringify(response)}\n`);
+      });
     }
   });
 }

@@ -1,8 +1,11 @@
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { scanAndSave, verifyCatalog } from "./lib/catalog.js";
 import { readDocument, resolveContext } from "./lib/context.js";
-import { annotateDocument, linkDocuments } from "./lib/graph.js";
+import { runAudit } from "./lib/audit.js";
+import {
+  annotateDocument, linkDocuments, linkEntities,
+  relationshipContext, upsertEntity
+} from "./lib/graph.js";
 
 const VERSION = "0.1.0";
 
@@ -43,6 +46,10 @@ Usage:
   agentspine verify [root] [--json]
   agentspine link <from.md> <to.md> --relation related [--reason text] [--confidence 0.8]
   agentspine annotate <path.md> --layer soul [--reason text] [--confidence 0.8]
+  agentspine entity <id> --kind person [--name text] [--privacy private]
+  agentspine relate <from> <to> --relation works-with [--privacy private]
+  agentspine relationships <entity-id> [--include-private] [--json]
+  agentspine audit [root] [--json]
   agentspine doctor [--json]
   agentspine mcp
 
@@ -112,6 +119,31 @@ export async function run(argv = process.argv.slice(2)) {
     return output(result, json);
   }
 
+  if (command === "entity") {
+    const result = await upsertEntity({
+      root: flags.root || process.cwd(), id: positional[0], kind: flags.kind,
+      displayName: flags.name || "", confidence: Number(flags.confidence ?? 0.5),
+      privacy: flags.privacy || "private"
+    });
+    return output(result, json);
+  }
+
+  if (command === "relate") {
+    const result = await linkEntities({
+      root: flags.root || process.cwd(), from: positional[0], to: positional[1],
+      relation: flags.relation || "related", reason: flags.reason || "",
+      confidence: Number(flags.confidence ?? 0.5), privacy: flags.privacy || "private"
+    });
+    return output(result, json);
+  }
+
+  if (command === "relationships") {
+    return output(await relationshipContext({
+      root: flags.root || process.cwd(), entityId: positional[0],
+      includePrivate: Boolean(flags["include-private"])
+    }), json);
+  }
+
   if (command === "doctor") {
     const result = {
       ok: Number(process.versions.node.split(".")[0]) >= 20,
@@ -126,8 +158,16 @@ export async function run(argv = process.argv.slice(2)) {
     return;
   }
 
+  if (command === "audit") {
+    const result = await runAudit(positional[0] || process.cwd());
+    output(result, json);
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
+
   if (command === "mcp") {
-    await import("./mcp.js");
+    const { startMcpServer } = await import("./mcp.js");
+    startMcpServer();
     return;
   }
 

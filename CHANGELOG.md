@@ -4,10 +4,30 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- Ten-gate `agentspine audit` command and MCP tool
+- Privacy-scoped entities and relationships for people, agents, groups, channels, and projects
+- Append-only history for superseded document annotations, document links, entities, and relationships
+- Broken-link and competing-candidate findings in every catalog
+- Large-tree, manifest-consistency, CLI-MCP, privacy, authority, and shell-guard tests
+
+### Changed
+
+- `agentspine mcp` now starts the stdio server instead of returning immediately
+- Discovery fingerprints files with bounded parallel reads
+- Context resolution reuses catalogs and only follows confident overlay links
+- Protected-source hooks recognize common mutating shell commands and refresh after tool writes
+- Agent annotations cannot promote arbitrary Markdown into a constitution layer
+- CI runs the repository's own ten-gate audit and uses the current maintained GitHub action majors
+
+### Security
+
+- Relationship attributes recursively reject permissions, rights, authorization, credentials, secrets, tokens, and API keys
+- Every relationship and history record is explicitly context-only
+
 ### Planned
 
-- Relationship graph and privacy scopes
-- Confidence-aware memory candidates
 - Attention and open-thread signals
 - Optional shared-memory adapters
 

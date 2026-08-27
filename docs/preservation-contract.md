@@ -17,6 +17,8 @@ The scanner:
 
 The resolver may omit content from an individual response when its configured byte budget is exhausted. Omission is explicit. The original remains retrievable through a ranged read with its SHA-256 digest. Ranged reads include both UTF-8 text and base64 bytes so callers can verify exact data even when a boundary splits a multibyte character.
 
+Filename and path classification is a hint. An agent may add a context-only overlay annotation, but cannot promote an arbitrary source into the constitution layer. Only filenames understood by the native host adapter are instruction candidates.
+
 ## Protected sources
 
 A source is protected from agent write tools when it is any of the following:
@@ -27,6 +29,8 @@ A source is protected from agent write tools when it is any of the following:
 - a Markdown file explicitly linked from a protected source.
 
 Protection is a host hook guardrail, not an operating-system security boundary. Users retain full control of their files. Specialized tools that bypass host hooks may also bypass the guardrail.
+
+The bundled guard recognizes direct Edit/Write/apply-patch targets and common mutating shell forms that name a protected source. Shell syntax is too broad to prove safe by pattern matching; operating-system permissions, host approvals, and version control remain the hard controls.
 
 ## Conflicts and precedence
 

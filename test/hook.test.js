@@ -51,3 +51,34 @@ test("PreToolUse extracts protected targets from an apply_patch payload", async 
   assert.equal(result.blocked, true);
   assert.match(result.reason, /SOUL\.md/);
 });
+
+test("PreToolUse blocks shell mutation of a protected source", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-hook-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-hook-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "AGENTS.md"), "# Rules\n", "utf8");
+  const result = await runHook({
+    hook_event_name: "PreToolUse",
+    cwd: root,
+    tool_name: "Bash",
+    tool_input: { command: "sed -i 's/old/new/' AGENTS.md" }
+  });
+  assert.equal(result.blocked, true);
+  assert.match(result.reason, /AGENTS\.md/);
+});
+
+test("PreToolUse allows shell reads of a protected source", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-hook-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-hook-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "AGENTS.md"), "# Rules\n", "utf8");
+  const result = await runHook({
+    hook_event_name: "PreToolUse",
+    cwd: root,
+    tool_name: "Bash",
+    tool_input: { command: "sed -n '1,20p' AGENTS.md" }
+  });
+  assert.equal(result.blocked, false);
+});

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { scanAndSave } from "./lib/catalog.js";
 import { loadGraph } from "./lib/graph.js";
 import { findProjectRoot } from "./lib/paths.js";
@@ -28,7 +28,29 @@ function candidatePaths(value, output = []) {
 }
 
 function isMutationTool(name = "") {
-  return /(^|__)(apply_patch|edit|write|delete|move|rename)(_|$)/i.test(name);
+  return /(^|__)(apply_patch|edit|write|delete|move|rename|bash|exec_command|shell)(_|$)/i.test(name);
+}
+
+function stringValues(value, output = []) {
+  if (typeof value === "string") output.push(value);
+  else if (Array.isArray(value)) value.forEach((item) => stringValues(item, output));
+  else if (value && typeof value === "object") Object.values(value).forEach((item) => stringValues(item, output));
+  return output;
+}
+
+function shellTargetsProtected(input, documents, cwd, root) {
+  if (!/(bash|exec_command|shell)/i.test(input.tool_name || "")) return null;
+  const command = stringValues(input.tool_input || input.tool_args).join("\n").replaceAll("\\", "/");
+  if (!/(?:^|[;&|\s])(?:rm|mv|cp|truncate|tee|sed\s+-i|perl\s+-i)\b|(?:^|[^>])>{1,2}(?!>)/i.test(command)) return null;
+  for (const document of documents) {
+    const forms = new Set([document.path.replaceAll("\\", "/"), document.relativePath]);
+    for (const base of [cwd, root]) {
+      const candidate = relative(base, document.path);
+      if (candidate && !candidate.startsWith("..") && !isAbsolute(candidate)) forms.add(candidate.replaceAll("\\", "/"));
+    }
+    if ([...forms].some((form) => form && command.includes(form))) return document;
+  }
+  return null;
 }
 
 function deny(reason) {
@@ -51,7 +73,7 @@ export async function runHook(payload = null) {
   const { catalog, catalogPath } = await scanAndSave(root);
 
   if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
-    const { graph } = await loadGraph(root);
+    const { graph } = await loadGraph(root, catalog);
     const inferredProtected = new Set(graph.annotations
       .filter((annotation) => ["constitution", "soul", "memory-index", "memory-fact"].includes(annotation.layer))
       .map((annotation) => annotation.path));
@@ -68,13 +90,13 @@ export async function runHook(payload = null) {
         }
       }
     }
-    const protectedPaths = new Set(catalog.documents
-      .filter((doc) => protectedRelative.has(doc.relativePath))
-      .map((doc) => resolve(doc.path)));
+    const protectedDocuments = catalog.documents.filter((doc) => protectedRelative.has(doc.relativePath));
+    const protectedPaths = new Set(protectedDocuments.map((doc) => resolve(doc.path)));
     const targets = candidatePaths(input.tool_input || input.tool_args).map((path) => resolve(cwd, path));
     const hit = targets.find((path) => protectedPaths.has(path));
-    if (hit) {
-      const relativePath = catalog.documents.find((doc) => resolve(doc.path) === hit)?.relativePath || hit;
+    const shellHit = shellTargetsProtected(input, protectedDocuments, cwd, root);
+    if (hit || shellHit) {
+      const relativePath = shellHit?.relativePath || catalog.documents.find((doc) => resolve(doc.path) === hit)?.relativePath || hit;
       const reason = `AgentSpine protected source: ${relativePath}. Existing identity, rule, soul, and memory documents are read-only to agents.`;
       if (payload) return { blocked: true, reason };
       deny(reason);

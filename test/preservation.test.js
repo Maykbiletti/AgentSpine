@@ -37,6 +37,7 @@ test("scan, resolution, graph learning, and verification preserve every source b
 
   const { catalog } = await scanAndSave(root);
   assert.equal(catalog.summary.total, 6);
+  assert.equal(Array.isArray(catalog.conflicts), true);
   assert.equal(catalog.documents.find((doc) => doc.relativePath === "memory/user/preference.md").protected, true);
   assert.equal(catalog.documents.find((doc) => doc.relativePath === "notes.md").protected, false);
 
@@ -67,6 +68,21 @@ test("scan, resolution, graph learning, and verification preserve every source b
   });
 });
 
+test("catalog exposes broken links and native precedence without editing either file", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-conflict-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-conflict-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "AGENTS.md"), "# Base\n\n[Missing](missing.md)\n", "utf8");
+  await writeFile(join(root, "AGENTS.override.md"), "# Override\n", "utf8");
+  const before = await Promise.all(["AGENTS.md", "AGENTS.override.md"].map((name) => readFile(join(root, name), "utf8")));
+  const { catalog } = await scanAndSave(root);
+  assert.equal(catalog.conflicts.some((item) => item.type === "broken-link"), true);
+  assert.equal(catalog.conflicts.some((item) => item.type === "native-precedence"), true);
+  const after = await Promise.all(["AGENTS.md", "AGENTS.override.md"].map((name) => readFile(join(root, name), "utf8")));
+  assert.deepEqual(after, before);
+});
+
 test("verify reports changes and never restores them", async (t) => {
   const { root, state } = await fixture();
   t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
@@ -76,4 +92,13 @@ test("verify reports changes and never restores them", async (t) => {
   assert.equal(result.ok, false);
   assert.deepEqual(result.changed, ["SOUL.md"]);
   assert.match(await readFile(join(root, "SOUL.md"), "utf8"), /Changed by the file owner/);
+});
+
+test("agent annotations cannot promote arbitrary Markdown to host authority", async (t) => {
+  const { root, state } = await fixture();
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await assert.rejects(
+    annotateDocument({ root, path: "notes.md", layer: "constitution", reason: "Untrusted claim", confidence: 1 }),
+    /unsupported context-only layer/
+  );
 });

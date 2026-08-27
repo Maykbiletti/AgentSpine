@@ -36,7 +36,7 @@ function nativeDocuments(catalog, cwd, host, graph) {
     .filter((annotation) => inferredLayers.has(annotation.layer))
     .map((annotation) => annotation.path));
   selected.push(...inScope.filter((document) => inferredPaths.has(document.relativePath)));
-  return selected;
+  return [...new Map(selected.map((document) => [document.relativePath, document])).values()];
 }
 
 function addLinkedDocuments(catalog, seed, graph) {
@@ -46,7 +46,7 @@ function addLinkedDocuments(catalog, seed, graph) {
   while (queue.length) {
     const current = queue.shift();
     const learnedLinks = graph.edges
-      .filter((edge) => edge.from === current.relativePath)
+      .filter((edge) => edge.from === current.relativePath && edge.confidence >= 0.6)
       .map((edge) => edge.to);
     for (const linkedPath of [...current.links, ...learnedLinks]) {
       const linked = byPath.get(linkedPath);
@@ -59,25 +59,36 @@ function addLinkedDocuments(catalog, seed, graph) {
   return [...selected.values()];
 }
 
-function precedence(document) {
-  if (document.layer === "constitution") return 0;
-  if (document.layer === "soul") return 1;
-  if (document.layer === "memory-index") return 2;
-  if (document.layer === "memory-fact") return 3;
+function precedence(layer) {
+  if (layer === "constitution") return 0;
+  if (layer === "soul") return 1;
+  if (layer === "memory-index") return 2;
+  if (layer === "memory-fact") return 3;
   return 4;
 }
 
-export async function resolveContext({ root = process.cwd(), cwd = root, host = "generic", maxBytes = 65536, includeContent = true } = {}) {
+export async function resolveContext({ root = process.cwd(), cwd = root, host = "generic", maxBytes = 65536, includeContent = true, catalog: providedCatalog = null } = {}) {
   const canonicalRoot = await canonicalPath(root);
   const canonicalCwd = await canonicalPath(cwd);
   if (!isInside(canonicalRoot, canonicalCwd)) {
     throw new Error(`cwd must be inside root: ${canonicalCwd}`);
   }
-  const catalog = await buildCatalog(canonicalRoot);
-  const { graph } = await loadGraph(canonicalRoot);
+  const catalog = providedCatalog || await buildCatalog(canonicalRoot);
+  if (catalog.root !== canonicalRoot) throw new Error("provided catalog belongs to a different project root");
+  const { graph } = await loadGraph(canonicalRoot, catalog);
+  const annotations = new Map(graph.annotations.map((annotation) => [annotation.path, annotation]));
   const seed = nativeDocuments(catalog, canonicalCwd, host, graph);
   const documents = addLinkedDocuments(catalog, seed, graph)
-    .sort((a, b) => precedence(a) - precedence(b) || depth(catalog.root, a.path) - depth(catalog.root, b.path) || a.relativePath.localeCompare(b.relativePath));
+    .map((document) => {
+      const annotation = annotations.get(document.relativePath);
+      return {
+        ...document,
+        effectiveLayer: annotation?.layer || document.layer,
+        authority: annotation ? "context-only" : document.authority,
+        classificationSource: annotation ? "agent-overlay" : document.classificationSource
+      };
+    })
+    .sort((a, b) => precedence(a.effectiveLayer) - precedence(b.effectiveLayer) || depth(catalog.root, a.path) - depth(catalog.root, b.path) || a.relativePath.localeCompare(b.relativePath));
 
   let remaining = Math.max(0, Number(maxBytes) || 0);
   const resolved = [];
@@ -102,6 +113,7 @@ export async function resolveContext({ root = process.cwd(), cwd = root, host = 
       annotations: graph.annotations,
       authority: "context-only"
     },
+    conflicts: catalog.conflicts,
     budget: { maxBytes, remainingBytes: remaining },
     documents: resolved,
     omitted: resolved.filter((document) => !document.loaded).map((document) => document.relativePath),

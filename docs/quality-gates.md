@@ -1,0 +1,29 @@
+# Ten quality gates
+
+`agentspine audit` is the executable Definition of Done for an installed project. It scans twice, resolves context, validates overlay state, verifies the saved catalog, and compares source hashes. It never repairs or rewrites source Markdown.
+
+```bash
+agentspine audit /path/to/project
+agentspine audit /path/to/project --json
+```
+
+| Gate | Proof | Failure meaning |
+|---:|---|---|
+| 1 | Supported Node.js runtime | Runtime is below Node 20 |
+| 2 | Catalog schema and discovery | Sources could not be represented deterministically |
+| 3 | External generated state | Catalog or graph landed inside the scanned project |
+| 4 | Native hierarchy mapping | A recognized host source lacks host mapping |
+| 5 | Markdown link integrity | An indexed local `.md` link has no target |
+| 6 | Conflict visibility | Precedence and competing candidates are surfaced for review |
+| 7 | Authority boundary | Overlay state contains a non-context authority claim or forbidden field |
+| 8 | Relationship privacy | Entity or relationship privacy has an invalid scope |
+| 9 | Context budget | Loaded bytes exceed the requested ceiling |
+| 10 | Byte preservation | A source hash changed during the audit or differs from the saved scan |
+
+Gate 6 is informational when findings are represented correctly; AgentSpine exposes conflicts rather than pretending to solve them. Every other failed gate makes the command exit non-zero.
+
+## CI and troubleshooting
+
+The repository test matrix covers Linux, macOS, and Windows on supported Node.js release lines. Package integrity runs separately. For an integration project, run the JSON form and retain only the audit result—never upload source content or the private graph as CI evidence.
+
+Broken links are reported with source and target in the catalog. Competing constitution candidates record either native host precedence or `agent-review-required`. Fix the project only through its normal owner workflow; AgentSpine deliberately has no auto-fix mode.

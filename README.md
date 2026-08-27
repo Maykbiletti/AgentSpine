@@ -32,7 +32,8 @@ flowchart TB
     A["Existing Markdown sources"] --> B["Read-only discovery"]
     B --> C["Provenance catalog"]
     C --> D["Host-aware resolver"]
-    D --> E["CLI · MCP · hooks"]
+    F["Context-only relationship graph"] --> D
+    D --> E["Claude Code · Codex · MCP"]
 ```
 
 The resolver keeps three concerns separate:
@@ -63,6 +64,7 @@ Then point AgentSpine at any existing project:
 agentspine scan /path/to/project
 agentspine context /path/to/project --host codex
 agentspine verify /path/to/project
+agentspine audit /path/to/project
 ```
 
 The generated catalog is written to the operating system's user state directory, never into the scanned project. Set `AGENTSPINE_STATE_DIR` if you want a custom location.
@@ -104,6 +106,7 @@ AgentSpine's first release is intentionally narrow and testable:
 - generated state is stored outside the project;
 - every source receives a SHA-256 fingerprint, byte size, path, layer, and provenance;
 - native host precedence is retained rather than flattened;
+- broken links and competing candidates are exposed as findings, never auto-resolved;
 - linked files are resolved transitively without loading unrelated Markdown;
 - oversized context stays available through exact ranged reads;
 - agent write tools are blocked from protected sources by lifecycle hooks;
@@ -121,6 +124,10 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine verify [root]` | Report added, removed, or byte-changed Markdown |
 | `agentspine link …` | Add an agent-inferred document relationship to the overlay graph |
 | `agentspine annotate …` | Add a reversible semantic classification with confidence |
+| `agentspine entity …` | Add or update a person, agent, group, channel, or project |
+| `agentspine relate …` | Connect two known entities with privacy and confidence |
+| `agentspine relationships …` | Read one privacy-filtered relationship neighborhood |
+| `agentspine audit [root]` | Run ten deterministic quality and preservation gates |
 | `agentspine doctor` | Check runtime and preservation mode |
 | `agentspine mcp` | Start the stdio MCP server |
 
@@ -133,6 +140,8 @@ flowchart LR
     S["scan"] --> R["resolve_context"]
     R --> Q["read_document"]
     Q --> V["verify"]
+    E["upsert_entity"] --> L["link_entities"]
+    L --> C["relationship_context"]
 ```
 
 - `scan` builds the source map.
@@ -140,6 +149,10 @@ flowchart LR
 - `read_document` retrieves exact byte ranges that did not fit the context budget.
 - `verify` proves whether source bytes changed since the last scan.
 - `link_documents` and `annotate_document` let agents build their own semantic map without editing sources.
+- `upsert_entity`, `link_entities`, and `relationship_context` maintain a privacy-scoped social and responsibility map outside the project.
+- `audit` runs the same ten gates available through the CLI.
+
+Relationship updates supersede the active view but retain the previous observation in append-only graph history. Permission-like and credential-like attributes are rejected recursively. See [relationships and learning](docs/relationships.md).
 
 ## Optional four-layer starter
 
@@ -165,7 +178,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.1` establishes the preservation kernel, context resolver, MCP surface, dual-host plugin layout, and executable tests. Relationship graphs, confidence-aware learning, attention signals, and pluggable shared memory are staged in the [roadmap](docs/roadmap.md) behind the same permission boundary.
+AgentSpine is in active early development. `v0.1` establishes the preservation kernel, context resolver, relationship foundation, MCP surface, dual-host plugin layout, and executable tests. Attention signals, deeper candidate promotion, and pluggable shared memory remain staged in the [roadmap](docs/roadmap.md) behind the same permission boundary.
 
 ## Documentation
 
@@ -174,7 +187,10 @@ AgentSpine is in active early development. `v0.1` establishes the preservation k
 | Understand the system | [Architecture](docs/architecture.md) |
 | Audit non-destructive behavior | [Preservation contract](docs/preservation-contract.md) |
 | Integrate a host | [Claude Code and Codex](docs/host-integration.md) |
+| Understand relationships and history | [Relationships](docs/relationships.md) |
+| Run the Definition of Done | [Ten quality gates](docs/quality-gates.md) |
 | See planned capabilities | [Roadmap](docs/roadmap.md) |
+| Cut a release | [Release process](docs/releasing.md) |
 | Contribute safely | [Contributing](CONTRIBUTING.md) |
 | Report a vulnerability | [Security policy](SECURITY.md) |
 

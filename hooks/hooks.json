@@ -13,8 +13,9 @@
         ]
       }
     ],
-    "UserPromptSubmit": [
+    "PreToolUse": [
       {
+        "matcher": "Edit|Write|apply_patch|Bash",
         "hooks": [
           {
             "type": "command",
@@ -24,9 +25,9 @@
         ]
       }
     ],
-    "PreToolUse": [
+    "PostToolUse": [
       {
-        "matcher": "Edit|Write|apply_patch",
+        "matcher": "Edit|Write|apply_patch|Bash",
         "hooks": [
           {
             "type": "command",

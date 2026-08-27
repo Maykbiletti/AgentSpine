@@ -12,7 +12,7 @@ flowchart TB
 
 ## 1. Preservation kernel
 
-Status: in progress for `v0.1`.
+Status: implemented for `v0.1`; ongoing hardening.
 
 - byte-preserving discovery;
 - SHA-256 provenance catalog;
@@ -22,15 +22,19 @@ Status: in progress for `v0.1`.
 
 ## 2. Memory graph
 
-- one fact per local file, grouped by user, feedback, project, or reference;
+Status: foundation implemented; candidate workflow remains planned.
+
+- existing one-fact-per-file layouts are discovered and linked without migration;
 - compact generated index with a configurable context ceiling;
-- typed links, confidence, timestamps, source, and supersession without deletion;
+- typed links, confidence, timestamps, source, and supersession history without deletion;
 - learning candidates separated from confirmed facts.
 
 ## 3. Relationships
 
-- distinct identities for people, agents, channels, and groups;
-- relationship state per agent and counterpart;
+Status: foundation implemented; delegation policy and open-thread UX remain planned.
+
+- distinct identities for people, agents, channels, groups, and projects;
+- privacy-scoped relationship state per agent and counterpart;
 - responsibilities, delegation boundaries, preferences, goals, no-gos, and open threads;
 - explicit identity linking instead of name-based merging;
 - private facts prevented from leaking into group context.
