@@ -21,6 +21,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Agent annotations cannot promote arbitrary Markdown into a constitution layer
 - CI runs the repository's own ten-gate audit and uses the current maintained GitHub action majors
 - Syntax checks and protected-path comparisons are portable across Linux, macOS, and Windows
+- External-state auditing handles Windows project and state directories on different drives
 
 ### Security
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 
 export async function canonicalPath(input = process.cwd()) {
@@ -23,9 +23,9 @@ export async function findProjectRoot(input = process.cwd()) {
   }
 }
 
-export function isInside(parent, child) {
-  const value = relative(parent, child);
-  return value === "" || (!value.startsWith(`..${sep}`) && value !== "..");
+export function isInside(parent, child, pathApi = { relative, isAbsolute, sep }) {
+  const value = pathApi.relative(parent, child);
+  return value === "" || (!pathApi.isAbsolute(value) && !value.startsWith(`..${pathApi.sep}`) && value !== "..");
 }
 
 export function ancestorsBetween(root, cwd) {
