@@ -2,7 +2,7 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { scanAndSave } from "./lib/catalog.js";
 import { loadGraph } from "./lib/graph.js";
-import { findProjectRoot } from "./lib/paths.js";
+import { canonicalPath, findProjectRoot } from "./lib/paths.js";
 
 async function readStdin() {
   let value = "";
@@ -68,7 +68,7 @@ function deny(reason) {
 export async function runHook(payload = null) {
   const input = payload || await readStdin();
   const event = input.hook_event_name || input.event_name || "";
-  const cwd = resolve(input.cwd || process.cwd());
+  const cwd = await canonicalPath(input.cwd || process.cwd());
   const root = await findProjectRoot(cwd);
   const { catalog, catalogPath } = await scanAndSave(root);
 
@@ -92,7 +92,13 @@ export async function runHook(payload = null) {
     }
     const protectedDocuments = catalog.documents.filter((doc) => protectedRelative.has(doc.relativePath));
     const protectedPaths = new Set(protectedDocuments.map((doc) => resolve(doc.path)));
-    const targets = candidatePaths(input.tool_input || input.tool_args).map((path) => resolve(cwd, path));
+    const targets = await Promise.all(candidatePaths(input.tool_input || input.tool_args).map(async (path) => {
+      const target = resolve(cwd, path);
+      try { return await canonicalPath(target); } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+        return target;
+      }
+    }));
     const hit = targets.find((path) => protectedPaths.has(path));
     const shellHit = shellTargetsProtected(input, protectedDocuments, cwd, root);
     if (hit || shellHit) {

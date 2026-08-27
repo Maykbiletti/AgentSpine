@@ -21,6 +21,21 @@ test("PreToolUse blocks an agent write to a protected source", async (t) => {
   assert.match(result.reason, /CLAUDE\.md/);
 });
 
+test("PreToolUse canonicalizes an existing protected target before comparison", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-hook-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-hook-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "SOUL.md"), "# Soul\n", "utf8");
+  const result = await runHook({
+    hook_event_name: "PreToolUse",
+    cwd: root,
+    tool_name: "Write",
+    tool_input: { file_path: join(root, "SOUL.md"), content: "replacement" }
+  });
+  assert.equal(result.blocked, true);
+});
+
 test("PreToolUse allows an unrelated source target", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "agentspine-hook-"));
   const state = await mkdtemp(join(tmpdir(), "agentspine-hook-state-"));

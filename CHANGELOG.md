@@ -20,6 +20,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Protected-source hooks recognize common mutating shell commands and refresh after tool writes
 - Agent annotations cannot promote arbitrary Markdown into a constitution layer
 - CI runs the repository's own ten-gate audit and uses the current maintained GitHub action majors
+- Syntax checks and protected-path comparisons are portable across Linux, macOS, and Windows
 
 ### Security
 

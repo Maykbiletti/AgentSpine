@@ -18,6 +18,7 @@
     "bin",
     "docs",
     "hooks",
+    "scripts",
     "skill",
     "skills",
     "spine-example",
@@ -29,7 +30,7 @@
   "scripts": {
     "check": "npm run lint && npm test && npm run smoke && npm run audit:self",
     "audit:self": "node bin/agentspine.js audit . --json",
-    "lint": "node --check src/*.js && node --check src/lib/*.js && node --check bin/*.js",
+    "lint": "node scripts/check-syntax.js",
     "smoke": "node bin/agentspine.js doctor --json",
     "test": "node --test",
     "prepack": "npm run check"
