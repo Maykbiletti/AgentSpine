@@ -9,5 +9,6 @@
   "homepage": "https://github.com/Maykbiletti/AgentSpine",
   "repository": "https://github.com/Maykbiletti/AgentSpine",
   "license": "Apache-2.0",
-  "keywords": ["identity", "memory", "mcp", "agents"]
+  "keywords": ["identity", "memory", "mcp", "agents"],
+  "mcpServers": "./.mcp.json"
 }

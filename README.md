@@ -90,6 +90,25 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Verify the installed registration from a checkout with:
+
+```bash
+npm run host:check
+claude plugin list
+claude mcp list
+```
+
+If AgentSpine is installed but absent from `/mcp`, refresh the cached marketplace copy, reinstall the plugin, start a new Claude Code session, and approve the `agent-spine` server in `/mcp`:
+
+```bash
+claude plugin marketplace update agent-spine
+claude plugin uninstall agent-spine@agent-spine
+claude plugin install agent-spine@agent-spine
+claude mcp list
+```
+
+An unapproved server may appear as `Pending approval`; approval remains a user action and AgentSpine never bypasses Claude Code's trust boundary.
+
 ## Install for Codex
 
 AgentSpine ships a native `.codex-plugin/plugin.json`. Add the repository to a configured marketplace, open the Codex plugin browser with `/plugins`, install AgentSpine, and start a fresh session. For development, the CLI and MCP server can be used directly:

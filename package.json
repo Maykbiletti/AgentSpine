@@ -28,8 +28,9 @@
     "README.md"
   ],
   "scripts": {
-    "check": "npm run lint && npm test && npm run smoke && npm run audit:self",
+    "check": "npm run lint && npm test && npm run host:check && npm run smoke && npm run audit:self",
     "audit:self": "node bin/agentspine.js audit . --json",
+    "host:check": "node scripts/check-hosts.js --json",
     "lint": "node scripts/check-syntax.js",
     "release:check": "node scripts/release-check.js --json",
     "release:sbom": "npm sbom --sbom-format cyclonedx",

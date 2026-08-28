@@ -6,6 +6,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Executable Claude Code and Codex host-registration check with a real MCP `initialize` handshake
 - Optional local SQLite snapshot transport with immutable signed-adapter binding, append-only hash-linked revisions, atomic head advancement, full integrity replay, quarantined pull, CLI integration, and no MCP database authority
 - One-shot challenge-response peer transport over an owner-selected stdin/stdout carrier, with a fresh nonce, live Ed25519 proof, shell-free process execution, environment minimization, quarantine import, CLI integration, and no MCP process authority
 - Provider-neutral signed HTTPS feed with strong ETag compare-and-swap publication, bounded hash-chain continuity, external rollback receipts, quarantined pull, CLI integration, audit coverage, and no MCP transport authority
@@ -43,6 +44,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Changed
 
+- Claude Code now receives an explicit manifest reference to the bundled `.mcp.json`, preventing the MCP server from disappearing in installations that do not apply implicit component discovery
 - `agentspine mcp` now starts the stdio server instead of returning immediately
 - Discovery fingerprints files with bounded parallel reads
 - Context resolution reuses catalogs and only follows confident overlay links

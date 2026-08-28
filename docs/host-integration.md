@@ -21,6 +21,26 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
+The Claude manifest explicitly references `./.mcp.json`. This avoids relying on implicit discovery in older or cached Claude Code plugin installations. The repository's host check resolves the installed-root variable and performs a real MCP `initialize` handshake for both host registrations:
+
+```bash
+npm run host:check
+```
+
+### Claude MCP troubleshooting
+
+If the plugin is listed but `agent-spine` is missing from `/mcp`, update the marketplace cache and reinstall before starting a new session:
+
+```bash
+claude plugin marketplace update agent-spine
+claude plugin uninstall agent-spine@agent-spine
+claude plugin install agent-spine@agent-spine
+claude plugin list
+claude mcp list
+```
+
+Open `/mcp` in the new interactive session and approve or reconnect `agent-spine`. `Pending approval` means discovery succeeded but Claude Code still needs the user's trust decision. A missing entry after reinstall should be diagnosed from `claude plugin validate .`, `npm run host:check`, and Claude Code's plugin diagnostics; AgentSpine does not write to Claude's user configuration or silently approve itself.
+
 ## Codex
 
 | Component | Path | Purpose |
@@ -54,6 +74,7 @@ Verify either installation against a synthetic or real project without changing 
 
 ```bash
 agentspine doctor --json
+npm run host:check
 agentspine audit /path/to/project --json
 ```
 
