@@ -10,6 +10,9 @@ import { resolveContext } from "./context.js";
 import { sessionBriefing } from "./briefing.js";
 import { inspectHttpsFeedState } from "./feed-transport.js";
 import { continuityFindings, inspectContinuity } from "./continuity.js";
+import {
+  executionPolicyFindings, inspectSelfstarter, selfstarterFindings
+} from "./selfstarter.js";
 import { fileURLToPath } from "node:url";
 import { checkHosts } from "../../scripts/check-hosts.js";
 
@@ -81,6 +84,10 @@ export async function runAudit(root = process.cwd()) {
   const {
     policy, coordination, policyPath, coordinationPath, errors: coordinationLoadErrors
   } = await inspectCoordination(before.root, catalog);
+  const {
+    policy: executionPolicy, state: selfstarter, executionPolicyPath, selfstarterPath,
+    errors: selfstarterLoadErrors
+  } = await inspectSelfstarter(before.root, catalog);
   const { sharing, sharingPath, error: sharingLoadError } = await inspectSharing(before.root, catalog);
   const { trust, trustPath, error: trustLoadError } = await inspectTrust(before.root, catalog);
   const { registry, registryPath, signerDirectory, errors: signerErrors } = await inspectSignerRegistry(before.root, catalog);
@@ -164,6 +171,14 @@ export async function runAudit(root = process.cwd()) {
   }
   const coordinationAuthorityIssues = coordinationIssues.filter((issue) => /assignment|policy-snapshot/.test(issue));
   const coordinationContextIssues = coordinationIssues.filter((issue) => !coordinationAuthorityIssues.includes(issue));
+  const executionPolicyIssues = executionPolicyFindings(executionPolicy, graph, coordination);
+  const selfstarterIssues = selfstarterFindings(selfstarter, executionPolicy, graph, coordination);
+  for (const error of selfstarterLoadErrors) {
+    if (error.startsWith("policy:")) executionPolicyIssues.push(`unreadable-state:${error}`);
+    else selfstarterIssues.push(`unreadable-state:${error}`);
+  }
+  const selfstarterAuthorityIssues = selfstarterIssues.filter((issue) => /grant|policy|task-mismatch/.test(issue));
+  const selfstarterStateIssues = selfstarterIssues.filter((issue) => !selfstarterAuthorityIssues.includes(issue));
   const sharingIssues = sharingFindings(sharing, graph);
   if (sharingLoadError) sharingIssues.push(`unreadable-state:${sharingLoadError}`);
   const authenticationIssues = [
@@ -186,12 +201,12 @@ export async function runAudit(root = process.cwd()) {
       ? `Node ${process.versions.node}; host integration failed closed: ${hostIntegrationError}`
       : `Node ${process.versions.node}; one versioned MCP server and lifecycle hook set per host`),
     gate(2, "Discovery", catalog.schema === "agentspine.catalog/v1", `${catalog.documents.length} Markdown documents indexed`),
-    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath) && !isInside(catalog.root, continuityPath) && !isInside(catalog.root, policyPath) && !isInside(catalog.root, coordinationPath) && !isInside(catalog.root, sharingPath) && !isInside(catalog.root, trustPath) && !isInside(catalog.root, registryPath) && !isInside(catalog.root, signerDirectory) && !isInside(catalog.root, feedStatePath), `State remains outside ${catalog.root}`),
+    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath) && !isInside(catalog.root, continuityPath) && !isInside(catalog.root, policyPath) && !isInside(catalog.root, coordinationPath) && !isInside(catalog.root, executionPolicyPath) && !isInside(catalog.root, selfstarterPath) && !isInside(catalog.root, sharingPath) && !isInside(catalog.root, trustPath) && !isInside(catalog.root, registryPath) && !isInside(catalog.root, signerDirectory) && !isInside(catalog.root, feedStatePath), `State remains outside ${catalog.root}`),
     gate(4, "Native hierarchy", nativeMapped.every((document) => document.hosts.length > 0), `${nativeMapped.length} host-native documents mapped`),
     gate(5, "Link integrity", brokenLinks.length === 0, brokenLinks.length ? `${brokenLinks.length} broken Markdown links` : "All indexed Markdown links resolve"),
     gate(6, "Conflict visibility", Array.isArray(catalog.conflicts), `${reviewConflicts.length} precedence or classification findings exposed`, "warning"),
-    gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0 && sharingAuthorityIssues.length === 0, `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings; ${sharingAuthorityIssues.length} shared authority findings`),
-    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && attentionIssues.length === 0 && learningIssues.length === 0 && continuityIssues.length === 0 && coordinationContextIssues.length === 0 && sharingContextIssues.length === 0 && authenticationIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${attention.events.length} lifecycle events, ${learning.candidates.length} learning records, ${continuity.signals.length} continuity signals, ${coordination.tasks.length} coordination items, ${sharing.records.length} shared records, ${trust.records.length} trusted keys, ${registry.signers.length} local signers, and ${feedState.feeds.length} feed receipts checked`),
+    gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0 && executionPolicyIssues.length === 0 && selfstarterAuthorityIssues.length === 0 && sharingAuthorityIssues.length === 0, `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings; ${executionPolicyIssues.length} execution policy findings; ${selfstarterAuthorityIssues.length} self-starter authority findings; ${sharingAuthorityIssues.length} shared authority findings`),
+    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && attentionIssues.length === 0 && learningIssues.length === 0 && continuityIssues.length === 0 && coordinationContextIssues.length === 0 && selfstarterStateIssues.length === 0 && sharingContextIssues.length === 0 && authenticationIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${attention.events.length} lifecycle events, ${learning.candidates.length} learning records, ${continuity.signals.length} continuity signals, ${coordination.tasks.length} coordination items, ${selfstarter.jobs.length} self-starter jobs, ${sharing.records.length} shared records, ${trust.records.length} trusted keys, ${registry.signers.length} local signers, and ${feedState.feeds.length} feed receipts checked`),
     gate(9, "Context budget", loadedBytes <= context.budget.maxBytes && briefingBudgetValid, briefingError
       ? `${loadedBytes}/${context.budget.maxBytes} source bytes; briefing failed closed: ${briefingError}`
       : `${loadedBytes}/${context.budget.maxBytes} source bytes; ${briefingBytes}/${briefing.budget.maxBytes} briefing bytes`),
@@ -211,6 +226,8 @@ export async function runAudit(root = process.cwd()) {
     continuityPath,
     policyPath,
     coordinationPath,
+    executionPolicyPath,
+    selfstarterPath,
     sharingPath,
     trustPath,
     registryPath,

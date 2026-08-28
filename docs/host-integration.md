@@ -10,7 +10,7 @@ AgentSpine uses native plugin surfaces instead of asking users to paste a large 
 | Marketplace | `.claude-plugin/marketplace.json` | GitHub installation and updates |
 | Skill | `skills/agent-spine/SKILL.md` | Context rules and preservation invariants |
 | MCP | `.mcp.json` | Read-only source tools plus external overlay workflows |
-| Hooks | `hooks/hooks.json` | Automatic briefing, opted-in signal capture, and protected-source guard |
+| Hooks | `hooks/hooks.json` | Automatic briefing, attention, protected-source guard, and rights-bound checkpoints |
 
 Install from GitHub:
 
@@ -21,7 +21,7 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
-The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Version `0.3.0` replaces the `0.2.0` cache identity; both host manifests and the hook bundle carry that version, while the bundle declares the `agentspine.attention-events/v1` runtime contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise clean install, previous-version cache rejection, upgrade, automatic attention injection, and uninstall preservation:
+The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Version `0.4.0` replaces the `0.3.0` cache identity; both host manifests and the hook bundle carry that version, while the bundle declares the `agentspine.selfstarter/v1` runtime contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise clean install, previous-version cache rejection, upgrade, automatic briefing, attention, exact job start, tool checkpoint, new-session resume, and uninstall preservation:
 
 ```bash
 npm run host:check
@@ -81,7 +81,9 @@ agentspine audit /path/to/project --json
 
 The audit exits non-zero when a required gate fails, making it suitable for installation smoke tests and CI.
 
-The provider-neutral lifecycle adapter covers `SessionStart` (including resume and compact starts), `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `PostCompact`, `Stop`, and `SubagentStop`. Start, prompt, and compaction boundaries scan and inject the actual byte-budgeted `session_briefing`; no model-side MCP selection is required. Prompt submission can additionally capture minimal safe learning and direct promise/blocker signals after the separate local continuity opt-in. `PostToolUse` writes an idempotent task heartbeat; `Stop` and `SubagentStop` close that heartbeat without emitting repeated chat text. Minimal host event envelopes can transition a promise or blocker. `PreToolUse` retains the protected-source guard. No hook creates permissions.
+The provider-neutral lifecycle adapter covers `SessionStart` (including resume and compact starts), `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `PostCompact`, `Stop`, and `SubagentStop`. Start, prompt, and compaction boundaries scan and inject the actual byte-budgeted `session_briefing`; no model-side MCP selection is required. Prompt submission can additionally capture minimal safe learning and direct promise/blocker signals after the separate local continuity opt-in. `PostToolUse` writes an idempotent task heartbeat; `Stop` and `SubagentStop` close that heartbeat without emitting repeated chat text.
+
+When an exact locally registered job is waiting, `SessionStart` acquires its lease and injects its real checkpoint automatically. Subsequent tool and stop hooks resolve that job from the native host session; the model does not need to repeat a job envelope. `PreToolUse` first retains the protected-source guard, then rechecks the current execution grant, assignment, scope, capability, lease, and workspace. `PostToolUse` checkpoints exactly one matching result. A new session resumes only after the same checks. Grant and job administration remain local CLI operations and are absent from MCP. No hook creates permissions.
 
 Identity and audience come from explicit hook scope fields or the locally configured default direct-person/project scope. Group content requires an exact group ID and never enters automatic learning. Missing scope produces no inferred identity; corrupt state returns a visible `failedClosed` packet and must never be reported as successful recall.
 

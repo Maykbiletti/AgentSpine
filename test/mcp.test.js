@@ -64,6 +64,12 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   assert.equal(names.includes("serve_peer"), false);
   assert.equal(names.includes("pull_peer"), false);
   assert.equal(names.includes("execute_peer_command"), false);
+  assert.equal(names.includes("grant_execution"), false);
+  assert.equal(names.includes("revoke_execution"), false);
+  assert.equal(names.includes("register_job"), false);
+  assert.equal(names.includes("start_job"), false);
+  assert.equal(names.includes("checkpoint_job"), false);
+  assert.equal(names.includes("cancel_job"), false);
 });
 
 test("agentspine mcp CLI launches the stdio server", async (t) => {

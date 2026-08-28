@@ -1,6 +1,6 @@
 # Automatic continuity
 
-AgentSpine `0.3.0` connects the portal-neutral memory, briefing, and attention layers to installed Claude Code and Codex lifecycle hooks. The result is real host context and durable scoped attention state at lifecycle boundaries, not a counter or a suggestion that the model should call an MCP tool later.
+AgentSpine `0.4.0` connects the portal-neutral memory, briefing, attention, and exactly authorized job-checkpoint layers to installed Claude Code and Codex lifecycle hooks. The result is real host context, durable scoped attention state, and an optional rights-bound resume path at lifecycle boundaries—not a counter or a suggestion that the model should call an MCP tool later.
 
 ## One-time setup
 

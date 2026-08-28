@@ -20,6 +20,12 @@ export {
   loadDelegationPolicy, revokeDelegation, taskContext, updateTask
 } from "./lib/coordination.js";
 export {
+  authorizeJobEffect, cancelJob, checkpointJobEffect, closeJobLease, deleteJob,
+  executionPolicyFindings, grantExecution, inspectSelfstarter, loadExecutionPolicy,
+  loadSelfstarter, registerJob, resolveSessionJob, revokeExecution, selfstarterContext,
+  selfstarterFindings, startOrResumeJob, workspaceFingerprint
+} from "./lib/selfstarter.js";
+export {
   configureSharing, deleteShared, initDirectoryAdapter, inspectSharing, loadSharing,
   publishLearning, pullShared, readDirectoryExchange, reviewShared, rollbackShared, sharedContext, sharedInbox,
   sharingAuthenticationFindings, sharingFindings, validateSharedEvent

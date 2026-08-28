@@ -4,6 +4,28 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-28
+
+### Added
+
+- Rights-bound self-starter for one exact waiting job with durable checkpoints, expiring leases, retry budget, backoff, crash recovery, audit receipts, cancellation, and purge
+- Native Claude Code and Codex lifecycle path from `SessionStart` through `PreToolUse`, `PostToolUse`, `Stop`, and a new-session resume without a model-side MCP call or repeated job envelope
+- Separate local execution policy binding actor, action set, job, task, target, project, optional group, host, and finite tool capabilities
+- Fresh-install and `0.3.0` upgrade proof for exactly one MCP server, one hook set, an authorized effect, a durable checkpoint, and automatic resume
+
+### Changed
+
+- Package, lockfile, Claude Code, Codex, marketplace, and hook-bundle versions advance together to `0.4.0`
+- The lifecycle bundle declares `agentspine.selfstarter/v1` and resolves active jobs from the native host session
+- Ten-gate audit includes external execution-policy and job-state integrity without reading either as context authority
+
+### Security
+
+- Every start, resume, and effect rechecks the current exact grant, task assignment, scope, host session, capability, lease, and content-bound workspace fingerprint
+- Memory, Markdown, learning, relationships, attention, tasks, prior approvals, model claims, and MCP responses cannot create or widen execution rights
+- Unknown effects, concurrent leases, revocation, expiry, workspace drift, uncheckpointed crash changes, retry exhaustion, malformed state, and protected-source writes fail closed
+- MCP exposes no execution-policy grant, revoke, job registration, cancellation, or checkpoint administration
+
 ## [0.3.0] - 2026-08-28
 
 ### Added
@@ -134,6 +156,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Cross-platform preservation, hook, graph, and MCP tests
 
 [Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.1.0...HEAD
+[0.4.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Maykbiletti/AgentSpine/releases/tag/v0.1.0

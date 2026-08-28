@@ -35,6 +35,7 @@ flowchart TB
     F["Relationships + attention + safe learning + tasks + reviewed sharing"] --> G["Budgeted session briefing"]
     D --> G
     P["Separate default-deny delegation policy"] --> F
+    Y["Exact local execution policy"] --> J["Leased job + atomic checkpoint"] --> G
     X["Optional provider-neutral adapter"] --> S["Optional Ed25519 origin check"] --> Q["Local import quarantine"] --> F
     G --> E["Claude Code · Codex · MCP"]
 ```
@@ -89,7 +90,7 @@ claude --plugin-dir .
 ```
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
-Version `0.3.0` explicitly registers `.mcp.json`, ships one version-bound native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.2.0` plugin cache. Fresh-install and upgrade checks prove that exactly one MCP server and one hook set load.
+Version `0.4.0` explicitly registers `.mcp.json`, ships one version-bound native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.3.0` plugin cache. Fresh-install and upgrade checks prove that exactly one MCP server and one hook set load, then exercise automatic briefing, attention, exact job start, checkpoint, stop, and new-session resume.
 
 Verify the installed registration from a checkout with:
 
@@ -186,6 +187,12 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine task-create …` | Create a context-only task, open thread, or handoff |
 | `agentspine task-update …` | Update status, assignee, or details while retaining the prior version |
 | `agentspine tasks …` | Read privacy-filtered current coordination context |
+| `agentspine execution-grant …` | Create one exact local owner-confirmed job grant; never inferred from context |
+| `agentspine execution-revoke …` | Revoke future start, resume, and effects while retaining policy history |
+| `agentspine job-register …` | Register a waiting job with its initial content-bound checkpoint |
+| `agentspine jobs …` | Inspect durable status, retry, blocker, lease, and checkpoint metadata |
+| `agentspine job-cancel …` | Stop a job through an explicit local owner decision |
+| `agentspine job-delete …` | Permanently purge an unleased job, history, and receipts |
 | `agentspine share-init …` | Initialize an optional provider-neutral directory adapter outside the project |
 | `agentspine share-keygen …` | Create or explicitly rotate a local Ed25519 signing identity |
 | `agentspine share-trust …` | Trust one exported public identity for the current project |
@@ -253,6 +260,8 @@ Shared memory is transport-neutral and double-reviewed: only accepted non-privat
 
 Session briefing keeps that growing context usable: one scoped read prioritizes the current request, explicit stops, and current task; deduplicates local and shared facts; defaults to focus mode; enforces exact group audiences; and measures the entire compact JSON result against the requested byte ceiling. Native lifecycle hooks now inject this packet automatically instead of asking the model to call MCP. See [session briefing](docs/session-briefing.md).
 
+The rights-bound self-starter is a separate execution path. A genuine local owner action must grant one exact actor, job, task, target, project, host, and finite tool-capability set. Installed hooks then acquire one lease, recheck authority before every effect, checkpoint the workspace after every result, and resume only an unchanged checkpoint. Memory, Markdown, relationships, learning, attention, task text, previous approvals, and MCP can never create that grant. See [rights-bound self-starter](docs/selfstarter.md).
+
 ## Optional four-layer starter
 
 New agents that do not have identity files yet can start with the included [`spine-example/`](spine-example/) template:
@@ -277,7 +286,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.3` adds persistent, exactly scoped heartbeat, promise, and blocker events to the automatic Claude Code and Codex lifecycle bundle. Existing source Markdown remains immutable. The next ordered milestone—the rights-bound self-starter—remains deliberately unimplemented.
+AgentSpine is in active early development. `v0.4` adds an exact-policy, leased, checkpointed self-starter to the automatic Claude Code and Codex lifecycle bundle. It resumes without a model-side MCP call, while every effect remains current-rights-bound and default-deny. Existing source Markdown remains immutable. The next ordered milestone is the visible multi-person, multi-group, multilingual restart acceptance run.
 
 ## Documentation
 
@@ -288,6 +297,7 @@ AgentSpine is in active early development. `v0.3` adds persistent, exactly scope
 | Integrate a host | [Claude Code and Codex](docs/host-integration.md) |
 | Enable automatic continuity | [Automatic continuity](docs/automatic-continuity.md) |
 | Load one compact session packet | [Session briefing](docs/session-briefing.md) |
+| Resume one exactly authorized job | [Rights-bound self-starter](docs/selfstarter.md) |
 | Understand relationships and history | [Relationships](docs/relationships.md) |
 | Configure sparse follow-ups | [Attention](docs/attention.md) |
 | Review evidence-backed observations | [Safe learning](docs/learning.md) |

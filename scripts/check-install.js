@@ -24,22 +24,21 @@ async function makePreviousCache(target) {
   for (const path of ["package.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
     const file = join(target, path);
     const value = JSON.parse(await readFile(file, "utf8"));
-    value.version = "0.2.0";
-    delete value.lifecycleContract;
+    value.version = "0.3.0";
     await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   }
   const marketplacePath = join(target, ".claude-plugin/marketplace.json");
   const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
-  marketplace.plugins[0].version = "0.2.0";
+  marketplace.plugins[0].version = "0.3.0";
   await writeFile(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
   const hooksPath = join(target, "hooks/hooks.json");
   const hooks = JSON.parse(await readFile(hooksPath, "utf8"));
-  hooks.version = "0.2.0";
-  delete hooks.contract;
+  hooks.version = "0.3.0";
+  hooks.contract = "agentspine.attention-events/v1";
   await writeFile(hooksPath, `${JSON.stringify(hooks, null, 2)}\n`, "utf8");
 }
 
-async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, payload = null) {
+async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, payload = null, { requireBriefing = true } = {}) {
   return await new Promise((resolveResult, reject) => {
     const child = spawn(process.execPath, [join(pluginRoot, "src/hook.js")], {
       cwd: projectRoot,
@@ -69,14 +68,17 @@ async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, pay
       try {
         const protocol = JSON.parse(stdout.trim());
         const context = JSON.parse(protocol.hookSpecificOutput?.additionalContext || "null");
-        if (context?.briefing?.host !== host || !Array.isArray(context?.briefing?.sources?.documents)) {
+        if (requireBriefing && (context?.briefing?.host !== host || !Array.isArray(context?.briefing?.sources?.documents))) {
           throw new Error(`${host} installed hook did not inject a real session briefing`);
         }
         resolveResult({
-          event: protocol.hookSpecificOutput.hookEventName, host,
-          sources: context.briefing.sources.documents.length,
-          attentionKinds: context.briefing.attention.items.map((item) => item.kind),
-          capturedAttentionKind: context.attentionEvent?.kind || null
+          event: protocol.hookSpecificOutput?.hookEventName || payload?.hook_event_name || null, host,
+          sources: context?.briefing?.sources?.documents?.length ?? null,
+          attentionKinds: context?.briefing?.attention?.items?.map((item) => item.kind) || [],
+          capturedAttentionKind: context?.attentionEvent?.kind || null,
+          selfstarter: context?.selfstarter || null,
+          decision: protocol.decision || null,
+          reason: protocol.reason || null
         });
       } catch (error) {
         reject(error);
@@ -84,6 +86,79 @@ async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, pay
     });
     child.stdin.end(`${JSON.stringify(payload || { hook_event_name: "SessionStart", cwd: projectRoot, host })}\n`);
   });
+}
+
+async function prepareInstalledSelfstarter(pluginRoot, projectRoot, stateRoot, host) {
+  const previous = process.env.AGENTSPINE_STATE_DIR;
+  process.env.AGENTSPINE_STATE_DIR = stateRoot;
+  try {
+    const graph = await import(pathToFileURL(join(pluginRoot, "src/lib/graph.js")).href);
+    const coordination = await import(pathToFileURL(join(pluginRoot, "src/lib/coordination.js")).href);
+    const selfstarter = await import(pathToFileURL(join(pluginRoot, "src/lib/selfstarter.js")).href);
+    for (const [id, kind] of [
+      ["person:install-owner", "person"], ["agent:install-worker", "agent"], ["project:install-runtime", "project"]
+    ]) await graph.upsertEntity({ root: projectRoot, id, kind, privacy: "shared" });
+    await coordination.createTask({
+      root: projectRoot, id: `task:install-${host}`, actorId: "agent:install-worker", assigneeId: "agent:install-worker",
+      projectId: "project:install-runtime", title: `Installed ${host} self-starter check`, privacy: "private"
+    });
+    await selfstarter.grantExecution({
+      root: projectRoot, id: `execution-grant:install-${host}`, jobId: `job:install-${host}`,
+      actorId: "agent:install-worker", taskId: `task:install-${host}`, targetId: "person:install-owner",
+      projectId: "project:install-runtime", host, capabilities: ["tool:Write"],
+      reason: `Owner approved the exact installed ${host} synthetic write.`, confirmation: "local-owner-confirmed"
+    });
+    await selfstarter.registerJob({
+      root: projectRoot, id: `job:install-${host}`, grantId: `execution-grant:install-${host}`,
+      confirmation: "local-owner-confirmed"
+    });
+  } finally {
+    if (previous === undefined) delete process.env.AGENTSPINE_STATE_DIR;
+    else process.env.AGENTSPINE_STATE_DIR = previous;
+  }
+}
+
+async function invokeInstalledSelfstarter(pluginRoot, projectRoot, stateRoot, host) {
+  await prepareInstalledSelfstarter(pluginRoot, projectRoot, stateRoot, host);
+  const session = `session:install-${host}-one`;
+  const nextSession = `session:install-${host}-two`;
+  const toolUseId = `tool:install-${host}`;
+  const taskId = `task:install-${host}`;
+  const artifact = join(projectRoot, `installed-${host}-artifact.txt`);
+  const shared = {
+    cwd: projectRoot, host, entity_id: "agent:install-worker", project_id: "project:install-runtime",
+    task_id: taskId
+  };
+  const started = await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
+    ...shared, hook_event_name: "SessionStart", session_id: session
+  });
+  if (!started.selfstarter?.active || started.selfstarter.action !== "start") {
+    throw new Error(`${host} installed hook did not start the exact authorized job`);
+  }
+  const authorized = await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
+    ...shared, hook_event_name: "PreToolUse", session_id: session,
+    tool_name: "Write", tool_use_id: toolUseId,
+    tool_input: { file_path: artifact, content: `installed ${host} checkpoint\n` }
+  }, { requireBriefing: false });
+  if (authorized.decision === "block") throw new Error(`${host} installed PreToolUse denied the exact authorized effect: ${authorized.reason}`);
+  await writeFile(artifact, `installed ${host} checkpoint\n`, "utf8");
+  await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
+    ...shared, hook_event_name: "PostToolUse", session_id: session,
+    tool_name: "Write", tool_use_id: toolUseId, success: true, tool_result: { ok: true }
+  }, { requireBriefing: false });
+  await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
+    ...shared, hook_event_name: "Stop", session_id: session
+  }, { requireBriefing: false });
+  const resumed = await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
+    ...shared, hook_event_name: "SessionStart", session_id: nextSession
+  });
+  if (!resumed.selfstarter?.active || resumed.selfstarter.action !== "resume" || resumed.selfstarter.checkpointSequence !== 1) {
+    throw new Error(`${host} installed hook did not resume the durable checkpoint`);
+  }
+  return {
+    started: started.selfstarter.action, resumed: resumed.selfstarter.action,
+    checkpointSequence: resumed.selfstarter.checkpointSequence, mcpCalls: 0
+  };
 }
 
 async function prepareInstalledAttention(pluginRoot, projectRoot, stateRoot) {
@@ -147,6 +222,7 @@ export async function checkInstall(root = process.cwd()) {
     const freshState = join(workspace, "state-fresh");
     const freshHook = await invokeInstalledHook(fresh, userProject, freshState, "claude");
     const freshAttention = await invokeInstalledAttention(fresh, userProject, freshState, "claude");
+    const freshSelfstarter = await invokeInstalledSelfstarter(fresh, userProject, freshState, "claude");
 
     const installed = join(workspace, "cache", "agent-spine");
     await copyBundle(root, installed);
@@ -163,6 +239,7 @@ export async function checkInstall(root = process.cwd()) {
     const upgradeState = join(workspace, "state-upgrade");
     const upgradedHook = await invokeInstalledHook(installed, userProject, upgradeState, "codex");
     const upgradedAttention = await invokeInstalledAttention(installed, userProject, upgradeState, "codex");
+    const upgradedSelfstarter = await invokeInstalledSelfstarter(installed, userProject, upgradeState, "codex");
 
     await rm(fresh, { recursive: true });
     await rm(installed, { recursive: true });
@@ -174,6 +251,7 @@ export async function checkInstall(root = process.cwd()) {
       upgrade: upgraded.exactlyOnce,
       automaticBriefing: { fresh: freshHook, upgrade: upgradedHook },
       automaticAttention: { fresh: freshAttention, upgrade: upgradedAttention },
+      automaticSelfstarter: { fresh: freshSelfstarter, upgrade: upgradedSelfstarter },
       canonicalAliasLaunch: aliasResult.ok,
       previousCacheRejected: legacyFailed,
       uninstallPreservedSources: true,

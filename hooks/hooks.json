@@ -1,7 +1,7 @@
 {
-  "version": "0.3.0",
-  "contract": "agentspine.attention-events/v1",
-  "description": "Injects scoped context, persists minimal attention lifecycles, and protects existing identity sources from agent writes.",
+  "version": "0.4.0",
+  "contract": "agentspine.selfstarter/v1",
+  "description": "Injects scoped context, persists attention and exact job checkpoints, rechecks execution rights, and protects existing identity sources.",
   "hooks": {
     "SessionStart": [
       {

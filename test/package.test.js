@@ -20,7 +20,7 @@ test("package and host manifests keep one release version", async () => {
   assert.equal(codex.version, pkg.version);
   assert.equal(marketplace.plugins[0].version, pkg.version);
   assert.equal(hooks.version, pkg.version);
-  assert.equal(hooks.contract, "agentspine.attention-events/v1");
+  assert.equal(hooks.contract, "agentspine.selfstarter/v1");
   assert.notEqual(pkg.version, "0.1.0");
   assert.equal(pkg.engines.node, ">=20.9.0");
 });
@@ -43,7 +43,7 @@ test("Claude and Codex registrations complete a real MCP initialize handshake", 
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
-  assert.equal(result.version, "0.3.0");
+  assert.equal(result.version, "0.4.0");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
   assert.equal(result.hooks.claude.events.includes("PostCompact"), true);
   assert.equal(result.hooks.codex.events.includes("UserPromptSubmit"), true);
@@ -66,6 +66,8 @@ test("fresh install, stale-cache upgrade, and uninstall keep exactly one runtime
   );
   assert.deepEqual(result.automaticAttention.fresh, { captured: "promise", restarted: ["promise"] });
   assert.deepEqual(result.automaticAttention.upgrade, { captured: "promise", restarted: ["promise"] });
+  assert.deepEqual(result.automaticSelfstarter.fresh, { started: "start", resumed: "resume", checkpointSequence: 1, mcpCalls: 0 });
+  assert.deepEqual(result.automaticSelfstarter.upgrade, { started: "start", resumed: "resume", checkpointSequence: 1, mcpCalls: 0 });
   assert.equal(result.canonicalAliasLaunch, true);
   assert.equal(result.uninstallPreservedSources, true);
 });

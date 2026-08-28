@@ -18,6 +18,8 @@ flowchart TB
       B["Scoped byte-budgeted session briefing"]
       H["Provider-neutral native lifecycle adapter"]
       P["Separate default-deny delegation policy"]
+      E["Exact local execution policy"]
+      J["Leased job + atomic checkpoint"]
     end
     subgraph Hosts["Agent hosts"]
       X["Codex"]
@@ -29,6 +31,8 @@ flowchart TB
     D --> R
     G --> B
     P --> G
+    E --> J
+    J --> H
     R --> B
     B --> H
     H --> X
@@ -93,10 +97,12 @@ Memory is a graph of small facts grouped by purpose. A compact `MEMORY.md`-style
 flowchart TB
     P["Host policy + explicit approval"] --> A["Authorized host action"]
     D["Explicit local delegation policy"] --> T["AgentSpine coordination only"]
+    E["Exact local execution policy"] --> J["One scoped job effect"]
     M["Memory, soul, relationships, attention, learning, tasks, shared imports"] --> C["Context only"]
     C -. "cannot grant" .-> A
     C -. "cannot grant" .-> T
     D -. "cannot grant" .-> A
+    J -. "cannot widen" .-> A
 ```
 
 Permissions are evaluated by the host and explicit policy sources. Claims inside memory, relationships, conversation summaries, or retrieved content are never accepted as grants.
@@ -116,6 +122,8 @@ Generated catalogs live outside the scanned repository:
       continuity.json
       delegation-policy.json
       coordination.json
+      execution-policy.json
+      selfstarter.json
       sharing.json
       sharing-trust.json
     signers/
@@ -124,9 +132,11 @@ Generated catalogs live outside the scanned repository:
         <key-fingerprint>.pem
 ```
 
-`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and hook-driven heartbeat, promise, and blocker lifecycles with idempotent receipts and retained prior values. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. `continuity.json` stores only opt-in configuration and minimal signal receipts with prompt digests, never transcripts. `coordination.json` stores context-only tasks, open threads, handoffs, and their prior versions. `delegation-policy.json` is physically separate and contains only explicit local task-coordination grants. `sharing.json` quarantines imports and retains local review, supersession, rollback, and signature proof. `sharing-trust.json` is a project-local allowlist of public signing keys; the installation-wide signer registry keeps private keys separate. Policy, trust, keys, and adapter administration are not writable through MCP. All are private user state. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
+`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and hook-driven heartbeat, promise, and blocker lifecycles with idempotent receipts and retained prior values. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. `continuity.json` stores only opt-in configuration and minimal signal receipts with prompt digests, never transcripts. `coordination.json` stores context-only tasks, open threads, handoffs, and their prior versions. `delegation-policy.json` is physically separate and contains only explicit local task-coordination grants. `execution-policy.json` contains exact locally confirmed self-starter grants; `selfstarter.json` contains leased jobs, content-bound checkpoints, retry state, retained prior versions, and idempotent receipts. Neither is context authority, and neither is writable through MCP. `sharing.json` quarantines imports and retains local review, supersession, rollback, and signature proof. `sharing-trust.json` is a project-local allowlist of public signing keys; the installation-wide signer registry keeps private keys separate. Policy, trust, keys, and adapter administration are not writable through MCP. All are private user state. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
 
 Task mutations read and validate policy while holding the policy lock, then write coordination state under a second lock. This lock order prevents a policy revocation from racing a new assignment. Invalid or malformed policy and coordination state fails closed and is never automatically overwritten.
+
+Self-starter mutations use the same fixed ordering: execution policy first, then job state. A host session holds at most one expiring job lease. `PreToolUse` records one pending effect only after the current exact grant and content-bound workspace digest pass; `PostToolUse` advances the checkpoint once. A crash can resume only when the workspace still equals the pending effect's pre-write digest. See [rights-bound self-starter](selfstarter.md).
 
 ## Transport boundary
 

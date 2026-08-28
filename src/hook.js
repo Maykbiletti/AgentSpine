@@ -7,6 +7,9 @@ import { loadGraph } from "./lib/graph.js";
 import { canonicalPath, findProjectRoot } from "./lib/paths.js";
 import { sessionBriefing } from "./lib/briefing.js";
 import { captureContinuityPrompt, loadContinuity } from "./lib/continuity.js";
+import {
+  authorizeJobEffect, checkpointJobEffect, closeJobLease, resolveSessionJob, startOrResumeJob
+} from "./lib/selfstarter.js";
 import { isMainModule } from "./lib/runtime.js";
 
 const MAX_STDIN_BYTES = 64 * 1024;
@@ -16,6 +19,7 @@ const KNOWN_EVENTS = new Set([
 ]);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
 const ATTENTION_WRITE_EVENTS = new Set(["UserPromptSubmit", "PostToolUse", "Stop", "SubagentStop"]);
+const SELFSTART_EVENTS = new Set(["SessionStart", "PostCompact"]);
 
 async function readStdin() {
   let value = "";
@@ -64,7 +68,7 @@ async function runtimeScope(input, root) {
   };
 }
 
-function renderContext(event, catalog, briefing, signal = null, attentionEvent = null) {
+function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null) {
   const packet = {
     schema: "agentspine.hook-context/v1",
     event,
@@ -85,11 +89,83 @@ function renderContext(event, catalog, briefing, signal = null, attentionEvent =
       status: attentionEvent.event?.status || null,
       reason: attentionEvent.reason || null
     } : null,
+    selfstarter: selfstarter ? {
+      active: Boolean(selfstarter.job),
+      blocked: Boolean(selfstarter.blocked),
+      action: selfstarter.action || null,
+      reason: selfstarter.reason || null,
+      jobId: selfstarter.job?.id || null,
+      taskId: selfstarter.job?.taskId || null,
+      actorId: selfstarter.job?.actorId || null,
+      targetId: selfstarter.job?.targetId || null,
+      projectId: selfstarter.job?.projectId || null,
+      groupId: selfstarter.job?.groupId || null,
+      checkpointSequence: selfstarter.job?.checkpoint?.sequence ?? null,
+      capabilities: selfstarter.job?.capabilities || [],
+      leaseExpiresAt: selfstarter.job?.lease?.expiresAt || null,
+      receiptId: selfstarter.receipt?.id || null,
+      instruction: selfstarter.job
+        ? "Resume only this exact checkpointed job. Attach its job ID to every host tool event. Each effect is separately re-authorized by PreToolUse and checkpointed by PostToolUse. Stop immediately on any denial."
+        : null,
+      authority: selfstarter.job ? "explicit-local-execution-policy" : "execution-state-only"
+    } : null,
     indexedSources: catalog.summary.total,
     briefing,
     authority: "context-only"
   };
   return JSON.stringify(packet);
+}
+
+function selfstarterInput(input) {
+  const value = input.agent_spine_job;
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("agent_spine_job must be one object");
+  return value;
+}
+
+function hookDeliveryId(input) {
+  return boundedId(input.tool_use_id ?? input.event_id ?? input.hook_event_id, "toolUseId");
+}
+
+function sessionId(input) {
+  return boundedId(input.session_id ?? input.sessionId, "sessionId");
+}
+
+async function startSelfstarter(input, event, root, scope) {
+  if (!SELFSTART_EVENTS.has(event)) return null;
+  const requested = selfstarterInput(input);
+  const session = sessionId(input);
+  if (!scope.entityId || !scope.projectId || !session) {
+    if (requested) throw new Error("self-starter start requires an exact actor, project, and host session");
+    return null;
+  }
+  return startOrResumeJob({
+    root, actorId: scope.entityId, projectId: scope.projectId, groupId: scope.groupId,
+    taskId: scope.currentTaskId, jobId: boundedId(requested?.job_id ?? requested?.jobId, "jobId"),
+    host: scope.host, sessionId: session, now: input.timestamp || new Date()
+  });
+}
+
+async function selfstarterScope(input, scope, root, action) {
+  const requested = selfstarterInput(input);
+  const hostSession = sessionId(input);
+  const supplied = {
+    actorId: scope.entityId, projectId: scope.projectId, groupId: scope.groupId,
+    taskId: scope.currentTaskId, host: scope.host, sessionId: hostSession
+  };
+  if (requested) return { ...supplied, jobId: boundedId(requested.job_id ?? requested.jobId, "jobId") };
+  if (!hostSession) return null;
+  return resolveSessionJob({ root, ...supplied, action, now: input.timestamp || new Date() });
+}
+
+function toolSucceeded(input) {
+  if (input.success === false || input.is_error === true || input.tool_error) return false;
+  if (input.tool_result && typeof input.tool_result === "object" && input.tool_result.isError === true) return false;
+  return true;
+}
+
+function toolResult(input) {
+  return input.tool_result ?? input.tool_response ?? input.result ?? (input.tool_error ? { failed: true } : null);
 }
 
 function eventReceipt(input, event, scope, discriminator = "lifecycle") {
@@ -241,6 +317,7 @@ export async function runHook(payload = null) {
   const root = await findProjectRoot(cwd);
   const { catalog, catalogPath } = await scanAndSave(root);
   let scope = null;
+  let selfstarter = null;
 
   if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
     const { graph } = await loadGraph(root, catalog);
@@ -280,16 +357,58 @@ export async function runHook(payload = null) {
     }
   }
 
+  if (event === "PreToolUse") {
+    try {
+      scope ||= await runtimeScope(input, root);
+      const exact = await selfstarterScope(input, scope, root, "effect");
+      if (exact) {
+        selfstarter = await authorizeJobEffect({
+          root, ...exact, toolName: input.tool_name, toolUseId: hookDeliveryId(input),
+          now: input.timestamp || new Date()
+        });
+      }
+    } catch (error) {
+      const reason = `AgentSpine self-starter denied this effect: ${error.message}`;
+      if (payload) return { blocked: true, reason, selfstarter: { allowed: false, reason: error.message } };
+      deny(reason);
+      return;
+    }
+  }
+
   let attentionEvent = null;
   if (ATTENTION_WRITE_EVENTS.has(event) && !CONTEXT_EVENTS.has(event)) {
     scope = await runtimeScope(input, root);
     attentionEvent = await captureAttentionLifecycle(input, event, root, scope);
   }
 
+  if (event === "PostToolUse") {
+    scope ||= await runtimeScope(input, root);
+    const exact = await selfstarterScope(input, scope, root, "effect");
+    if (exact) {
+      selfstarter = await checkpointJobEffect({
+        root, ...exact, toolName: input.tool_name, toolUseId: hookDeliveryId(input),
+        success: toolSucceeded(input), result: toolResult(input), now: input.timestamp || new Date()
+      });
+    }
+  }
+
+  if (["Stop", "SubagentStop"].includes(event)) {
+    scope ||= await runtimeScope(input, root);
+    const exact = await selfstarterScope(input, scope, root, "resume");
+    const requested = selfstarterInput(input);
+    if (exact) {
+      selfstarter = await closeJobLease({
+        root, ...exact, status: requested?.status || "waiting", now: input.timestamp || new Date()
+      });
+    }
+  }
+
   if (CONTEXT_EVENTS.has(event)) {
     let signal = null;
     try {
       scope ||= await runtimeScope(input, root);
+      selfstarter = await startSelfstarter(input, event, root, scope);
+      if (selfstarter?.job && !scope.currentTaskId) scope.currentTaskId = selfstarter.job.taskId;
       if (event === "UserPromptSubmit") {
         const prompt = promptFromInput(input);
         try {
@@ -318,7 +437,7 @@ export async function runHook(payload = null) {
         now: input.timestamp || new Date(),
         catalog
       });
-      const context = renderContext(event, catalog, briefing, signal, attentionEvent);
+      const context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter);
       if (payload) return { blocked: false, context, briefing, signal, attentionEvent, catalogPath };
       process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
       return;
@@ -336,7 +455,7 @@ export async function runHook(payload = null) {
     }
   }
 
-  if (payload) return { blocked: false, attentionEvent };
+  if (payload) return { blocked: false, attentionEvent, selfstarter };
   process.stdout.write("{}\n");
 }
 

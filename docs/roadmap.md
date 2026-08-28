@@ -18,6 +18,8 @@ flowchart TB
     L --> M["13 · Challenge-response peers"]
     M --> N["14 · Local SQLite snapshots"]
     N --> O["15 · Automatic live continuity"]
+    O --> P["16 · Native attention events"]
+    P --> Q["17 · Rights-bound self-starter"]
 ```
 
 ## 1. Preservation kernel
@@ -197,7 +199,7 @@ Status: provider-neutral local database initialization, append-only publication,
 
 ## 15. Automatic live continuity
 
-Status: implemented in `v0.2.0` for the ordered portal-neutral memory milestone. Automatic attention events followed in `v0.3.0`; rights-bound job resume remains a later stage.
+Status: implemented in `v0.2.0` for the ordered portal-neutral memory milestone. Automatic attention events followed in `v0.3.0`, and rights-bound job resume followed in `v0.4.0`.
 
 - native Claude Code and Codex lifecycle bundle with one command per supported event;
 - complete scoped session briefing injected at start, resume, prompt, and compaction boundaries without model-side MCP selection;
@@ -211,7 +213,7 @@ Status: implemented in `v0.2.0` for the ordered portal-neutral memory milestone.
 
 ## 16. Native attention events
 
-Status: implemented in `v0.3.0` as the second ordered milestone. The rights-bound self-starter remains deliberately unimplemented.
+Status: implemented in `v0.3.0` as the second ordered milestone. The rights-bound self-starter followed in `v0.4.0`.
 
 - provider-neutral heartbeat, promise, and blocker lifecycle records written by installed native hooks;
 - immutable person/agent, group, project, task, privacy, and event identity binding;
@@ -222,6 +224,21 @@ Status: implemented in `v0.3.0` as the second ordered milestone. The rights-boun
 - rejection of secret, identity, private-group, authority, access, production, payment, and permission claims;
 - `0.3.0` cache boundary and install/upgrade proof that exactly one MCP server and one lifecycle hook set load;
 - no messages, scheduling, task execution, permissions, or job resume.
+
+## 17. Rights-bound self-starter
+
+Status: implemented in `v0.4.0` as the third ordered milestone. The visible multi-person, multi-group, multilingual restart acceptance run remains the next stage.
+
+- separate explicit local execution policy binding exact actor, actions, job, task, target, project, optional group, host, and finite tool capabilities;
+- durable waiting, running, blocked, exhausted, completed, and cancelled job state outside the project;
+- one expiring host-session lease, atomically recorded pending effects, content-bound workspace checkpoints, and result digests without tool-output retention;
+- automatic native-hook start, capability recheck, checkpoint, stop, and new-session resume without MCP selection or a model-supplied job envelope;
+- current grant, assignment, scope, host, lease, capability, task, and workspace revalidation before every effect;
+- crash retry only when the workspace still matches the pre-effect digest, otherwise a visible permanent blocker;
+- durable retry budget, exponential backoff, append-only history, idempotent receipts, owner cancellation, and confirmed purge;
+- execution-policy and job administration absent from MCP;
+- `0.4.0` cache boundary and fresh-install/`0.3.0` upgrade proof for exactly one MCP server and one lifecycle hook set;
+- no authority from memory, Markdown, learning, relationships, attention, task text, model claims, previous approval, or MCP.
 
 ## Definition of done for every stage
 

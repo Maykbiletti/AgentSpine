@@ -11,12 +11,12 @@ agentspine audit /path/to/project --json
 |---:|---|---|
 | 1 | Supported Node.js runtime and installed host inventory | Runtime is below Node 20, or the MCP/hook set is missing, duplicated, disabled, or stale |
 | 2 | Catalog schema and discovery | Sources could not be represented deterministically |
-| 3 | External generated state | Catalog, graph, attention, learning, delegation policy, coordination, sharing, trust, or signer state landed inside the scanned project |
+| 3 | External generated state | Catalog, graph, attention, learning, delegation policy, coordination, execution policy, job checkpoint, sharing, trust, or signer state landed inside the scanned project |
 | 4 | Native hierarchy mapping | A recognized host source lacks host mapping |
 | 5 | Markdown link integrity | An indexed local `.md` link has no target |
 | 6 | Conflict visibility | Precedence and competing candidates are surfaced for review |
-| 7 | Authority boundary | Context or shared state claims authority, a delegation grant lacks explicit local provenance, or an assignment snapshot has no matching policy history |
-| 8 | Context privacy | Graph, attention, learning, coordination, sharing, signer, trust, signature, group binding, local-review proof, or safety boundary is invalid |
+| 7 | Authority boundary | Context or shared state claims authority; a delegation or execution grant lacks explicit local provenance; or a task/job snapshot has no matching policy history |
+| 8 | Context privacy | Graph, attention, learning, coordination, self-starter, sharing, signer, trust, signature, group binding, local-review proof, or safety boundary is invalid |
 | 9 | Context budget | Resolved source bytes or the complete compact session briefing exceed the requested ceiling |
 | 10 | Byte preservation | A source hash changed during the audit or differs from the saved scan |
 
@@ -28,7 +28,7 @@ The repository test matrix covers Linux, macOS, and Windows on supported Node.js
 
 Broken links are reported with source and target in the catalog. Competing constitution candidates record either native host precedence or `agent-review-required`. Fix the project only through its normal owner workflow; AgentSpine deliberately has no auto-fix mode.
 
-Gate 8 validates attention lifecycle schema, provenance, event and receipt identity, exact group binding, the local sharing quarantine, accepted imports, review proof, transport event integrity, trusted public keys, private/public key matches, private-key file safety, and retained signatures. `agentspine audit` does not crawl remote URLs. Directory manifests and events are validated with strict file, size, schema, digest, signature, trust, and collision checks whenever used. HTTPS snapshots add endpoint, DNS, TLS, redirect, media-type, compression, response-size, bundle-integrity, and signed-document checks before they enter that same importer. The object-transport suite additionally proves create-only headers, exact body length, status handling, idempotent collision verification, mandatory read-back, secret exclusion, private-network confirmation, and source preservation. CI uses synthetic responses and identities only; it never depends on an external service or secret.
+Gate 8 validates attention lifecycle schema, provenance, event and receipt identity, exact group binding, execution-policy/job binding, leases, pending effects, checkpoints, retry state, the local sharing quarantine, accepted imports, review proof, transport event integrity, trusted public keys, private/public key matches, private-key file safety, and retained signatures. `agentspine audit` does not start or resume jobs and does not crawl remote URLs. Directory manifests and events are validated with strict file, size, schema, digest, signature, trust, and collision checks whenever used. HTTPS snapshots add endpoint, DNS, TLS, redirect, media-type, compression, response-size, bundle-integrity, and signed-document checks before they enter that same importer. The object-transport suite additionally proves create-only headers, exact body length, status handling, idempotent collision verification, mandatory read-back, secret exclusion, private-network confirmation, and source preservation. CI uses synthetic responses and identities only; it never depends on an external service or secret.
 
 The optional SQLite suite runs where `node:sqlite` is available and proves external-path enforcement, signed-manifest binding, strict schema and integrity validation, append-only revision continuity, atomic-head validation, idempotency, tamper rejection, quarantined pull, CLI integration, agent-surface exclusion, and source preservation. Older supported Node.js jobs load the package without activating this optional transport.
 

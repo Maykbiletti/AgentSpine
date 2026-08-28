@@ -26,7 +26,7 @@ flowchart LR
     P -. "does not grant" .-> H
 ```
 
-`delegation-policy.json` contains only explicit local grants for AgentSpine task coordination. `coordination.json` contains context-only work records and append-only prior versions. Neither file grants host tool access, file or network access, production rights, spending authority, credentials, or policy exceptions. Those remain under the host and operating environment.
+`delegation-policy.json` contains only explicit local grants for AgentSpine task coordination. `coordination.json` contains context-only work records and append-only prior versions. Neither file grants host tool access, file or network access, production rights, spending authority, credentials, or policy exceptions. Those remain under the host and operating environment. The optional self-starter uses a third, separate `execution-policy.json`; see [rights-bound self-starter](selfstarter.md). A coordination task alone never creates an execution grant.
 
 A `responsible-for`, `reports-to`, or `works-with` relationship describes the team. It never satisfies a delegation check. A sentence in `SOUL.md`, `AGENTS.md`, `CLAUDE.md`, memory, accepted learning, a task, or an MCP response also cannot create a grant.
 
@@ -130,7 +130,7 @@ All decision and mutation paths validate current state before use. Unknown entit
 
 ## Deliberate limits
 
-- AgentSpine coordinates records; it does not dispatch agents or execute tasks.
+- AgentSpine coordinates records without execution authority. The optional self-starter is the sole narrow exception and requires a separate current exact execution grant for every lifecycle effect.
 - It does not send Telegram, email, chat, or notification messages.
 - It does not authenticate the human operating a shell.
 - It does not synchronize policy or tasks across machines.

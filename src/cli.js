@@ -17,6 +17,10 @@ import {
   revokeDelegation, taskContext, updateTask
 } from "./lib/coordination.js";
 import {
+  cancelJob, deleteJob, grantExecution, loadExecutionPolicy, registerJob,
+  revokeExecution, selfstarterContext
+} from "./lib/selfstarter.js";
+import {
   configureSharing, deleteShared, initDirectoryAdapter, publishLearning, pullShared,
   reviewShared, rollbackShared, sharedContext, sharedInbox
 } from "./lib/sharing.js";
@@ -115,6 +119,13 @@ Usage:
   agentspine task-update <id> --actor id [--status in-progress] [--assignee id|--unassign]
   agentspine tasks [root] [--assignee id] [--project id] [--include-private] [--group id]
   agentspine task-delete <id> [--confirm-local-policy]
+  agentspine execution-grant <job-id> --actor id --task task:id --target id --project project:id --host claude|codex --capabilities tool:Write --reason text [--expires date] --confirm-local-execution
+  agentspine execution-revoke <grant-id> --reason text --confirm-local-execution
+  agentspine execution-policy [root]
+  agentspine job-register <job-id> --grant grant:id [--max-retries 3] [--lease-seconds 120] --confirm-local-execution
+  agentspine jobs [root] [--actor id] [--project id] [--task id] [--include-terminal]
+  agentspine job-cancel <job-id> --reason text --confirm-local-execution
+  agentspine job-delete <job-id> --confirm-local-execution
   agentspine share-keygen <signer-id> [--public-out signer.json] [--rotate] [--confirm-local-share]
   agentspine share-signers [root]
   agentspine share-trust <signer.json> [--root path] [--confirm-local-share]
@@ -493,6 +504,58 @@ export async function run(argv = process.argv.slice(2)) {
     return output(await deleteTask({
       root: flags.root || process.cwd(), id: positional[0],
       confirmation: booleanFlag(flags["confirm-local-policy"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "execution-grant") {
+    return output(await grantExecution({
+      root: flags.root || process.cwd(), id: flags.id, jobId: positional[0], actorId: flags.actor,
+      taskId: flags.task, targetId: flags.target, projectId: flags.project, groupId: flags.group || null,
+      host: flags.host, capabilities: String(flags.capabilities || "").split(",").filter(Boolean),
+      reason: flags.reason, expiresAt: flags.expires || null,
+      confirmation: booleanFlag(flags["confirm-local-execution"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "execution-revoke") {
+    return output(await revokeExecution({
+      root: flags.root || process.cwd(), id: positional[0], reason: flags.reason,
+      confirmation: booleanFlag(flags["confirm-local-execution"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "execution-policy") {
+    return output((await loadExecutionPolicy(positional[0] || process.cwd())).policy, json);
+  }
+
+  if (command === "job-register") {
+    return output(await registerJob({
+      root: flags.root || process.cwd(), id: positional[0], grantId: flags.grant,
+      maxRetries: Number(flags["max-retries"] ?? 3), leaseSeconds: Number(flags["lease-seconds"] ?? 120),
+      baseRetrySeconds: Number(flags["retry-seconds"] ?? 5),
+      confirmation: booleanFlag(flags["confirm-local-execution"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "jobs") {
+    return output(await selfstarterContext({
+      root: positional[0] || process.cwd(), actorId: flags.actor || null,
+      projectId: flags.project || null, taskId: flags.task || null,
+      includeTerminal: booleanFlag(flags["include-terminal"])
+    }), json);
+  }
+
+  if (command === "job-cancel") {
+    return output(await cancelJob({
+      root: flags.root || process.cwd(), id: positional[0], reason: flags.reason,
+      confirmation: booleanFlag(flags["confirm-local-execution"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "job-delete") {
+    return output(await deleteJob({
+      root: flags.root || process.cwd(), id: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-execution"]) ? "local-owner-confirmed" : null
     }), json);
   }
 
