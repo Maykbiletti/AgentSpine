@@ -92,7 +92,9 @@ async function initializeServer({ label, root, variable, server }) {
       }
     });
     child.once("error", (error) => finish(error));
-    child.once("exit", (code) => {
+    // `exit` can precede delivery of the final stdout chunk on macOS and
+    // Windows. `close` is emitted only after the stdio pipes have closed.
+    child.once("close", (code) => {
       if (!settled) finish(new Error(`${label} MCP server exited with ${code}${stderr ? `: ${stderr.trim()}` : ""}`));
     });
     child.stdin.end(`${JSON.stringify({
