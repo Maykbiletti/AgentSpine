@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scanAndSave, verifyCatalog } from "./lib/catalog.js";
 import { readDocument, resolveContext } from "./lib/context.js";
@@ -38,6 +37,7 @@ import {
 } from "./lib/graph.js";
 import { checkHosts } from "../scripts/check-hosts.js";
 import { VERSION } from "./version.js";
+import { isMainModule } from "./lib/runtime.js";
 
 function parse(argv) {
   const [command = "help", ...rest] = argv;
@@ -703,7 +703,7 @@ export async function run(argv = process.argv.slice(2)) {
   throw new Error(`Unknown command: ${command}`);
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${resolve(process.argv[1])}`).href) {
+if (isMainModule(import.meta.url)) {
   run().catch((error) => {
     process.stderr.write(`AgentSpine: ${error.message}\n`);
     process.exitCode = 1;

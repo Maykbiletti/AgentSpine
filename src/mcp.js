@@ -1,5 +1,5 @@
-import { resolve } from "node:path";
 import { VERSION } from "./version.js";
+import { isMainModule } from "./lib/runtime.js";
 import { scanAndSave, verifyCatalog } from "./lib/catalog.js";
 import { readDocument, resolveContext } from "./lib/context.js";
 import { sessionBriefing } from "./lib/briefing.js";
@@ -516,6 +516,6 @@ export function startMcpServer(input = process.stdin, output = process.stdout) {
   });
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${resolve(process.argv[1])}`).href) {
+if (isMainModule(import.meta.url)) {
   startMcpServer();
 }

@@ -56,5 +56,6 @@ test("fresh install, stale-cache upgrade, and uninstall keep exactly one runtime
   assert.deepEqual(result.upgrade, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
   assert.deepEqual(result.automaticBriefing.fresh, { event: "SessionStart", host: "claude", sources: 1 });
   assert.deepEqual(result.automaticBriefing.upgrade, { event: "SessionStart", host: "codex", sources: 1 });
+  assert.equal(result.canonicalAliasLaunch, true);
   assert.equal(result.uninstallPreservedSources, true);
 });

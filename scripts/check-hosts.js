@@ -68,9 +68,13 @@ async function initializeServer({ label, root, variable, server, version }) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      const settle = () => {
+        if (error) reject(error);
+        else resolveResult(value);
+      };
+      if (child.exitCode !== null || child.signalCode !== null) return settle();
+      child.once("close", settle);
       child.kill();
-      if (error) reject(error);
-      else resolveResult(value);
     };
     const timer = setTimeout(() => {
       finish(new Error(`${label} MCP initialize timed out${stderr ? `: ${stderr.trim()}` : ""}`));

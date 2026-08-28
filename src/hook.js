@@ -5,6 +5,7 @@ import { loadGraph } from "./lib/graph.js";
 import { canonicalPath, findProjectRoot } from "./lib/paths.js";
 import { sessionBriefing } from "./lib/briefing.js";
 import { captureContinuityPrompt, loadContinuity } from "./lib/continuity.js";
+import { isMainModule } from "./lib/runtime.js";
 
 const MAX_STDIN_BYTES = 64 * 1024;
 const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
@@ -232,7 +233,7 @@ export async function runHook(payload = null) {
   process.stdout.write("{}\n");
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${resolve(process.argv[1])}`).href) {
+if (isMainModule(import.meta.url)) {
   runHook().catch((error) => {
     process.stderr.write(`AgentSpine hook: ${String(error.message).slice(0, 2048)}\n`);
     process.exitCode = 1;

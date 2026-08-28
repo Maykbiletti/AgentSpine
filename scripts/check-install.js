@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,6 +94,9 @@ export async function checkInstall(root = process.cwd()) {
     const fresh = join(workspace, "fresh", "agent-spine");
     await copyBundle(root, fresh);
     const freshResult = await checkHosts(fresh);
+    const aliasRoot = join(workspace, "fresh-alias");
+    await symlink(join(workspace, "fresh"), aliasRoot, process.platform === "win32" ? "junction" : "dir");
+    const aliasResult = await checkHosts(join(aliasRoot, "agent-spine"));
     const freshHook = await invokeInstalledHook(fresh, userProject, join(workspace, "state-fresh"), "claude");
 
     const installed = join(workspace, "cache", "agent-spine");
@@ -119,6 +122,7 @@ export async function checkInstall(root = process.cwd()) {
       fresh: freshResult.exactlyOnce,
       upgrade: upgraded.exactlyOnce,
       automaticBriefing: { fresh: freshHook, upgrade: upgradedHook },
+      canonicalAliasLaunch: aliasResult.ok,
       legacyCacheRejected: legacyFailed,
       uninstallPreservedSources: true,
       authority: "installation-check-only"
