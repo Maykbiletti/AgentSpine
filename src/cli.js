@@ -26,6 +26,7 @@ import {
 import { exportHttpsSnapshot, pullHttpsSnapshot } from "./lib/https-transport.js";
 import { publishHttpsSnapshot } from "./lib/object-transport.js";
 import { loadHttpsFeedState, publishHttpsFeed, pullHttpsFeed } from "./lib/feed-transport.js";
+import { pullPeerCommand, servePeerOnce } from "./lib/peer-transport.js";
 import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
@@ -118,6 +119,8 @@ Usage:
   agentspine share-feed-publish <directory> --base https://store.example/spine --feed team:id --signer signer:id [--id snapshot:id] [--token-env VARIABLE] --confirm-local-share
   agentspine share-feed-pull --base https://store.example/spine --feed team:id [--root path] [--token-env VARIABLE] [--allow-private-network --confirm-local-share]
   agentspine share-feed-state [root]
+  agentspine share-peer-serve <directory> --root path --signer signer:id [--timeout-ms 10000] --confirm-local-share
+  agentspine share-peer-pull --root path --command-json '["ssh","host","agentspine",…]' [--timeout-ms 10000] [--max-bytes n] --confirm-local-share
   agentspine share-inbox [root] [--status pending|accepted|rejected|superseded|rolled-back]
   agentspine share-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine share-context [root] [--scope team:id] [--group group:id] [--kind preference,goal]
@@ -529,6 +532,25 @@ export async function run(argv = process.argv.slice(2)) {
 
   if (command === "share-feed-state") {
     return output(await loadHttpsFeedState(positional[0] || process.cwd()), json);
+  }
+
+  if (command === "share-peer-serve") {
+    await servePeerOnce({
+      root: flags.root || process.cwd(), directory: positional[0], signerId: flags.signer,
+      input: process.stdin, output: process.stdout,
+      timeoutMs: Number(flags["timeout-ms"] ?? 10000),
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    });
+    return;
+  }
+
+  if (command === "share-peer-pull") {
+    return output(await pullPeerCommand({
+      root: flags.root || process.cwd(), commandJson: flags["command-json"],
+      timeoutMs: Number(flags["timeout-ms"] ?? 10000),
+      maxBytes: Number(flags["max-bytes"] ?? 22 * 1024 * 1024),
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
   }
 
   if (command === "share-inbox") {

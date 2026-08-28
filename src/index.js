@@ -32,6 +32,10 @@ export {
   pullHttpsFeed, validateHttpsFeed
 } from "./lib/feed-transport.js";
 export {
+  buildPeerResponse, createPeerRequest, importPeerResponse, pullPeerCommand,
+  servePeerOnce, validatePeerRequest, validatePeerResponse
+} from "./lib/peer-transport.js";
+export {
   assertTrustedIdentity, generateSigningIdentity, inspectSignerRegistry, inspectTrust, listSigningIdentities,
   loadTrust, revokeTrustedSigner, signEnvelope, trustedSignerContext, trustFindings,
   trustSigner, validatePublicIdentity, verifyEnvelope

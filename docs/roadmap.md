@@ -15,6 +15,7 @@ flowchart TB
     I --> J["10 · Immutable HTTPS objects"]
     J --> K["11 · Verifiable releases"]
     K --> L["12 · Signed mutable feeds"]
+    L --> M["13 · Challenge-response peers"]
 ```
 
 ## 1. Preservation kernel
@@ -81,7 +82,7 @@ Status: local default-deny foundation implemented; remote dispatch remains delib
 
 ## 7. Portable shared memory
 
-Status: optional directory transport, Ed25519 origin authentication, hardened HTTPS snapshots, immutable object publication, and signed mutable feeds implemented; database and peer transports remain extension work.
+Status: optional directory transport, Ed25519 origin authentication, hardened HTTPS snapshots, immutable object publication, signed mutable feeds, and one-shot peer exchange implemented; database transports remain extension work.
 
 - directory adapter usable locally, on a network drive, or through a user-selected synchronization service;
 - strict immutable event schema, canonical SHA-256 integrity, deterministic IDs, limits, and collision detection;
@@ -95,7 +96,7 @@ Status: optional directory transport, Ed25519 origin authentication, hardened HT
 
 ## 8. Hardened HTTPS snapshots
 
-Status: provider-neutral static export, hardened pull, create-only object publication, and signed mutable-feed discovery implemented; database and peer adapters remain extension work.
+Status: provider-neutral static export, hardened pull, create-only object publication, signed mutable-feed discovery, and challenge-response peer exchange implemented; database adapters remain extension work.
 
 - immutable signed snapshot export outside the scanned project;
 - dependency-free HTTPS pull with TLS verification, vetted and pinned DNS, default SSRF protection, no redirects, and exact response limits;
@@ -147,7 +148,7 @@ Status: deterministic local gate and tag-authorized GitHub release pipeline impl
 
 ## 12. Signed mutable feeds
 
-Status: provider-neutral signed feed publication, continuity tracking, and quarantined pull implemented; databases and peer transports remain extension work.
+Status: provider-neutral signed feed publication, continuity tracking, and quarantined pull implemented; database transports remain extension work. Direct peers are implemented separately in stage 13.
 
 - bounded 256-entry hash-chain window over immutable signed snapshot objects;
 - full Ed25519 signature over feed identity, scope, adapter, sequence, and retained chain;
@@ -159,6 +160,22 @@ Status: provider-neutral signed feed publication, continuity tracking, and quara
 - latest snapshot independently verified and imported only into quarantine;
 - CLI-only endpoint and credential administration; no MCP or hook transport capability;
 - feed state, signatures, remote authentication, and imported content remain context-only.
+
+## 13. Challenge-response peers
+
+Status: one-shot provider-neutral stdio server, owner-selected carrier process, and quarantined pull implemented; database transports remain extension work.
+
+- fresh 256-bit random challenge and request ID for every pull;
+- live Ed25519 response binding the challenge to one independently validated signed snapshot;
+- exact outer-response and snapshot-manifest signer equality plus project-local trust;
+- strict request, response, command, argument, stderr, and timeout limits;
+- carrier launched as an exact executable/argument array with the shell disabled;
+- minimal environment allowlist instead of inherited application tokens;
+- no AgentSpine listener, background daemon, vendor SDK, carrier credential store, or hidden retry;
+- both serving and carrier execution require explicit local owner confirmation;
+- received events enter quarantine and still need a second local content review;
+- peer and process administration absent from MCP and hooks;
+- challenge, signatures, carrier authentication, snapshots, and imports remain context-only.
 
 ## Definition of done for every stage
 

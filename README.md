@@ -163,6 +163,8 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine share-feed-publish …` | Append one immutable snapshot to a signed ETag-protected feed |
 | `agentspine share-feed-pull …` | Verify feed continuity and import its latest snapshot into quarantine |
 | `agentspine share-feed-state …` | Inspect local rollback-protection receipts and retained history |
+| `agentspine share-peer-serve …` | Answer one live signed snapshot challenge over stdin/stdout |
+| `agentspine share-peer-pull …` | Pull through an owner-selected executable without invoking a shell |
 | `agentspine share-inbox …` | Review pending, accepted, rejected, superseded, or rolled-back imports |
 | `agentspine share-review …` | Accept or reject one import through a second local decision |
 | `agentspine share-context …` | Read only locally accepted, privacy-filtered shared memory |
@@ -206,7 +208,7 @@ Safe learning is evidence-first: candidates are invisible until reviewed, automa
 
 Delegation is intentionally narrower than authority: a relationship such as `responsible-for` never permits assignment. Cross-entity task actions require an explicit local actor/action/target grant, while tasks, open threads, and handoffs remain context-only. See [delegation and coordination](docs/coordination.md).
 
-Shared memory is transport-neutral and double-reviewed: only accepted non-private learning may be published, every import enters quarantine, and the receiving installation must confirm it again before it can appear in context. The reference directory adapter works without a cloud account. Signed adapters can be exported as immutable snapshots, published as create-only content-addressed HTTPS objects, and discovered through signed ETag-protected feeds with local rollback receipts. Pulling uses pinned DNS, SSRF protection, strict limits, verified read-back, and optional environment-supplied bearer authentication. Digests and Ed25519 envelopes protect transport integrity and configured origins; neither grants authority or approves content. See [shared memory adapters](docs/shared-memory.md), [HTTPS snapshots](docs/https-transport.md), [immutable HTTPS objects](docs/object-transport.md), and [signed mutable feeds](docs/feed-transport.md).
+Shared memory is transport-neutral and double-reviewed: only accepted non-private learning may be published, every import enters quarantine, and the receiving installation must confirm it again before it can appear in context. The reference directory adapter works without a cloud account. Signed adapters can be exported as immutable snapshots, published as create-only content-addressed HTTPS objects, discovered through signed ETag-protected feeds with local rollback receipts, or requested live through a challenge-response stdio peer. HTTPS pulling uses pinned DNS, SSRF protection, strict limits, verified read-back, and optional environment-supplied bearer authentication. Peer pulling delegates the carrier to one explicit owner-selected executable without AgentSpine invoking a shell. Digests and Ed25519 envelopes protect transport integrity and configured origins; neither grants authority or approves content. See [shared memory adapters](docs/shared-memory.md), [HTTPS snapshots](docs/https-transport.md), [immutable HTTPS objects](docs/object-transport.md), [signed mutable feeds](docs/feed-transport.md), and [peer transport](docs/peer-transport.md).
 
 Session briefing keeps that growing context usable: one scoped read prioritizes the current task, deduplicates local and shared facts, defaults to focus mode, enforces exact group audiences, and measures the entire compact JSON result against the requested byte ceiling. See [session briefing](docs/session-briefing.md).
 
@@ -234,7 +236,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.1` establishes the preservation kernel; current `main` also includes relationships, sparse attention, safe learning, default-deny coordination, optional provider-neutral shared memory with Ed25519 origin authentication, hardened HTTPS pull, immutable object publication, signed compare-and-swap feeds, a budgeted session briefing, a provider-neutral MCP surface, dual-host plugin layout, and executable tests. Databases and peer transports remain optional extension work.
+AgentSpine is in active early development. `v0.1` establishes the preservation kernel; current `main` also includes relationships, sparse attention, safe learning, default-deny coordination, optional provider-neutral shared memory with Ed25519 origin authentication, hardened HTTPS pull, immutable object publication, signed compare-and-swap feeds, one-shot challenge-response peers, a budgeted session briefing, a provider-neutral MCP surface, dual-host plugin layout, and executable tests. Database transports remain optional extension work.
 
 ## Documentation
 
@@ -252,6 +254,7 @@ AgentSpine is in active early development. `v0.1` establishes the preservation k
 | Publish or pull signed static snapshots | [HTTPS snapshot transport](docs/https-transport.md) |
 | Publish immutable content-addressed objects | [HTTPS object transport](docs/object-transport.md) |
 | Discover successive snapshots safely | [Signed mutable feeds](docs/feed-transport.md) |
+| Pull directly from another installation | [Challenge-response peer transport](docs/peer-transport.md) |
 | Verify or cut a release | [Release process](docs/releasing.md) |
 | Run the Definition of Done | [Ten quality gates](docs/quality-gates.md) |
 | See planned capabilities | [Roadmap](docs/roadmap.md) |
