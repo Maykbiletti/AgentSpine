@@ -16,7 +16,8 @@ async function javascriptFiles(directory, files = []) {
 
 const files = [
   ...await javascriptFiles("src"),
-  ...await javascriptFiles("bin")
+  ...await javascriptFiles("bin"),
+  ...await javascriptFiles("scripts")
 ];
 for (const file of files) {
   const result = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" });

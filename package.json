@@ -31,6 +31,8 @@
     "check": "npm run lint && npm test && npm run smoke && npm run audit:self",
     "audit:self": "node bin/agentspine.js audit . --json",
     "lint": "node scripts/check-syntax.js",
+    "release:check": "node scripts/release-check.js --json",
+    "release:sbom": "npm sbom --sbom-format cyclonedx",
     "smoke": "node bin/agentspine.js doctor --json",
     "test": "node --test",
     "prepack": "npm run check"

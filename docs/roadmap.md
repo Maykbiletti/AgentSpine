@@ -13,6 +13,7 @@ flowchart TB
     G --> H["8 · Hardened HTTPS snapshots"]
     H --> I["9 · Budgeted session briefing"]
     I --> J["10 · Immutable HTTPS objects"]
+    J --> K["11 · Verifiable releases"]
 ```
 
 ## 1. Preservation kernel
@@ -127,6 +128,21 @@ Status: provider-neutral create-only publish and verified read-back implemented;
 - explicit local confirmation for every network write and separate private-network opt-in;
 - CLI-only transport surface; no endpoint, credential, publish, overwrite, or delete capability in MCP or hooks;
 - snapshots remain context-only and imports still enter quarantine for a second local review.
+
+## 11. Verifiable releases
+
+Status: deterministic local gate and tag-authorized GitHub release pipeline implemented; npm publication remains deliberately disabled until registry trust is configured.
+
+- exact SemVer parity across npm, lockfile, Claude Code, Codex, and marketplace metadata;
+- strict package allow/deny boundary with size, count, integrity, path, state, key, and user-source checks;
+- full action commit-SHA pinning and Dependabot tracking;
+- tag must match the version, have a dated changelog section, and point to a commit contained in `main`;
+- complete CI, audit, plugin, skill, and package gates run before artifact creation;
+- release tarball, CycloneDX SBOM, and SHA-256 checksum bundle;
+- OIDC-backed build-provenance and SBOM attestations;
+- build/attestation and GitHub publication split into separate least-privilege jobs;
+- optional protected `release` environment and documented consumer verification;
+- no long-lived npm token or automatic registry publication.
 
 ## Definition of done for every stage
 

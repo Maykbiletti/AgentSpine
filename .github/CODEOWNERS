@@ -1,0 +1,10 @@
+# Default review ownership
+* @Maykbiletti
+
+# Security- and release-sensitive surfaces
+/.github/ @Maykbiletti
+/SECURITY.md @Maykbiletti
+/scripts/release-check.js @Maykbiletti
+/src/lib/authentication.js @Maykbiletti
+/src/lib/https-transport.js @Maykbiletti
+/src/lib/object-transport.js @Maykbiletti

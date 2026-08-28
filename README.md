@@ -248,6 +248,7 @@ AgentSpine is in active early development. `v0.1` establishes the preservation k
 | Exchange reviewed context between installations | [Shared memory adapters](docs/shared-memory.md) |
 | Publish or pull signed static snapshots | [HTTPS snapshot transport](docs/https-transport.md) |
 | Publish immutable content-addressed objects | [HTTPS object transport](docs/object-transport.md) |
+| Verify or cut a release | [Release process](docs/releasing.md) |
 | Run the Definition of Done | [Ten quality gates](docs/quality-gates.md) |
 | See planned capabilities | [Roadmap](docs/roadmap.md) |
 | Cut a release | [Release process](docs/releasing.md) |

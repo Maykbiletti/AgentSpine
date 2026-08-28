@@ -34,6 +34,9 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Current-task priority, local/shared deduplication, exact compact-JSON byte accounting, atomic omission, and group-safe metadata-only source handling
 - Provider-neutral content-addressed HTTPS object publication with create-only preconditions
 - Mandatory signed read-back verification and safe idempotent retry handling for immutable remote objects
+- Tag-authorized GitHub release pipeline with CycloneDX SBOM, SHA-256 checksums, build provenance, and SBOM attestations
+- Deterministic release metadata and package-boundary validator covering both host manifests and forbidden state/source material
+- Pinned-action policy, release-sensitive CODEOWNERS, and isolated least-privilege publication jobs
 
 ### Changed
 
@@ -66,6 +69,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - HTTPS snapshot transport validates TLS endpoints, every DNS answer, bundle integrity, strict schema, and all nested signatures before quarantine mutation
 - Group briefings reject private reads, foreign membership, and unscoped source content; briefing output remains context-only and read-only
 - HTTPS publishing is CLI-only, owner-confirmed, DNS-pinned, SSRF-restricted, overwrite-free, size-bounded, and credential-safe
+- Release workflows accept tags only, verify containment in `main`, use short-lived OIDC for attestations, and expose no npm or AgentSpine secrets
 
 ### Planned
 
