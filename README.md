@@ -90,7 +90,7 @@ claude --plugin-dir .
 ```
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
-Version `0.5.0` explicitly registers `.mcp.json`, ships one version-bound native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.4.0` plugin cache. Fresh-install and upgrade checks prove that exactly one MCP server and one hook set load, then run the complete visible multilingual acceptance with automatic briefing, attention, exact job start, checkpoint, stop, and new-session resume.
+Version `0.6.0` explicitly registers `.mcp.json`, ships one version-bound native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.5.0` plugin cache. Fresh-install and upgrade checks prove that exactly one MCP server and one hook set load, then reproduce host-native user, project, and memory discovery from both the AgentSpine checkout and a foreign working directory without a broad home scan.
 
 Verify the installed registration from a checkout with:
 
@@ -120,6 +120,8 @@ agentspine continuity-config /path/to/project --enabled true --entity person:me 
 ```
 
 From the next prompt onward, installed lifecycle hooks scan and inject the real scoped `session_briefing` at start, resume, prompt submission, and compaction boundaries. The model does not need to choose `scan`, `context`, or `session_briefing`. The opt-in is separate from host trust because learning conversation signals is a user-controlled privacy decision.
+
+Source discovery is independent of the installation `cwd`: Claude uses `CLAUDE_CONFIG_DIR` plus the active project and evidenced project-memory binding; Codex uses `CODEX_HOME` plus its native root-to-`cwd` instruction chain. Inspect the result with `agentspine source-status --host claude|codex --cwd /active/project --json`. See [host-native source roots](docs/source-roots.md).
 
 ## Install for Codex
 
@@ -181,6 +183,10 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine continuity-config …` | Enable, disable, scope, and budget automatic continuity after local opt-in |
 | `agentspine continuity-status …` | Inspect configuration and minimal signal counts without transcript content |
 | `agentspine continuity-purge …` | Permanently remove one identity's automatic signals and learned context |
+| `agentspine source-status …` | Inspect host-native user, project, and memory roots without exposing source contents |
+| `agentspine source-bind …` | Bind existing user-wide continuity after an explicit local confirmation |
+| `agentspine source-rollback …` | Disable one source binding while retaining its append-only audit history |
+| `agentspine source-purge …` | Permanently remove one binding while retaining only its non-reversible digest receipt |
 | `agentspine delegation-check …` | Check explicit actor/action/target coordination policy; default deny |
 | `agentspine delegation-grant …` | Owner-confirmed local CLI grant for task coordination only |
 | `agentspine delegation-revoke …` | Revoke future coordination and retain policy history |

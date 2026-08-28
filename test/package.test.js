@@ -20,7 +20,7 @@ test("package and host manifests keep one release version", async () => {
   assert.equal(codex.version, pkg.version);
   assert.equal(marketplace.plugins[0].version, pkg.version);
   assert.equal(hooks.version, pkg.version);
-  assert.equal(hooks.contract, "agentspine.acceptance/v1");
+  assert.equal(hooks.contract, "agentspine.source-roots/v1");
   assert.notEqual(pkg.version, "0.1.0");
   assert.equal(pkg.engines.node, ">=20.9.0");
 });
@@ -43,7 +43,7 @@ test("Claude and Codex registrations complete a real MCP initialize handshake", 
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
-  assert.equal(result.version, "0.5.0");
+  assert.equal(result.version, "0.6.0");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
   assert.equal(result.hooks.claude.events.includes("PostCompact"), true);
   assert.equal(result.hooks.codex.events.includes("UserPromptSubmit"), true);

@@ -1,7 +1,7 @@
 {
-  "version": "0.5.0",
-  "contract": "agentspine.acceptance/v1",
-  "description": "Injects scoped multilingual context, persists attention and exact job checkpoints, rechecks execution rights, and protects existing identity sources.",
+  "version": "0.6.0",
+  "contract": "agentspine.source-roots/v1",
+  "description": "Resolves host-native user, project, and memory roots before injecting scoped context, persisting attention and checkpoints, rechecking rights, and protecting sources.",
   "hooks": {
     "SessionStart": [
       {

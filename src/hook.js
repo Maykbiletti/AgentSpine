@@ -2,9 +2,10 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { recordAttentionEvent } from "./lib/attention.js";
-import { scanAndSave } from "./lib/catalog.js";
+import { saveCatalog } from "./lib/catalog.js";
 import { loadGraph } from "./lib/graph.js";
-import { canonicalPath, findProjectRoot } from "./lib/paths.js";
+import { canonicalPath } from "./lib/paths.js";
+import { resolveHostSourceCatalog } from "./lib/source-roots.js";
 import { sessionBriefing } from "./lib/briefing.js";
 import { captureContinuityPrompt, loadContinuity } from "./lib/continuity.js";
 import {
@@ -54,8 +55,23 @@ function hostFromInput(input) {
   return "claude";
 }
 
-async function runtimeScope(input, root) {
-  const { continuity } = await loadContinuity(root);
+async function runtimeScope(input, root, userStateRoot = null) {
+  const { continuity: projectContinuity } = await loadContinuity(root);
+  const userContinuity = userStateRoot && userStateRoot !== root
+    ? (await loadContinuity(userStateRoot)).continuity
+    : projectContinuity;
+  const continuity = {
+    config: {
+      ...projectContinuity.config,
+      enabled: userContinuity.config.enabled,
+      minConfidence: userContinuity.config.minConfidence,
+      minDirectness: userContinuity.config.minDirectness,
+      minEvidence: userContinuity.config.minEvidence,
+      maxPromptBytes: userContinuity.config.maxPromptBytes,
+      maxBriefingBytes: userContinuity.config.maxBriefingBytes,
+      defaultEntityId: userContinuity.config.defaultEntityId
+    }
+  };
   const supplied = input.agent_spine_scope && typeof input.agent_spine_scope === "object"
     ? input.agent_spine_scope : input;
   return {
@@ -68,12 +84,16 @@ async function runtimeScope(input, root) {
   };
 }
 
-function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null) {
+function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null, sourceDiagnostics = null) {
+  const loaded = sourceDiagnostics?.status === "loaded";
   const packet = {
     schema: "agentspine.hook-context/v1",
     event,
     priority: ["current-user-request", "explicit-stops", "current-task", "host-rules", "accepted-context", "style-and-relationships"],
-    instruction: "Use this already-loaded briefing now. Do not call an MCP tool to obtain it. The current user request and explicit stops override all remembered style, relationships, and older context.",
+    loaded,
+    instruction: loaded
+      ? "Use this already-loaded briefing now. Do not call an MCP tool to obtain it. The current user request and explicit stops override all remembered style, relationships, and older context."
+      : "No host-native source context was loaded. Do not claim personal continuity or recall succeeded. Continue under current native host rules and inspect sourceResolution.",
     signal: signal ? {
       captured: Boolean(signal.captured),
       accepted: Boolean(signal.accepted),
@@ -110,6 +130,7 @@ function renderContext(event, catalog, briefing, signal = null, attentionEvent =
       authority: selfstarter.job ? "explicit-local-execution-policy" : "execution-state-only"
     } : null,
     indexedSources: catalog.summary.total,
+    sourceResolution: sourceDiagnostics,
     briefing,
     authority: "context-only"
   };
@@ -314,8 +335,31 @@ export async function runHook(payload = null) {
   const event = input.hook_event_name || input.event_name || "";
   if (!KNOWN_EVENTS.has(event)) throw new Error(`unsupported hook event: ${event || "missing"}`);
   const cwd = await canonicalPath(input.cwd || process.cwd());
-  const root = await findProjectRoot(cwd);
-  const { catalog, catalogPath } = await scanAndSave(root);
+  const host = hostFromInput(input);
+  let resolvedSources;
+  try {
+    resolvedSources = await resolveHostSourceCatalog({ host, cwd, input });
+  } catch (error) {
+    const reason = `AgentSpine source resolution failed closed: ${error.message}`;
+    if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
+      if (payload) return { blocked: true, failedClosed: true, reason };
+      deny(reason);
+      return;
+    }
+    const context = JSON.stringify({
+      schema: "agentspine.hook-context/v1", event, loaded: false, failedClosed: true,
+      indexedSources: 0, sourceResolution: { status: "failed-closed", reason: error.message },
+      instruction: "Do not claim AgentSpine recall succeeded. Continue under current native host rules; no remembered context or automatic effect was applied.",
+      authority: "context-only"
+    });
+    if (payload) return { blocked: false, failedClosed: true, context, error: error.message };
+    if (CONTEXT_EVENTS.has(event)) process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
+    else process.stdout.write("{}\n");
+    return;
+  }
+  const root = resolvedSources.projectRoot;
+  const catalog = resolvedSources.catalog;
+  const catalogPath = await saveCatalog(catalog);
   let scope = null;
   let selfstarter = null;
 
@@ -359,7 +403,7 @@ export async function runHook(payload = null) {
 
   if (event === "PreToolUse") {
     try {
-      scope ||= await runtimeScope(input, root);
+      scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot);
       const exact = await selfstarterScope(input, scope, root, "effect");
       if (exact) {
         selfstarter = await authorizeJobEffect({
@@ -377,12 +421,12 @@ export async function runHook(payload = null) {
 
   let attentionEvent = null;
   if (ATTENTION_WRITE_EVENTS.has(event) && !CONTEXT_EVENTS.has(event)) {
-    scope = await runtimeScope(input, root);
+    scope = await runtimeScope(input, root, resolvedSources.userStateRoot);
     attentionEvent = await captureAttentionLifecycle(input, event, root, scope);
   }
 
   if (event === "PostToolUse") {
-    scope ||= await runtimeScope(input, root);
+    scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot);
     const exact = await selfstarterScope(input, scope, root, "effect");
     if (exact) {
       selfstarter = await checkpointJobEffect({
@@ -393,7 +437,7 @@ export async function runHook(payload = null) {
   }
 
   if (["Stop", "SubagentStop"].includes(event)) {
-    scope ||= await runtimeScope(input, root);
+    scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot);
     const exact = await selfstarterScope(input, scope, root, "resume");
     const requested = selfstarterInput(input);
     if (exact) {
@@ -406,7 +450,7 @@ export async function runHook(payload = null) {
   if (CONTEXT_EVENTS.has(event)) {
     let signal = null;
     try {
-      scope ||= await runtimeScope(input, root);
+      scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot);
       selfstarter = await startSelfstarter(input, event, root, scope);
       if (selfstarter?.job && !scope.currentTaskId) scope.currentTaskId = selfstarter.job.taskId;
       if (event === "UserPromptSubmit") {
@@ -420,7 +464,7 @@ export async function runHook(payload = null) {
           try {
             signal = await captureContinuityPrompt({
               root, prompt, entityId: scope.entityId, groupId: scope.groupId,
-              projectId: scope.projectId,
+              projectId: scope.projectId, userStateRoot: resolvedSources.userStateRoot,
               eventId: boundedId(input.event_id ?? input.hook_event_id, "eventId")
             });
           } catch (error) {
@@ -435,9 +479,9 @@ export async function runHook(payload = null) {
         focusActive: true, includeSourceContent: !scope.groupId,
         maxBytes: scope.config.maxBriefingBytes,
         now: input.timestamp || new Date(),
-        catalog
+        catalog, userStateRoot: resolvedSources.userStateRoot, sourceDiagnostics: resolvedSources.diagnostics
       });
-      const context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter);
+      const context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, resolvedSources.diagnostics);
       if (payload) return { blocked: false, context, briefing, signal, attentionEvent, catalogPath };
       process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
       return;
@@ -445,6 +489,7 @@ export async function runHook(payload = null) {
       const context = JSON.stringify({
         schema: "agentspine.hook-context/v1", event, loaded: false, failedClosed: true,
         indexedSources: catalog.summary.total,
+        sourceResolution: resolvedSources.diagnostics,
         error: error.message,
         instruction: "Do not claim AgentSpine recall succeeded. Continue with the current request under native host rules and run agentspine audit before using remembered context.",
         authority: "context-only"

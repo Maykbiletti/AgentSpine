@@ -10,6 +10,11 @@ function depth(root, path) {
 }
 
 function nativeDocuments(catalog, cwd, host, graph) {
+  if (catalog.sourceRegistry) {
+    return [...catalog.documents]
+      .filter((document) => document.hosts.includes(host))
+      .sort((left, right) => left.precedence - right.precedence || left.relativePath.localeCompare(right.relativePath));
+  }
   const ancestors = new Set(ancestorsBetween(catalog.root, cwd));
   const inScope = catalog.documents.filter((document) => ancestors.has(dirname(document.path)));
   const selected = [];
@@ -70,7 +75,7 @@ function precedence(layer) {
 export async function resolveContext({ root = process.cwd(), cwd = root, host = "generic", maxBytes = 65536, includeContent = true, catalog: providedCatalog = null } = {}) {
   const canonicalRoot = await canonicalPath(root);
   const canonicalCwd = await canonicalPath(cwd);
-  if (!isInside(canonicalRoot, canonicalCwd)) {
+  if (!isInside(canonicalRoot, canonicalCwd) && !providedCatalog?.sourceRegistry) {
     throw new Error(`cwd must be inside root: ${canonicalCwd}`);
   }
   const catalog = providedCatalog || await buildCatalog(canonicalRoot);
@@ -88,7 +93,9 @@ export async function resolveContext({ root = process.cwd(), cwd = root, host = 
         classificationSource: annotation ? "agent-overlay" : document.classificationSource
       };
     })
-    .sort((a, b) => precedence(a.effectiveLayer) - precedence(b.effectiveLayer) || depth(catalog.root, a.path) - depth(catalog.root, b.path) || a.relativePath.localeCompare(b.relativePath));
+    .sort((a, b) => catalog.sourceRegistry
+      ? a.precedence - b.precedence || a.relativePath.localeCompare(b.relativePath)
+      : precedence(a.effectiveLayer) - precedence(b.effectiveLayer) || depth(catalog.root, a.path) - depth(catalog.root, b.path) || a.relativePath.localeCompare(b.relativePath));
 
   let remaining = Math.max(0, Number(maxBytes) || 0);
   const resolved = [];

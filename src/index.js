@@ -2,6 +2,10 @@ export { buildCatalog, loadCatalog, saveCatalog, scanAndSave, verifyCatalog } fr
 export { resolveContext, readDocument } from "./lib/context.js";
 export { sessionBriefing } from "./lib/briefing.js";
 export { discoverDocuments } from "./lib/documents.js";
+export {
+  bindSourceRoot, inspectSourceRegistry, purgeSourceBinding, resolveHostSourceCatalog,
+  rollbackSourceBinding, SOURCE_REGISTRY_SCHEMA
+} from "./lib/source-roots.js";
 export { runAudit } from "./lib/audit.js";
 export {
   attentionContext, attentionFindings, configureAttention, deleteAttention, inspectAttention, loadAttention,

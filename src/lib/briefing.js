@@ -97,29 +97,36 @@ export async function sessionBriefing({
   root = process.cwd(), cwd = root, host = "generic", entityId = null,
   groupId = null, projectId = null, currentTaskId = null,
   includePrivate = false, focusActive = true, includeSourceContent = true,
-  maxBytes = 16384, now = new Date()
+  maxBytes = 16384, now = new Date(), catalog: providedCatalog = null, userStateRoot = null,
+  sourceDiagnostics = null
 } = {}) {
   const limit = integer(maxBytes, "maxBytes", MIN_BYTES, MAX_BYTES);
   if (!new Set(["codex", "claude", "generic"]).has(host)) throw new Error(`unsupported host: ${host}`);
   if (groupId !== null && includePrivate) throw new Error("private context cannot be assembled for a group audience");
 
-  const catalog = await buildCatalog(root);
+  const catalog = providedCatalog || await buildCatalog(root);
   const sources = await resolveContext({
     root: catalog.root, cwd, host, maxBytes: limit,
     includeContent: includeSourceContent && groupId === null,
     catalog
   });
+  const portableRelationship = Boolean(entityId && userStateRoot && userStateRoot !== catalog.root);
   const relationship = entityId
-    ? await relationshipContext({ root: catalog.root, entityId, includePrivate, groupId, catalog })
+    ? await relationshipContext(userStateRoot && userStateRoot !== catalog.root
+      ? { root: userStateRoot, entityId, includePrivate, groupId }
+      : { root: catalog.root, entityId, includePrivate, groupId, catalog })
     : null;
-  const [learned, attention, tasks, shared] = await settleReads([
+  const [learned, attention, tasks, shared, userLearned] = await settleReads([
     learningContext({ root: catalog.root, includePrivate, groupId, maxItems: 50, catalog }),
     attentionContext({
       root: catalog.root, includePrivate, entityId, groupId, projectId, currentTaskId,
       focusActive, markPresented: false, maxItems: 20, now, catalog
     }),
     taskContext({ root: catalog.root, includePrivate, groupId, projectId, includeClosed: false, maxItems: 100, catalog }),
-    sharedContext({ root: catalog.root, includePrivate, groupId, maxItems: 50, catalog })
+    sharedContext({ root: catalog.root, includePrivate, groupId, maxItems: 50, catalog }),
+    userStateRoot && userStateRoot !== catalog.root
+      ? learningContext({ root: userStateRoot, includePrivate, groupId, maxItems: 50 })
+      : Promise.resolve({ items: [] })
   ]);
 
   const result = {
@@ -129,7 +136,7 @@ export async function sessionBriefing({
     host,
     scope: { entityId, groupId, projectId, includePrivate },
     focus: { active: Boolean(focusActive), currentTaskId },
-    sources: { documents: [] },
+    sources: { documents: [], diagnostics: sourceDiagnostics },
     tasks: [],
     relationship: relationship ? { entity: null, relatedEntities: [], edges: [] } : null,
     learning: [],
@@ -163,15 +170,19 @@ export async function sessionBriefing({
 
   if (relationship) {
     if (!trySet(result, result.relationship, "entity", relationship.entity)) countOmitted(result, "relationships");
-    for (const entity of relationship.relatedEntities.filter((item) => item.id !== entityId)) {
-      if (!tryAdd(result, result.relationship.relatedEntities, entity)) countOmitted(result, "relationships");
-    }
-    for (const edge of relationship.edges) {
-      if (!tryAdd(result, result.relationship.edges, edge)) countOmitted(result, "relationships");
+    if (!portableRelationship) {
+      for (const entity of relationship.relatedEntities.filter((item) => item.id !== entityId)) {
+        if (!tryAdd(result, result.relationship.relatedEntities, entity)) countOmitted(result, "relationships");
+      }
+      for (const edge of relationship.edges) {
+        if (!tryAdd(result, result.relationship.edges, edge)) countOmitted(result, "relationships");
+      }
     }
   }
 
-  const localItems = learned.items.filter((item) => matchesScope(item, entityId, projectId));
+  const portableKinds = new Set(["preference", "no-go", "correction", "reference"]);
+  const portableItems = userLearned.items.filter((item) => portableKinds.has(item.kind) && matchesScope(item, entityId, null));
+  const localItems = [...portableItems, ...learned.items.filter((item) => matchesScope(item, entityId, projectId))];
   const localKeys = new Set(localItems.map(normalizeKey));
   for (const item of localItems) {
     if (!tryAdd(result, result.learning, item)) countOmitted(result, "learning");

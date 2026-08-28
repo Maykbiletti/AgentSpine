@@ -32,7 +32,7 @@ function validateHooks(root, hooks, version) {
   ];
   assert(hooks && typeof hooks === "object" && !Array.isArray(hooks), "hook bundle is missing");
   assert(hooks.version === version, "hook bundle must use the package cache version");
-  assert(hooks.contract === "agentspine.acceptance/v1", "hook bundle is missing the current visible acceptance contract");
+  assert(hooks.contract === "agentspine.source-roots/v1", "hook bundle is missing the current host-native source-root contract");
   assert(hooks.description && typeof hooks.description === "string", "hook bundle description is missing");
   for (const event of required) {
     const registrations = hooks.hooks?.[event];

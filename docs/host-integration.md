@@ -21,7 +21,7 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
-The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Version `0.5.0` replaces the `0.4.0` cache identity; both host manifests and the hook bundle carry that version, while the bundle declares the `agentspine.acceptance/v1` runtime contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise clean install, previous-version cache rejection, upgrade, automatic multilingual briefing, attention, exact job start, tool checkpoint, new-session resume, purge, and uninstall preservation:
+The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Version `0.6.0` replaces the `0.5.0` cache identity; both host manifests and the hook bundle carry that version, while the bundle declares the `agentspine.source-roots/v1` runtime contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise clean install, previous-version cache rejection, upgrade, host-native source resolution, automatic multilingual briefing, attention, exact job start, tool checkpoint, new-session resume, purge, and uninstall preservation:
 
 ```bash
 npm run host:check
@@ -81,6 +81,8 @@ agentspine audit /path/to/project --json
 ```
 
 The audit exits non-zero when a required gate fails, making it suitable for installation smoke tests and CI.
+
+Use `agentspine doctor --host claude|codex --cwd /active/project --json` or `agentspine source-status --host claude|codex --cwd /active/project --json` to see the checked scope counts and a concrete empty/fail-closed reason. The lifecycle adapter never substitutes the installation directory for the active host hierarchy. Details and official host references are in [host-native source roots](source-roots.md).
 
 The provider-neutral lifecycle adapter covers `SessionStart` (including resume and compact starts), `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `PostCompact`, `Stop`, and `SubagentStop`. Start, prompt, and compaction boundaries scan and inject the actual byte-budgeted `session_briefing`; no model-side MCP selection is required. Prompt submission can additionally capture minimal safe learning and direct promise/blocker signals after the separate local continuity opt-in. `PostToolUse` writes an idempotent task heartbeat; `Stop` and `SubagentStop` close that heartbeat without emitting repeated chat text.
 

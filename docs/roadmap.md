@@ -255,6 +255,17 @@ Status: implemented in `v0.5.0` as the fourth and final ordered live-runtime mil
 - `0.5.0` cache boundary and fresh-install/`0.4.0` upgrade proof for exactly one MCP server and one lifecycle hook set;
 - host trust and local continuity/execution consent remain genuine user or owner decisions and are never simulated.
 
+## 19. Host-native source-root resolution
+
+Status: implemented in `v0.6.0` after a real installed session exposed `cwd` coupling in the earlier synthetic acceptance.
+
+- Claude profile, user instructions, exact project chain, and evidenced project-memory resolution;
+- Codex home override, configurable root markers, fallback names, and root-to-`cwd` precedence;
+- explicit portable user-state bindings with provenance, conflict detection, rollback, and purge;
+- no broad home scan, symlink following, foreign-repository visibility, or guessed host paths;
+- visible empty/fail-closed Doctor, Audit, and hook diagnostics;
+- fresh-install and `0.5.0` upgrade smoke tests through the installed production hook bundle.
+
 ## Definition of done for every stage
 
 1. A failing case is reproducible.

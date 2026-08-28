@@ -4,6 +4,27 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-28
+
+### Added
+
+- Provider-neutral host-native source-root registry with bounded Claude profile, project-chain, project-memory, Codex home, root-marker, fallback-name, and nested-override resolution
+- Explicit portable user-state binding with provenance, conflict detection, rollback, purge, and low-risk learning-only projection across repositories and hosts
+- Installed production-hook RED/GREEN reproduction of the real zero-source failure from an AgentSpine checkout and foreign working directory
+- `source-status`, `source-bind`, `source-rollback`, and `source-purge` CLI workflows plus host-aware Doctor and Audit diagnostics
+
+### Changed
+
+- Package, lockfile, Claude Code, Codex, marketplace, and hook-bundle versions advance together to `0.6.0`
+- The lifecycle bundle declares `agentspine.source-roots/v1`; upgrade tests reject the cached `0.5.0` bundle
+- Automatic briefing uses separate user, project, and project-memory bindings instead of treating the launch directory as one recursive source root
+
+### Security
+
+- Home-wide scans, foreign-repository discovery, symlink following, guessed Claude memory paths, blind root-hash state copying, and project-state flattening are prohibited and tested
+- Empty or damaged source resolution is visible and never reported as loaded personal continuity
+- Source and migration bindings remain context-only and cannot create identities, roles, delegation, host trust, execution grants, capabilities, or self-starter rights
+
 ## [0.5.0] - 2026-08-28
 
 ### Added
@@ -175,7 +196,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.2.0...v0.3.0

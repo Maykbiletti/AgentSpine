@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { opendir, readFile, stat } from "node:fs/promises";
+import { lstat, opendir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
 const SKIP_DIRS = new Set([
@@ -39,6 +39,39 @@ function hostsFor(name) {
   if (name === "CLAUDE.md" || name === "CLAUDE.local.md") return ["claude"];
   if (name === "GEMINI.md") return ["gemini"];
   return ["generic"];
+}
+
+export async function indexExplicitDocuments(entries) {
+  const documents = [];
+  for (const entry of entries) {
+    const supplied = await lstat(entry.path);
+    if (supplied.isSymbolicLink() || !supplied.isFile()) throw new Error(`source is not a regular non-symlink file: ${entry.id}`);
+    const path = await realpath(entry.path);
+    const metadata = await lstat(path);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`source is not a regular non-symlink file: ${entry.id}`);
+    const buffer = await readFile(path);
+    if (buffer.byteLength > (entry.maxBytes || 4 * 1024 * 1024)) throw new Error(`source exceeds its byte limit: ${entry.id}`);
+    const classification = classify(entry.id);
+    documents.push({
+      path,
+      relativePath: entry.id,
+      name: basename(path),
+      ...classification,
+      layer: entry.layer || classification.layer,
+      protected: entry.protected ?? classification.protected,
+      authority: authorityFor(entry.layer || classification.layer),
+      classificationSource: "host-native-source-binding",
+      hosts: [entry.host],
+      bytes: buffer.byteLength,
+      modifiedAt: metadata.mtime.toISOString(),
+      sha256: sha256(buffer),
+      links: [],
+      sourceScope: entry.scope,
+      sourceBinding: entry.binding,
+      precedence: entry.precedence
+    });
+  }
+  return documents;
 }
 
 function extractMarkdownLinks(text, filePath, root) {

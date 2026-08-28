@@ -201,19 +201,21 @@ function assertSafeSignal(signal, prompt, scope) {
 
 export async function captureContinuityPrompt({
   root = process.cwd(), prompt, entityId = null, groupId = null, projectId = null,
-  eventId = null, now = new Date()
+  eventId = null, now = new Date(), userStateRoot = null
 }) {
-  const { continuity, catalog } = await loadContinuity(root);
+  const { continuity, catalog } = await loadContinuity(userStateRoot || root);
   if (!continuity.config.enabled) return { enabled: false, captured: false, reason: "opt-in-disabled", authority: "context-only" };
   if (typeof prompt !== "string" || Buffer.byteLength(prompt) > continuity.config.maxPromptBytes) {
     throw new Error("prompt payload is missing or exceeds the configured byte limit");
   }
   const detected = detectSignal(prompt);
   if (!detected) return { enabled: true, captured: false, reason: "no-minimal-safe-signal", authority: "context-only" };
+  const storageRoot = detected.kind === "project-fact" ? root : userStateRoot || root;
   const subjectId = detected.kind === "project-fact" ? projectId : entityId || projectId;
   if (!subjectId || !ID_RE.test(subjectId)) throw new Error("automatic learning requires an exact known person or project identity");
   if (groupId !== null && !ID_RE.test(groupId)) throw new Error("groupId is invalid");
-  const { graph } = await loadGraph(catalog.root, catalog);
+  const storageCatalog = storageRoot === catalog.root ? catalog : await buildCatalog(storageRoot);
+  const { graph } = await loadGraph(storageCatalog.root, storageCatalog);
   const subject = graph.entities.find((item) => item.id === subjectId);
   if (!subject) throw new Error(`automatic learning requires a known canonical identity: ${subjectId}`);
   if (subjectId === projectId && subject.kind !== "project") throw new Error("projectId must identify a project");
@@ -227,7 +229,7 @@ export async function captureContinuityPrompt({
   const receiptId = eventId && ID_RE.test(eventId) ? eventId : `signal:${promptDigest.slice(0, 32)}`;
   const eventKey = digest(`${receiptId}\0${signalKey}\0${promptDigest}`);
 
-  const recorded = await mutate(root, (state, catalog, continuityPath) => {
+  const recorded = await mutate(storageRoot, (state, catalog, continuityPath) => {
     if (!state.config.enabled) return { duplicate: false, disabled: true, config: state.config, continuityPath, catalog };
     const duplicate = state.signals.some((item) => item.eventKey === eventKey);
     if (duplicate) return { duplicate: true, disabled: false, config: state.config, continuityPath, catalog };
@@ -248,26 +250,26 @@ export async function captureContinuityPrompt({
     confidence: detected.confidence,
     observedAt: at
   };
-  let existing = (await loadLearning(root)).learning.candidates.find((item) => item.id === learningId);
+  let existing = (await loadLearning(storageRoot)).learning.candidates.find((item) => item.id === learningId);
   if (!existing) {
     try {
       await proposeLearning({
-        root, id: learningId, kind: detected.kind, claim: detected.claim, subjectId,
+        root: storageRoot, id: learningId, kind: detected.kind, claim: detected.claim, subjectId,
         privacy: subjectId === projectId ? "shared" : "private", groupId: null, evidence, now: at
       });
     } catch (error) {
       if (!/candidate IDs are immutable/.test(error.message)) throw error;
     }
-    existing = (await loadLearning(root)).learning.candidates.find((item) => item.id === learningId);
+    existing = (await loadLearning(storageRoot)).learning.candidates.find((item) => item.id === learningId);
   }
   if (existing?.status === "candidate" && !existing.evidence.some((item) => item.id === evidence.id)) {
     try {
-      await addLearningEvidence({ root, id: learningId, evidence, now: at });
+      await addLearningEvidence({ root: storageRoot, id: learningId, evidence, now: at });
     } catch (error) {
       if (!/duplicate evidence id|unreviewed candidate/.test(error.message)) throw error;
     }
   }
-  const refreshed = (await loadLearning(root)).learning.candidates.find((item) => item.id === learningId);
+  const refreshed = (await loadLearning(storageRoot)).learning.candidates.find((item) => item.id === learningId);
   let accepted = refreshed?.status === "accepted";
   if (!accepted && refreshed?.status === "candidate") {
     const distinct = new Set(refreshed.evidence.map((item) => item.id)).size;
@@ -276,7 +278,7 @@ export async function captureContinuityPrompt({
       && detected.directness >= recorded.config.minDirectness
       && distinct >= requiredEvidence) {
       await acceptContinuityLearning({
-        root, id: learningId, now: at,
+        root: storageRoot, id: learningId, now: at,
         proof: {
           mode: "automatic-continuity-low-risk", localOptIn: true,
           minConfidence: recorded.config.minConfidence,

@@ -1,4 +1,4 @@
-import { isInside } from "./paths.js";
+import { canonicalPath, isInside } from "./paths.js";
 import { buildCatalog, saveCatalog, verifyCatalog } from "./catalog.js";
 import { loadGraph } from "./graph.js";
 import { attentionFindings, inspectAttention } from "./attention.js";
@@ -15,6 +15,7 @@ import {
 } from "./selfstarter.js";
 import { fileURLToPath } from "node:url";
 import { checkHosts } from "../../scripts/check-hosts.js";
+import { resolveHostSourceCatalog } from "./source-roots.js";
 
 function gate(id, name, ok, detail, severity = "error") {
   return { id, name, ok, severity, detail };
@@ -66,7 +67,17 @@ function forbiddenEntityKeys(graph) {
   return [...graph.entities, ...historicalEntities].filter((entity) => forbidden.test(JSON.stringify(entity?.attributes || {})));
 }
 
-export async function runAudit(root = process.cwd()) {
+export async function runAudit(root = process.cwd(), { host = null } = {}) {
+  let sourceResolution = null;
+  let sourceResolutionError = null;
+  let resolvedHostSources = null;
+  if (["claude", "codex"].includes(host)) {
+    try {
+      resolvedHostSources = await resolveHostSourceCatalog({ host, cwd: root });
+      sourceResolution = resolvedHostSources.diagnostics;
+    }
+    catch (error) { sourceResolutionError = error.message; }
+  }
   let hostIntegration = null;
   let hostIntegrationError = null;
   try {
@@ -74,7 +85,13 @@ export async function runAudit(root = process.cwd()) {
   } catch (error) {
     hostIntegrationError = error.message;
   }
-  const before = await buildCatalog(root);
+  const before = resolvedHostSources?.catalog || (sourceResolutionError
+    ? {
+      schema: "agentspine.catalog/v1", generatedAt: new Date().toISOString(), root: await canonicalPath(root),
+      preservation: "source-files-are-read-only", documents: [], conflicts: [],
+      summary: { total: 0, protected: 0, conflicts: 0, byLayer: {} }
+    }
+    : await buildCatalog(root));
   const catalog = before;
   const catalogPath = await saveCatalog(catalog);
   const { graph, graphPath } = await loadGraph(before.root, catalog);
@@ -97,14 +114,19 @@ export async function runAudit(root = process.cwd()) {
   let briefingError = null;
   try {
     briefing = await sessionBriefing({
-      root: before.root, cwd: before.root, host: "generic", maxBytes: 16384,
-      includePrivate: false, focusActive: true, includeSourceContent: true
+      root: before.root, cwd: before.root, host: host || "generic", maxBytes: 16384,
+      includePrivate: false, focusActive: true, includeSourceContent: true,
+      catalog: resolvedHostSources?.catalog || null, sourceDiagnostics: sourceResolution
     });
   } catch (error) {
     briefingError = error.message;
   }
-  const verification = await verifyCatalog(before.root);
-  const after = await buildCatalog(before.root);
+  const verification = ["claude", "codex"].includes(host)
+    ? { ok: !sourceResolutionError, reason: sourceResolutionError ? "host-native-resolution-failed" : "host-native-rescan" }
+    : await verifyCatalog(before.root);
+  const after = resolvedHostSources
+    ? (await resolveHostSourceCatalog({ host, cwd: root })).catalog
+    : sourceResolutionError ? before : await buildCatalog(before.root);
   const beforeHashes = new Map(before.documents.map((document) => [document.relativePath, document.sha256]));
   const byteStable = after.documents.length === before.documents.length && after.documents.every((document) => beforeHashes.get(document.relativePath) === document.sha256);
   const brokenLinks = catalog.conflicts.filter((conflict) => conflict.type === "broken-link");
@@ -200,7 +222,11 @@ export async function runAudit(root = process.cwd()) {
     gate(1, "Runtime", Number(process.versions.node.split(".")[0]) >= 20 && hostIntegration?.ok === true, hostIntegrationError
       ? `Node ${process.versions.node}; host integration failed closed: ${hostIntegrationError}`
       : `Node ${process.versions.node}; one versioned MCP server and lifecycle hook set per host`),
-    gate(2, "Discovery", catalog.schema === "agentspine.catalog/v1", `${catalog.documents.length} Markdown documents indexed`),
+    gate(2, "Discovery", catalog.schema === "agentspine.catalog/v1"
+      && (!host || (sourceResolution?.status === "loaded" && !sourceResolutionError)), sourceResolutionError
+      ? `${catalog.documents.length} project documents; host-native source resolution failed closed: ${sourceResolutionError}`
+      : sourceResolution ? `${sourceResolution.scopes.user} user, ${sourceResolution.scopes.project} project, and ${sourceResolution.scopes["project-memory"]} memory sources; broad home scan disabled`
+        : `${catalog.documents.length} Markdown documents indexed`),
     gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath) && !isInside(catalog.root, continuityPath) && !isInside(catalog.root, policyPath) && !isInside(catalog.root, coordinationPath) && !isInside(catalog.root, executionPolicyPath) && !isInside(catalog.root, selfstarterPath) && !isInside(catalog.root, sharingPath) && !isInside(catalog.root, trustPath) && !isInside(catalog.root, registryPath) && !isInside(catalog.root, signerDirectory) && !isInside(catalog.root, feedStatePath), `State remains outside ${catalog.root}`),
     gate(4, "Native hierarchy", nativeMapped.every((document) => document.hosts.length > 0), `${nativeMapped.length} host-native documents mapped`),
     gate(5, "Link integrity", brokenLinks.length === 0, brokenLinks.length ? `${brokenLinks.length} broken Markdown links` : "All indexed Markdown links resolve"),
@@ -231,6 +257,7 @@ export async function runAudit(root = process.cwd()) {
     sharingPath,
     trustPath,
     registryPath,
-    feedStatePath
+    feedStatePath,
+    sourceResolution
   };
 }

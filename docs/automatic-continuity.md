@@ -1,6 +1,6 @@
 # Automatic continuity
 
-AgentSpine `0.5.0` connects the portal-neutral memory, briefing, attention, and exactly authorized job-checkpoint layers to installed Claude Code and Codex lifecycle hooks. The result is real host context, durable scoped attention state, and an optional rights-bound resume path at lifecycle boundaries—not a counter or a suggestion that the model should call an MCP tool later.
+AgentSpine `0.6.0` connects the portal-neutral memory, briefing, attention, and exactly authorized job-checkpoint layers to installed Claude Code and Codex lifecycle hooks. Host-native source-root resolution keeps user continuity available across repositories while project, group, task, and private state remain exact. The result is real host context, durable scoped attention state, and an optional rights-bound resume path at lifecycle boundaries—not a counter or a suggestion that the model should call an MCP tool later.
 
 ## One-time setup
 
@@ -71,6 +71,8 @@ agentspine audit /path/to/project --json
 ```
 
 Generated state remains in the operating system's private user-state directory. `SOUL.md`, `AGENTS.md`, `CLAUDE.md`, and every other existing Markdown source remain byte-for-byte unchanged during learning, rollback, purge, upgrade, and uninstall.
+
+Existing opted-in user continuity can be made repository-independent only through the explicit, reversible `source-bind --scope state-user` flow. No state is blindly copied between root hashes. See [host-native source roots](source-roots.md).
 
 ## Deliberate boundary
 

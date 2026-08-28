@@ -41,6 +41,10 @@ import {
 } from "./lib/graph.js";
 import { checkHosts } from "../scripts/check-hosts.js";
 import { renderAcceptanceReport, runVisibleAcceptance } from "./lib/acceptance.js";
+import {
+  bindSourceRoot, inspectSourceRegistry, purgeSourceBinding, resolveHostSourceCatalog,
+  rollbackSourceBinding
+} from "./lib/source-roots.js";
 import { VERSION } from "./version.js";
 import { isMainModule } from "./lib/runtime.js";
 
@@ -112,6 +116,10 @@ Usage:
   agentspine continuity-config [root] [--enabled true|false] [--entity id] [--project id] [--confirm-local-opt-in]
   agentspine continuity-status [root]
   agentspine continuity-purge <entity-id> [--root path] --confirm-local-purge
+  agentspine source-status --host claude|codex [--cwd path]
+  agentspine source-bind <state-root> --host all|claude|codex --scope state-user --project path --host-home path --confirm-local-binding
+  agentspine source-rollback <binding-id> --confirm-local-binding
+  agentspine source-purge <binding-id> --confirm-local-binding
   agentspine delegation-grant <actor-id> --actions assign,manage --targets agent:id --reason text [--confirm-local-policy]
   agentspine delegation-revoke <grant-id> --reason text [--confirm-local-policy]
   agentspine delegation-check <actor-id> --action assign [--target agent:id]
@@ -450,6 +458,35 @@ export async function run(argv = process.argv.slice(2)) {
     }), json);
   }
 
+  if (command === "source-status") {
+    const host = flags.host || process.env.AGENTSPINE_HOST;
+    if (!["claude", "codex"].includes(host)) throw new Error("source-status requires --host claude or --host codex");
+    const resolved = await resolveHostSourceCatalog({ host, cwd: flags.cwd || process.cwd() });
+    const registry = await inspectSourceRegistry();
+    return output({ diagnostics: resolved.diagnostics, sources: resolved.catalog.documents.map((item) => ({
+      id: item.relativePath, scope: item.sourceScope, binding: item.sourceBinding, sha256: item.sha256,
+      bytes: item.bytes, authority: item.authority
+    })), bindings: registry.registry.bindings, authority: "context-only" }, json);
+  }
+
+  if (command === "source-bind") {
+    return output(await bindSourceRoot({
+      host: flags.host, hostHome: flags["host-home"] || process.env.CLAUDE_CONFIG_DIR || process.env.CODEX_HOME || process.cwd(),
+      projectRoot: flags.project || process.cwd(), sourceRoot: positional[0], scope: flags.scope || "state-user",
+      confirmation: booleanFlag(flags["confirm-local-binding"]) ? "local-user-confirmed" : null
+    }), json);
+  }
+
+  if (command === "source-rollback") {
+    return output(await rollbackSourceBinding({ id: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-binding"]) ? "local-user-confirmed" : null }), json);
+  }
+
+  if (command === "source-purge") {
+    return output(await purgeSourceBinding({ id: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-binding"]) ? "local-user-confirmed" : null }), json);
+  }
+
   if (command === "delegation-grant") {
     return output(await grantDelegation({
       root: flags.root || process.cwd(), actorId: positional[0],
@@ -769,14 +806,22 @@ export async function run(argv = process.argv.slice(2)) {
     } catch (error) {
       hostIntegration = { ok: false, error: error.message };
     }
+    let sourceResolution = null;
+    const sourceHost = flags.host || process.env.AGENTSPINE_HOST;
+    if (["claude", "codex"].includes(sourceHost)) {
+      try { sourceResolution = (await resolveHostSourceCatalog({ host: sourceHost, cwd: flags.cwd || process.cwd() })).diagnostics; }
+      catch (error) { sourceResolution = { status: "failed-closed", reason: error.message }; }
+    }
     const result = {
-      ok: Number(process.versions.node.split(".")[0]) >= 20 && hostIntegration.ok,
+      ok: Number(process.versions.node.split(".")[0]) >= 20 && hostIntegration.ok
+        && (!sourceResolution || sourceResolution.status === "loaded"),
       version: VERSION,
       node: process.versions.node,
       platform: process.platform,
       preservationMode: "read-only-source-overlay",
       stateDirectory: process.env.AGENTSPINE_STATE_DIR || "platform-default",
-      hostIntegration
+      hostIntegration,
+      sourceResolution
     };
     output(result, json);
     if (!result.ok) process.exitCode = 1;
@@ -784,7 +829,7 @@ export async function run(argv = process.argv.slice(2)) {
   }
 
   if (command === "audit") {
-    const result = await runAudit(positional[0] || process.cwd());
+    const result = await runAudit(positional[0] || process.cwd(), { host: flags.host || process.env.AGENTSPINE_HOST || null });
     output(result, json);
     if (!result.ok) process.exitCode = 1;
     return;

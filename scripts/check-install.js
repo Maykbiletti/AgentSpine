@@ -24,21 +24,21 @@ async function makePreviousCache(target) {
   for (const path of ["package.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
     const file = join(target, path);
     const value = JSON.parse(await readFile(file, "utf8"));
-    value.version = "0.4.0";
+    value.version = "0.5.0";
     await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   }
   const marketplacePath = join(target, ".claude-plugin/marketplace.json");
   const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
-  marketplace.plugins[0].version = "0.4.0";
+  marketplace.plugins[0].version = "0.5.0";
   await writeFile(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
   const hooksPath = join(target, "hooks/hooks.json");
   const hooks = JSON.parse(await readFile(hooksPath, "utf8"));
-  hooks.version = "0.4.0";
-  hooks.contract = "agentspine.selfstarter/v1";
+  hooks.version = "0.5.0";
+  hooks.contract = "agentspine.acceptance/v1";
   await writeFile(hooksPath, `${JSON.stringify(hooks, null, 2)}\n`, "utf8");
 }
 
-async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, payload = null, { requireBriefing = true } = {}) {
+async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, payload = null, { requireBriefing = true, extraEnv = {} } = {}) {
   return await new Promise((resolveResult, reject) => {
     const child = spawn(process.execPath, [join(pluginRoot, "src/hook.js")], {
       cwd: projectRoot,
@@ -47,7 +47,8 @@ async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, pay
         AGENTSPINE_HOST: host,
         AGENTSPINE_STATE_DIR: stateRoot,
         CLAUDE_PLUGIN_ROOT: pluginRoot,
-        PLUGIN_ROOT: pluginRoot
+        PLUGIN_ROOT: pluginRoot,
+        ...extraEnv
       },
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -74,6 +75,10 @@ async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, pay
         resolveResult({
           event: protocol.hookSpecificOutput?.hookEventName || payload?.hook_event_name || null, host,
           sources: context?.briefing?.sources?.documents?.length ?? null,
+          sourceIds: context?.briefing?.sources?.documents?.map((item) => item.path) || [],
+          sourceContents: context?.briefing?.sources?.documents?.map((item) => item.content).filter(Boolean) || [],
+          sourceResolution: context?.sourceResolution || null,
+          learningClaims: context?.briefing?.learning?.map((item) => item.claim) || [],
           attentionKinds: context?.briefing?.attention?.items?.map((item) => item.kind) || [],
           capturedAttentionKind: context?.attentionEvent?.kind || null,
           selfstarter: context?.selfstarter || null,
@@ -86,6 +91,77 @@ async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, pay
     });
     child.stdin.end(`${JSON.stringify(payload || { hook_event_name: "SessionStart", cwd: projectRoot, host })}\n`);
   });
+}
+
+async function invokeInstalledLiveRoots(pluginRoot, workspace, stateRoot) {
+  const home = join(workspace, "live-home");
+  const claudeHome = join(home, ".claude-live");
+  const codexHome = join(home, ".codex-live");
+  const projectA = join(home, "AgentSpine");
+  const projectB = join(home, "other-project");
+  const nestedB = join(projectB, "api");
+  const loose = join(workspace, "foreign-cwd");
+  const memory = join(claudeHome, "projects", "project-a", "memory");
+  for (const path of [claudeHome, codexHome, projectA, nestedB, loose, memory]) await mkdir(path, { recursive: true });
+  await mkdir(join(projectA, ".git"));
+  await mkdir(join(projectB, ".git"));
+  const protectedSources = new Map([
+    [join(claudeHome, "CLAUDE.md"), "# Installed user style\n\nBe calm and humane.\n"],
+    [join(projectA, "CLAUDE.md"), "# Installed project A\n"],
+    [join(projectB, "CLAUDE.md"), "# Installed project B\n"],
+    [join(memory, "MEMORY.md"), "# Installed project A memory\n"],
+    [join(codexHome, "AGENTS.override.md"), "# Installed Codex user style\n"],
+    [join(projectA, "AGENTS.md"), "# Installed Codex A\n"],
+    [join(projectB, "TEAM_GUIDE.md"), "# Installed Codex B\n"],
+    [join(nestedB, "AGENTS.override.md"), "# Installed Codex API override\n"],
+    [join(home, "PRIVATE.md"), "# Never scan this home file\n"]
+  ]);
+  for (const [path, content] of protectedSources) await writeFile(path, content, "utf8");
+  const transcript = join(claudeHome, "projects", "project-a", "session.jsonl");
+  await writeFile(transcript, "{}\n", "utf8");
+  await writeFile(join(loose, "CLAUDE.md"), "# Installed loose cwd\n", "utf8");
+  await writeFile(join(codexHome, "config.toml"), [
+    'project_doc_fallback_filenames = ["TEAM_GUIDE.md"]', 'project_root_markers = [".git"]', ""
+  ].join("\n"), "utf8");
+  const before = new Map(await Promise.all([...protectedSources.keys()].map(async (path) => [path, hash(await readFile(path))])));
+  const claudeEnv = { HOME: home, CLAUDE_CONFIG_DIR: claudeHome };
+  const codexEnv = { HOME: home, CODEX_HOME: codexHome };
+  const claudeA = await invokeInstalledHook(pluginRoot, projectA, stateRoot, "claude", {
+    hook_event_name: "SessionStart", host: "claude", cwd: projectA, transcript_path: transcript
+  }, { extraEnv: claudeEnv });
+  const claudeRestart = await invokeInstalledHook(pluginRoot, projectA, stateRoot, "claude", {
+    hook_event_name: "PostCompact", host: "claude", cwd: projectA
+  }, { extraEnv: claudeEnv });
+  const claudeLoose = await invokeInstalledHook(pluginRoot, loose, stateRoot, "claude", {
+    hook_event_name: "SessionStart", host: "claude", cwd: loose
+  }, { extraEnv: claudeEnv });
+  const codexA = await invokeInstalledHook(pluginRoot, projectA, stateRoot, "codex", {
+    hook_event_name: "SessionStart", host: "codex", cwd: projectA
+  }, { extraEnv: codexEnv });
+  const codexB = await invokeInstalledHook(pluginRoot, nestedB, stateRoot, "codex", {
+    hook_event_name: "PostCompact", host: "codex", cwd: nestedB
+  }, { extraEnv: codexEnv });
+  if (!claudeA.sourceIds.includes("claude:user/CLAUDE.md") || !claudeA.sourceIds.includes("claude:memory/MEMORY.md")
+    || !claudeRestart.sourceIds.includes("claude:memory/MEMORY.md") || claudeLoose.sourceIds.some((id) => id.startsWith("claude:memory/"))) {
+    throw new Error("installed Claude hook did not preserve exact user/project/memory source scope across restart and foreign cwd");
+  }
+  if (claudeA.sourceContents.some((content) => content.includes("Never scan this"))
+    || claudeLoose.sourceContents.some((content) => content.includes("Installed project A"))) {
+    throw new Error("installed Claude hook leaked a broad-home or foreign-project source");
+  }
+  const codexAIds = codexA.sourceIds.filter((id) => id.startsWith("codex:"));
+  const codexBIds = codexB.sourceIds.filter((id) => id.startsWith("codex:"));
+  if (JSON.stringify(codexAIds) !== JSON.stringify(["codex:user/AGENTS.override.md", "codex:project/AGENTS.md"])
+    || JSON.stringify(codexBIds) !== JSON.stringify(["codex:user/AGENTS.override.md", "codex:project/TEAM_GUIDE.md", "codex:project/api/AGENTS.override.md"])) {
+    throw new Error("installed Codex hook did not preserve native override and fallback precedence");
+  }
+  for (const [path, expected] of before) {
+    if (hash(await readFile(path)) !== expected) throw new Error(`installed live-root hook changed a protected source: ${basename(path)}`);
+  }
+  return {
+    claude: { project: claudeA.sourceIds, restart: claudeRestart.sourceIds, foreign: claudeLoose.sourceIds },
+    codex: { projectA: codexAIds, projectB: codexBIds }, broadHomeScan: false, mcpCalls: 0
+  };
 }
 
 async function prepareInstalledSelfstarter(pluginRoot, projectRoot, stateRoot, host) {
@@ -240,6 +316,7 @@ export async function checkInstall(root = process.cwd()) {
     const freshAttention = await invokeInstalledAttention(fresh, userProject, freshState, "claude");
     const freshSelfstarter = await invokeInstalledSelfstarter(fresh, userProject, freshState, "claude");
     const freshAcceptance = await invokeInstalledAcceptance(fresh);
+    const freshLiveRoots = await invokeInstalledLiveRoots(fresh, workspace, join(workspace, "state-live-fresh"));
 
     const installed = join(workspace, "cache", "agent-spine");
     await copyBundle(root, installed);
@@ -258,6 +335,7 @@ export async function checkInstall(root = process.cwd()) {
     const upgradedAttention = await invokeInstalledAttention(installed, userProject, upgradeState, "codex");
     const upgradedSelfstarter = await invokeInstalledSelfstarter(installed, userProject, upgradeState, "codex");
     const upgradedAcceptance = await invokeInstalledAcceptance(installed);
+    const upgradedLiveRoots = await invokeInstalledLiveRoots(installed, join(workspace, "upgrade-live"), join(workspace, "state-live-upgrade"));
 
     await rm(fresh, { recursive: true });
     await rm(installed, { recursive: true });
@@ -271,6 +349,7 @@ export async function checkInstall(root = process.cwd()) {
       automaticAttention: { fresh: freshAttention, upgrade: upgradedAttention },
       automaticSelfstarter: { fresh: freshSelfstarter, upgrade: upgradedSelfstarter },
       visibleAcceptance: { fresh: freshAcceptance, upgrade: upgradedAcceptance },
+      liveRootResolution: { fresh: freshLiveRoots, upgrade: upgradedLiveRoots },
       canonicalAliasLaunch: aliasResult.ok,
       previousCacheRejected: legacyFailed,
       uninstallPreservedSources: true,

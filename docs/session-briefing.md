@@ -1,6 +1,6 @@
 # Session briefing
 
-As of `0.5.0`, native lifecycle hooks generate and inject this packet automatically at start, resume, prompt, and compaction boundaries. Exact current-task heartbeat, promise, and blocker events can enter the same constrained attention section. An independently authorized waiting job can also add its exact durable checkpoint at start and resume; execution rights never come from briefing content. MCP and CLI remain inspection surfaces, and model-side tool selection is not part of automatic continuity.
+As of `0.6.0`, native lifecycle hooks resolve host-native user, project, and memory roots, then generate and inject this packet automatically at start, resume, prompt, and compaction boundaries. Exact current-task heartbeat, promise, and blocker events can enter the same constrained attention section. An independently authorized waiting job can also add its exact durable checkpoint at start and resume; execution rights never come from briefing content. MCP and CLI remain inspection surfaces, and model-side tool selection is not part of automatic continuity.
 
 `session_briefing` assembles the smallest useful, provider-neutral context packet for one Claude Code, Codex, or generic MCP session. It replaces a chain of separate context reads without turning aggregation into authority.
 
