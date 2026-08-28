@@ -2,6 +2,8 @@
 
 AgentSpine can exchange reviewed context between installations without requiring a vendor account, hosted database, or network service. The first reference adapter uses an ordinary directory. That directory may remain local or be placed on a user-controlled network drive or synchronization service.
 
+A signed directory can also be exported as an immutable JSON file for the hardened, provider-neutral [HTTPS snapshot transport](https-transport.md). HTTPS is only another delivery path: all signer trust, quarantine, local review, privacy, history, and authority rules remain identical.
+
 Shared memory is optional. Local discovery, identity, learning, relationships, attention, coordination, and auditing remain complete when no adapter exists.
 
 ## Trust flow
@@ -242,7 +244,7 @@ MCP exposes only `shared_context`, which reads locally accepted records. Adapter
 
 ## Adapter compatibility
 
-A future adapter may use object storage, a database, a peer protocol, or a hosted API. To remain compatible it must produce the same strict manifest and event semantics or map its transport into them before local import:
+The implemented static HTTPS adapter maps a strict signed snapshot back into the reference directory semantics before local import. A future writable adapter may use object storage, a database, a peer protocol, or a hosted API. To remain compatible it must produce the same strict manifest and event semantics or map its transport into them before local import:
 
 1. immutable stable event IDs;
 2. canonical integrity digest and, for authenticated transports, a verifiable signed envelope;

@@ -154,6 +154,8 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine share-trust-revoke …` | Revoke a trusted key without turning signatures into authority |
 | `agentspine share-publish …` | Publish one explicitly selected accepted, non-private learning |
 | `agentspine share-pull …` | Import immutable events into local quarantine, never active context |
+| `agentspine share-snapshot-export …` | Export one immutable signed snapshot outside the scanned project |
+| `agentspine share-https-pull …` | Fetch a bounded signed snapshot through hardened HTTPS into quarantine |
 | `agentspine share-inbox …` | Review pending, accepted, rejected, superseded, or rolled-back imports |
 | `agentspine share-review …` | Accept or reject one import through a second local decision |
 | `agentspine share-context …` | Read only locally accepted, privacy-filtered shared memory |
@@ -195,7 +197,7 @@ Safe learning is evidence-first: candidates are invisible until reviewed, automa
 
 Delegation is intentionally narrower than authority: a relationship such as `responsible-for` never permits assignment. Cross-entity task actions require an explicit local actor/action/target grant, while tasks, open threads, and handoffs remain context-only. See [delegation and coordination](docs/coordination.md).
 
-Shared memory is transport-neutral and double-reviewed: only accepted non-private learning may be published, every import enters quarantine, and the receiving installation must confirm it again before it can appear in context. The reference directory adapter works without a cloud account. Its baseline digest detects damage; optional Ed25519 envelopes authenticate a configured origin against a local trust store. Neither mechanism grants authority or approves content. See [shared memory adapters](docs/shared-memory.md).
+Shared memory is transport-neutral and double-reviewed: only accepted non-private learning may be published, every import enters quarantine, and the receiving installation must confirm it again before it can appear in context. The reference directory adapter works without a cloud account. Signed adapters can also be exported as immutable snapshots and pulled from an operator-controlled HTTPS endpoint with pinned DNS, SSRF protection, strict limits, and optional environment-supplied bearer authentication. Digests and Ed25519 envelopes protect transport integrity and configured origins; neither grants authority or approves content. See [shared memory adapters](docs/shared-memory.md) and [HTTPS snapshots](docs/https-transport.md).
 
 ## Optional four-layer starter
 
@@ -221,7 +223,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.1` establishes the preservation kernel; current `main` also includes relationship, sparse-attention, safe-learning, default-deny coordination, and optional provider-neutral shared-memory foundations with Ed25519 origin authentication, a provider-neutral MCP surface, dual-host plugin layout, and executable tests. Network and hosted transports remain optional extension work.
+AgentSpine is in active early development. `v0.1` establishes the preservation kernel; current `main` also includes relationship, sparse-attention, safe-learning, default-deny coordination, optional provider-neutral shared memory with Ed25519 origin authentication and hardened static HTTPS snapshots, a provider-neutral MCP surface, dual-host plugin layout, and executable tests. Writable hosted transports remain optional extension work.
 
 ## Documentation
 
@@ -235,6 +237,7 @@ AgentSpine is in active early development. `v0.1` establishes the preservation k
 | Review evidence-backed observations | [Safe learning](docs/learning.md) |
 | Coordinate agents without memory-based authority | [Delegation and coordination](docs/coordination.md) |
 | Exchange reviewed context between installations | [Shared memory adapters](docs/shared-memory.md) |
+| Publish or pull signed static snapshots | [HTTPS snapshot transport](docs/https-transport.md) |
 | Run the Definition of Done | [Ten quality gates](docs/quality-gates.md) |
 | See planned capabilities | [Roadmap](docs/roadmap.md) |
 | Cut a release | [Release process](docs/releasing.md) |

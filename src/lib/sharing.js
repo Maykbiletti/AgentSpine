@@ -296,7 +296,10 @@ async function openAdapter(root, directory) {
   const eventsDirectory = join(adapterDirectory, "events");
   const eventsMetadata = await lstat(eventsDirectory);
   if (!eventsMetadata.isDirectory() || eventsMetadata.isSymbolicLink()) throw new Error("adapter events path must be a real directory");
-  return { adapterDirectory, manifestPath, manifest, eventsDirectory, authentication, publicIdentity };
+  return {
+    adapterDirectory, manifestPath, manifest, manifestDocument,
+    eventsDirectory, authentication, publicIdentity
+  };
 }
 
 export async function initDirectoryAdapter({
@@ -508,6 +511,31 @@ async function readAdapterEvents(adapter) {
     byId.set(item.event.id, item);
   }
   return [...byId.values()].sort((a, b) => a.event.publishedAt.localeCompare(b.event.publishedAt) || a.event.id.localeCompare(b.event.id));
+}
+
+export async function readDirectoryExchange({
+  root = process.cwd(), directory, requireAuthenticated = true
+}) {
+  const catalog = await buildCatalog(root);
+  const adapter = await openAdapter(catalog.root, directory);
+  if (requireAuthenticated && !adapter.authentication) {
+    throw new Error("HTTPS snapshots require an authenticated directory adapter");
+  }
+  const events = await readAdapterEvents(adapter);
+  if (adapter.authentication && events.some((item) => !item.authentication)) {
+    throw new Error("signed adapters cannot contain unsigned events");
+  }
+  if (!adapter.authentication && events.some((item) => item.authentication)) {
+    throw new Error("unsigned adapters cannot mix signed events");
+  }
+  return {
+    root: catalog.root,
+    scopeId: adapter.manifest.scopeId,
+    adapterId: adapter.manifest.adapterId,
+    authenticated: Boolean(adapter.authentication),
+    manifest: structuredClone(adapter.manifestDocument),
+    events: events.map((item) => structuredClone(item.document))
+  };
 }
 
 export async function pullShared({ root = process.cwd(), directory, requireAuthenticated = false, now = new Date() }) {

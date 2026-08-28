@@ -22,6 +22,7 @@ import {
   generateSigningIdentity, listSigningIdentities, revokeTrustedSigner,
   trustedSignerContext, trustSigner
 } from "./lib/authentication.js";
+import { exportHttpsSnapshot, pullHttpsSnapshot } from "./lib/https-transport.js";
 import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
@@ -107,6 +108,8 @@ Usage:
   agentspine share-init <directory> --scope team:id [--adapter adapter:id] [--signer signer:id] [--confirm-local-share]
   agentspine share-publish <directory> --learning id [--id shared:id] [--signer signer:id] [--supersedes shared:id] [--confirm-local-share]
   agentspine share-pull <directory> [--root path] [--require-authenticated]
+  agentspine share-snapshot-export <directory> --out snapshot.json [--id snapshot:id] [--confirm-local-share]
+  agentspine share-https-pull <https-url> [--token-env VARIABLE] [--timeout-ms 10000] [--allow-private-network --confirm-local-share]
   agentspine share-inbox [root] [--status pending|accepted|rejected|superseded|rolled-back]
   agentspine share-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine share-context [root] [--scope team:id] [--group group:id] [--kind preference,goal]
@@ -454,6 +457,23 @@ export async function run(argv = process.argv.slice(2)) {
     return output(await pullShared({
       root: flags.root || process.cwd(), directory: positional[0],
       requireAuthenticated: booleanFlag(flags["require-authenticated"])
+    }), json);
+  }
+
+  if (command === "share-snapshot-export") {
+    return output(await exportHttpsSnapshot({
+      root: flags.root || process.cwd(), directory: positional[0], output: flags.out,
+      snapshotId: flags.id,
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-https-pull") {
+    return output(await pullHttpsSnapshot({
+      root: flags.root || process.cwd(), url: positional[0], tokenEnv: flags["token-env"] || null,
+      timeoutMs: Number(flags["timeout-ms"] ?? 10000),
+      allowPrivateNetwork: booleanFlag(flags["allow-private-network"]),
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
     }), json);
   }
 

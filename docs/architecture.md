@@ -14,7 +14,7 @@ flowchart TB
     subgraph Core["AgentSpine core"]
       D["Discovery + SHA-256"]
       R["Host-aware resolver"]
-      G["Context-only graph + attention + learning + tasks + shared quarantine"]
+    G["Context-only graph + attention + learning + tasks + shared quarantine"]
       P["Separate default-deny delegation policy"]
     end
     subgraph Hosts["Agent hosts"]
@@ -106,13 +106,28 @@ Generated catalogs live outside the scanned repository:
 
 Task mutations read and validate policy while holding the policy lock, then write coordination state under a second lock. This lock order prevents a policy revocation from racing a new assignment. Invalid or malformed policy and coordination state fails closed and is never automatically overwritten.
 
+## Transport boundary
+
+```mermaid
+flowchart LR
+    D["Signed directory exchange"] --> S["Immutable HTTPS snapshot"]
+    S --> H["Operator-controlled HTTPS"]
+    H --> V["TLS + DNS + size + schema + signature validation"]
+    V --> Q["Local pending quarantine"]
+    Q --> R["Second local review"]
+    R --> C["Context-only shared memory"]
+    H -. "never grants" .-> A["Host or delegation authority"]
+```
+
+HTTPS snapshots are temporary transport artifacts, not canonical memory. The client materializes a validated snapshot in an operating-system temporary directory, invokes the same signed directory importer, and deletes the temporary files on success or failure. Endpoint configuration and bearer values are not written to AgentSpine state.
+
 ## Extension points
 
 Future modules plug in behind the core boundary:
 
-- network or hosted transports implementing the provider-neutral signed-envelope and shared-event contracts;
+- writable object-store, database, peer, or hosted transports implementing the provider-neutral signed-envelope and shared-event contracts;
 - additional host resolvers.
 
 Each extension consumes read-only provenance and emits separate state. None receives permission authority.
 
-The reference directory adapter is optional external transport, not canonical storage. It exports only owner-selected accepted learning, while a receiving installation keeps every import outside active context until a second local review. In signed mode, Ed25519 proves that an envelope matches a locally trusted public key; it does not make the payload authoritative. See [shared memory adapters](shared-memory.md).
+The reference directory and static HTTPS snapshot adapters are optional external transports, not canonical storage. They export only owner-selected accepted learning, while a receiving installation keeps every import outside active context until a second local review. In signed mode, Ed25519 proves that an envelope matches a locally trusted public key; it does not make the payload authoritative. See [shared memory adapters](shared-memory.md) and [HTTPS snapshots](https-transport.md).

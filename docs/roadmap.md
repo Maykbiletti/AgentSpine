@@ -10,6 +10,7 @@ flowchart TB
     D --> E["5 · Safe learning"]
     E --> F["6 · Delegation + coordination"]
     F --> G["7 · Portable shared memory"]
+    G --> H["8 · Hardened HTTPS snapshots"]
 ```
 
 ## 1. Preservation kernel
@@ -76,7 +77,7 @@ Status: local default-deny foundation implemented; remote dispatch remains delib
 
 ## 7. Portable shared memory
 
-Status: optional reference transport and Ed25519 origin authentication implemented; network and hosted transports remain extension work.
+Status: optional directory transport, Ed25519 origin authentication, and hardened static HTTPS snapshots implemented; writable hosted transports remain extension work.
 
 - directory adapter usable locally, on a network drive, or through a user-selected synchronization service;
 - strict immutable event schema, canonical SHA-256 integrity, deterministic IDs, limits, and collision detection;
@@ -87,6 +88,18 @@ Status: optional reference transport and Ed25519 origin authentication implement
 - digest integrity remains available for compatibility; signed mode verifies trusted Ed25519 manifest and event origins;
 - local signer generation, explicit rotation, per-project public-key trust, revocation, retained proof, and audit replay;
 - signatures authenticate configured keys only and never replace quarantine, content review, privacy, or authority boundaries.
+
+## 8. Hardened HTTPS snapshots
+
+Status: provider-neutral static transport implemented; writable object-store, database, and peer adapters remain extension work.
+
+- immutable signed snapshot export outside the scanned project;
+- dependency-free HTTPS pull with TLS verification, vetted and pinned DNS, default SSRF protection, no redirects, and exact response limits;
+- optional bearer token read only from an explicitly named environment variable;
+- explicit private-network opt-in with local confirmation;
+- strict bundle digest plus independent manifest and event signature verification before local mutation;
+- import through the same quarantine, second local review, trust, privacy, supersession, rollback, and authority boundaries as the directory adapter;
+- CLI-only transport administration; no network or token surface in MCP or hooks.
 
 ## Definition of done for every stage
 

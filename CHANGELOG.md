@@ -28,6 +28,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Shared supersession, rollback, exact group filtering, CLI administration, read-only MCP context, hooks, and audit coverage
 - Optional Ed25519 manifest and event envelopes with strict public identities and retained verification proof
 - Installation-local signer generation and rotation plus project-local trust, revocation, and audit replay
+- Immutable signed HTTPS snapshot export and dependency-free provider-neutral pull transport
+- DNS pinning, default SSRF blocking, redirect and compression rejection, bounded responses, optional environment-only bearer authentication, and explicit private-network opt-in
 
 ### Changed
 
@@ -56,10 +58,11 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Private learning, source content, evidence text, tasks, policy, and credentials are excluded from shared events
 - Adapter administration is excluded from MCP; malformed, oversized, symlinked, collided, or tampered exchange state fails closed
 - Private signing keys remain outside projects and agent surfaces; unknown, revoked, swapped, or mismatched signers fail closed
+- HTTPS snapshot transport validates TLS endpoints, every DNS answer, bundle integrity, strict schema, and all nested signatures before quarantine mutation
 
 ### Planned
 
-- Optional network and hosted transports implementing the signed-envelope and shared-event contracts
+- Optional writable object-store, database, peer, and hosted transports implementing the signed-envelope and shared-event contracts
 
 ## [0.1.0] - 2026-08-27
 

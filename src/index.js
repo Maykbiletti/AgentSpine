@@ -16,9 +16,13 @@ export {
 } from "./lib/coordination.js";
 export {
   configureSharing, deleteShared, initDirectoryAdapter, inspectSharing, loadSharing,
-  publishLearning, pullShared, reviewShared, rollbackShared, sharedContext, sharedInbox,
+  publishLearning, pullShared, readDirectoryExchange, reviewShared, rollbackShared, sharedContext, sharedInbox,
   sharingAuthenticationFindings, sharingFindings, validateSharedEvent
 } from "./lib/sharing.js";
+export {
+  exportHttpsSnapshot, fetchHttpsSnapshot, importHttpsSnapshot, pullHttpsSnapshot,
+  resolveHttpsEndpoint, validateHttpsEndpoint, validateHttpsSnapshot
+} from "./lib/https-transport.js";
 export {
   assertTrustedIdentity, generateSigningIdentity, inspectSignerRegistry, inspectTrust, listSigningIdentities,
   loadTrust, revokeTrustedSigner, signEnvelope, trustedSignerContext, trustFindings,
