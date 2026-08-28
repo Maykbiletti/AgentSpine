@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { VERSION } from "./version.js";
 import { scanAndSave, verifyCatalog } from "./lib/catalog.js";
 import { readDocument, resolveContext } from "./lib/context.js";
 import { sessionBriefing } from "./lib/briefing.js";
@@ -474,7 +475,7 @@ async function dispatch(message) {
       result: {
         protocolVersion: params.protocolVersion || "2025-06-18",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "agent-spine", version: "0.1.0" }
+        serverInfo: { name: "agent-spine", version: VERSION }
       }
     };
   }

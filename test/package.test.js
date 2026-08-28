@@ -41,6 +41,7 @@ test("Claude and Codex registrations complete a real MCP initialize handshake", 
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
+  assert.equal(result.version, "0.2.0");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
   assert.equal(result.hooks.claude.events.includes("PostCompact"), true);
   assert.equal(result.hooks.codex.events.includes("UserPromptSubmit"), true);

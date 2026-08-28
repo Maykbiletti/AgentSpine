@@ -37,8 +37,7 @@ import {
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
 import { checkHosts } from "../scripts/check-hosts.js";
-
-const VERSION = "0.2.0";
+import { VERSION } from "./version.js";
 
 function parse(argv) {
   const [command = "help", ...rest] = argv;

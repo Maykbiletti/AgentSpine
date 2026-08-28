@@ -82,6 +82,7 @@ async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host) {
 
 export async function checkInstall(root = process.cwd()) {
   root = resolve(root);
+  const currentVersion = JSON.parse(await readFile(join(root, "package.json"), "utf8")).version;
   const workspace = await mkdtemp(join(tmpdir(), "agentspine-install-check-"));
   try {
     const userProject = join(workspace, "user-project");
@@ -102,7 +103,7 @@ export async function checkInstall(root = process.cwd()) {
     try { await checkHosts(installed); } catch { legacyFailed = true; }
     if (!legacyFailed) throw new Error("legacy cache unexpectedly passed the current host inventory");
 
-    const staging = `${installed}.0.2.0.staging`;
+    const staging = `${installed}.${currentVersion}.staging`;
     await copyBundle(root, staging);
     await rm(installed, { recursive: true });
     await rename(staging, installed);

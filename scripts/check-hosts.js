@@ -46,7 +46,7 @@ function validateHooks(root, hooks) {
   return { events: required, commands: required.length, entrypoint: relative(root, resolve(root, "src/hook.js")) };
 }
 
-async function initializeServer({ label, root, variable, server }) {
+async function initializeServer({ label, root, variable, server, version }) {
   assert(server && typeof server === "object" && !Array.isArray(server), `${label} MCP registration is missing`);
   assert(server.command === "node", `${label} MCP registration must use the Node.js runtime`);
   assert(Array.isArray(server.args) && server.args.length === 1, `${label} MCP registration must name exactly one entrypoint`);
@@ -86,18 +86,19 @@ async function initializeServer({ label, root, variable, server }) {
         const message = JSON.parse(stdout.slice(0, newline));
         assert(message.id === 1, `${label} MCP initialize returned the wrong request id`);
         assert(message.result?.serverInfo?.name === "agent-spine", `${label} MCP initialize returned the wrong server identity`);
+        assert(message.result?.serverInfo?.version === version, `${label} MCP initialize returned a stale server version`);
         finish(null, { label, server: message.result.serverInfo.name, entrypoint: relative(root, args[0]) });
       } catch (error) {
         finish(error);
       }
     });
     child.once("error", (error) => finish(error));
-    // `exit` can precede delivery of the final stdout chunk on macOS and
-    // Windows. `close` is emitted only after the stdio pipes have closed.
     child.once("close", (code) => {
       if (!settled) finish(new Error(`${label} MCP server exited with ${code}${stderr ? `: ${stderr.trim()}` : ""}`));
     });
-    child.stdin.end(`${JSON.stringify({
+    // A real MCP host keeps stdio open after initialization. Closing stdin
+    // here let macOS and Windows terminate the server before its queued reply.
+    child.stdin.write(`${JSON.stringify({
       jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" }
     })}\n`);
   });
@@ -119,8 +120,8 @@ export async function checkHosts(root = process.cwd()) {
   assert(codexManifest.mcpServers && Object.keys(codexManifest.mcpServers).length === 1, "Codex manifest must contain one MCP registration");
   const hookInventory = validateHooks(root, hooks);
   const registrations = await Promise.all([
-    initializeServer({ label: "claude", root, variable: "CLAUDE_PLUGIN_ROOT", server: claudeMcp.mcpServers["agent-spine"] }),
-    initializeServer({ label: "codex", root, variable: "PLUGIN_ROOT", server: codexManifest.mcpServers["agent-spine"] })
+    initializeServer({ label: "claude", root, variable: "CLAUDE_PLUGIN_ROOT", server: claudeMcp.mcpServers["agent-spine"], version: pkg.version }),
+    initializeServer({ label: "codex", root, variable: "PLUGIN_ROOT", server: codexManifest.mcpServers["agent-spine"], version: pkg.version })
   ]);
   return {
     ok: true, root, version: pkg.version, registrations,
