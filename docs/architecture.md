@@ -132,6 +132,7 @@ flowchart LR
     D["Signed directory exchange"] --> S["Immutable HTTPS snapshot"]
     S --> P["Create-only content-addressed PUT"]
     P --> H["Operator-controlled HTTPS object"]
+    H --> F["Signed ETag feed + local continuity receipt"]
     S --> H
     H --> V["TLS + DNS + size + schema + signature validation"]
     V --> Q["Local pending quarantine"]
@@ -140,15 +141,15 @@ flowchart LR
     H -. "never grants" .-> A["Host or delegation authority"]
 ```
 
-HTTPS snapshots are temporary transport artifacts, not canonical memory. The object publisher derives an immutable URL from the snapshot digest, requires create-only semantics, and verifies a hardened read-back. The pull client materializes a validated snapshot in an operating-system temporary directory, invokes the same signed directory importer, and deletes the temporary files on success or failure. Endpoint configuration and bearer values are not written to AgentSpine state.
+HTTPS snapshots are temporary transport artifacts, not canonical memory. The object publisher derives an immutable URL from the snapshot digest, requires create-only semantics, and verifies a hardened read-back. A signed feed may reference successive immutable objects through an ETag compare-and-swap pointer and a bounded digest chain. Receivers keep an external receipt so rollback, equivocation, signer replacement, and continuity gaps fail closed. The pull client materializes a validated snapshot in an operating-system temporary directory, invokes the same signed directory importer, and deletes the temporary files on success or failure. Endpoint configuration and bearer values are not written to AgentSpine state.
 
 ## Extension points
 
 Future modules plug in behind the core boundary:
 
-- database, peer, mutable-feed, or hosted transports implementing the provider-neutral signed-envelope and shared-event contracts;
+- database, peer, or hosted transports implementing the provider-neutral signed-envelope and shared-event contracts;
 - additional host resolvers.
 
 Each extension consumes read-only provenance and emits separate state. None receives permission authority.
 
-The reference directory, static HTTPS snapshot, and immutable HTTPS object adapters are optional external transports, not canonical storage. They export only owner-selected accepted learning, while a receiving installation keeps every import outside active context until a second local review. In signed mode, Ed25519 proves that an envelope matches a locally trusted public key; it does not make the payload authoritative. See [shared memory adapters](shared-memory.md), [HTTPS snapshots](https-transport.md), and [immutable HTTPS objects](object-transport.md).
+The reference directory, static HTTPS snapshot, immutable HTTPS object, and signed feed adapters are optional external transports, not canonical storage. They export only owner-selected accepted learning, while a receiving installation keeps every import outside active context until a second local review. In signed mode, Ed25519 proves that an envelope matches a locally trusted public key; it does not make the payload authoritative. See [shared memory adapters](shared-memory.md), [HTTPS snapshots](https-transport.md), [immutable HTTPS objects](object-transport.md), and [signed mutable feeds](feed-transport.md).

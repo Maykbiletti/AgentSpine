@@ -57,6 +57,10 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   assert.equal(names.includes("export_https_snapshot"), false);
   assert.equal(names.includes("publish_https_snapshot"), false);
   assert.equal(names.includes("put_https_snapshot"), false);
+  assert.equal(names.includes("publish_https_feed"), false);
+  assert.equal(names.includes("pull_https_feed"), false);
+  assert.equal(names.includes("fetch_https_feed"), false);
+  assert.equal(names.includes("reset_https_feed"), false);
 });
 
 test("agentspine mcp CLI launches the stdio server", async (t) => {

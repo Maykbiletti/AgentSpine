@@ -28,6 +28,10 @@ export {
   httpsObjectUrl, publishHttpsSnapshot, putHttpsSnapshot, validateHttpsObjectBase
 } from "./lib/object-transport.js";
 export {
+  fetchHttpsFeed, httpsFeedUrl, inspectHttpsFeedState, loadHttpsFeedState, publishHttpsFeed,
+  pullHttpsFeed, validateHttpsFeed
+} from "./lib/feed-transport.js";
+export {
   assertTrustedIdentity, generateSigningIdentity, inspectSignerRegistry, inspectTrust, listSigningIdentities,
   loadTrust, revokeTrustedSigner, signEnvelope, trustedSignerContext, trustFindings,
   trustSigner, validatePublicIdentity, verifyEnvelope

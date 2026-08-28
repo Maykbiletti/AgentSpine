@@ -14,6 +14,7 @@ flowchart TB
     H --> I["9 · Budgeted session briefing"]
     I --> J["10 · Immutable HTTPS objects"]
     J --> K["11 · Verifiable releases"]
+    K --> L["12 · Signed mutable feeds"]
 ```
 
 ## 1. Preservation kernel
@@ -80,7 +81,7 @@ Status: local default-deny foundation implemented; remote dispatch remains delib
 
 ## 7. Portable shared memory
 
-Status: optional directory transport, Ed25519 origin authentication, hardened HTTPS snapshots, and immutable object publication implemented; database, peer, and mutable feeds remain extension work.
+Status: optional directory transport, Ed25519 origin authentication, hardened HTTPS snapshots, immutable object publication, and signed mutable feeds implemented; database and peer transports remain extension work.
 
 - directory adapter usable locally, on a network drive, or through a user-selected synchronization service;
 - strict immutable event schema, canonical SHA-256 integrity, deterministic IDs, limits, and collision detection;
@@ -94,7 +95,7 @@ Status: optional directory transport, Ed25519 origin authentication, hardened HT
 
 ## 8. Hardened HTTPS snapshots
 
-Status: provider-neutral static export, hardened pull, and create-only object publication implemented; database, peer, and mutable-feed adapters remain extension work.
+Status: provider-neutral static export, hardened pull, create-only object publication, and signed mutable-feed discovery implemented; database and peer adapters remain extension work.
 
 - immutable signed snapshot export outside the scanned project;
 - dependency-free HTTPS pull with TLS verification, vetted and pinned DNS, default SSRF protection, no redirects, and exact response limits;
@@ -117,7 +118,7 @@ Status: provider-neutral CLI, MCP, hook guidance, privacy enforcement, and behav
 
 ## 10. Immutable HTTPS objects
 
-Status: provider-neutral create-only publish and verified read-back implemented; mutable feeds, deletion, database, and peer transports remain out of scope.
+Status: provider-neutral create-only publish and verified read-back implemented; deletion, database, and peer transports remain out of scope. Signed feed discovery is implemented separately in stage 12.
 
 - signed snapshot publication under a deterministic SHA-256 object address;
 - atomic create-only `PUT` with `If-None-Match: *` and no overwrite path;
@@ -143,6 +144,21 @@ Status: deterministic local gate and tag-authorized GitHub release pipeline impl
 - build/attestation and GitHub publication split into separate least-privilege jobs;
 - optional protected `release` environment and documented consumer verification;
 - no long-lived npm token or automatic registry publication.
+
+## 12. Signed mutable feeds
+
+Status: provider-neutral signed feed publication, continuity tracking, and quarantined pull implemented; databases and peer transports remain extension work.
+
+- bounded 256-entry hash-chain window over immutable signed snapshot objects;
+- full Ed25519 signature over feed identity, scope, adapter, sequence, and retained chain;
+- strong ETag compare-and-swap with `If-None-Match: *` genesis and `If-Match` updates;
+- explicit concurrency conflicts without hidden overwrite or retry;
+- local external receipts with retained prior versions and fail-closed corruption handling;
+- rollback, same-sequence equivocation, signer replacement, and continuity-gap rejection;
+- hardened TLS, DNS pinning, SSRF, redirect, compression, size, token, and timeout boundaries;
+- latest snapshot independently verified and imported only into quarantine;
+- CLI-only endpoint and credential administration; no MCP or hook transport capability;
+- feed state, signatures, remote authentication, and imported content remain context-only.
 
 ## Definition of done for every stage
 

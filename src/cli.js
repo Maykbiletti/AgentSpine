@@ -25,6 +25,7 @@ import {
 } from "./lib/authentication.js";
 import { exportHttpsSnapshot, pullHttpsSnapshot } from "./lib/https-transport.js";
 import { publishHttpsSnapshot } from "./lib/object-transport.js";
+import { loadHttpsFeedState, publishHttpsFeed, pullHttpsFeed } from "./lib/feed-transport.js";
 import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
@@ -114,6 +115,9 @@ Usage:
   agentspine share-snapshot-export <directory> --out snapshot.json [--id snapshot:id] [--confirm-local-share]
   agentspine share-https-publish <directory> --base https://store.example/spine [--id snapshot:id] [--token-env VARIABLE] [--timeout-ms 10000] [--allow-private-network] --confirm-local-share
   agentspine share-https-pull <https-url> [--token-env VARIABLE] [--timeout-ms 10000] [--allow-private-network --confirm-local-share]
+  agentspine share-feed-publish <directory> --base https://store.example/spine --feed team:id --signer signer:id [--id snapshot:id] [--token-env VARIABLE] --confirm-local-share
+  agentspine share-feed-pull --base https://store.example/spine --feed team:id [--root path] [--token-env VARIABLE] [--allow-private-network --confirm-local-share]
+  agentspine share-feed-state [root]
   agentspine share-inbox [root] [--status pending|accepted|rejected|superseded|rolled-back]
   agentspine share-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine share-context [root] [--scope team:id] [--group group:id] [--kind preference,goal]
@@ -502,6 +506,29 @@ export async function run(argv = process.argv.slice(2)) {
       allowPrivateNetwork: booleanFlag(flags["allow-private-network"]),
       confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
     }), json);
+  }
+
+  if (command === "share-feed-publish") {
+    return output(await publishHttpsFeed({
+      root: flags.root || process.cwd(), directory: positional[0], baseUrl: flags.base,
+      feedId: flags.feed, signerId: flags.signer, snapshotId: flags.id,
+      tokenEnv: flags["token-env"] || null, timeoutMs: Number(flags["timeout-ms"] ?? 10000),
+      allowPrivateNetwork: booleanFlag(flags["allow-private-network"]),
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-feed-pull") {
+    return output(await pullHttpsFeed({
+      root: flags.root || process.cwd(), baseUrl: flags.base, feedId: flags.feed,
+      tokenEnv: flags["token-env"] || null, timeoutMs: Number(flags["timeout-ms"] ?? 10000),
+      allowPrivateNetwork: booleanFlag(flags["allow-private-network"]),
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-feed-state") {
+    return output(await loadHttpsFeedState(positional[0] || process.cwd()), json);
   }
 
   if (command === "share-inbox") {
