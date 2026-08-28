@@ -22,7 +22,7 @@ Status: implemented for `v0.1`; ongoing hardening.
 
 ## 2. Memory graph
 
-Status: foundation implemented; candidate workflow remains planned.
+Status: local foundation and candidate workflow implemented; shared adapters remain planned.
 
 - existing one-fact-per-file layouts are discovered and linked without migration;
 - compact generated index with a configurable context ceiling;
@@ -51,9 +51,13 @@ Status: sparse local foundation implemented; host-specific notification adapters
 
 ## 5. Safe learning
 
-- observation candidates with evidence and confidence;
-- new information changes relevance without silently erasing history;
-- measurable before/after checks and rollback for automatic low-risk changes;
+Status: local evidence, review, promotion, supersession, and rollback workflow implemented.
+
+- observation candidates remain outside context until accepted;
+- evidence, source fingerprints, confidence, and every prior candidate version are retained;
+- new information changes relevance through explicit supersession instead of erasure;
+- automatic promotion is default-off, thresholded, and limited to project facts and references;
+- acceptance proof and rollback are audited;
 - code, secrets, billing, permissions, and production access remain approval-bound.
 
 ## Definition of done for every stage

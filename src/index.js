@@ -7,6 +7,10 @@ export {
   recordActivity, resolveAttention, upsertAttention
 } from "./lib/attention.js";
 export {
+  addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
+  learningContext, loadLearning, proposeLearning, reviewLearning, rollbackLearning
+} from "./lib/learning.js";
+export {
   annotateDocument, linkDocuments, linkEntities, loadGraph,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";

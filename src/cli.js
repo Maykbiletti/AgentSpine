@@ -7,6 +7,10 @@ import {
   recordActivity, resolveAttention, upsertAttention
 } from "./lib/attention.js";
 import {
+  addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
+  learningContext, loadLearning, proposeLearning, reviewLearning, rollbackLearning
+} from "./lib/learning.js";
+import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
@@ -67,6 +71,14 @@ Usage:
   agentspine attention-delete <signal-id>
   agentspine attention-purge <entity-id>
   agentspine attention-config [root] [--enabled true|false] [--quiet-start 22 --quiet-end 7 --utc-offset 120]
+  agentspine learn-propose [id] --kind preference --claim text --evidence text
+  agentspine learn-evidence <id> --summary text [--type interaction] [--source path.md]
+  agentspine learn-review <id> --decision accept|reject --reason text [--confirmed-by-user]
+  agentspine learn-context [root] [--group id] [--include-private] [--kind preference,goal]
+  agentspine learn-evaluate [root]
+  agentspine learn-rollback <id> --reason text
+  agentspine learn-delete <id>
+  agentspine learn-config [root] [--auto-promote true|false] [--min-confidence 0.85]
   agentspine audit [root] [--json]
   agentspine doctor [--json]
   agentspine mcp
@@ -220,6 +232,71 @@ export async function run(argv = process.argv.slice(2)) {
     }
     if (!Object.keys(config).length) return output((await loadAttention(root)).attention.config, json);
     return output(await configureAttention({ root, config }), json);
+  }
+
+  if (command === "learn-propose") {
+    return output(await proposeLearning({
+      root: flags.root || process.cwd(), id: positional[0], kind: flags.kind,
+      claim: flags.claim, subjectId: flags.subject || null, privacy: flags.privacy || "private",
+      groupId: flags.group || null, supersedesId: flags.supersedes || null,
+      evidence: {
+        id: flags["evidence-id"], type: flags["evidence-type"] || "user-statement",
+        summary: flags.evidence, sourceDocument: flags.source || null,
+        confidence: Number(flags.confidence ?? 0.5), observedAt: flags.at
+      }
+    }), json);
+  }
+
+  if (command === "learn-evidence") {
+    return output(await addLearningEvidence({
+      root: flags.root || process.cwd(), id: positional[0],
+      evidence: {
+        id: flags["evidence-id"], type: flags.type || "interaction", summary: flags.summary,
+        sourceDocument: flags.source || null, confidence: Number(flags.confidence ?? 0.5), observedAt: flags.at
+      }
+    }), json);
+  }
+
+  if (command === "learn-review") {
+    return output(await reviewLearning({
+      root: flags.root || process.cwd(), id: positional[0], decision: flags.decision,
+      reason: flags.reason, confirmedByUser: booleanFlag(flags["confirmed-by-user"])
+    }), json);
+  }
+
+  if (command === "learn-context") {
+    return output(await learningContext({
+      root: positional[0] || process.cwd(), includePrivate: booleanFlag(flags["include-private"]),
+      groupId: flags.group || null,
+      kinds: flags.kind ? String(flags.kind).split(",").filter(Boolean) : null,
+      subjectIds: flags.subject ? String(flags.subject).split(",").filter(Boolean) : null,
+      maxItems: flags["max-items"] === undefined ? null : Number(flags["max-items"])
+    }), json);
+  }
+
+  if (command === "learn-evaluate") {
+    return output(await evaluateLearning({ root: positional[0] || process.cwd() }), json);
+  }
+
+  if (command === "learn-rollback") {
+    return output(await rollbackLearning({
+      root: flags.root || process.cwd(), id: positional[0], reason: flags.reason
+    }), json);
+  }
+
+  if (command === "learn-delete") {
+    return output(await deleteLearning({ root: flags.root || process.cwd(), id: positional[0] }), json);
+  }
+
+  if (command === "learn-config") {
+    const root = positional[0] || process.cwd();
+    const config = {};
+    if (flags["auto-promote"] !== undefined) config.autoPromote = booleanFlag(flags["auto-promote"]);
+    if (flags["min-confidence"] !== undefined) config.minConfidence = Number(flags["min-confidence"]);
+    if (flags["min-evidence"] !== undefined) config.minEvidence = Number(flags["min-evidence"]);
+    if (flags["max-items"] !== undefined) config.maxContextItems = Number(flags["max-items"]);
+    if (!Object.keys(config).length) return output((await loadLearning(root)).learning.config, json);
+    return output(await configureLearning({ root, config }), json);
   }
 
   if (command === "doctor") {

@@ -7,6 +7,10 @@ import {
   recordActivity, resolveAttention, upsertAttention
 } from "./lib/attention.js";
 import {
+  addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
+  learningContext, proposeLearning, reviewLearning, rollbackLearning
+} from "./lib/learning.js";
+import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
@@ -201,6 +205,113 @@ const tools = [
     }
   },
   {
+    name: "propose_learning",
+    description: "Create an evidence-backed learning candidate in external state. Candidates are invisible to learned context until explicitly accepted or safely auto-promoted.",
+    inputSchema: {
+      type: "object", required: ["kind", "claim", "evidence"],
+      properties: {
+        root: { type: "string" }, id: { type: "string" },
+        kind: { type: "string", enum: ["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference"] },
+        claim: { type: "string", maxLength: 1000 }, subjectId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        privacy: { type: "string", enum: ["private", "shared", "group"] },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        supersedesId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        evidence: { "$ref": "#/$defs/evidence" }
+      },
+      "$defs": {
+        evidence: {
+          type: "object", required: ["summary"], additionalProperties: false,
+          properties: {
+            id: { type: "string" }, type: { type: "string", enum: ["user-statement", "document", "interaction", "test"] },
+            summary: { type: "string", maxLength: 500 }, sourceDocument: { anyOf: [{ type: "string" }, { type: "null" }] },
+            confidence: { type: "number", minimum: 0, maximum: 1 }, observedAt: { type: "string" }
+          }
+        }
+      }
+    }
+  },
+  {
+    name: "add_learning_evidence",
+    description: "Append distinct evidence to an unreviewed learning candidate while retaining the previous candidate version in history.",
+    inputSchema: {
+      type: "object", required: ["id", "evidence"],
+      properties: {
+        root: { type: "string" }, id: { type: "string" },
+        evidence: {
+          type: "object", required: ["summary"], additionalProperties: false,
+          properties: {
+            id: { type: "string" }, type: { type: "string", enum: ["user-statement", "document", "interaction", "test"] },
+            summary: { type: "string", maxLength: 500 }, sourceDocument: { anyOf: [{ type: "string" }, { type: "null" }] },
+            confidence: { type: "number", minimum: 0, maximum: 1 }, observedAt: { type: "string" }
+          }
+        }
+      }
+    }
+  },
+  {
+    name: "review_learning",
+    description: "Accept or reject one candidate. Acceptance requires an explicit user-confirmation marker and never grants authority.",
+    inputSchema: {
+      type: "object", required: ["id", "decision", "reason"],
+      properties: {
+        root: { type: "string" }, id: { type: "string" },
+        decision: { type: "string", enum: ["accept", "reject"] }, reason: { type: "string", maxLength: 500 },
+        confirmedByUser: { type: "boolean" }
+      }
+    }
+  },
+  {
+    name: "learning_context",
+    description: "Return accepted learning only, filtered by privacy, exact group audience, kind, subject, and context limit.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" }, includePrivate: { type: "boolean" },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        kinds: { type: "array", items: { type: "string", enum: ["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference"] } },
+        subjectIds: { type: "array", items: { type: "string" } }, maxItems: { type: "integer", minimum: 0, maximum: 50 }
+      }
+    }
+  },
+  {
+    name: "evaluate_learning",
+    description: "Evaluate pending candidates against the opt-in low-risk auto-promotion policy. Auto-promotion is disabled by default and limited to project facts and references.",
+    inputSchema: { type: "object", properties: { root: { type: "string" } } }
+  },
+  {
+    name: "rollback_learning",
+    description: "Roll back an accepted learning and restore the accepted fact it superseded, without deleting history.",
+    inputSchema: {
+      type: "object", required: ["id", "reason"],
+      properties: { root: { type: "string" }, id: { type: "string" }, reason: { type: "string", maxLength: 500 } }
+    }
+  },
+  {
+    name: "configure_learning",
+    description: "Configure the local learning context limit and the default-off, low-risk auto-promotion evidence thresholds.",
+    inputSchema: {
+      type: "object", required: ["config"],
+      properties: {
+        root: { type: "string" },
+        config: {
+          type: "object", additionalProperties: false,
+          properties: {
+            autoPromote: { type: "boolean" }, minConfidence: { type: "number", minimum: 0.5, maximum: 1 },
+            minEvidence: { type: "integer", minimum: 1, maximum: 10 }, maxContextItems: { type: "integer", minimum: 1, maximum: 50 }
+          }
+        }
+      }
+    }
+  },
+  {
+    name: "delete_learning",
+    description: "Permanently delete one candidate and its retained learning history. Superseding active facts must be rolled back first.",
+    inputSchema: {
+      type: "object", required: ["id"],
+      properties: { root: { type: "string" }, id: { type: "string" } }
+    }
+  },
+  {
     name: "audit",
     description: "Run AgentSpine's ten deterministic quality gates for discovery, hierarchy, links, authority, privacy, budget, and source preservation.",
     inputSchema: { type: "object", properties: { root: { type: "string" } } }
@@ -236,6 +347,14 @@ async function callTool(name, args = {}) {
   if (name === "resolve_attention") return textResult(await resolveAttention({ ...args, root }));
   if (name === "configure_attention") return textResult(await configureAttention({ ...args, root }));
   if (name === "delete_attention") return textResult(await deleteAttention({ ...args, root }));
+  if (name === "propose_learning") return textResult(await proposeLearning({ ...args, root }));
+  if (name === "add_learning_evidence") return textResult(await addLearningEvidence({ ...args, root }));
+  if (name === "review_learning") return textResult(await reviewLearning({ ...args, root }));
+  if (name === "learning_context") return textResult(await learningContext({ ...args, root }));
+  if (name === "evaluate_learning") return textResult(await evaluateLearning({ ...args, root }));
+  if (name === "rollback_learning") return textResult(await rollbackLearning({ ...args, root }));
+  if (name === "configure_learning") return textResult(await configureLearning({ ...args, root }));
+  if (name === "delete_learning") return textResult(await deleteLearning({ ...args, root }));
   if (name === "audit") return textResult(await runAudit(root));
   throw new Error(`Unknown tool: ${name}`);
 }

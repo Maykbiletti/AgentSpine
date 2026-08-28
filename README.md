@@ -32,7 +32,7 @@ flowchart TB
     A["Existing Markdown sources"] --> B["Read-only discovery"]
     B --> C["Provenance catalog"]
     C --> D["Host-aware resolver"]
-    F["Relationships + sparse attention"] --> D
+    F["Relationships + attention + safe learning"] --> D
     D --> E["Claude Code · Codex · MCP"]
 ```
 
@@ -132,6 +132,14 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine attention-touch …` | Record only that an entity interaction occurred |
 | `agentspine attention-config …` | Configure limits, quiet hours, silence threshold, or disable attention |
 | `agentspine attention-delete …` | Permanently remove a cue and its retained attention history |
+| `agentspine learn-propose …` | Store an evidence-backed candidate outside accepted context |
+| `agentspine learn-evidence …` | Append evidence while retaining the previous candidate version |
+| `agentspine learn-review …` | Explicitly accept or reject a candidate |
+| `agentspine learn-context …` | Read only accepted, privacy-filtered learning |
+| `agentspine learn-evaluate …` | Run the default-off low-risk automatic policy |
+| `agentspine learn-rollback …` | Restore the accepted fact replaced by a learning |
+| `agentspine learn-config …` | Configure auto-promotion thresholds and context limits |
+| `agentspine learn-delete …` | Permanently remove one candidate and its learning history |
 | `agentspine audit [root]` | Run ten deterministic quality and preservation gates |
 | `agentspine doctor` | Check runtime and preservation mode |
 | `agentspine mcp` | Start the stdio MCP server |
@@ -156,11 +164,14 @@ flowchart LR
 - `link_documents` and `annotate_document` let agents build their own semantic map without editing sources.
 - `upsert_entity`, `link_entities`, and `relationship_context` maintain a privacy-scoped social and responsibility map outside the project.
 - `upsert_attention`, `record_activity`, `attention_context`, `resolve_attention`, `configure_attention`, and `delete_attention` provide sparse follow-up suggestions without sending messages or granting authority.
+- `propose_learning`, `add_learning_evidence`, `review_learning`, `learning_context`, `evaluate_learning`, `rollback_learning`, `configure_learning`, and `delete_learning` keep observations separate from accepted context and preserve every relevance change.
 - `audit` runs the same ten gates available through the CLI.
 
 Relationship updates supersede the active view but retain the previous observation in append-only graph history. Permission-like and credential-like attributes are rejected recursively. See [relationships and learning](docs/relationships.md).
 
 Attention is deliberately restrained: the current task wins, private cues require an explicit private read, quiet hours and presentation throttles suppress repetition, and deletion removes retained attention history. Lifecycle hooks inject only counts and cue kinds—never the cue text. See [attention](docs/attention.md).
+
+Safe learning is evidence-first: candidates are invisible until reviewed, automatic promotion is off by default and limited to project facts and references, and every accepted change can be superseded or rolled back without touching source Markdown. See [safe learning](docs/learning.md).
 
 ## Optional four-layer starter
 
@@ -186,7 +197,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.1` establishes the preservation kernel, context resolver, relationship and sparse-attention foundations, MCP surface, dual-host plugin layout, and executable tests. Deeper candidate promotion and pluggable shared memory remain staged in the [roadmap](docs/roadmap.md) behind the same permission boundary.
+AgentSpine is in active early development. `v0.1` establishes the preservation kernel, context resolver, relationship, sparse-attention, and safe-learning foundations, MCP surface, dual-host plugin layout, and executable tests. Pluggable shared memory remains staged in the [roadmap](docs/roadmap.md) behind the same permission boundary.
 
 ## Documentation
 
@@ -197,6 +208,7 @@ AgentSpine is in active early development. `v0.1` establishes the preservation k
 | Integrate a host | [Claude Code and Codex](docs/host-integration.md) |
 | Understand relationships and history | [Relationships](docs/relationships.md) |
 | Configure sparse follow-ups | [Attention](docs/attention.md) |
+| Review evidence-backed observations | [Safe learning](docs/learning.md) |
 | Run the Definition of Done | [Ten quality gates](docs/quality-gates.md) |
 | See planned capabilities | [Roadmap](docs/roadmap.md) |
 | Cut a release | [Release process](docs/releasing.md) |

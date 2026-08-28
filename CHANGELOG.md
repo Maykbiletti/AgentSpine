@@ -16,6 +16,10 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Attention CLI and MCP surfaces with quiet hours, focus suppression, throttling, disable, resolve, and permanent deletion controls
 - Exact group-audience binding for group-scoped cues and activity timestamps
 - Cross-process locking for concurrent local attention updates
+- Evidence-backed learning candidates kept separate from accepted context
+- Explicit review, low-risk opt-in promotion, supersession, rollback, and permanent learning deletion
+- SHA-256 provenance capture for document evidence and serialized concurrent evidence appends
+- Safe-learning CLI, MCP tools, hook metadata, audit checks, and full lifecycle tests
 
 ### Changed
 
@@ -29,12 +33,14 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - External-state auditing handles Windows project and state directories on different drives
 - Session hooks expose only due attention counts and kinds; cue text remains behind an explicit privacy-filtered read
 - The ten-gate audit now validates attention authority, privacy, configuration, and external-state placement
+- Accepted learning must carry auditable manual-confirmation proof or an evidence-threshold policy snapshot
 
 ### Security
 
 - Relationship attributes recursively reject permissions, rights, authorization, credentials, secrets, tokens, and API keys
 - Every relationship and history record is explicitly context-only
 - Every attention cue and activity is context-only; corrupt attention policy fails closed
+- Secret-shaped observations and authority assertions are rejected before learning storage
 
 ### Planned
 

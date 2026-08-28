@@ -4,6 +4,7 @@ import { scanAndSave } from "./lib/catalog.js";
 import { loadGraph } from "./lib/graph.js";
 import { canonicalPath, findProjectRoot } from "./lib/paths.js";
 import { attentionContext } from "./lib/attention.js";
+import { learningContext } from "./lib/learning.js";
 
 async function readStdin() {
   let value = "";
@@ -113,6 +114,7 @@ export async function runHook(payload = null) {
 
   if (["SessionStart", "UserPromptSubmit", "PostCompact"].includes(event)) {
     let attentionNote = "";
+    let learningNote = "";
     try {
       const attention = await attentionContext({ root, includePrivate: false, maxItems: 3, catalog });
       attentionNote = attention.items.length
@@ -121,7 +123,15 @@ export async function runHook(payload = null) {
     } catch {
       attentionNote = " Attention state needs review; run agentspine audit before using attention cues.";
     }
-    const summary = `AgentSpine indexed ${catalog.summary.total} Markdown sources (${catalog.summary.protected} protected). Source files remain byte-for-byte untouched.${attentionNote} Catalog: ${catalogPath}`;
+    try {
+      const learned = await learningContext({ root, includePrivate: false, maxItems: 50, catalog });
+      learningNote = learned.items.length
+        ? ` ${learned.items.length} accepted learning item(s) are available (${[...new Set(learned.items.map((item) => item.kind))].join(", ")}); load only relevant items with learning_context.`
+        : "";
+    } catch {
+      learningNote = " Learning state needs review; run agentspine audit before using learned context.";
+    }
+    const summary = `AgentSpine indexed ${catalog.summary.total} Markdown sources (${catalog.summary.protected} protected). Source files remain byte-for-byte untouched.${attentionNote}${learningNote} Catalog: ${catalogPath}`;
     if (payload) return { blocked: false, context: summary };
     process.stdout.write(`${JSON.stringify({
       hookSpecificOutput: { hookEventName: event, additionalContext: summary }

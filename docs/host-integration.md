@@ -59,4 +59,4 @@ agentspine audit /path/to/project --json
 
 The audit exits non-zero when a required gate fails, making it suitable for installation smoke tests and CI.
 
-At session and compaction boundaries, the hook may add a count and kinds of due shared attention cues. It never injects cue summaries or private relationship data. The agent must explicitly call `attention_context`, respect current-task priority, and set `markPresented` only when it actually surfaces a cue.
+At session and compaction boundaries, the hook may add counts and kinds for due shared attention cues and accepted shared learning. It never injects cue summaries, learned claims, private relationship data, or group context without an audience. The agent must explicitly call `attention_context` or `learning_context`, respect current-task priority, and set `markPresented` only when it actually surfaces a cue.

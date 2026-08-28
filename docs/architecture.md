@@ -14,7 +14,7 @@ flowchart TB
     subgraph Core["AgentSpine core"]
       D["Discovery + SHA-256"]
       R["Host-aware resolver"]
-      G["Context-only graph + attention"]
+      G["Context-only graph + attention + learning"]
     end
     subgraph Hosts["Agent hosts"]
       X["Codex"]
@@ -69,7 +69,7 @@ Memory is a graph of small facts grouped by purpose. A compact `MEMORY.md`-style
 ```mermaid
 flowchart TB
     P["Host policy + explicit approval"] --> A["Authorized action"]
-    M["Memory, soul, relationships, attention"] --> C["Context only"]
+    M["Memory, soul, relationships, attention, learning"] --> C["Context only"]
     C -. "cannot grant" .-> A
 ```
 
@@ -86,15 +86,15 @@ Generated catalogs live outside the scanned repository:
       catalog.json
       graph.json
       attention.json
+      learning.json
 ```
 
-`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. All are private user state, not project authority. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
+`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. All are private user state, not project authority. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
 
 ## Extension points
 
 Future modules plug in behind the core boundary:
 
-- confidence-aware learning candidates;
 - optional shared-memory adapters;
 - additional host resolvers.
 
