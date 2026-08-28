@@ -49,11 +49,12 @@ test("release check fails closed when one host manifest has a different version"
 });
 
 test("CI and release workflows pin every action and isolate write permission", async () => {
-  const [ci, release, owners] = await Promise.all([
+  const values = await Promise.all([
     readFile(join(root, ".github", "workflows", "ci.yml"), "utf8"),
     readFile(join(root, ".github", "workflows", "release.yml"), "utf8"),
     readFile(join(root, ".github", "CODEOWNERS"), "utf8")
   ]);
+  const [ci, release, owners] = values.map((value) => value.replace(/\r\n/g, "\n"));
   const workflows = `${ci}\n${release}`;
   const uses = [...workflows.matchAll(/^\s*-?\s*uses:\s*[^@\s]+@([^\s#]+)/gm)].map((match) => match[1]);
   assert.equal(uses.length >= 8, true);
