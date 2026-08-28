@@ -1,5 +1,7 @@
 {
-  "description": "Indexes context at lifecycle boundaries and protects existing identity sources from agent writes.",
+  "version": "0.3.0",
+  "contract": "agentspine.attention-events/v1",
+  "description": "Injects scoped context, persists minimal attention lifecycles, and protects existing identity sources from agent writes.",
   "hooks": {
     "SessionStart": [
       {
@@ -38,7 +40,6 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|apply_patch|Bash",
         "hooks": [
           {
             "type": "command",

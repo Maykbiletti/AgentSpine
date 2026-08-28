@@ -197,7 +197,7 @@ Status: provider-neutral local database initialization, append-only publication,
 
 ## 15. Automatic live continuity
 
-Status: implemented in `v0.2.0` for the ordered portal-neutral memory milestone. Automatic attention events and rights-bound job resume remain later stages.
+Status: implemented in `v0.2.0` for the ordered portal-neutral memory milestone. Automatic attention events followed in `v0.3.0`; rights-bound job resume remains a later stage.
 
 - native Claude Code and Codex lifecycle bundle with one command per supported event;
 - complete scoped session briefing injected at start, resume, prompt, and compaction boundaries without model-side MCP selection;
@@ -208,6 +208,20 @@ Status: implemented in `v0.2.0` for the ordered portal-neutral memory milestone.
 - unconditional rejection of secrets, sensitive personal facts, private group content, identity claims, authority, access, payment, production, and operational permissions;
 - `0.2.0` cache boundary, explicit Claude component registration, and reproducible fresh-install, stale-upgrade, and uninstall checks;
 - visible fail-closed context when any dependent state is malformed.
+
+## 16. Native attention events
+
+Status: implemented in `v0.3.0` as the second ordered milestone. The rights-bound self-starter remains deliberately unimplemented.
+
+- provider-neutral heartbeat, promise, and blocker lifecycle records written by installed native hooks;
+- immutable person/agent, group, project, task, privacy, and event identity binding;
+- hook receipt deduplication, repetition throttling, atomic multi-process writes, and retained prior versions;
+- start, restart, and compaction injection through the real scoped briefing without MCP selection;
+- current-task blocker and due-promise visibility under focus, with unrelated cues suppressed;
+- quiet-hour, disable, deletion, and person-purge behavior across active state, receipts, history, and presentations;
+- rejection of secret, identity, private-group, authority, access, production, payment, and permission claims;
+- `0.3.0` cache boundary and install/upgrade proof that exactly one MCP server and one lifecycle hook set load;
+- no messages, scheduling, task execution, permissions, or job resume.
 
 ## Definition of done for every stage
 

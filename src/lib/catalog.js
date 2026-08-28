@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalPath, projectStateDir } from "./paths.js";
@@ -66,7 +67,7 @@ export async function buildCatalog(inputRoot = process.cwd()) {
 export async function saveCatalog(catalog) {
   const directory = await projectStateDir(catalog.root);
   const target = join(directory, "catalog.json");
-  const temporary = `${target}.${process.pid}.tmp`;
+  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, `${JSON.stringify(catalog, null, 2)}\n`, { mode: 0o600 });
   await rename(temporary, target);
   return target;

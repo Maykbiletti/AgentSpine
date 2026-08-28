@@ -4,6 +4,27 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-28
+
+### Added
+
+- Provider-neutral heartbeat, promise, and blocker lifecycle events written by installed Claude Code and Codex hooks without a model-side MCP call
+- Exact actor, group, project, and task binding with stable event identity, minimal SHA-256 provenance, idempotent receipts, occurrence counts, and retained prior versions
+- Automatic current-task event injection at start, restart, prompt, and compaction boundaries, including stale-heartbeat, open-promise, and open-blocker handling
+- CLI inspection and permanent event deletion plus entity purge across events, receipts, history, and presentation throttles
+- Fresh-install and previous-version upgrade test that proves one MCP server, one hook set, automatic event capture, restart injection, and source-preserving uninstall
+
+### Changed
+
+- Package, lockfile, Claude Code, Codex, marketplace, and hook-bundle versions advance together to `0.3.0`
+- Focus mode suppresses unrelated cues while permitting an active blocker, due promise, or stale heartbeat for the exact current task
+- Parallel catalog replacement uses collision-free atomic temporary paths across concurrent lifecycle hooks
+
+### Security
+
+- Automatic prompt events require the local continuity opt-in and reject group conversation content, secrets, identity claims, rights, roles, delegation, access, production, payment, and approval claims
+- Corrupt attention lifecycle state and unknown task scope fail closed; events remain context-only and can neither send messages nor create authority
+
 ## [0.2.0] - 2026-08-28
 
 ### Added
@@ -113,5 +134,6 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Cross-platform preservation, hook, graph, and MCP tests
 
 [Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.1.0...HEAD
+[0.3.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Maykbiletti/AgentSpine/releases/tag/v0.1.0

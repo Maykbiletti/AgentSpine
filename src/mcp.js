@@ -173,7 +173,10 @@ const tools = [
       properties: {
         root: { type: "string" }, includePrivate: { type: "boolean" }, focusActive: { type: "boolean" },
         markPresented: { type: "boolean" }, maxItems: { type: "integer", minimum: 0, maximum: 20 },
-        groupId: { anyOf: [{ type: "string" }, { type: "null" }] }, now: { type: "string" }
+        entityId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        projectId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        currentTaskId: { anyOf: [{ type: "string" }, { type: "null" }] }, now: { type: "string" }
       }
     }
   },
@@ -199,7 +202,9 @@ const tools = [
           type: "object", additionalProperties: false,
           properties: {
             enabled: { type: "boolean" }, minIntervalHours: { type: "number", minimum: 1, maximum: 720 },
-            entitySilenceDays: { type: "number", minimum: 1, maximum: 3650 }, maxItems: { type: "integer", minimum: 1, maximum: 20 },
+            entitySilenceDays: { type: "number", minimum: 1, maximum: 3650 },
+            heartbeatStaleMinutes: { type: "integer", minimum: 1, maximum: 10080 },
+            maxItems: { type: "integer", minimum: 1, maximum: 20 },
             quietHours: {
               anyOf: [
                 { type: "null" },
@@ -219,13 +224,13 @@ const tools = [
   },
   {
     name: "delete_attention",
-    description: "Permanently delete one cue or all attention data for one entity, including retained attention history and presentation timestamps.",
+    description: "Permanently delete one cue, one lifecycle event, or all attention data for one entity, including retained history, receipts, and presentation timestamps.",
     inputSchema: {
       type: "object",
       properties: {
-        root: { type: "string" }, signalId: { type: "string" }, entityId: { type: "string" }
+        root: { type: "string" }, signalId: { type: "string" }, eventId: { type: "string" }, entityId: { type: "string" }
       },
-      oneOf: [{ required: ["signalId"] }, { required: ["entityId"] }]
+      oneOf: [{ required: ["signalId"] }, { required: ["eventId"] }, { required: ["entityId"] }]
     }
   },
   {

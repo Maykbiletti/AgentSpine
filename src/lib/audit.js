@@ -1,7 +1,7 @@
 import { isInside } from "./paths.js";
 import { buildCatalog, saveCatalog, verifyCatalog } from "./catalog.js";
 import { loadGraph } from "./graph.js";
-import { loadAttention } from "./attention.js";
+import { attentionFindings, inspectAttention } from "./attention.js";
 import { inspectLearning, learningFindings } from "./learning.js";
 import { coordinationFindings, delegationPolicyFindings, inspectCoordination } from "./coordination.js";
 import { inspectSharing, sharingAuthenticationFindings, sharingFindings } from "./sharing.js";
@@ -10,6 +10,8 @@ import { resolveContext } from "./context.js";
 import { sessionBriefing } from "./briefing.js";
 import { inspectHttpsFeedState } from "./feed-transport.js";
 import { continuityFindings, inspectContinuity } from "./continuity.js";
+import { fileURLToPath } from "node:url";
+import { checkHosts } from "../../scripts/check-hosts.js";
 
 function gate(id, name, ok, detail, severity = "error") {
   return { id, name, ok, severity, detail };
@@ -25,6 +27,8 @@ function authorityViolations(graph, attention, learning, continuity, coordinatio
     ...graph.history.map((entry) => entry.value).filter(Boolean),
     ...attention.signals,
     ...attention.activities,
+    ...attention.events,
+    ...attention.receipts,
     ...attention.history,
     ...attention.history.map((entry) => entry.value).filter(Boolean),
     ...learning.candidates,
@@ -60,11 +64,18 @@ function forbiddenEntityKeys(graph) {
 }
 
 export async function runAudit(root = process.cwd()) {
+  let hostIntegration = null;
+  let hostIntegrationError = null;
+  try {
+    hostIntegration = await checkHosts(fileURLToPath(new URL("../..", import.meta.url)));
+  } catch (error) {
+    hostIntegrationError = error.message;
+  }
   const before = await buildCatalog(root);
   const catalog = before;
   const catalogPath = await saveCatalog(catalog);
   const { graph, graphPath } = await loadGraph(before.root, catalog);
-  const { attention, attentionPath } = await loadAttention(before.root, catalog);
+  const { attention, attentionPath, error: attentionLoadError } = await inspectAttention(before.root, catalog);
   const { learning, learningPath, error: learningLoadError } = await inspectLearning(before.root, catalog);
   const { continuity, continuityPath, error: continuityLoadError } = await inspectContinuity(before.root, catalog);
   const {
@@ -101,6 +112,7 @@ export async function runAudit(root = process.cwd()) {
     ...graph.history.map((entry) => entry.value).filter((value) => value && "privacy" in value),
     ...attention.signals,
     ...attention.activities,
+    ...attention.events,
     ...attention.history,
     ...attention.history.map((entry) => entry.value).filter((value) => value && "privacy" in value),
     ...learning.candidates,
@@ -124,11 +136,13 @@ export async function runAudit(root = process.cwd()) {
   const attentionGroupInvalid = [
     ...attention.signals,
     ...attention.activities,
+    ...attention.events,
     ...attention.history.map((entry) => entry.value).filter(Boolean)
   ].filter((record) => record.privacy === "group" && (!knownGroups.has(record.groupId) || !isKnownGroupMember(record)));
   const attentionConfigValid = typeof attention.config.enabled === "boolean"
     && Number.isFinite(attention.config.minIntervalHours) && attention.config.minIntervalHours >= 1 && attention.config.minIntervalHours <= 720
     && Number.isFinite(attention.config.entitySilenceDays) && attention.config.entitySilenceDays >= 1 && attention.config.entitySilenceDays <= 3650
+    && Number.isInteger(attention.config.heartbeatStaleMinutes) && attention.config.heartbeatStaleMinutes >= 1 && attention.config.heartbeatStaleMinutes <= 10080
     && Number.isInteger(attention.config.maxItems) && attention.config.maxItems >= 1 && attention.config.maxItems <= 20
     && (attention.config.quietHours === null || (
       Number.isInteger(attention.config.quietHours?.start) && attention.config.quietHours.start >= 0 && attention.config.quietHours.start <= 23
@@ -137,6 +151,8 @@ export async function runAudit(root = process.cwd()) {
       && attention.config.quietHours.utcOffsetMinutes >= -720 && attention.config.quietHours.utcOffsetMinutes <= 840
     ));
   const learningIssues = learningFindings(learning, graph);
+  const attentionIssues = attentionFindings(attention);
+  if (attentionLoadError) attentionIssues.push(`unreadable-state:${attentionLoadError}`);
   if (learningLoadError) learningIssues.push(`unreadable-state:${learningLoadError}`);
   const continuityIssues = continuityFindings(continuity);
   if (continuityLoadError) continuityIssues.push(`unreadable-state:${continuityLoadError}`);
@@ -166,14 +182,16 @@ export async function runAudit(root = process.cwd()) {
     && briefingBytes <= briefing.budget.maxBytes;
 
   const gates = [
-    gate(1, "Runtime", Number(process.versions.node.split(".")[0]) >= 20, `Node ${process.versions.node}`),
+    gate(1, "Runtime", Number(process.versions.node.split(".")[0]) >= 20 && hostIntegration?.ok === true, hostIntegrationError
+      ? `Node ${process.versions.node}; host integration failed closed: ${hostIntegrationError}`
+      : `Node ${process.versions.node}; one versioned MCP server and lifecycle hook set per host`),
     gate(2, "Discovery", catalog.schema === "agentspine.catalog/v1", `${catalog.documents.length} Markdown documents indexed`),
     gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath) && !isInside(catalog.root, continuityPath) && !isInside(catalog.root, policyPath) && !isInside(catalog.root, coordinationPath) && !isInside(catalog.root, sharingPath) && !isInside(catalog.root, trustPath) && !isInside(catalog.root, registryPath) && !isInside(catalog.root, signerDirectory) && !isInside(catalog.root, feedStatePath), `State remains outside ${catalog.root}`),
     gate(4, "Native hierarchy", nativeMapped.every((document) => document.hosts.length > 0), `${nativeMapped.length} host-native documents mapped`),
     gate(5, "Link integrity", brokenLinks.length === 0, brokenLinks.length ? `${brokenLinks.length} broken Markdown links` : "All indexed Markdown links resolve"),
     gate(6, "Conflict visibility", Array.isArray(catalog.conflicts), `${reviewConflicts.length} precedence or classification findings exposed`, "warning"),
     gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0 && sharingAuthorityIssues.length === 0, `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings; ${sharingAuthorityIssues.length} shared authority findings`),
-    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && learningIssues.length === 0 && continuityIssues.length === 0 && coordinationContextIssues.length === 0 && sharingContextIssues.length === 0 && authenticationIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${learning.candidates.length} learning records, ${continuity.signals.length} continuity signals, ${coordination.tasks.length} coordination items, ${sharing.records.length} shared records, ${trust.records.length} trusted keys, ${registry.signers.length} local signers, and ${feedState.feeds.length} feed receipts checked`),
+    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && attentionIssues.length === 0 && learningIssues.length === 0 && continuityIssues.length === 0 && coordinationContextIssues.length === 0 && sharingContextIssues.length === 0 && authenticationIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${attention.events.length} lifecycle events, ${learning.candidates.length} learning records, ${continuity.signals.length} continuity signals, ${coordination.tasks.length} coordination items, ${sharing.records.length} shared records, ${trust.records.length} trusted keys, ${registry.signers.length} local signers, and ${feedState.feeds.length} feed receipts checked`),
     gate(9, "Context budget", loadedBytes <= context.budget.maxBytes && briefingBudgetValid, briefingError
       ? `${loadedBytes}/${context.budget.maxBytes} source bytes; briefing failed closed: ${briefingError}`
       : `${loadedBytes}/${context.budget.maxBytes} source bytes; ${briefingBytes}/${briefing.budget.maxBytes} briefing bytes`),

@@ -89,7 +89,7 @@ claude --plugin-dir .
 ```
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
-Version `0.2.0` explicitly registers `.mcp.json` and ships one native auto-discovered `hooks/hooks.json`; the version bump also invalidates Claude Code's earlier `0.1.0` plugin cache.
+Version `0.3.0` explicitly registers `.mcp.json`, ships one version-bound native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.2.0` plugin cache. Fresh-install and upgrade checks prove that exactly one MCP server and one hook set load.
 
 Verify the installed registration from a checkout with:
 
@@ -167,6 +167,8 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine attention-touch …` | Record only that an entity interaction occurred |
 | `agentspine attention-config …` | Configure limits, quiet hours, silence threshold, or disable attention |
 | `agentspine attention-delete …` | Permanently remove a cue and its retained attention history |
+| `agentspine attention-events …` | Inspect durable heartbeat, promise, and blocker events plus optional history |
+| `agentspine attention-event-delete …` | Permanently remove one lifecycle event, its receipts, history, and presentation state |
 | `agentspine learn-propose …` | Store an evidence-backed candidate outside accepted context |
 | `agentspine learn-evidence …` | Append evidence while retaining the previous candidate version |
 | `agentspine learn-review …` | Explicitly accept or reject a candidate |
@@ -241,7 +243,7 @@ flowchart LR
 
 Relationship updates supersede the active view but retain the previous observation in append-only graph history. Permission-like and credential-like attributes are rejected recursively. See [relationships and learning](docs/relationships.md).
 
-Attention is deliberately restrained: the current task wins, private cues require an exact direct-person scope, quiet hours and presentation throttles suppress repetition, and deletion removes retained attention history. Automatic briefings include only cues that survive those filters. See [attention](docs/attention.md).
+Attention is deliberately restrained: installed hooks retain minimal heartbeats, promises, and blockers without storing transcripts; each event requires an exact known actor/project/task scope; private and group visibility stays exact; and quiet hours, focus, throttling, lifecycle transitions, deletion, and purge remain enforceable. Events are context only—they send no messages, start no work, and grant no authority. See [attention](docs/attention.md).
 
 Safe learning is evidence-first: general candidates remain invisible until reviewed. A separate default-off continuity opt-in can automatically accept only direct, high-confidence style, preference, no-go, correction, project-fact, and reference signals. Sensitive personal facts, secrets, identity merges, private group content, and operational or authority claims are always rejected. See [automatic continuity](docs/automatic-continuity.md) and [safe learning](docs/learning.md).
 
@@ -275,7 +277,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.2` adds automatic scoped session continuity and opt-in low-risk conversation learning through the installed Claude Code and Codex lifecycle bundle. Existing source Markdown remains immutable, and later attention-event and rights-bound self-starter milestones remain deliberately unfinished.
+AgentSpine is in active early development. `v0.3` adds persistent, exactly scoped heartbeat, promise, and blocker events to the automatic Claude Code and Codex lifecycle bundle. Existing source Markdown remains immutable. The next ordered milestone—the rights-bound self-starter—remains deliberately unimplemented.
 
 ## Documentation
 

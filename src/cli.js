@@ -88,10 +88,12 @@ Usage:
   agentspine relate <from> <to> --relation works-with [--privacy private]
   agentspine relationships <entity-id> [--group id] [--include-private] [--json]
   agentspine attention [root] [--group id] [--include-private] [--focus-active] [--mark-presented]
+  agentspine attention-events [root] [--include-history]
   agentspine attention-add [id] --kind promise --summary text [--entity id] [--group id] [--due date]
   agentspine attention-resolve <id> [--status completed|dismissed|open]
   agentspine attention-touch <entity-id> [--kind interaction] [--at date]
   agentspine attention-delete <signal-id>
+  agentspine attention-event-delete <event-id>
   agentspine attention-purge <entity-id>
   agentspine attention-config [root] [--enabled true|false] [--quiet-start 22 --quiet-end 7 --utc-offset 120]
   agentspine learn-propose [id] --kind preference --claim text --evidence text
@@ -253,9 +255,23 @@ export async function run(argv = process.argv.slice(2)) {
       includePrivate: booleanFlag(flags["include-private"]),
       focusActive: booleanFlag(flags["focus-active"]),
       markPresented: booleanFlag(flags["mark-presented"]),
+      entityId: flags.entity || null,
       groupId: flags.group || null,
+      projectId: flags.project || null,
+      currentTaskId: flags.task || null,
       maxItems: flags["max-items"] === undefined ? null : Number(flags["max-items"])
     }), json);
+  }
+
+  if (command === "attention-events") {
+    const { attention, attentionPath } = await loadAttention(positional[0] || process.cwd());
+    return output({
+      schema: "agentspine.attention-events/v1", attentionPath,
+      events: attention.events,
+      receipts: attention.receipts,
+      history: booleanFlag(flags["include-history"]) ? attention.history.filter((item) => item.kind === "attention-event") : [],
+      authority: "context-only"
+    }, json);
   }
 
   if (command === "attention-add") {
@@ -285,6 +301,10 @@ export async function run(argv = process.argv.slice(2)) {
     return output(await deleteAttention({ root: flags.root || process.cwd(), signalId: positional[0] }), json);
   }
 
+  if (command === "attention-event-delete") {
+    return output(await deleteAttention({ root: flags.root || process.cwd(), eventId: positional[0] }), json);
+  }
+
   if (command === "attention-purge") {
     return output(await deleteAttention({ root: flags.root || process.cwd(), entityId: positional[0] }), json);
   }
@@ -295,6 +315,7 @@ export async function run(argv = process.argv.slice(2)) {
     if (flags.enabled !== undefined) config.enabled = booleanFlag(flags.enabled);
     if (flags["min-interval-hours"] !== undefined) config.minIntervalHours = Number(flags["min-interval-hours"]);
     if (flags["silence-days"] !== undefined) config.entitySilenceDays = Number(flags["silence-days"]);
+    if (flags["heartbeat-stale-minutes"] !== undefined) config.heartbeatStaleMinutes = Number(flags["heartbeat-stale-minutes"]);
     if (flags["max-items"] !== undefined) config.maxItems = Number(flags["max-items"]);
     if (flags["quiet-off"] !== undefined) config.quietHours = null;
     else if (flags["quiet-start"] !== undefined || flags["quiet-end"] !== undefined) {

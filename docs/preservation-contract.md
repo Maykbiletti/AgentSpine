@@ -39,7 +39,7 @@ AgentSpine does not resolve semantic disagreement by editing content. It exposes
 
 ## Uninstall
 
-Uninstall removes the plugin and its generated state only. It never touches scanned projects. Acceptance tests snapshot source bytes before scanning, resolving, session briefing, reading, attention mutation, learning proposal/review/rollback, delegation and task workflows, signing, trust, shared adapter publication/import/review, HTTPS snapshot export/import, verifying, and hook execution, then compare the source tree afterward.
+Uninstall removes the plugin and its generated state only. It never touches scanned projects. Acceptance tests snapshot source bytes before scanning, resolving, session briefing, reading, attention mutation, heartbeat/promise/blocker lifecycle transitions, learning proposal/review/rollback, delegation and task workflows, signing, trust, shared adapter publication/import/review, HTTPS snapshot export/import, verifying, and hook execution, then compare the source tree afterward.
 
 ## Not guaranteed
 

@@ -1,6 +1,6 @@
 # Automatic continuity
 
-AgentSpine `0.2.0` connects the existing portal-neutral memory and briefing layers to installed Claude Code and Codex lifecycle hooks. The result is real host context at session boundaries, not a counter or a suggestion that the model should call an MCP tool later.
+AgentSpine `0.3.0` connects the portal-neutral memory, briefing, and attention layers to installed Claude Code and Codex lifecycle hooks. The result is real host context and durable scoped attention state at lifecycle boundaries, not a counter or a suggestion that the model should call an MCP tool later.
 
 ## One-time setup
 
@@ -30,8 +30,10 @@ sequenceDiagram
     L->>L: current request > stops > task > rules > older context
     L-->>M: complete byte-budgeted session_briefing
     H->>L: UserPromptSubmit
-    L->>S: optional minimal safe signal + digest provenance
+    L->>S: optional minimal safe learning + promise/blocker event
     L-->>M: refreshed scoped briefing
+    H->>L: PostToolUse / Stop / SubagentStop
+    L->>S: idempotent heartbeat or explicit status transition
 ```
 
 The model does not need to call `scan`, `context`, or `session_briefing`. Those tools remain available for explicit inspection only.
@@ -72,4 +74,4 @@ Generated state remains in the operating system's private user-state directory. 
 
 ## Deliberate boundary
 
-This milestone does not yet connect promises, blockers, or heartbeats to automatic attention events, and it does not start or resume jobs. Those are later ordered milestones with separate lifecycle and authority proofs.
+Promises, blockers, and heartbeats now persist through automatic lifecycle events with exact actor, group, project, and task scope. AgentSpine still does not start or resume jobs. The rights-bound self-starter remains the next ordered milestone and requires a separate current host/owner authorization proof before every effect.

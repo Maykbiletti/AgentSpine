@@ -4,8 +4,8 @@ export { sessionBriefing } from "./lib/briefing.js";
 export { discoverDocuments } from "./lib/documents.js";
 export { runAudit } from "./lib/audit.js";
 export {
-  attentionContext, configureAttention, deleteAttention, loadAttention,
-  recordActivity, resolveAttention, upsertAttention
+  attentionContext, attentionFindings, configureAttention, deleteAttention, inspectAttention, loadAttention,
+  recordActivity, recordAttentionEvent, resolveAttention, upsertAttention
 } from "./lib/attention.js";
 export {
   acceptContinuityLearning, addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,

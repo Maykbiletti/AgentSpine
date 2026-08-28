@@ -1,23 +1,33 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCatalog } from "./catalog.js";
+import { loadCoordination } from "./coordination.js";
 import { loadGraph } from "./graph.js";
 import { projectStateDir } from "./paths.js";
 
 const SIGNAL_KINDS = new Set(["unanswered-question", "promise", "check-in", "meaningful-change"]);
 const ACTIVITY_KINDS = new Set(["message", "interaction", "task", "check-in"]);
+const EVENT_KINDS = new Set(["heartbeat", "promise", "blocker"]);
 const PRIVACY = new Set(["private", "shared", "group"]);
 const STATUSES = new Set(["open", "completed", "dismissed"]);
+const EVENT_STATUSES = {
+  heartbeat: new Set(["active", "stopped"]),
+  promise: new Set(["open", "completed", "dismissed"]),
+  blocker: new Set(["open", "resolved", "dismissed"])
+};
+const HOOK_EVENTS = new Set(["UserPromptSubmit", "PostToolUse", "Stop", "SubagentStop"]);
 const TEAM_RELATIONS = new Set(["works-with", "member-of", "reports-to", "responsible-for"]);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
 const MAX_STATE_BYTES = 5 * 1024 * 1024;
+const UNSAFE_EVENT_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret|passwort|geheimnis)\s*[:=]\s*\S{8,}|\b(?:permission|permissions|rights?|roles?|delegat|authorized|authorization|berechtigt|rechte|rolle|freigabe|approval|approve|admin|deploy|production|produktion|billing|payment|zahlung|spending|network access|netzwerkzugriff|database access|datenbankzugriff|tool access|dateizugriff|file access|same person|same identity|alias of|merge identit|identit(?:y|ät)|private group|private gruppe|private chat|privater chat)\b/i;
 
 function defaultConfig() {
   return {
     enabled: true,
     minIntervalHours: 24,
     entitySilenceDays: 14,
+    heartbeatStaleMinutes: 30,
     maxItems: 3,
     quietHours: null
   };
@@ -25,11 +35,13 @@ function defaultConfig() {
 
 function emptyAttention(root) {
   return {
-    schema: "agentspine.attention/v1",
+    schema: "agentspine.attention/v2",
     root,
     config: defaultConfig(),
     signals: [],
     activities: [],
+    events: [],
+    receipts: [],
     history: [],
     presentations: {}
   };
@@ -37,12 +49,53 @@ function emptyAttention(root) {
 
 function normalizeAttention(value, root) {
   const state = value && typeof value === "object" ? value : emptyAttention(root);
-  state.schema = "agentspine.attention/v1";
-  state.root = root;
+  const originalSchema = state.schema;
+  if (!["agentspine.attention/v1", "agentspine.attention/v2"].includes(state.schema) || state.root !== root) {
+    throw new Error("attention state structure is invalid; automatic attention is disabled until repaired");
+  }
+  state.schema = "agentspine.attention/v2";
   state.config = { ...defaultConfig(), ...(state.config && typeof state.config === "object" ? state.config : {}) };
-  for (const key of ["signals", "activities", "history"]) if (!Array.isArray(state[key])) state[key] = [];
-  if (!state.presentations || Array.isArray(state.presentations) || typeof state.presentations !== "object") state.presentations = {};
+  for (const key of ["signals", "activities", "history"]) {
+    if (!Array.isArray(state[key])) throw new Error("attention state structure is invalid; automatic attention is disabled until repaired");
+  }
+  for (const key of ["events", "receipts"]) {
+    if (state[key] === undefined && originalSchema === "agentspine.attention/v1") state[key] = [];
+    if (!Array.isArray(state[key])) throw new Error("attention state structure is invalid; automatic attention is disabled until repaired");
+  }
+  if (!state.presentations || Array.isArray(state.presentations) || typeof state.presentations !== "object") {
+    throw new Error("attention state structure is invalid; automatic attention is disabled until repaired");
+  }
+  if (state.events.some((event) => !validEventRecord(event)) || state.receipts.some((receipt) => !validReceipt(receipt))) {
+    throw new Error("attention lifecycle state is invalid; automatic attention is disabled until repaired");
+  }
   return state;
+}
+
+function validEventRecord(event) {
+  return event && ID_RE.test(event.id || "") && EVENT_KINDS.has(event.kind)
+    && EVENT_STATUSES[event.kind]?.has(event.status) && PRIVACY.has(event.privacy)
+    && (event.entityId === null || ID_RE.test(event.entityId))
+    && (event.groupId === null || ID_RE.test(event.groupId))
+    && ID_RE.test(event.projectId || "") && ID_RE.test(event.taskId || "")
+    && typeof event.summary === "string" && event.summary.length > 0 && event.summary.length <= 280
+    && Number.isInteger(event.occurrenceCount) && event.occurrenceCount >= 1
+    && event.authority === "context-only"
+    && Number.isFinite(new Date(event.createdAt).getTime())
+    && Number.isFinite(new Date(event.updatedAt).getTime())
+    && (event.dueAt === null || Number.isFinite(new Date(event.dueAt).getTime()))
+    && !UNSAFE_EVENT_RE.test(event.summary)
+    && event.provenance?.source === "native-lifecycle-hook"
+    && ID_RE.test(event.provenance?.receiptId || "")
+    && HOOK_EVENTS.has(event.provenance?.hookEvent)
+    && new Set(["claude", "codex", "generic"]).has(event.provenance?.host)
+    && /^[a-f0-9]{64}$/.test(event.provenance?.digest || "");
+}
+
+function validReceipt(receipt) {
+  return receipt && ID_RE.test(receipt.id || "") && ID_RE.test(receipt.eventId || "")
+    && EVENT_KINDS.has(receipt.kind) && receipt.authority === "context-only"
+    && /^[a-f0-9]{64}$/.test(receipt.digest || "")
+    && Number.isFinite(new Date(receipt.at).getTime());
 }
 
 function normalizeDate(value, field, nullable = false) {
@@ -77,6 +130,7 @@ function validConfig(config) {
   return typeof config.enabled === "boolean"
     && Number.isFinite(config.minIntervalHours) && config.minIntervalHours >= 1 && config.minIntervalHours <= 720
     && Number.isFinite(config.entitySilenceDays) && config.entitySilenceDays >= 1 && config.entitySilenceDays <= 3650
+    && Number.isInteger(config.heartbeatStaleMinutes) && config.heartbeatStaleMinutes >= 1 && config.heartbeatStaleMinutes <= 10080
     && Number.isInteger(config.maxItems) && config.maxItems >= 1 && config.maxItems <= 20
     && quietValid;
 }
@@ -107,6 +161,43 @@ export async function loadAttention(root = process.cwd(), providedCatalog = null
   const directory = await projectStateDir(catalog.root);
   const attentionPath = join(directory, "attention.json");
   return { attention: await readAttentionFile(attentionPath, catalog.root), attentionPath, catalog };
+}
+
+export async function inspectAttention(root = process.cwd(), providedCatalog = null) {
+  const catalog = providedCatalog || await buildCatalog(root);
+  const directory = await projectStateDir(catalog.root);
+  const attentionPath = join(directory, "attention.json");
+  try {
+    return { attention: await readAttentionFile(attentionPath, catalog.root), attentionPath, catalog, error: null };
+  } catch (error) {
+    return { attention: emptyAttention(catalog.root), attentionPath, catalog, error: error.message };
+  }
+}
+
+export function attentionFindings(attention) {
+  const findings = [];
+  if (!attention || attention.schema !== "agentspine.attention/v2") findings.push("invalid-schema");
+  if (!validConfig(attention?.config || {})) findings.push("invalid-config");
+  const ids = new Set();
+  for (const event of attention?.events || []) {
+    if (!validEventRecord(event)) findings.push(`invalid-event:${event?.id || "unknown"}`);
+    if (ids.has(event.id)) findings.push(`duplicate-event:${event.id}`);
+    ids.add(event.id);
+  }
+  const receiptIds = new Set();
+  for (const receipt of attention?.receipts || []) {
+    if (!validReceipt(receipt)) findings.push(`invalid-receipt:${receipt?.id || "unknown"}`);
+    if (receiptIds.has(receipt.id)) findings.push(`duplicate-receipt:${receipt.id}`);
+    if (!ids.has(receipt.eventId)) findings.push(`orphan-receipt:${receipt.id}`);
+    receiptIds.add(receipt.id);
+  }
+  for (const event of attention?.events || []) {
+    const receipt = (attention.receipts || []).find((item) => item.id === event.provenance?.receiptId);
+    if (!receipt || receipt.eventId !== event.id || receipt.digest !== event.provenance.digest) {
+      findings.push(`event-provenance-receipt-mismatch:${event.id}`);
+    }
+  }
+  return findings;
 }
 
 async function saveAttention(state, path) {
@@ -157,6 +248,113 @@ function preservePrevious(state, kind, value, now) {
     value: { ...value, authority: "context-only" },
     privacy: value.privacy || "private",
     authority: "context-only"
+  });
+}
+
+function digest(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function eventIdentity(kind, scope, summary) {
+  const canonical = [kind, scope.entityId || "", scope.groupId || "", scope.projectId || "", scope.taskId || "", summary.trim().toLowerCase()].join("\0");
+  return `event:${kind}:${digest(canonical).slice(0, 24)}`;
+}
+
+function validateKnownScope(graph, { entityId, groupId, projectId, taskId, privacy }) {
+  if (!entityId) throw new Error("attention events require an exact known actor identity");
+  if (!projectId || !taskId) throw new Error("attention events require exact project and task scope");
+  if (entityId && !graph.entities.some((entity) => entity.id === entityId && ["person", "agent"].includes(entity.kind))) {
+    throw new Error(`unknown person or agent entity: ${entityId}`);
+  }
+  if (!graph.entities.some((entity) => entity.id === projectId && entity.kind === "project")) {
+    throw new Error(`unknown project entity: ${projectId}`);
+  }
+  validateGroupScope(privacy, groupId, graph, entityId);
+}
+
+function validateEventSummary(summary) {
+  if (!summary || typeof summary !== "string") throw new Error("event summary is required");
+  const compact = summary.trim().replace(/\s+/g, " ").slice(0, 280);
+  if (!compact) throw new Error("event summary is required");
+  if (UNSAFE_EVENT_RE.test(compact)) throw new Error("secret, identity, authority, or operational-rights content was rejected");
+  return compact;
+}
+
+/** Record or transition a minimal provider-neutral lifecycle event. */
+export async function recordAttentionEvent({
+  root = process.cwd(), id = null, kind, summary, status = null,
+  entityId = null, groupId = null, projectId = null, taskId = null,
+  privacy = "private", dueAt = null, receiptId, host, hookEvent,
+  observedAt = new Date()
+}) {
+  if (!EVENT_KINDS.has(kind)) throw new Error(`unsupported attention event kind: ${kind}`);
+  if (!PRIVACY.has(privacy)) throw new Error(`unsupported privacy scope: ${privacy}`);
+  if (!ID_RE.test(receiptId || "")) throw new Error("receiptId is required for idempotent lifecycle recording");
+  if (!new Set(["claude", "codex", "generic"]).has(host)) throw new Error("event host is invalid");
+  if (!HOOK_EVENTS.has(hookEvent)) throw new Error("event provenance must name a supported lifecycle hook");
+  for (const [field, value] of Object.entries({ entityId, groupId, projectId, taskId })) {
+    if (value !== null && !ID_RE.test(value)) throw new Error(`${field} is invalid`);
+  }
+  const at = normalizeDate(observedAt, "observedAt");
+  const normalizedDueAt = normalizeDate(dueAt, "dueAt", true);
+  const normalizedSummary = validateEventSummary(summary);
+  const nextStatus = status || (kind === "heartbeat" ? "active" : "open");
+  if (!EVENT_STATUSES[kind].has(nextStatus)) throw new Error(`unsupported ${kind} status: ${nextStatus}`);
+  const scope = { entityId, groupId, projectId, taskId };
+  const eventId = id || eventIdentity(kind, scope, normalizedSummary);
+  if (!ID_RE.test(eventId)) throw new Error("event id must be stable and whitespace-free");
+  const provenanceDigest = digest(JSON.stringify({ kind, summary: normalizedSummary, status: nextStatus, ...scope }));
+  return attentionMutation(root, async (state, catalog, attentionPath) => {
+    const duplicate = state.receipts.find((receipt) => receipt.id === receiptId);
+    if (duplicate) {
+      if (duplicate.eventId !== eventId || duplicate.kind !== kind || duplicate.digest !== provenanceDigest) {
+        throw new Error("attention receipt collision detected");
+      }
+      const event = state.events.find((item) => item.id === duplicate.eventId) || null;
+      return { event, duplicate: true, receipt: duplicate, attentionPath };
+    }
+    const { graph } = await loadGraph(catalog.root, catalog);
+    validateKnownScope(graph, { ...scope, privacy });
+    const { coordination } = await loadCoordination(catalog.root, catalog);
+    const task = coordination.tasks.find((item) => item.id === taskId);
+    if (!task || task.projectId !== projectId) throw new Error("attention event task must exist in the exact project scope");
+    if (![task.createdBy, task.assigneeId].includes(entityId)) {
+      throw new Error("attention event actor must be the task creator or assignee");
+    }
+    if (task.groupId !== groupId && (task.groupId !== null || groupId !== null)) {
+      throw new Error("attention event group scope must match the task");
+    }
+    if (stricterPrivacy(privacy, task.privacy) !== privacy) {
+      throw new Error("attention event privacy cannot be broader than the task");
+    }
+    const previous = state.events.find((item) => item.id === eventId);
+    if (previous && (previous.kind !== kind || previous.entityId !== entityId || previous.groupId !== groupId
+      || previous.projectId !== projectId || previous.taskId !== taskId || previous.privacy !== privacy)) {
+      throw new Error("stable attention event identity cannot change kind, scope, or privacy");
+    }
+    preservePrevious(state, "attention-event", previous, at);
+    const provenance = {
+      source: "native-lifecycle-hook", host, hookEvent, receiptId,
+      observedAt: at,
+      digest: provenanceDigest
+    };
+    const event = {
+      id: eventId, kind, summary: normalizedSummary, status: nextStatus,
+      entityId, groupId, projectId, taskId, privacy,
+      dueAt: normalizedDueAt,
+      createdAt: previous?.createdAt || at,
+      updatedAt: at,
+      occurrenceCount: (previous?.occurrenceCount || 0) + 1,
+      provenance,
+      authority: "context-only"
+    };
+    state.events = state.events.filter((item) => item.id !== eventId);
+    state.events.push(event);
+    state.events.sort((left, right) => left.id.localeCompare(right.id));
+    const receipt = { id: receiptId, eventId, kind, digest: provenanceDigest, at, authority: "context-only" };
+    state.receipts.push(receipt);
+    state.receipts.sort((left, right) => left.at.localeCompare(right.at) || left.id.localeCompare(right.id));
+    return { event, duplicate: false, receipt, attentionPath };
   });
 }
 
@@ -281,7 +479,7 @@ function normalizeQuietHours(value) {
 export async function configureAttention({ root = process.cwd(), config = {}, now = new Date() }) {
   if (!config || Array.isArray(config) || typeof config !== "object") throw new Error("config must be an object");
   if (!Object.keys(config).length) throw new Error("config must change at least one attention setting");
-  const allowed = new Set(["enabled", "minIntervalHours", "entitySilenceDays", "maxItems", "quietHours"]);
+  const allowed = new Set(["enabled", "minIntervalHours", "entitySilenceDays", "heartbeatStaleMinutes", "maxItems", "quietHours"]);
   const unknown = Object.keys(config).filter((key) => !allowed.has(key));
   if (unknown.length) throw new Error(`unsupported attention config: ${unknown.join(", ")}`);
   const timestamp = normalizeDate(now, "now");
@@ -293,6 +491,7 @@ export async function configureAttention({ root = process.cwd(), config = {}, no
     }
     if ("minIntervalHours" in config) state.config.minIntervalHours = normalizeNumber(config.minIntervalHours, "minIntervalHours", 1, 720);
     if ("entitySilenceDays" in config) state.config.entitySilenceDays = normalizeNumber(config.entitySilenceDays, "entitySilenceDays", 1, 3650);
+    if ("heartbeatStaleMinutes" in config) state.config.heartbeatStaleMinutes = normalizeInteger(config.heartbeatStaleMinutes, "heartbeatStaleMinutes", 1, 10080);
     if ("maxItems" in config) state.config.maxItems = normalizeInteger(config.maxItems, "maxItems", 1, 20);
     if ("quietHours" in config) state.config.quietHours = normalizeQuietHours(config.quietHours);
     if (!validConfig(state.config)) throw new Error("resulting attention configuration is invalid");
@@ -357,7 +556,8 @@ function looserPrivacy(left, right) {
 
 export async function attentionContext({
   root = process.cwd(), includePrivate = false, focusActive = false,
-  markPresented = false, maxItems = null, groupId = null, now = new Date(), catalog: providedCatalog = null
+  markPresented = false, maxItems = null, entityId = null, groupId = null,
+  projectId = null, currentTaskId = null, now = new Date(), catalog: providedCatalog = null
 } = {}) {
   const timestamp = normalizeDate(now, "now");
   const current = new Date(timestamp);
@@ -373,8 +573,8 @@ export async function attentionContext({
   const groupEntities = groupEntityIds(graph, groupId, includePrivate);
   let suppressed = null;
   if (!attention.config.enabled) suppressed = "disabled";
-  else if (focusActive) suppressed = "focus-active";
   else if (isQuiet(current, attention.config.quietHours)) suppressed = "quiet-hours";
+  else if (focusActive) suppressed = "focus-active";
 
   const candidates = [];
   if (!suppressed) {
@@ -446,6 +646,42 @@ export async function attentionContext({
     }
   }
 
+  // Focus suppresses unrelated reminders but not a blocker or due promise for
+  // the exact task already in focus. Quiet hours and the global switch still
+  // suppress every presentation while retaining durable state.
+  if (attention.config.enabled && suppressed !== "quiet-hours") {
+    for (const event of attention.events) {
+      if (!EVENT_KINDS.has(event.kind) || !EVENT_STATUSES[event.kind]?.has(event.status)) continue;
+      if (!visible(event, entities, includePrivate, groupId, groupEntities)) continue;
+      if (event.entityId !== null && event.entityId !== entityId) continue;
+      if (event.projectId !== projectId || event.taskId !== currentTaskId) continue;
+      if (event.kind === "heartbeat" && event.status !== "active") continue;
+      if (event.kind === "promise" && event.status !== "open") continue;
+      if (event.kind === "blocker" && event.status !== "open") continue;
+      if (event.dueAt && new Date(event.dueAt) > current) continue;
+      if (event.dueAt && !Number.isFinite(new Date(event.dueAt).getTime())) continue;
+      if (event.kind === "heartbeat" && !event.dueAt) {
+        const staleAt = new Date(event.updatedAt).getTime() + attention.config.heartbeatStaleMinutes * 60000;
+        if (staleAt > current.getTime()) continue;
+      }
+      const key = `event:${event.id}`;
+      if (recentlyPresented(attention, key, current)) continue;
+      const weights = { blocker: 200, promise: 150, heartbeat: 80 };
+      candidates.push({
+        key, source: "lifecycle-event", score: weights[event.kind],
+        kind: event.kind, summary: event.summary, status: event.status,
+        entityId: event.entityId, projectId: event.projectId, taskId: event.taskId,
+        dueAt: event.dueAt, privacy: event.privacy, groupId: event.groupId,
+        occurrenceCount: event.occurrenceCount,
+        provenance: event.provenance,
+        authority: "context-only"
+      });
+    }
+  }
+  if (focusActive && candidates.some((item) => item.source === "lifecycle-event")) {
+    suppressed = "focus-active-except-current-task";
+  }
+
   const limit = maxItems === null
     ? attention.config.maxItems
     : normalizeInteger(maxItems, "maxItems", 0, 20);
@@ -469,7 +705,10 @@ export async function attentionContext({
     enabled: attention.config.enabled,
     suppressed,
     now: timestamp,
+    entityId,
     groupId,
+    projectId,
+    currentTaskId,
     items,
     remaining: Math.max(0, candidates.length - items.length),
     authority: "context-only",
@@ -477,8 +716,8 @@ export async function attentionContext({
   };
 }
 
-export async function deleteAttention({ root = process.cwd(), signalId = null, entityId = null }) {
-  if (Boolean(signalId) === Boolean(entityId)) throw new Error("provide exactly one of signalId or entityId");
+export async function deleteAttention({ root = process.cwd(), signalId = null, eventId = null, entityId = null }) {
+  if ([signalId, eventId, entityId].filter(Boolean).length !== 1) throw new Error("provide exactly one of signalId, eventId, or entityId");
   return attentionMutation(root, (state, _catalog, attentionPath) => {
     if (signalId) {
       const existed = state.signals.some((signal) => signal.id === signalId);
@@ -487,15 +726,29 @@ export async function deleteAttention({ root = process.cwd(), signalId = null, e
       delete state.presentations[`cue:${signalId}`];
       return { deleted: existed, signalId, attentionPath };
     }
+    if (eventId) {
+      const existed = state.events.some((event) => event.id === eventId);
+      state.events = state.events.filter((event) => event.id !== eventId);
+      const receiptIds = new Set(state.receipts.filter((receipt) => receipt.eventId === eventId).map((receipt) => receipt.id));
+      state.receipts = state.receipts.filter((receipt) => receipt.eventId !== eventId);
+      state.history = state.history.filter((entry) => entry.recordId !== eventId && entry.value?.id !== eventId);
+      delete state.presentations[`event:${eventId}`];
+      return { deleted: existed, eventId, deletedReceipts: receiptIds.size, attentionPath };
+    }
     const signalIds = new Set(state.signals.filter((signal) => signal.entityId === entityId).map((signal) => signal.id));
     const deletedSignals = signalIds.size;
     const deletedActivities = state.activities.filter((activity) => activity.entityId === entityId).length;
+    const eventIds = new Set(state.events.filter((event) => event.entityId === entityId).map((event) => event.id));
+    const deletedEvents = eventIds.size;
     state.signals = state.signals.filter((signal) => signal.entityId !== entityId);
     state.activities = state.activities.filter((activity) => activity.entityId !== entityId);
-    state.history = state.history.filter((entry) => entry.entityId !== entityId && entry.value?.entityId !== entityId && !signalIds.has(entry.recordId));
+    state.events = state.events.filter((event) => event.entityId !== entityId);
+    state.receipts = state.receipts.filter((receipt) => !eventIds.has(receipt.eventId));
+    state.history = state.history.filter((entry) => entry.entityId !== entityId && entry.value?.entityId !== entityId && !signalIds.has(entry.recordId) && !eventIds.has(entry.recordId));
     for (const key of Object.keys(state.presentations)) {
       if (key === `neglected:${entityId}` || [...signalIds].some((id) => key === `cue:${id}`)) delete state.presentations[key];
+      if ([...eventIds].some((id) => key === `event:${id}`)) delete state.presentations[key];
     }
-    return { deletedSignals, deletedActivities, entityId, attentionPath };
+    return { deletedSignals, deletedActivities, deletedEvents, entityId, attentionPath };
   });
 }

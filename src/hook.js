@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
+import { recordAttentionEvent } from "./lib/attention.js";
 import { scanAndSave } from "./lib/catalog.js";
 import { loadGraph } from "./lib/graph.js";
 import { canonicalPath, findProjectRoot } from "./lib/paths.js";
@@ -13,6 +15,7 @@ const KNOWN_EVENTS = new Set([
   ...CONTEXT_EVENTS, "PreToolUse", "PostToolUse", "Stop", "SubagentStop"
 ]);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
+const ATTENTION_WRITE_EVENTS = new Set(["UserPromptSubmit", "PostToolUse", "Stop", "SubagentStop"]);
 
 async function readStdin() {
   let value = "";
@@ -22,7 +25,9 @@ async function readStdin() {
     if (bytes > MAX_STDIN_BYTES) throw new Error("hook input exceeds the 64 KiB limit");
     value += chunk;
   }
-  return value.trim() ? JSON.parse(value) : {};
+  const parsed = value.trim() ? JSON.parse(value) : {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("hook input must be one JSON object");
+  return parsed;
 }
 
 function boundedId(value, field) {
@@ -59,7 +64,7 @@ async function runtimeScope(input, root) {
   };
 }
 
-function renderContext(event, catalog, briefing, signal = null) {
+function renderContext(event, catalog, briefing, signal = null, attentionEvent = null) {
   const packet = {
     schema: "agentspine.hook-context/v1",
     event,
@@ -72,11 +77,100 @@ function renderContext(event, catalog, briefing, signal = null) {
       kind: signal.kind || null,
       reason: signal.reason || null
     } : null,
+    attentionEvent: attentionEvent ? {
+      captured: Boolean(attentionEvent.event),
+      duplicate: Boolean(attentionEvent.duplicate),
+      id: attentionEvent.event?.id || null,
+      kind: attentionEvent.event?.kind || null,
+      status: attentionEvent.event?.status || null,
+      reason: attentionEvent.reason || null
+    } : null,
     indexedSources: catalog.summary.total,
     briefing,
     authority: "context-only"
   };
   return JSON.stringify(packet);
+}
+
+function eventReceipt(input, event, scope, discriminator = "lifecycle") {
+  const supplied = input.event_id ?? input.hook_event_id ?? input.tool_use_id ?? input.session_id;
+  if (typeof supplied === "string" && ID_RE.test(supplied)) {
+    return `receipt:${createHash("sha256").update(`${event}\0${supplied}\0${discriminator}`).digest("hex").slice(0, 24)}`;
+  }
+  const material = [event, scope.host, scope.entityId, scope.projectId, scope.currentTaskId, discriminator].join("\0");
+  return `receipt:${createHash("sha256").update(material).digest("hex").slice(0, 24)}`;
+}
+
+function heartbeatReceipt(input, scope) {
+  const at = new Date(input.timestamp || Date.now());
+  if (!Number.isFinite(at.getTime())) throw new Error("heartbeat timestamp is invalid");
+  const minute = at.toISOString().slice(0, 16);
+  const material = [scope.host, scope.entityId, scope.groupId, scope.projectId, scope.currentTaskId, minute].join("\0");
+  return `receipt:heartbeat:${createHash("sha256").update(material).digest("hex").slice(0, 20)}`;
+}
+
+function minimalAttentionSignal(prompt) {
+  if (typeof prompt !== "string" || Buffer.byteLength(prompt) > 16384) return null;
+  const rules = [
+    { kind: "promise", re: /^(?:i promise(?: to)?|i will|ich verspreche(?:,)?|ich werde)\s+(.+)$/i, prefix: "Promise: " },
+    { kind: "blocker", re: /^(?:blocker|blocked(?: by)?|i am blocked(?: by)?|ich bin blockiert(?: durch)?|blockiert durch)\s*[:,-]?\s*(.+)$/i, prefix: "Blocker: " }
+  ];
+  for (const rule of rules) {
+    const match = prompt.trim().match(rule.re);
+    if (!match) continue;
+    const value = match[1].trim().replace(/\s+/g, " ").replace(/[.!?]+$/, "").slice(0, 220);
+    if (value) return { kind: rule.kind, summary: `${rule.prefix}${value}` };
+  }
+  return null;
+}
+
+async function captureAttentionLifecycle(input, event, root, scope) {
+  if (!ATTENTION_WRITE_EVENTS.has(event)) return null;
+  const explicit = input.agent_spine_attention && typeof input.agent_spine_attention === "object"
+    && !Array.isArray(input.agent_spine_attention) ? input.agent_spine_attention : null;
+  let proposed = explicit;
+  let automaticHeartbeat = false;
+  if (!proposed && event === "UserPromptSubmit" && scope.config.enabled) {
+    proposed = minimalAttentionSignal(promptFromInput(input));
+    if (proposed && scope.groupId) return { event: null, duplicate: false, reason: "rejected:group conversation events are never learned automatically" };
+  }
+  if (!proposed && event === "PostToolUse" && scope.currentTaskId) {
+    proposed = { kind: "heartbeat", summary: "Work heartbeat recorded.", status: "active" };
+    automaticHeartbeat = true;
+  }
+  if (!proposed && ["Stop", "SubagentStop"].includes(event) && scope.currentTaskId) {
+    proposed = { kind: "heartbeat", summary: "Work heartbeat recorded.", status: "stopped" };
+  }
+  if (!proposed) return null;
+  if (event === "PostToolUse" && ![input.event_id, input.hook_event_id, input.tool_use_id].some((value) => typeof value === "string" && ID_RE.test(value))) {
+    throw new Error("PostToolUse attention requires a stable host delivery ID");
+  }
+  if (!scope.entityId || !scope.projectId || !scope.currentTaskId) {
+    if (explicit) throw new Error("lifecycle attention event is missing exact actor, project, or task scope");
+    return { event: null, duplicate: false, reason: "missing-exact-scope" };
+  }
+  const privacy = proposed.privacy || "private";
+  if (event === "UserPromptSubmit" && privacy === "group") {
+    return { event: null, duplicate: false, reason: "rejected:group conversation events are never learned automatically" };
+  }
+  const discriminator = proposed.id || `${proposed.kind}:${proposed.status || ""}:${proposed.summary}`;
+  return recordAttentionEvent({
+    root,
+    id: boundedId(proposed.id, "attentionEventId"),
+    kind: proposed.kind,
+    summary: proposed.summary,
+    status: proposed.status || null,
+    entityId: scope.entityId,
+    groupId: privacy === "group" ? scope.groupId : null,
+    projectId: scope.projectId,
+    taskId: scope.currentTaskId,
+    privacy,
+    dueAt: proposed.due_at ?? proposed.dueAt ?? null,
+    receiptId: automaticHeartbeat ? heartbeatReceipt(input, scope) : eventReceipt(input, event, scope, discriminator),
+    host: scope.host,
+    hookEvent: event,
+    observedAt: input.timestamp || new Date()
+  });
 }
 
 function hookOutput(event, context) {
@@ -140,11 +234,13 @@ function deny(reason) {
 
 export async function runHook(payload = null) {
   const input = payload || await readStdin();
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("hook input must be one JSON object");
   const event = input.hook_event_name || input.event_name || "";
   if (!KNOWN_EVENTS.has(event)) throw new Error(`unsupported hook event: ${event || "missing"}`);
   const cwd = await canonicalPath(input.cwd || process.cwd());
   const root = await findProjectRoot(cwd);
   const { catalog, catalogPath } = await scanAndSave(root);
+  let scope = null;
 
   if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
     const { graph } = await loadGraph(root, catalog);
@@ -184,13 +280,23 @@ export async function runHook(payload = null) {
     }
   }
 
+  let attentionEvent = null;
+  if (ATTENTION_WRITE_EVENTS.has(event) && !CONTEXT_EVENTS.has(event)) {
+    scope = await runtimeScope(input, root);
+    attentionEvent = await captureAttentionLifecycle(input, event, root, scope);
+  }
+
   if (CONTEXT_EVENTS.has(event)) {
-    let scope;
     let signal = null;
     try {
-      scope = await runtimeScope(input, root);
+      scope ||= await runtimeScope(input, root);
       if (event === "UserPromptSubmit") {
         const prompt = promptFromInput(input);
+        try {
+          attentionEvent = await captureAttentionLifecycle(input, event, root, scope);
+        } catch (error) {
+          attentionEvent = { event: null, duplicate: false, reason: `rejected:${error.message}` };
+        }
         if (prompt !== null) {
           try {
             signal = await captureContinuityPrompt({
@@ -209,10 +315,11 @@ export async function runHook(payload = null) {
         includePrivate: Boolean(scope.entityId && !scope.groupId),
         focusActive: true, includeSourceContent: !scope.groupId,
         maxBytes: scope.config.maxBriefingBytes,
+        now: input.timestamp || new Date(),
         catalog
       });
-      const context = renderContext(event, catalog, briefing, signal);
-      if (payload) return { blocked: false, context, briefing, signal, catalogPath };
+      const context = renderContext(event, catalog, briefing, signal, attentionEvent);
+      if (payload) return { blocked: false, context, briefing, signal, attentionEvent, catalogPath };
       process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
       return;
     } catch (error) {
@@ -229,7 +336,7 @@ export async function runHook(payload = null) {
     }
   }
 
-  if (payload) return { blocked: false };
+  if (payload) return { blocked: false, attentionEvent };
   process.stdout.write("{}\n");
 }
 

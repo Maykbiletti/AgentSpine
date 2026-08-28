@@ -114,7 +114,10 @@ export async function sessionBriefing({
     : null;
   const [learned, attention, tasks, shared] = await settleReads([
     learningContext({ root: catalog.root, includePrivate, groupId, maxItems: 50, catalog }),
-    attentionContext({ root: catalog.root, includePrivate, groupId, focusActive, markPresented: false, maxItems: 20, now, catalog }),
+    attentionContext({
+      root: catalog.root, includePrivate, entityId, groupId, projectId, currentTaskId,
+      focusActive, markPresented: false, maxItems: 20, now, catalog
+    }),
     taskContext({ root: catalog.root, includePrivate, groupId, projectId, includeClosed: false, maxItems: 100, catalog }),
     sharedContext({ root: catalog.root, includePrivate, groupId, maxItems: 50, catalog })
   ]);

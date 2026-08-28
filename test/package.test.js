@@ -10,15 +10,17 @@ async function json(relativePath) {
 }
 
 test("package and host manifests keep one release version", async () => {
-  const [pkg, lock, claude, codex, marketplace] = await Promise.all([
+  const [pkg, lock, claude, codex, marketplace, hooks] = await Promise.all([
     json("package.json"), json("package-lock.json"), json(".claude-plugin/plugin.json"),
-    json(".codex-plugin/plugin.json"), json(".claude-plugin/marketplace.json")
+    json(".codex-plugin/plugin.json"), json(".claude-plugin/marketplace.json"), json("hooks/hooks.json")
   ]);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[""].version, pkg.version);
   assert.equal(claude.version, pkg.version);
   assert.equal(codex.version, pkg.version);
   assert.equal(marketplace.plugins[0].version, pkg.version);
+  assert.equal(hooks.version, pkg.version);
+  assert.equal(hooks.contract, "agentspine.attention-events/v1");
   assert.notEqual(pkg.version, "0.1.0");
   assert.equal(pkg.engines.node, ">=20.9.0");
 });
@@ -41,7 +43,7 @@ test("Claude and Codex registrations complete a real MCP initialize handshake", 
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
-  assert.equal(result.version, "0.2.0");
+  assert.equal(result.version, "0.3.0");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
   assert.equal(result.hooks.claude.events.includes("PostCompact"), true);
   assert.equal(result.hooks.codex.events.includes("UserPromptSubmit"), true);
@@ -51,11 +53,19 @@ test("fresh install, stale-cache upgrade, and uninstall keep exactly one runtime
   const root = fileURLToPath(new URL("..", import.meta.url));
   const result = await checkInstall(root);
   assert.equal(result.ok, true);
-  assert.equal(result.legacyCacheRejected, true);
+  assert.equal(result.previousCacheRejected, true);
   assert.deepEqual(result.fresh, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
   assert.deepEqual(result.upgrade, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
-  assert.deepEqual(result.automaticBriefing.fresh, { event: "SessionStart", host: "claude", sources: 1 });
-  assert.deepEqual(result.automaticBriefing.upgrade, { event: "SessionStart", host: "codex", sources: 1 });
+  assert.deepEqual(
+    { event: result.automaticBriefing.fresh.event, host: result.automaticBriefing.fresh.host, sources: result.automaticBriefing.fresh.sources },
+    { event: "SessionStart", host: "claude", sources: 1 }
+  );
+  assert.deepEqual(
+    { event: result.automaticBriefing.upgrade.event, host: result.automaticBriefing.upgrade.host, sources: result.automaticBriefing.upgrade.sources },
+    { event: "SessionStart", host: "codex", sources: 1 }
+  );
+  assert.deepEqual(result.automaticAttention.fresh, { captured: "promise", restarted: ["promise"] });
+  assert.deepEqual(result.automaticAttention.upgrade, { captured: "promise", restarted: ["promise"] });
   assert.equal(result.canonicalAliasLaunch, true);
   assert.equal(result.uninstallPreservedSources, true);
 });

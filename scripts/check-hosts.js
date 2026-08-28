@@ -25,12 +25,14 @@ async function validateEntrypoint(root, value) {
   assert(metadata.isFile(), "MCP entrypoint must be a regular file");
 }
 
-function validateHooks(root, hooks) {
+function validateHooks(root, hooks, version) {
   const required = [
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
     "PreCompact", "PostCompact", "Stop", "SubagentStop"
   ];
   assert(hooks && typeof hooks === "object" && !Array.isArray(hooks), "hook bundle is missing");
+  assert(hooks.version === version, "hook bundle must use the package cache version");
+  assert(hooks.contract === "agentspine.attention-events/v1", "hook bundle is missing the current attention lifecycle contract");
   assert(hooks.description && typeof hooks.description === "string", "hook bundle description is missing");
   for (const event of required) {
     const registrations = hooks.hooks?.[event];
@@ -122,7 +124,7 @@ export async function checkHosts(root = process.cwd()) {
   assert(claudeManifest.hooks === undefined, "default hooks/hooks.json must not also be registered through a supplemental manifest path");
   assert(claudeMcp.mcpServers && Object.keys(claudeMcp.mcpServers).length === 1, "Claude MCP file must contain one mcpServers registration");
   assert(codexManifest.mcpServers && Object.keys(codexManifest.mcpServers).length === 1, "Codex manifest must contain one MCP registration");
-  const hookInventory = validateHooks(root, hooks);
+  const hookInventory = validateHooks(root, hooks, pkg.version);
   const registrations = await Promise.all([
     initializeServer({ label: "claude", root, variable: "CLAUDE_PLUGIN_ROOT", server: claudeMcp.mcpServers["agent-spine"], version: pkg.version }),
     initializeServer({ label: "codex", root, variable: "PLUGIN_ROOT", server: codexManifest.mcpServers["agent-spine"], version: pkg.version })
