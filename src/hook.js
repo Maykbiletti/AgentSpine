@@ -3,15 +3,83 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { scanAndSave } from "./lib/catalog.js";
 import { loadGraph } from "./lib/graph.js";
 import { canonicalPath, findProjectRoot } from "./lib/paths.js";
-import { attentionContext } from "./lib/attention.js";
-import { learningContext } from "./lib/learning.js";
-import { taskContext } from "./lib/coordination.js";
-import { sharedContext } from "./lib/sharing.js";
+import { sessionBriefing } from "./lib/briefing.js";
+import { captureContinuityPrompt, loadContinuity } from "./lib/continuity.js";
+
+const MAX_STDIN_BYTES = 64 * 1024;
+const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
+const KNOWN_EVENTS = new Set([
+  ...CONTEXT_EVENTS, "PreToolUse", "PostToolUse", "Stop", "SubagentStop"
+]);
+const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
 
 async function readStdin() {
   let value = "";
-  for await (const chunk of process.stdin) value += chunk;
+  let bytes = 0;
+  for await (const chunk of process.stdin) {
+    bytes += Buffer.byteLength(chunk);
+    if (bytes > MAX_STDIN_BYTES) throw new Error("hook input exceeds the 64 KiB limit");
+    value += chunk;
+  }
   return value.trim() ? JSON.parse(value) : {};
+}
+
+function boundedId(value, field) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "string" || !ID_RE.test(value)) throw new Error(`${field} is invalid`);
+  return value;
+}
+
+function promptFromInput(input) {
+  for (const key of ["prompt", "user_prompt", "message", "input"]) {
+    if (typeof input[key] === "string") return input[key];
+  }
+  return null;
+}
+
+function hostFromInput(input) {
+  const explicit = input.host || input.provider || process.env.AGENTSPINE_HOST;
+  if (["claude", "codex", "generic"].includes(explicit)) return explicit;
+  if (process.env.CODEX_HOME) return "codex";
+  return "claude";
+}
+
+async function runtimeScope(input, root) {
+  const { continuity } = await loadContinuity(root);
+  const supplied = input.agent_spine_scope && typeof input.agent_spine_scope === "object"
+    ? input.agent_spine_scope : input;
+  return {
+    entityId: boundedId(supplied.entity_id ?? supplied.entityId ?? continuity.config.defaultEntityId, "entityId"),
+    groupId: boundedId(supplied.group_id ?? supplied.groupId, "groupId"),
+    projectId: boundedId(supplied.project_id ?? supplied.projectId ?? continuity.config.defaultProjectId, "projectId"),
+    currentTaskId: boundedId(supplied.task_id ?? supplied.currentTaskId, "currentTaskId"),
+    host: hostFromInput(input),
+    config: continuity.config
+  };
+}
+
+function renderContext(event, catalog, briefing, signal = null) {
+  const packet = {
+    schema: "agentspine.hook-context/v1",
+    event,
+    priority: ["current-user-request", "explicit-stops", "current-task", "host-rules", "accepted-context", "style-and-relationships"],
+    instruction: "Use this already-loaded briefing now. Do not call an MCP tool to obtain it. The current user request and explicit stops override all remembered style, relationships, and older context.",
+    signal: signal ? {
+      captured: Boolean(signal.captured),
+      accepted: Boolean(signal.accepted),
+      duplicate: Boolean(signal.duplicate),
+      kind: signal.kind || null,
+      reason: signal.reason || null
+    } : null,
+    indexedSources: catalog.summary.total,
+    briefing,
+    authority: "context-only"
+  };
+  return JSON.stringify(packet);
+}
+
+function hookOutput(event, context) {
+  return { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
 }
 
 function candidatePaths(value, output = []) {
@@ -72,6 +140,7 @@ function deny(reason) {
 export async function runHook(payload = null) {
   const input = payload || await readStdin();
   const event = input.hook_event_name || input.event_name || "";
+  if (!KNOWN_EVENTS.has(event)) throw new Error(`unsupported hook event: ${event || "missing"}`);
   const cwd = await canonicalPath(input.cwd || process.cwd());
   const root = await findProjectRoot(cwd);
   const { catalog, catalogPath } = await scanAndSave(root);
@@ -114,52 +183,49 @@ export async function runHook(payload = null) {
     }
   }
 
-  if (["SessionStart", "UserPromptSubmit", "PostCompact"].includes(event)) {
-    let attentionNote = "";
-    let learningNote = "";
-    let coordinationNote = "";
-    let sharingNote = "";
+  if (CONTEXT_EVENTS.has(event)) {
+    let scope;
+    let signal = null;
     try {
-      const attention = await attentionContext({ root, includePrivate: false, maxItems: 3, catalog });
-      attentionNote = attention.items.length
-        ? ` ${attention.items.length} shared attention cue(s) are due (${[...new Set(attention.items.map((item) => item.kind))].join(", ")}). Treat them as suggestions and inspect only after the current task allows.`
-        : "";
-    } catch {
-      attentionNote = " Attention state needs review; run agentspine audit before using attention cues.";
+      scope = await runtimeScope(input, root);
+      if (event === "UserPromptSubmit") {
+        const prompt = promptFromInput(input);
+        if (prompt !== null) {
+          try {
+            signal = await captureContinuityPrompt({
+              root, prompt, entityId: scope.entityId, groupId: scope.groupId,
+              projectId: scope.projectId,
+              eventId: boundedId(input.event_id ?? input.hook_event_id, "eventId")
+            });
+          } catch (error) {
+            signal = { captured: false, accepted: false, reason: `rejected:${error.message}` };
+          }
+        }
+      }
+      const briefing = await sessionBriefing({
+        root, cwd, host: scope.host, entityId: scope.entityId, groupId: scope.groupId,
+        projectId: scope.projectId, currentTaskId: scope.currentTaskId,
+        includePrivate: Boolean(scope.entityId && !scope.groupId),
+        focusActive: true, includeSourceContent: !scope.groupId,
+        maxBytes: scope.config.maxBriefingBytes,
+        catalog
+      });
+      const context = renderContext(event, catalog, briefing, signal);
+      if (payload) return { blocked: false, context, briefing, signal, catalogPath };
+      process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
+      return;
+    } catch (error) {
+      const context = JSON.stringify({
+        schema: "agentspine.hook-context/v1", event, loaded: false, failedClosed: true,
+        indexedSources: catalog.summary.total,
+        error: error.message,
+        instruction: "Do not claim AgentSpine recall succeeded. Continue with the current request under native host rules and run agentspine audit before using remembered context.",
+        authority: "context-only"
+      });
+      if (payload) return { blocked: false, failedClosed: true, context, error: error.message, catalogPath };
+      process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
+      return;
     }
-    try {
-      const learned = await learningContext({ root, includePrivate: false, maxItems: 50, catalog });
-      learningNote = learned.items.length
-        ? ` ${learned.items.length} accepted learning item(s) are available (${[...new Set(learned.items.map((item) => item.kind))].join(", ")}).`
-        : "";
-    } catch {
-      learningNote = " Learning state needs review; run agentspine audit before using learned context.";
-    }
-    try {
-      const tasks = await taskContext({ root, includePrivate: false, includeClosed: false, maxItems: 50, catalog });
-      coordinationNote = tasks.items.length
-        ? ` ${tasks.items.length} shared coordination item(s) are open (${[...new Set(tasks.items.map((item) => item.kind))].join(", ")}).`
-        : "";
-    } catch {
-      coordinationNote = " Coordination state needs review; run agentspine audit before using tasks or delegation decisions.";
-    }
-    try {
-      const shared = await sharedContext({ root, includePrivate: false, maxItems: 50, catalog });
-      sharingNote = shared.items.length
-        ? ` ${shared.items.length} locally reviewed shared-memory item(s) are available (${[...new Set(shared.items.map((item) => item.kind))].join(", ")}).`
-        : "";
-    } catch {
-      sharingNote = " Shared-memory state needs review; run agentspine audit before using imported context.";
-    }
-    const available = attentionNote || learningNote || coordinationNote || sharingNote
-      ? " Load only the current scope with session_briefing; it is byte-budgeted and read-only."
-      : "";
-    const summary = `AgentSpine indexed ${catalog.summary.total} Markdown sources (${catalog.summary.protected} protected). Source files remain byte-for-byte untouched.${attentionNote}${learningNote}${coordinationNote}${sharingNote}${available} Catalog: ${catalogPath}`;
-    if (payload) return { blocked: false, context: summary };
-    process.stdout.write(`${JSON.stringify({
-      hookSpecificOutput: { hookEventName: event, additionalContext: summary }
-    })}\n`);
-    return;
   }
 
   if (payload) return { blocked: false };
@@ -168,7 +234,7 @@ export async function runHook(payload = null) {
 
 if (process.argv[1] && import.meta.url === new URL(`file://${resolve(process.argv[1])}`).href) {
   runHook().catch((error) => {
-    process.stderr.write(`AgentSpine hook: ${error.message}\n`);
+    process.stderr.write(`AgentSpine hook: ${String(error.message).slice(0, 2048)}\n`);
     process.exitCode = 1;
   });
 }

@@ -10,6 +10,7 @@ const EVIDENCE_TYPES = new Set(["user-statement", "document", "interaction", "te
 const PRIVACY = new Set(["private", "shared", "group"]);
 const STATUSES = new Set(["candidate", "accepted", "rejected", "superseded", "rolled-back"]);
 const AUTO_KINDS = new Set(["project-fact", "reference"]);
+const CONTINUITY_AUTO_KINDS = new Set(["preference", "no-go", "correction", "project-fact", "reference"]);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
 const MAX_STATE_BYTES = 5 * 1024 * 1024;
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret)\s*[:=]\s*\S{8,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i;
@@ -380,6 +381,49 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
   });
 }
 
+/**
+ * Internal runtime promotion path for locally opted-in continuity signals.
+ * This is intentionally not exposed over MCP. The caller must provide the
+ * directness, confidence, repetition and local opt-in proof recorded by the
+ * continuity state machine.
+ */
+export async function acceptContinuityLearning({
+  root = process.cwd(), id, proof, now = new Date()
+}) {
+  if (!ID_RE.test(id || "")) throw new Error("id is required");
+  if (!proof || proof.mode !== "automatic-continuity-low-risk" || proof.localOptIn !== true) {
+    throw new Error("continuity promotion requires a recorded local opt-in proof");
+  }
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const candidate = state.candidates.find((entry) => entry.id === id);
+    if (!candidate) throw new Error(`unknown learning candidate: ${id}`);
+    if (candidate.status === "accepted") return { candidate, learningPath, unchanged: true };
+    if (candidate.status !== "candidate") throw new Error("only an active candidate can be promoted");
+    if (!CONTINUITY_AUTO_KINDS.has(candidate.kind)) throw new Error("learning kind is not eligible for continuity promotion");
+    const minConfidence = number(proof.minConfidence, "proof.minConfidence", 0.9, 1);
+    const minEvidence = integer(proof.minEvidence, "proof.minEvidence", 1, 10);
+    const minDirectness = number(proof.minDirectness, "proof.minDirectness", 0.9, 1);
+    const directness = number(proof.directness, "proof.directness", 0, 1);
+    const evidenceCount = distinctEvidence(candidate);
+    if (candidate.confidence < minConfidence || directness < minDirectness || evidenceCount < minEvidence) {
+      throw new Error("continuity candidate does not meet the recorded promotion thresholds");
+    }
+    const accepted = acceptCandidate(state, candidate, timestamp, true, {
+      mode: "automatic-continuity-low-risk",
+      localOptIn: true,
+      minConfidence,
+      minEvidence,
+      minDirectness,
+      directness,
+      evidenceCount,
+      evaluatedAt: timestamp,
+      authority: "context-only"
+    });
+    return { candidate: accepted, learningPath, unchanged: false };
+  });
+}
+
 export async function rollbackLearning({ root = process.cwd(), id, reason, now = new Date() }) {
   if (!ID_RE.test(id || "")) throw new Error("id is required");
   const rollbackReason = safeText(reason, "reason", 500);
@@ -517,6 +561,16 @@ export async function deleteLearning({ root = process.cwd(), id }) {
   });
 }
 
+export async function purgeLearningBySubject({ root = process.cwd(), subjectId }) {
+  if (!ID_RE.test(subjectId || "")) throw new Error("subjectId is required");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const ids = new Set(state.candidates.filter((entry) => entry.subjectId === subjectId).map((entry) => entry.id));
+    state.candidates = state.candidates.filter((entry) => entry.subjectId !== subjectId);
+    state.history = state.history.filter((entry) => entry.subjectId !== subjectId && !ids.has(entry.recordId) && !ids.has(entry.value?.id));
+    return { deleted: ids.size, subjectId, learningPath };
+  });
+}
+
 export function learningFindings(learning, graph) {
   const findings = [];
   if (!validConfig(learning.config)) findings.push("invalid-config");
@@ -543,11 +597,18 @@ export function learningFindings(learning, graph) {
       const manualProof = candidate.automatic === false
         && candidate.review?.decision === "accept" && candidate.review?.confirmedByUser === true;
       const automaticProof = candidate.automatic === true
-        && AUTO_KINDS.has(candidate.kind)
-        && candidate.promotion?.mode === "automatic-low-risk"
-        && candidate.confidence >= candidate.promotion?.minConfidence
-        && distinctEvidence(candidate) >= candidate.promotion?.minEvidence
-        && candidate.promotion?.evidenceCount >= candidate.promotion?.minEvidence;
+        && ((AUTO_KINDS.has(candidate.kind)
+          && candidate.promotion?.mode === "automatic-low-risk"
+          && candidate.confidence >= candidate.promotion?.minConfidence
+          && distinctEvidence(candidate) >= candidate.promotion?.minEvidence
+          && candidate.promotion?.evidenceCount >= candidate.promotion?.minEvidence)
+        || (CONTINUITY_AUTO_KINDS.has(candidate.kind)
+          && candidate.promotion?.mode === "automatic-continuity-low-risk"
+          && candidate.promotion?.localOptIn === true
+          && candidate.confidence >= candidate.promotion?.minConfidence
+          && candidate.promotion?.directness >= candidate.promotion?.minDirectness
+          && distinctEvidence(candidate) >= candidate.promotion?.minEvidence
+          && candidate.promotion?.evidenceCount >= candidate.promotion?.minEvidence));
       if (!candidate.acceptedAt || (!manualProof && !automaticProof)) findings.push(`invalid-acceptance:${candidate.id}`);
     }
   }

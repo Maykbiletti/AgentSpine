@@ -17,6 +17,7 @@ flowchart TB
     K --> L["12 · Signed mutable feeds"]
     L --> M["13 · Challenge-response peers"]
     M --> N["14 · Local SQLite snapshots"]
+    N --> O["15 · Automatic live continuity"]
 ```
 
 ## 1. Preservation kernel
@@ -193,6 +194,20 @@ Status: provider-neutral local database initialization, append-only publication,
 - explicit local owner confirmation for initialization and publication;
 - CLI-only paths and administration; no SQLite surface in MCP or hooks;
 - SQLite state, hashes, signatures, snapshots, and imports remain context-only.
+
+## 15. Automatic live continuity
+
+Status: implemented in `v0.2.0` for the ordered portal-neutral memory milestone. Automatic attention events and rights-bound job resume remain later stages.
+
+- native Claude Code and Codex lifecycle bundle with one command per supported event;
+- complete scoped session briefing injected at start, resume, prompt, and compaction boundaries without model-side MCP selection;
+- separate one-time local privacy opt-in for minimal direct conversation signals;
+- exact person, group, project, and task scope with no name-based identity merging;
+- low-risk style, preference, no-go, correction, project-fact, and reference acceptance under recorded thresholds;
+- full-prompt exclusion, SHA-256 provenance receipts, deduplication, locking, rollback, and confirmed purge;
+- unconditional rejection of secrets, sensitive personal facts, private group content, identity claims, authority, access, payment, production, and operational permissions;
+- `0.2.0` cache boundary, explicit Claude component registration, and reproducible fresh-install, stale-upgrade, and uninstall checks;
+- visible fail-closed context when any dependent state is malformed.
 
 ## Definition of done for every stage
 

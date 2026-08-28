@@ -168,8 +168,10 @@ test("malformed policy fails closed, remains untouched, and does not break sourc
   );
   assert.equal(await readFile(loaded.policyPath, "utf8"), corrupt);
   const hook = await runHook({ hook_event_name: "SessionStart", cwd: root });
-  assert.match(hook.context, /indexed 1 Markdown source/);
-  assert.match(hook.context, /Coordination state needs review/);
+  const injected = JSON.parse(hook.context);
+  assert.equal(injected.indexedSources, 1);
+  assert.equal(injected.failedClosed, true);
+  assert.match(injected.error, /state structure is invalid/);
 });
 
 test("CLI supports explicit policy, task lifecycle, context, and revocation", async (t) => {
@@ -210,11 +212,12 @@ test("secrets are rejected from both dedicated policy and task state", async (t)
   assert.equal((await loadCoordination(root)).coordination.tasks.length, 0);
 });
 
-test("session hooks expose only coordination counts and kinds", async (t) => {
+test("session hooks inject visible coordination items without a model-side MCP call", async (t) => {
   const { root } = await fixture(t);
   await createTask({ root, actorId: "agent:worker", title: "Sensitive synthetic handoff wording", kind: "handoff", privacy: "shared" });
   const result = await runHook({ hook_event_name: "SessionStart", cwd: root });
-  assert.match(result.context, /1 shared coordination item/);
-  assert.match(result.context, /handoff/);
-  assert.doesNotMatch(result.context, /Sensitive synthetic handoff wording/);
+  const injected = JSON.parse(result.context);
+  assert.equal(injected.briefing.tasks.length, 1);
+  assert.equal(injected.briefing.tasks[0].kind, "handoff");
+  assert.equal(injected.briefing.tasks[0].title, "Sensitive synthetic handoff wording");
 });

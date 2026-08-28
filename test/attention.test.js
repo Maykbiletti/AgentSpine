@@ -184,15 +184,16 @@ test("concurrent activity writes are serialized and entity purge removes their t
   assert.equal((await loadAttention(root)).attention.activities.length, 0);
 });
 
-test("session hooks inject only attention metadata, never cue text", async (t) => {
+test("session hooks inject the real focused briefing without surfacing suppressed attention", async (t) => {
   const { root } = await fixture(t);
   await upsertAttention({
     root, id: "signal:shared", kind: "promise", summary: "Sensitive wording must not enter automatic context.",
     privacy: "shared"
   });
   const result = await runHook({ hook_event_name: "SessionStart", cwd: root });
-  assert.match(result.context, /1 shared attention cue/);
-  assert.match(result.context, /promise/);
+  const context = JSON.parse(result.context);
+  assert.equal(context.briefing.attention.suppressed, "focus-active");
+  assert.equal(context.briefing.attention.items.length, 0);
   assert.doesNotMatch(result.context, /Sensitive wording/);
 });
 
@@ -203,8 +204,10 @@ test("corrupt attention configuration fails closed without breaking session inde
   await writeFile(loaded.attentionPath, `${JSON.stringify(loaded.attention)}\n`, "utf8");
   await assert.rejects(attentionContext({ root }), /configuration is invalid/);
   const hook = await runHook({ hook_event_name: "SessionStart", cwd: root });
-  assert.match(hook.context, /indexed 1 Markdown source/);
-  assert.match(hook.context, /Attention state needs review/);
+  const context = JSON.parse(hook.context);
+  assert.equal(context.indexedSources, 1);
+  assert.equal(context.failedClosed, true);
+  assert.match(context.error, /attention configuration is invalid/);
 });
 
 test("CLI attention workflow creates, presents, resolves, and disables cues", async (t) => {

@@ -4,6 +4,25 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-28
+
+### Added
+
+- Native Claude Code and Codex lifecycle integration that automatically injects the actual scoped, byte-budgeted session briefing at start, resume, prompt, and compaction boundaries without a model-side MCP call
+- Separate local opt-in for minimal high-confidence style, preference, no-go, correction, project-fact, and reference learning with digest provenance, deduplication, rollback, purge, and no transcript retention
+- Complete hook inventory for prompt, tool, compaction, stop, and subagent-stop boundaries plus reproducible fresh-install, stale-cache upgrade, and uninstall preservation checks
+
+### Changed
+
+- Claude Code explicitly registers the MCP file and loads exactly one hook bundle from its native `hooks/hooks.json` discovery path
+- Package, lockfile, Claude Code, Codex, and marketplace cache versions advance together to `0.2.0`
+- Session hooks now inject usable accepted context instead of counts and a suggestion to call `session_briefing`
+
+### Security
+
+- Automatic learning rejects secrets, sensitive personal facts, identity merging, private group content, rights, roles, delegation, approvals, tool or file access, network or database access, production, payments, and policy claims
+- Hook JSON input is bounded, state remains external and atomically locked, malformed state is visible and fail-closed, and source Markdown remains byte-for-byte unchanged
+
 ### Added
 
 - Executable Claude Code and Codex host-registration check with a real MCP `initialize` handshake

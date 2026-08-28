@@ -14,8 +14,9 @@ flowchart TB
     subgraph Core["AgentSpine core"]
       D["Discovery + SHA-256"]
       R["Host-aware resolver"]
-      G["Context-only graph + attention + learning + tasks + shared quarantine"]
+      G["Context-only graph + attention + learning + continuity + tasks + shared quarantine"]
       B["Scoped byte-budgeted session briefing"]
+      H["Provider-neutral native lifecycle adapter"]
       P["Separate default-deny delegation policy"]
     end
     subgraph Hosts["Agent hosts"]
@@ -29,8 +30,9 @@ flowchart TB
     G --> B
     P --> G
     R --> B
-    B --> X
-    B --> L
+    B --> H
+    H --> X
+    H --> L
 ```
 
 Source files are never copied into a canonical replacement. The catalog contains metadata and provenance. When content is required, it is read from the original path and checked against its fingerprint.
@@ -111,6 +113,7 @@ Generated catalogs live outside the scanned repository:
       graph.json
       attention.json
       learning.json
+      continuity.json
       delegation-policy.json
       coordination.json
       sharing.json
@@ -121,7 +124,7 @@ Generated catalogs live outside the scanned repository:
         <key-fingerprint>.pem
 ```
 
-`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. `coordination.json` stores context-only tasks, open threads, handoffs, and their prior versions. `delegation-policy.json` is physically separate and contains only explicit local task-coordination grants. `sharing.json` quarantines imports and retains local review, supersession, rollback, and signature proof. `sharing-trust.json` is a project-local allowlist of public signing keys; the installation-wide signer registry keeps private keys separate. Policy, trust, keys, and adapter administration are not writable through MCP. All are private user state. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
+`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. `continuity.json` stores only opt-in configuration and minimal signal receipts with prompt digests, never transcripts. `coordination.json` stores context-only tasks, open threads, handoffs, and their prior versions. `delegation-policy.json` is physically separate and contains only explicit local task-coordination grants. `sharing.json` quarantines imports and retains local review, supersession, rollback, and signature proof. `sharing-trust.json` is a project-local allowlist of public signing keys; the installation-wide signer registry keeps private keys separate. Policy, trust, keys, and adapter administration are not writable through MCP. All are private user state. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
 
 Task mutations read and validate policy while holding the policy lock, then write coordination state under a second lock. This lock order prevents a policy revocation from racing a new assignment. Invalid or malformed policy and coordination state fails closed and is never automatically overwritten.
 

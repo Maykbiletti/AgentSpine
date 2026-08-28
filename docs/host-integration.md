@@ -10,7 +10,7 @@ AgentSpine uses native plugin surfaces instead of asking users to paste a large 
 | Marketplace | `.claude-plugin/marketplace.json` | GitHub installation and updates |
 | Skill | `skills/agent-spine/SKILL.md` | Context rules and preservation invariants |
 | MCP | `.mcp.json` | Read-only source tools plus external overlay workflows |
-| Hooks | `hooks/hooks.json` | Lifecycle indexing and protected-source guard |
+| Hooks | `hooks/hooks.json` | Automatic briefing, opted-in signal capture, and protected-source guard |
 
 Install from GitHub:
 
@@ -21,10 +21,11 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
-The Claude manifest explicitly references `./.mcp.json`. This avoids relying on implicit discovery in older or cached Claude Code plugin installations. The repository's host check resolves the installed-root variable and performs a real MCP `initialize` handshake for both host registrations:
+The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Version `0.2.0` replaces the stale `0.1.0` cache identity. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise clean install, stale-cache upgrade, and uninstall preservation:
 
 ```bash
 npm run host:check
+npm run host:install-check
 ```
 
 ### Claude MCP troubleshooting
@@ -80,4 +81,10 @@ agentspine audit /path/to/project --json
 
 The audit exits non-zero when a required gate fails, making it suitable for installation smoke tests and CI.
 
-At session and compaction boundaries, the hook may add counts and kinds for due shared attention cues, accepted local learning, open shared coordination, and locally reviewed shared memory. It never injects cue summaries, learned or imported claims, pending inbox items, adapter paths, task titles or notes, delegation policy, private relationship data, or group context without an audience. The agent should explicitly call `session_briefing` with the narrowest known person, group, project, current task, and byte budget. The component context tools remain available for targeted follow-up. Set `markPresented` only through `attention_context` when a cue is actually surfaced. Cross-entity task actions require an explicit `check_delegation` decision in addition to normal host authorization.
+The provider-neutral lifecycle adapter covers `SessionStart` (including resume and compact starts), `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `PostCompact`, `Stop`, and `SubagentStop`. Start, prompt, and compaction boundaries scan and inject the actual byte-budgeted `session_briefing`; no model-side MCP selection is required. Prompt submission can additionally capture minimal safe signals after the separate local continuity opt-in. `PreToolUse` retains the protected-source guard. Completion events emit no repeated chat text and create no permissions.
+
+Identity and audience come from explicit hook scope fields or the locally configured default direct-person/project scope. Group content requires an exact group ID and never enters automatic learning. Missing scope produces no inferred identity; corrupt state returns a visible `failedClosed` packet and must never be reported as successful recall.
+
+Hook stdin is JSON-only and limited to 64 KiB. State transitions use external atomic files and locks. Hook stdout contains only host protocol JSON; diagnostics are bounded to stderr by the host process. Hooks do not expose transport, key, trust, database, network, message, payment, production, delegation, or policy administration.
+
+The first executable-component trust approval remains mandatory. AgentSpine cannot approve itself. After approval and the one-time continuity opt-in, no per-session enablement or voluntary tool call is required.

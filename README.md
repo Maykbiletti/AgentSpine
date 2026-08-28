@@ -89,11 +89,13 @@ claude --plugin-dir .
 ```
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
+Version `0.2.0` explicitly registers `.mcp.json` and ships one native auto-discovered `hooks/hooks.json`; the version bump also invalidates Claude Code's earlier `0.1.0` plugin cache.
 
 Verify the installed registration from a checkout with:
 
 ```bash
 npm run host:check
+npm run host:install-check
 claude plugin list
 claude mcp list
 ```
@@ -108,6 +110,15 @@ claude mcp list
 ```
 
 An unapproved server may appear as `Pending approval`; approval remains a user action and AgentSpine never bypasses Claude Code's trust boundary.
+
+After that one host trust decision, enable automatic continuity once for a known local identity:
+
+```bash
+agentspine entity person:me --kind person --name "Me" --privacy shared
+agentspine continuity-config /path/to/project --enabled true --entity person:me --confirm-local-opt-in
+```
+
+From the next prompt onward, installed lifecycle hooks scan and inject the real scoped `session_briefing` at start, resume, prompt submission, and compaction boundaries. The model does not need to choose `scan`, `context`, or `session_briefing`. The opt-in is separate from host trust because learning conversation signals is a user-controlled privacy decision.
 
 ## Install for Codex
 
@@ -164,6 +175,9 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine learn-rollback …` | Restore the accepted fact replaced by a learning |
 | `agentspine learn-config …` | Configure auto-promotion thresholds and context limits |
 | `agentspine learn-delete …` | Permanently remove one candidate and its learning history |
+| `agentspine continuity-config …` | Enable, disable, scope, and budget automatic continuity after local opt-in |
+| `agentspine continuity-status …` | Inspect configuration and minimal signal counts without transcript content |
+| `agentspine continuity-purge …` | Permanently remove one identity's automatic signals and learned context |
 | `agentspine delegation-check …` | Check explicit actor/action/target coordination policy; default deny |
 | `agentspine delegation-grant …` | Owner-confirmed local CLI grant for task coordination only |
 | `agentspine delegation-revoke …` | Revoke future coordination and retain policy history |
@@ -227,15 +241,15 @@ flowchart LR
 
 Relationship updates supersede the active view but retain the previous observation in append-only graph history. Permission-like and credential-like attributes are rejected recursively. See [relationships and learning](docs/relationships.md).
 
-Attention is deliberately restrained: the current task wins, private cues require an explicit private read, quiet hours and presentation throttles suppress repetition, and deletion removes retained attention history. Lifecycle hooks inject only counts and cue kinds—never the cue text. See [attention](docs/attention.md).
+Attention is deliberately restrained: the current task wins, private cues require an exact direct-person scope, quiet hours and presentation throttles suppress repetition, and deletion removes retained attention history. Automatic briefings include only cues that survive those filters. See [attention](docs/attention.md).
 
-Safe learning is evidence-first: candidates are invisible until reviewed, automatic promotion is off by default and limited to project facts and references, and every accepted change can be superseded or rolled back without touching source Markdown. See [safe learning](docs/learning.md).
+Safe learning is evidence-first: general candidates remain invisible until reviewed. A separate default-off continuity opt-in can automatically accept only direct, high-confidence style, preference, no-go, correction, project-fact, and reference signals. Sensitive personal facts, secrets, identity merges, private group content, and operational or authority claims are always rejected. See [automatic continuity](docs/automatic-continuity.md) and [safe learning](docs/learning.md).
 
 Delegation is intentionally narrower than authority: a relationship such as `responsible-for` never permits assignment. Cross-entity task actions require an explicit local actor/action/target grant, while tasks, open threads, and handoffs remain context-only. See [delegation and coordination](docs/coordination.md).
 
 Shared memory is transport-neutral and double-reviewed: only accepted non-private learning may be published, every import enters quarantine, and the receiving installation must confirm it again before it can appear in context. The reference directory adapter works without a cloud account. Signed adapters can be exported as immutable snapshots, published as create-only content-addressed HTTPS objects, discovered through signed ETag-protected feeds with local rollback receipts, or requested live through a challenge-response stdio peer. HTTPS pulling uses pinned DNS, SSRF protection, strict limits, verified read-back, and optional environment-supplied bearer authentication. Peer pulling delegates the carrier to one explicit owner-selected executable without AgentSpine invoking a shell. Digests and Ed25519 envelopes protect transport integrity and configured origins; neither grants authority or approves content. See [shared memory adapters](docs/shared-memory.md), [HTTPS snapshots](docs/https-transport.md), [immutable HTTPS objects](docs/object-transport.md), [signed mutable feeds](docs/feed-transport.md), and [peer transport](docs/peer-transport.md).
 
-Session briefing keeps that growing context usable: one scoped read prioritizes the current task, deduplicates local and shared facts, defaults to focus mode, enforces exact group audiences, and measures the entire compact JSON result against the requested byte ceiling. See [session briefing](docs/session-briefing.md).
+Session briefing keeps that growing context usable: one scoped read prioritizes the current request, explicit stops, and current task; deduplicates local and shared facts; defaults to focus mode; enforces exact group audiences; and measures the entire compact JSON result against the requested byte ceiling. Native lifecycle hooks now inject this packet automatically instead of asking the model to call MCP. See [session briefing](docs/session-briefing.md).
 
 ## Optional four-layer starter
 
@@ -261,7 +275,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.1` establishes the preservation kernel; current `main` also includes relationships, sparse attention, safe learning, default-deny coordination, optional provider-neutral shared memory with Ed25519 origin authentication, hardened HTTPS pull, immutable object publication, signed compare-and-swap feeds, one-shot challenge-response peers, a budgeted session briefing, a provider-neutral MCP surface, dual-host plugin layout, and executable tests. Database transports remain optional extension work.
+AgentSpine is in active early development. `v0.2` adds automatic scoped session continuity and opt-in low-risk conversation learning through the installed Claude Code and Codex lifecycle bundle. Existing source Markdown remains immutable, and later attention-event and rights-bound self-starter milestones remain deliberately unfinished.
 
 ## Documentation
 
@@ -270,6 +284,7 @@ AgentSpine is in active early development. `v0.1` establishes the preservation k
 | Understand the system | [Architecture](docs/architecture.md) |
 | Audit non-destructive behavior | [Preservation contract](docs/preservation-contract.md) |
 | Integrate a host | [Claude Code and Codex](docs/host-integration.md) |
+| Enable automatic continuity | [Automatic continuity](docs/automatic-continuity.md) |
 | Load one compact session packet | [Session briefing](docs/session-briefing.md) |
 | Understand relationships and history | [Relationships](docs/relationships.md) |
 | Configure sparse follow-ups | [Attention](docs/attention.md) |

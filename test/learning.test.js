@@ -168,7 +168,7 @@ test("concurrent evidence appends serialize without losing observations", async 
   assert.equal(learning.history.filter((entry) => entry.recordId === "learning:concurrent").length, 8);
 });
 
-test("session hooks expose learning metadata but never learned claim text", async (t) => {
+test("session hooks inject accepted learning without a model-side MCP call", async (t) => {
   const { root } = await fixture(t);
   await proposeLearning({
     root, id: "learning:hook", kind: "correction", claim: "Sensitive synthetic wording stays behind an explicit read.",
@@ -176,9 +176,10 @@ test("session hooks expose learning metadata but never learned claim text", asyn
   });
   await reviewLearning({ root, id: "learning:hook", decision: "accept", reason: "Confirmed.", confirmedByUser: true });
   const result = await runHook({ hook_event_name: "SessionStart", cwd: root });
-  assert.match(result.context, /1 accepted learning item/);
-  assert.match(result.context, /correction/);
-  assert.doesNotMatch(result.context, /Sensitive synthetic wording/);
+  const injected = JSON.parse(result.context);
+  assert.equal(injected.briefing.learning.length, 1);
+  assert.equal(injected.briefing.learning[0].kind, "correction");
+  assert.equal(injected.briefing.learning[0].claim, "Sensitive synthetic wording stays behind an explicit read.");
 });
 
 test("malformed learning state fails closed without breaking source indexing or being overwritten", async (t) => {
@@ -193,8 +194,10 @@ test("malformed learning state fails closed without breaking source indexing or 
   );
   assert.equal(await readFile(loaded.learningPath, "utf8"), corrupt);
   const hook = await runHook({ hook_event_name: "SessionStart", cwd: root });
-  assert.match(hook.context, /indexed 2 Markdown sources/);
-  assert.match(hook.context, /Learning state needs review/);
+  const injected = JSON.parse(hook.context);
+  assert.equal(injected.indexedSources, 2);
+  assert.equal(injected.failedClosed, true);
+  assert.match(injected.error, /learning state structure is invalid/);
 });
 
 test("CLI learning workflow proposes, confirms, reads, rolls back, and deletes a fact", async (t) => {

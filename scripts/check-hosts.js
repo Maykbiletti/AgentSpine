@@ -25,6 +25,27 @@ async function validateEntrypoint(root, value) {
   assert(metadata.isFile(), "MCP entrypoint must be a regular file");
 }
 
+function validateHooks(root, hooks) {
+  const required = [
+    "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+    "PreCompact", "PostCompact", "Stop", "SubagentStop"
+  ];
+  assert(hooks && typeof hooks === "object" && !Array.isArray(hooks), "hook bundle is missing");
+  assert(hooks.description && typeof hooks.description === "string", "hook bundle description is missing");
+  for (const event of required) {
+    const registrations = hooks.hooks?.[event];
+    assert(Array.isArray(registrations) && registrations.length === 1, `${event} must have exactly one registration`);
+    assert(Array.isArray(registrations[0].hooks) && registrations[0].hooks.length === 1, `${event} must have exactly one hook command`);
+    const command = registrations[0].hooks[0];
+    assert(command.type === "command", `${event} must use a command hook`);
+    assert(command.command === 'node "${CLAUDE_PLUGIN_ROOT}/src/hook.js"', `${event} must use the bundled lifecycle adapter`);
+    assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} timeout is unsafe`);
+  }
+  const extras = Object.keys(hooks.hooks || {}).filter((event) => !required.includes(event));
+  assert(extras.length === 0, `unknown hook events: ${extras.join(", ")}`);
+  return { events: required, commands: required.length, entrypoint: relative(root, resolve(root, "src/hook.js")) };
+}
+
 async function initializeServer({ label, root, variable, server }) {
   assert(server && typeof server === "object" && !Array.isArray(server), `${label} MCP registration is missing`);
   assert(server.command === "node", `${label} MCP registration must use the Node.js runtime`);
@@ -82,19 +103,29 @@ async function initializeServer({ label, root, variable, server }) {
 
 export async function checkHosts(root = process.cwd()) {
   root = resolve(root);
-  const [claudeManifest, claudeMcp, codexManifest] = await Promise.all([
+  const [pkg, claudeManifest, claudeMcp, codexManifest, hooks] = await Promise.all([
+    json(root, "package.json"),
     json(root, ".claude-plugin/plugin.json"),
     json(root, ".mcp.json"),
-    json(root, ".codex-plugin/plugin.json")
+    json(root, ".codex-plugin/plugin.json"),
+    json(root, "hooks/hooks.json")
   ]);
+  assert(claudeManifest.version === pkg.version && codexManifest.version === pkg.version, "host manifests must use the package cache version");
   assert(claudeManifest.mcpServers === "./.mcp.json", "Claude manifest must explicitly reference ./.mcp.json");
+  assert(claudeManifest.hooks === undefined, "default hooks/hooks.json must not also be registered through a supplemental manifest path");
   assert(claudeMcp.mcpServers && Object.keys(claudeMcp.mcpServers).length === 1, "Claude MCP file must contain one mcpServers registration");
   assert(codexManifest.mcpServers && Object.keys(codexManifest.mcpServers).length === 1, "Codex manifest must contain one MCP registration");
+  const hookInventory = validateHooks(root, hooks);
   const registrations = await Promise.all([
     initializeServer({ label: "claude", root, variable: "CLAUDE_PLUGIN_ROOT", server: claudeMcp.mcpServers["agent-spine"] }),
     initializeServer({ label: "codex", root, variable: "PLUGIN_ROOT", server: codexManifest.mcpServers["agent-spine"] })
   ]);
-  return { ok: true, root, registrations, authority: "registration-check-only" };
+  return {
+    ok: true, root, version: pkg.version, registrations,
+    hooks: { claude: hookInventory, codex: hookInventory },
+    exactlyOnce: { mcpServersPerHost: 1, hookSetsPerHost: 1 },
+    authority: "registration-check-only"
+  };
 }
 
 async function main() {

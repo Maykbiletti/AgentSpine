@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { scanAndSave, verifyCatalog } from "./lib/catalog.js";
 import { readDocument, resolveContext } from "./lib/context.js";
 import { sessionBriefing } from "./lib/briefing.js";
@@ -11,6 +12,7 @@ import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
   learningContext, loadLearning, proposeLearning, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
+import { configureContinuity, loadContinuity, purgeContinuity } from "./lib/continuity.js";
 import {
   checkDelegation, createTask, deleteTask, grantDelegation, loadDelegationPolicy,
   revokeDelegation, taskContext, updateTask
@@ -34,8 +36,9 @@ import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
+import { checkHosts } from "../scripts/check-hosts.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 function parse(argv) {
   const [command = "help", ...rest] = argv;
@@ -100,6 +103,9 @@ Usage:
   agentspine learn-rollback <id> --reason text
   agentspine learn-delete <id>
   agentspine learn-config [root] [--auto-promote true|false] [--min-confidence 0.85]
+  agentspine continuity-config [root] [--enabled true|false] [--entity id] [--project id] [--confirm-local-opt-in]
+  agentspine continuity-status [root]
+  agentspine continuity-purge <entity-id> [--root path] --confirm-local-purge
   agentspine delegation-grant <actor-id> --actions assign,manage --targets agent:id --reason text [--confirm-local-policy]
   agentspine delegation-revoke <grant-id> --reason text [--confirm-local-policy]
   agentspine delegation-check <actor-id> --action assign [--target agent:id]
@@ -367,6 +373,40 @@ export async function run(argv = process.argv.slice(2)) {
     return output(await configureLearning({ root, config }), json);
   }
 
+  if (command === "continuity-config") {
+    const root = positional[0] || process.cwd();
+    const config = {};
+    if (flags.enabled !== undefined) config.enabled = booleanFlag(flags.enabled);
+    if (flags.entity !== undefined) config.defaultEntityId = flags.entity === "none" ? null : flags.entity;
+    if (flags.project !== undefined) config.defaultProjectId = flags.project === "none" ? null : flags.project;
+    if (flags["min-confidence"] !== undefined) config.minConfidence = Number(flags["min-confidence"]);
+    if (flags["min-directness"] !== undefined) config.minDirectness = Number(flags["min-directness"]);
+    if (flags["min-evidence"] !== undefined) config.minEvidence = Number(flags["min-evidence"]);
+    if (flags["max-prompt-bytes"] !== undefined) config.maxPromptBytes = Number(flags["max-prompt-bytes"]);
+    if (flags["max-briefing-bytes"] !== undefined) config.maxBriefingBytes = Number(flags["max-briefing-bytes"]);
+    if (!Object.keys(config).length) return output((await loadContinuity(root)).continuity.config, json);
+    return output(await configureContinuity({
+      root, config,
+      confirmation: booleanFlag(flags["confirm-local-opt-in"]) ? "local-user-opt-in" : null
+    }), json);
+  }
+
+  if (command === "continuity-status") {
+    const { continuity, continuityPath } = await loadContinuity(positional[0] || process.cwd());
+    return output({
+      schema: continuity.schema, config: continuity.config,
+      signals: continuity.signals.length, history: continuity.history.length,
+      continuityPath, authority: "context-only"
+    }, json);
+  }
+
+  if (command === "continuity-purge") {
+    return output(await purgeContinuity({
+      root: flags.root || process.cwd(), subjectId: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-confirmed" : null
+    }), json);
+  }
+
   if (command === "delegation-grant") {
     return output(await grantDelegation({
       root: flags.root || process.cwd(), actorId: positional[0],
@@ -628,13 +668,20 @@ export async function run(argv = process.argv.slice(2)) {
   }
 
   if (command === "doctor") {
+    let hostIntegration;
+    try {
+      hostIntegration = await checkHosts(fileURLToPath(new URL("..", import.meta.url)));
+    } catch (error) {
+      hostIntegration = { ok: false, error: error.message };
+    }
     const result = {
-      ok: Number(process.versions.node.split(".")[0]) >= 20,
+      ok: Number(process.versions.node.split(".")[0]) >= 20 && hostIntegration.ok,
       version: VERSION,
       node: process.versions.node,
       platform: process.platform,
       preservationMode: "read-only-source-overlay",
-      stateDirectory: process.env.AGENTSPINE_STATE_DIR || "platform-default"
+      stateDirectory: process.env.AGENTSPINE_STATE_DIR || "platform-default",
+      hostIntegration
     };
     output(result, json);
     if (!result.ok) process.exitCode = 1;

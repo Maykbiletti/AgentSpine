@@ -1,5 +1,7 @@
 # Session briefing
 
+As of `0.2.0`, native lifecycle hooks generate and inject this packet automatically at start, resume, prompt, and compaction boundaries. MCP and CLI remain inspection surfaces; model-side tool selection is not part of automatic continuity.
+
 `session_briefing` assembles the smallest useful, provider-neutral context packet for one Claude Code, Codex, or generic MCP session. It replaces a chain of separate context reads without turning aggregation into authority.
 
 ```mermaid

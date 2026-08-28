@@ -238,8 +238,10 @@ test("malformed local sharing state fails closed without blocking indexing or be
   await assert.rejects(pullShared({ root: rootB, directory: adapter }), /structure is invalid/);
   assert.equal(await readFile(loaded.sharingPath, "utf8"), corrupt);
   const hook = await runHook({ hook_event_name: "SessionStart", cwd: rootB });
-  assert.match(hook.context, /indexed 1 Markdown source/);
-  assert.match(hook.context, /Shared-memory state needs review/);
+  const injected = JSON.parse(hook.context);
+  assert.equal(injected.indexedSources, 1);
+  assert.equal(injected.failedClosed, true);
+  assert.match(injected.error, /sharing state structure is invalid/);
 });
 
 test("CLI publishes, quarantines, reviews, reads, configures, and deletes shared context", async (t) => {

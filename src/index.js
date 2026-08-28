@@ -8,9 +8,13 @@ export {
   recordActivity, resolveAttention, upsertAttention
 } from "./lib/attention.js";
 export {
-  addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
-  learningContext, loadLearning, proposeLearning, reviewLearning, rollbackLearning
+  acceptContinuityLearning, addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
+  learningContext, loadLearning, proposeLearning, purgeLearningBySubject, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
+export {
+  captureContinuityPrompt, configureContinuity, continuityFindings,
+  inspectContinuity, loadContinuity, purgeContinuity
+} from "./lib/continuity.js";
 export {
   checkDelegation, createTask, deleteTask, grantDelegation, loadCoordination,
   loadDelegationPolicy, revokeDelegation, taskContext, updateTask

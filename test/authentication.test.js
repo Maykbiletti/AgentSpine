@@ -100,8 +100,9 @@ test("signed sharing authenticates origin but still requires local content revie
   assert.equal(context.items[0].authentication.signerId, "signer:publisher");
   assert.equal(context.items[0].authority, "context-only");
   const hook = await runHook({ hook_event_name: "SessionStart", cwd: rootB });
-  assert.match(hook.context, /1 locally reviewed shared-memory item/);
-  assert.doesNotMatch(hook.context, /signer:publisher|ed25519:/);
+  const injected = JSON.parse(hook.context);
+  assert.equal(injected.briefing.shared.length, 1);
+  assert.equal(injected.briefing.shared[0].claim, "The synthetic signed exchange is operational.");
   assert.equal(hash(await readFile(join(rootA, "AGENTS.md"))), beforeA);
   assert.equal(hash(await readFile(join(rootB, "CLAUDE.md"))), beforeB);
   const privateFiles = await readdir(join(state, "signers", "private"));

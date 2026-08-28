@@ -53,7 +53,7 @@ agentspine learn-review learning:concise \
 agentspine learn-context . --include-private --json
 ```
 
-Candidates never appear in learned context before acceptance. Hooks expose only the count and kinds of accepted shared learning; they never inject claims automatically.
+Candidates never appear in learned context before acceptance. Native lifecycle hooks inject only accepted, exactly scoped learning inside the byte-budgeted session briefing. They never inject unreviewed candidates.
 
 ## Optional automatic promotion
 
@@ -68,7 +68,9 @@ agentspine learn-config . \
 agentspine learn-evaluate . --json
 ```
 
-The accepted record stores the policy thresholds, evidence count, and evaluation time used for that decision. The audit rejects an accepted record with no valid manual-review proof or automatic-promotion snapshot. Personal facts, preferences, goals, corrections, and no-gos are never automatically promoted.
+The accepted record stores the policy thresholds, evidence count, and evaluation time used for that decision. The audit rejects an accepted record with no valid manual-review proof or automatic-promotion snapshot. Personal facts, preferences, goals, corrections, and no-gos are never automatically promoted by this general evaluator.
+
+This evaluator is separate from [automatic continuity](automatic-continuity.md). After its own local privacy opt-in, the lifecycle adapter may accept only direct, high-confidence style preferences, no-gos, corrections, project facts, and references with a recorded threshold proof. Personal facts, group conversation content, identity claims, secrets, authority, access, and operational permissions are never eligible. The continuity path is not exposed through MCP.
 
 ## Supersession and rollback
 
