@@ -3,13 +3,14 @@ import { buildCatalog, saveCatalog, verifyCatalog } from "./catalog.js";
 import { loadGraph } from "./graph.js";
 import { loadAttention } from "./attention.js";
 import { inspectLearning, learningFindings } from "./learning.js";
+import { coordinationFindings, delegationPolicyFindings, inspectCoordination } from "./coordination.js";
 import { resolveContext } from "./context.js";
 
 function gate(id, name, ok, detail, severity = "error") {
   return { id, name, ok, severity, detail };
 }
 
-function authorityViolations(graph, attention, learning) {
+function authorityViolations(graph, attention, learning, coordination) {
   const records = [
     ...graph.edges,
     ...graph.annotations,
@@ -26,7 +27,10 @@ function authorityViolations(graph, attention, learning) {
       ...(candidate.evidence || []), candidate.review, candidate.rollback
     ]).filter(Boolean),
     ...learning.history,
-    ...learning.history.map((entry) => entry.value).filter(Boolean)
+    ...learning.history.map((entry) => entry.value).filter(Boolean),
+    ...coordination.tasks,
+    ...coordination.history,
+    ...coordination.history.map((entry) => entry.value).filter(Boolean)
   ];
   return records.filter((record) => record.authority !== "context-only");
 }
@@ -46,6 +50,9 @@ export async function runAudit(root = process.cwd()) {
   const { graph, graphPath } = await loadGraph(before.root, catalog);
   const { attention, attentionPath } = await loadAttention(before.root, catalog);
   const { learning, learningPath, error: learningLoadError } = await inspectLearning(before.root, catalog);
+  const {
+    policy, coordination, policyPath, coordinationPath, errors: coordinationLoadErrors
+  } = await inspectCoordination(before.root, catalog);
   const context = await resolveContext({ root: before.root, cwd: before.root, host: "generic", maxBytes: 16384, includeContent: true, catalog });
   const verification = await verifyCatalog(before.root);
   const after = await buildCatalog(before.root);
@@ -53,7 +60,7 @@ export async function runAudit(root = process.cwd()) {
   const byteStable = after.documents.length === before.documents.length && after.documents.every((document) => beforeHashes.get(document.relativePath) === document.sha256);
   const brokenLinks = catalog.conflicts.filter((conflict) => conflict.type === "broken-link");
   const reviewConflicts = catalog.conflicts.filter((conflict) => conflict.type !== "broken-link");
-  const authority = authorityViolations(graph, attention, learning);
+  const authority = authorityViolations(graph, attention, learning, coordination);
   const forbidden = forbiddenEntityKeys(graph);
   const privacyValues = new Set(["private", "shared", "group"]);
   const privateRecords = [
@@ -67,7 +74,10 @@ export async function runAudit(root = process.cwd()) {
     ...attention.history.map((entry) => entry.value).filter((value) => value && "privacy" in value),
     ...learning.candidates,
     ...learning.history,
-    ...learning.history.map((entry) => entry.value).filter((value) => value && "privacy" in value)
+    ...learning.history.map((entry) => entry.value).filter((value) => value && "privacy" in value),
+    ...coordination.tasks,
+    ...coordination.history,
+    ...coordination.history.map((entry) => entry.value).filter((value) => value && "privacy" in value)
   ];
   const privacyInvalid = privateRecords.filter((record) => !privacyValues.has(record.privacy));
   const knownGroups = new Set(graph.entities.filter((entity) => entity.kind === "group").map((entity) => entity.id));
@@ -94,18 +104,26 @@ export async function runAudit(root = process.cwd()) {
     ));
   const learningIssues = learningFindings(learning, graph);
   if (learningLoadError) learningIssues.push(`unreadable-state:${learningLoadError}`);
+  const policyIssues = delegationPolicyFindings(policy, graph);
+  const coordinationIssues = coordinationFindings(coordination, policy, graph);
+  for (const error of coordinationLoadErrors) {
+    if (error.startsWith("policy:")) policyIssues.push(`unreadable-state:${error}`);
+    else coordinationIssues.push(`unreadable-state:${error}`);
+  }
+  const coordinationAuthorityIssues = coordinationIssues.filter((issue) => /assignment|policy-snapshot/.test(issue));
+  const coordinationContextIssues = coordinationIssues.filter((issue) => !coordinationAuthorityIssues.includes(issue));
   const nativeMapped = catalog.documents.filter((document) => document.hosts.some((host) => host !== "generic"));
   const loadedBytes = context.documents.filter((document) => document.loaded).reduce((sum, document) => sum + document.bytes, 0);
 
   const gates = [
     gate(1, "Runtime", Number(process.versions.node.split(".")[0]) >= 20, `Node ${process.versions.node}`),
     gate(2, "Discovery", catalog.schema === "agentspine.catalog/v1", `${catalog.documents.length} Markdown documents indexed`),
-    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath), `State remains outside ${catalog.root}`),
+    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath) && !isInside(catalog.root, policyPath) && !isInside(catalog.root, coordinationPath), `State remains outside ${catalog.root}`),
     gate(4, "Native hierarchy", nativeMapped.every((document) => document.hosts.length > 0), `${nativeMapped.length} host-native documents mapped`),
     gate(5, "Link integrity", brokenLinks.length === 0, brokenLinks.length ? `${brokenLinks.length} broken Markdown links` : "All indexed Markdown links resolve"),
     gate(6, "Conflict visibility", Array.isArray(catalog.conflicts), `${reviewConflicts.length} precedence or classification findings exposed`, "warning"),
-    gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0, `${authority.length} authority violations; ${forbidden.length} forbidden entity records`),
-    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && learningIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, and ${learning.candidates.length} learning records checked`),
+    gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0, `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings`),
+    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && learningIssues.length === 0 && coordinationContextIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${learning.candidates.length} learning records, and ${coordination.tasks.length} coordination items checked`),
     gate(9, "Context budget", loadedBytes <= context.budget.maxBytes, `${loadedBytes}/${context.budget.maxBytes} bytes loaded`),
     gate(10, "Byte preservation", byteStable && verification.ok, verification.ok ? "Sources remained byte-for-byte unchanged" : "Source drift detected")
   ];
@@ -119,6 +137,8 @@ export async function runAudit(root = process.cwd()) {
     catalogPath,
     graphPath,
     attentionPath,
-    learningPath
+    learningPath,
+    policyPath,
+    coordinationPath
   };
 }

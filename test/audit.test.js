@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { runAudit } from "../src/lib/audit.js";
 import { loadAttention } from "../src/lib/attention.js";
 import { loadLearning, proposeLearning } from "../src/lib/learning.js";
+import { grantDelegation, loadCoordination, loadDelegationPolicy } from "../src/lib/coordination.js";
+import { upsertEntity } from "../src/lib/graph.js";
 
 test("ten-point audit passes a healthy spine without source writes", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "agentspine-audit-"));
@@ -83,4 +85,41 @@ test("ten-point audit reports malformed learning state instead of overwriting it
   assert.equal(result.ok, false);
   assert.equal(result.gates.find((gate) => gate.name === "Context privacy").ok, false);
   assert.equal(await readFile(loaded.learningPath, "utf8"), corrupt);
+});
+
+test("ten-point audit rejects a delegation grant with forged provenance", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-audit-policy-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-audit-policy-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "AGENTS.md"), "# Rules\n", "utf8");
+  await upsertEntity({ root, id: "agent:lead", kind: "agent", privacy: "shared" });
+  await upsertEntity({ root, id: "agent:worker", kind: "agent", privacy: "shared" });
+  await grantDelegation({
+    root, id: "grant:forged", actorId: "agent:lead", actions: ["assign"], targetIds: ["agent:worker"],
+    reason: "Synthetic explicit owner decision.", confirmation: "local-owner-confirmed"
+  });
+  const loaded = await loadDelegationPolicy(root);
+  loaded.policy.grants[0].source = "relationship-memory";
+  await writeFile(loaded.policyPath, `${JSON.stringify(loaded.policy)}\n`, "utf8");
+  const result = await runAudit(root);
+  assert.equal(result.ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Authority boundary").ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Byte preservation").ok, true);
+});
+
+test("ten-point audit reports malformed coordination state without overwriting it", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-audit-coordination-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-audit-coordination-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "SOUL.md"), "# Soul\n", "utf8");
+  const loaded = await loadCoordination(root);
+  const corrupt = "{\"schema\":\"wrong\"}";
+  await writeFile(loaded.coordinationPath, corrupt, "utf8");
+  const result = await runAudit(root);
+  assert.equal(result.ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Context privacy").ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Byte preservation").ok, true);
+  assert.equal(await readFile(loaded.coordinationPath, "utf8"), corrupt);
 });

@@ -20,6 +20,9 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Explicit review, low-risk opt-in promotion, supersession, rollback, and permanent learning deletion
 - SHA-256 provenance capture for document evidence and serialized concurrent evidence appends
 - Safe-learning CLI, MCP tools, hook metadata, audit checks, and full lifecycle tests
+- Separate default-deny delegation policy with explicit actor, action, target, provenance, revision, and revocation history
+- Context-only tasks, open threads, and handoffs with assignment snapshots and retained prior versions
+- Coordination CLI, read/check MCP surfaces, privacy-filtered hook metadata, audit integration, and concurrency tests
 
 ### Changed
 
@@ -34,6 +37,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Session hooks expose only due attention counts and kinds; cue text remains behind an explicit privacy-filtered read
 - The ten-gate audit now validates attention authority, privacy, configuration, and external-state placement
 - Accepted learning must carry auditable manual-confirmation proof or an evidence-threshold policy snapshot
+- Cross-entity coordination now requires a matching explicit local policy grant; relationship responsibility remains descriptive only
 
 ### Security
 
@@ -41,6 +45,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Every relationship and history record is explicitly context-only
 - Every attention cue and activity is context-only; corrupt attention policy fails closed
 - Secret-shaped observations and authority assertions are rejected before learning storage
+- Delegation policy mutation is excluded from MCP, and malformed policy or coordination state fails closed without overwrite
+- Task coordination grants no host, tool, file, network, deployment, production, billing, or spending authority
 
 ### Planned
 

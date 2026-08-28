@@ -11,6 +11,10 @@ export {
   learningContext, loadLearning, proposeLearning, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 export {
+  checkDelegation, createTask, deleteTask, grantDelegation, loadCoordination,
+  loadDelegationPolicy, revokeDelegation, taskContext, updateTask
+} from "./lib/coordination.js";
+export {
   annotateDocument, linkDocuments, linkEntities, loadGraph,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";

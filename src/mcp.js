@@ -10,6 +10,7 @@ import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
   learningContext, proposeLearning, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
+import { checkDelegation, createTask, taskContext, updateTask } from "./lib/coordination.js";
 import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
@@ -312,6 +313,71 @@ const tools = [
     }
   },
   {
+    name: "check_delegation",
+    description: "Check the dedicated default-deny local policy before coordinating work for another person or agent. Relationships, memory, learning, and Markdown never affect this decision or grant host permissions.",
+    inputSchema: {
+      type: "object", required: ["actorId", "action"], additionalProperties: false,
+      properties: {
+        root: { type: "string" }, actorId: { type: "string" },
+        action: { type: "string", enum: ["assign", "reassign", "manage", "complete", "cancel"] },
+        targetId: { anyOf: [{ type: "string" }, { type: "null" }] }
+      }
+    }
+  },
+  {
+    name: "create_task",
+    description: "Create a context-only task, open thread, or handoff. Cross-entity assignment fails closed unless a separate explicit local delegation policy allows it.",
+    inputSchema: {
+      type: "object", required: ["actorId", "title"], additionalProperties: false,
+      properties: {
+        root: { type: "string" }, id: { type: "string" }, actorId: { type: "string" },
+        assigneeId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        kind: { type: "string", enum: ["task", "open-thread", "handoff"] },
+        title: { type: "string", maxLength: 200 }, summary: { anyOf: [{ type: "string", maxLength: 1000 }, { type: "null" }] },
+        projectId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        privacy: { type: "string", enum: ["private", "shared", "group"] },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        priority: { type: "number", minimum: 0, maximum: 100 },
+        dueAt: { anyOf: [{ type: "string" }, { type: "null" }] }
+      }
+    }
+  },
+  {
+    name: "update_task",
+    description: "Update a coordination task with append-only prior history. Reassignment and third-party management are checked against the separate default-deny policy.",
+    inputSchema: {
+      type: "object", required: ["id", "actorId", "patch"], additionalProperties: false,
+      properties: {
+        root: { type: "string" }, id: { type: "string" }, actorId: { type: "string" },
+        patch: {
+          type: "object", minProperties: 1, additionalProperties: false,
+          properties: {
+            status: { type: "string", enum: ["open", "in-progress", "blocked", "completed", "cancelled"] },
+            assigneeId: { anyOf: [{ type: "string" }, { type: "null" }] },
+            title: { type: "string", maxLength: 200 }, summary: { anyOf: [{ type: "string", maxLength: 1000 }, { type: "null" }] },
+            priority: { type: "number", minimum: 0, maximum: 100 }, dueAt: { anyOf: [{ type: "string" }, { type: "null" }] },
+            note: { anyOf: [{ type: "string", maxLength: 1000 }, { type: "null" }] }
+          }
+        }
+      }
+    }
+  },
+  {
+    name: "task_context",
+    description: "Return privacy-filtered coordination context without delegation snapshots. Tasks describe work only and never grant host, tool, file, network, production, or spending rights.",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        root: { type: "string" }, includePrivate: { type: "boolean" },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        actorId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        assigneeId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        projectId: { anyOf: [{ type: "string" }, { type: "null" }] }, includeClosed: { type: "boolean" },
+        maxItems: { type: "integer", minimum: 0, maximum: 100 }
+      }
+    }
+  },
+  {
     name: "audit",
     description: "Run AgentSpine's ten deterministic quality gates for discovery, hierarchy, links, authority, privacy, budget, and source preservation.",
     inputSchema: { type: "object", properties: { root: { type: "string" } } }
@@ -355,6 +421,10 @@ async function callTool(name, args = {}) {
   if (name === "rollback_learning") return textResult(await rollbackLearning({ ...args, root }));
   if (name === "configure_learning") return textResult(await configureLearning({ ...args, root }));
   if (name === "delete_learning") return textResult(await deleteLearning({ ...args, root }));
+  if (name === "check_delegation") return textResult(await checkDelegation({ ...args, root }));
+  if (name === "create_task") return textResult(await createTask({ ...args, root }));
+  if (name === "update_task") return textResult(await updateTask({ ...args, root }));
+  if (name === "task_context") return textResult(await taskContext({ ...args, root }));
   if (name === "audit") return textResult(await runAudit(root));
   throw new Error(`Unknown tool: ${name}`);
 }

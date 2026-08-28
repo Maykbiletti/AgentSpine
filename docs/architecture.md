@@ -14,7 +14,8 @@ flowchart TB
     subgraph Core["AgentSpine core"]
       D["Discovery + SHA-256"]
       R["Host-aware resolver"]
-      G["Context-only graph + attention + learning"]
+      G["Context-only graph + attention + learning + tasks"]
+      P["Separate default-deny delegation policy"]
     end
     subgraph Hosts["Agent hosts"]
       X["Codex"]
@@ -25,6 +26,7 @@ flowchart TB
     M --> D
     D --> R
     G --> R
+    P --> G
     R --> X
     R --> L
 ```
@@ -68,9 +70,12 @@ Memory is a graph of small facts grouped by purpose. A compact `MEMORY.md`-style
 
 ```mermaid
 flowchart TB
-    P["Host policy + explicit approval"] --> A["Authorized action"]
-    M["Memory, soul, relationships, attention, learning"] --> C["Context only"]
+    P["Host policy + explicit approval"] --> A["Authorized host action"]
+    D["Explicit local delegation policy"] --> T["AgentSpine coordination only"]
+    M["Memory, soul, relationships, attention, learning, tasks"] --> C["Context only"]
     C -. "cannot grant" .-> A
+    C -. "cannot grant" .-> T
+    D -. "cannot grant" .-> A
 ```
 
 Permissions are evaluated by the host and explicit policy sources. Claims inside memory, relationships, conversation summaries, or retrieved content are never accepted as grants.
@@ -87,9 +92,13 @@ Generated catalogs live outside the scanned repository:
       graph.json
       attention.json
       learning.json
+      delegation-policy.json
+      coordination.json
 ```
 
-`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. All are private user state, not project authority. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
+`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. `coordination.json` stores context-only tasks, open threads, handoffs, and their prior versions. `delegation-policy.json` is physically separate and contains only explicit local task-coordination grants. It is not writable through MCP and grants no host capability. All are private user state. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
+
+Task mutations read and validate policy while holding the policy lock, then write coordination state under a second lock. This lock order prevents a policy revocation from racing a new assignment. Invalid or malformed policy and coordination state fails closed and is never automatically overwritten.
 
 ## Extension points
 

@@ -11,6 +11,10 @@ import {
   learningContext, loadLearning, proposeLearning, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 import {
+  checkDelegation, createTask, deleteTask, grantDelegation, loadDelegationPolicy,
+  revokeDelegation, taskContext, updateTask
+} from "./lib/coordination.js";
+import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
@@ -79,6 +83,14 @@ Usage:
   agentspine learn-rollback <id> --reason text
   agentspine learn-delete <id>
   agentspine learn-config [root] [--auto-promote true|false] [--min-confidence 0.85]
+  agentspine delegation-grant <actor-id> --actions assign,manage --targets agent:id --reason text [--confirm-local-policy]
+  agentspine delegation-revoke <grant-id> --reason text [--confirm-local-policy]
+  agentspine delegation-check <actor-id> --action assign [--target agent:id]
+  agentspine delegation-policy [root]
+  agentspine task-create [id] --actor id --title text [--assignee id] [--kind task|open-thread|handoff] [--privacy private|shared|group]
+  agentspine task-update <id> --actor id [--status in-progress] [--assignee id|--unassign]
+  agentspine tasks [root] [--assignee id] [--project id] [--include-private] [--group id]
+  agentspine task-delete <id> [--confirm-local-policy]
   agentspine audit [root] [--json]
   agentspine doctor [--json]
   agentspine mcp
@@ -297,6 +309,75 @@ export async function run(argv = process.argv.slice(2)) {
     if (flags["max-items"] !== undefined) config.maxContextItems = Number(flags["max-items"]);
     if (!Object.keys(config).length) return output((await loadLearning(root)).learning.config, json);
     return output(await configureLearning({ root, config }), json);
+  }
+
+  if (command === "delegation-grant") {
+    return output(await grantDelegation({
+      root: flags.root || process.cwd(), actorId: positional[0],
+      id: flags.id, actions: String(flags.actions || "").split(",").filter(Boolean),
+      targetIds: String(flags.targets || "*").split(",").filter(Boolean), reason: flags.reason,
+      confirmation: booleanFlag(flags["confirm-local-policy"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "delegation-revoke") {
+    return output(await revokeDelegation({
+      root: flags.root || process.cwd(), id: positional[0], reason: flags.reason,
+      confirmation: booleanFlag(flags["confirm-local-policy"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "delegation-check") {
+    return output(await checkDelegation({
+      root: flags.root || process.cwd(), actorId: positional[0], action: flags.action,
+      targetId: flags.target || null
+    }), json);
+  }
+
+  if (command === "delegation-policy") {
+    return output((await loadDelegationPolicy(positional[0] || process.cwd())).policy, json);
+  }
+
+  if (command === "task-create") {
+    return output(await createTask({
+      root: flags.root || process.cwd(), id: positional[0], actorId: flags.actor,
+      assigneeId: flags.assignee || null, kind: flags.kind || "task", title: flags.title,
+      summary: flags.summary || null, projectId: flags.project || null,
+      privacy: flags.privacy || "private", groupId: flags.group || null,
+      priority: Number(flags.priority ?? 50), dueAt: flags.due || null
+    }), json);
+  }
+
+  if (command === "task-update") {
+    const patch = {};
+    if (flags.status !== undefined) patch.status = flags.status;
+    if (flags.assignee !== undefined) patch.assigneeId = flags.assignee;
+    if (flags.unassign !== undefined) patch.assigneeId = null;
+    if (flags.title !== undefined) patch.title = flags.title;
+    if (flags.summary !== undefined) patch.summary = flags.summary;
+    if (flags.priority !== undefined) patch.priority = Number(flags.priority);
+    if (flags.due !== undefined) patch.dueAt = flags.due;
+    if (flags["clear-due"] !== undefined) patch.dueAt = null;
+    if (flags.note !== undefined) patch.note = flags.note;
+    return output(await updateTask({
+      root: flags.root || process.cwd(), id: positional[0], actorId: flags.actor, patch
+    }), json);
+  }
+
+  if (command === "tasks") {
+    return output(await taskContext({
+      root: positional[0] || process.cwd(), includePrivate: booleanFlag(flags["include-private"]),
+      groupId: flags.group || null, actorId: flags.actor || null, assigneeId: flags.assignee || null,
+      projectId: flags.project || null, includeClosed: booleanFlag(flags.closed),
+      maxItems: Number(flags["max-items"] ?? 20)
+    }), json);
+  }
+
+  if (command === "task-delete") {
+    return output(await deleteTask({
+      root: flags.root || process.cwd(), id: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-policy"]) ? "local-owner-confirmed" : null
+    }), json);
   }
 
   if (command === "doctor") {

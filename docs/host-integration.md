@@ -9,7 +9,7 @@ AgentSpine uses native plugin surfaces instead of asking users to paste a large 
 | Manifest | `.claude-plugin/plugin.json` | Package identity and version |
 | Marketplace | `.claude-plugin/marketplace.json` | GitHub installation and updates |
 | Skill | `skills/agent-spine/SKILL.md` | Context rules and preservation invariants |
-| MCP | `.mcp.json` | Read-only discovery and context tools |
+| MCP | `.mcp.json` | Read-only source tools plus external overlay workflows |
 | Hooks | `hooks/hooks.json` | Lifecycle indexing and protected-source guard |
 
 Install from GitHub:
@@ -27,7 +27,7 @@ Use `claude plugin validate .` in a checkout to validate the manifest and market
 |---|---|---|
 | Manifest | `.codex-plugin/plugin.json` | Package identity, skill, and MCP registration |
 | Skill | `skills/agent-spine/SKILL.md` | Context rules and preservation invariants |
-| MCP | Manifest `mcpServers` | Read-only discovery and context tools |
+| MCP | Manifest `mcpServers` | Read-only source tools plus external overlay workflows |
 | Hooks | `hooks/hooks.json` | Auto-discovered lifecycle guardrails |
 
 Open `/plugins` in Codex CLI after configuring a marketplace that contains AgentSpine. Review and trust the hook definition, then start a new session.
@@ -48,7 +48,7 @@ Any MCP client that supports stdio can launch:
 }
 ```
 
-The server implements `initialize`, `ping`, `tools/list`, and `tools/call`. It has no network dependency and exposes no source-file write tool. Overlay tools write only private AgentSpine state outside the scanned project.
+The server implements `initialize`, `ping`, `tools/list`, and `tools/call`. It has no network dependency and exposes no source-file or delegation-policy mutation tool. Overlay tools write only private AgentSpine context state outside the scanned project. Explicit delegation grants and revocations remain on the local CLI administration surface.
 
 Verify either installation against a synthetic or real project without changing its Markdown:
 
@@ -59,4 +59,4 @@ agentspine audit /path/to/project --json
 
 The audit exits non-zero when a required gate fails, making it suitable for installation smoke tests and CI.
 
-At session and compaction boundaries, the hook may add counts and kinds for due shared attention cues and accepted shared learning. It never injects cue summaries, learned claims, private relationship data, or group context without an audience. The agent must explicitly call `attention_context` or `learning_context`, respect current-task priority, and set `markPresented` only when it actually surfaces a cue.
+At session and compaction boundaries, the hook may add counts and kinds for due shared attention cues, accepted shared learning, and open shared coordination. It never injects cue summaries, learned claims, task titles or notes, delegation policy, private relationship data, or group context without an audience. The agent must explicitly call `attention_context`, `learning_context`, or `task_context`, respect current-task priority, and set `markPresented` only when it actually surfaces a cue. Cross-entity task actions require an explicit `check_delegation` decision in addition to normal host authorization.

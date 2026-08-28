@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { startMcpServer } from "../src/mcp.js";
+import { grantDelegation } from "../src/lib/coordination.js";
+import { upsertEntity } from "../src/lib/graph.js";
 
 test("MCP server initializes and lists its read and graph tools", async () => {
   const input = new PassThrough();
@@ -38,8 +40,11 @@ test("MCP server initializes and lists its read and graph tools", async () => {
     "configure_attention", "delete_attention", "propose_learning",
     "add_learning_evidence", "review_learning", "learning_context",
     "evaluate_learning", "rollback_learning", "configure_learning",
-    "delete_learning", "audit"
+    "delete_learning", "check_delegation", "create_task", "update_task",
+    "task_context", "audit"
   ]);
+  assert.equal(names.includes("grant_delegation"), false);
+  assert.equal(names.includes("revoke_delegation"), false);
 });
 
 test("agentspine mcp CLI launches the stdio server", async (t) => {
@@ -153,5 +158,53 @@ test("MCP learning tools keep candidates hidden until confirmed and support roll
   assert.equal(JSON.parse(messages[1].result.content[0].text).items.length, 0);
   assert.equal(JSON.parse(messages[3].result.content[0].text).items[0].id, "learning:mcp");
   assert.equal(JSON.parse(messages[5].result.content[0].text).items.length, 0);
+  assert.equal(messages.every((message) => message.result.isError === false), true);
+});
+
+test("MCP coordination tools enforce separately configured delegation and retain task context", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-mcp-coordination-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-mcp-coordination-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "AGENTS.md"), "# Rules\n", "utf8");
+  await upsertEntity({ root, id: "agent:mcp-lead", kind: "agent", privacy: "shared" });
+  await upsertEntity({ root, id: "agent:mcp-worker", kind: "agent", privacy: "shared" });
+  await grantDelegation({
+    root, id: "grant:mcp", actorId: "agent:mcp-lead", actions: ["assign"], targetIds: ["agent:mcp-worker"],
+    reason: "The local owner approved the synthetic MCP assignment.", confirmation: "local-owner-confirmed"
+  });
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.setEncoding("utf8");
+  let response = "";
+  output.on("data", (chunk) => { response += chunk; });
+  startMcpServer(input, output);
+  const calls = [
+    { id: 31, name: "check_delegation", arguments: { root, actorId: "agent:mcp-lead", action: "assign", targetId: "agent:mcp-worker" } },
+    {
+      id: 32, name: "create_task", arguments: {
+        root, id: "task:mcp", actorId: "agent:mcp-lead", assigneeId: "agent:mcp-worker",
+        title: "Synthetic MCP handoff", kind: "handoff", privacy: "shared"
+      }
+    },
+    { id: 33, name: "update_task", arguments: { root, id: "task:mcp", actorId: "agent:mcp-worker", patch: { status: "completed" } } },
+    { id: 34, name: "task_context", arguments: { root, includeClosed: true } }
+  ];
+  for (const call of calls) input.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: call.id, method: "tools/call", params: { name: call.name, arguments: call.arguments }
+  })}\n`);
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("MCP coordination response timeout")), 3000);
+    const check = () => {
+      if (response.trim().split("\n").length >= calls.length) {
+        clearTimeout(timeout);
+        resolve();
+      } else setTimeout(check, 5);
+    };
+    check();
+  });
+  const messages = response.trim().split("\n").map(JSON.parse);
+  assert.equal(JSON.parse(messages[0].result.content[0].text).allowed, true);
+  assert.equal(JSON.parse(messages[3].result.content[0].text).items[0].status, "completed");
   assert.equal(messages.every((message) => message.result.isError === false), true);
 });

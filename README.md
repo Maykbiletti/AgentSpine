@@ -32,7 +32,8 @@ flowchart TB
     A["Existing Markdown sources"] --> B["Read-only discovery"]
     B --> C["Provenance catalog"]
     C --> D["Host-aware resolver"]
-    F["Relationships + attention + safe learning"] --> D
+    F["Relationships + attention + safe learning + tasks"] --> D
+    P["Separate default-deny delegation policy"] --> F
     D --> E["Claude Code · Codex · MCP"]
 ```
 
@@ -140,6 +141,12 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine learn-rollback …` | Restore the accepted fact replaced by a learning |
 | `agentspine learn-config …` | Configure auto-promotion thresholds and context limits |
 | `agentspine learn-delete …` | Permanently remove one candidate and its learning history |
+| `agentspine delegation-check …` | Check explicit actor/action/target coordination policy; default deny |
+| `agentspine delegation-grant …` | Owner-confirmed local CLI grant for task coordination only |
+| `agentspine delegation-revoke …` | Revoke future coordination and retain policy history |
+| `agentspine task-create …` | Create a context-only task, open thread, or handoff |
+| `agentspine task-update …` | Update status, assignee, or details while retaining the prior version |
+| `agentspine tasks …` | Read privacy-filtered current coordination context |
 | `agentspine audit [root]` | Run ten deterministic quality and preservation gates |
 | `agentspine doctor` | Check runtime and preservation mode |
 | `agentspine mcp` | Start the stdio MCP server |
@@ -165,6 +172,7 @@ flowchart LR
 - `upsert_entity`, `link_entities`, and `relationship_context` maintain a privacy-scoped social and responsibility map outside the project.
 - `upsert_attention`, `record_activity`, `attention_context`, `resolve_attention`, `configure_attention`, and `delete_attention` provide sparse follow-up suggestions without sending messages or granting authority.
 - `propose_learning`, `add_learning_evidence`, `review_learning`, `learning_context`, `evaluate_learning`, `rollback_learning`, `configure_learning`, and `delete_learning` keep observations separate from accepted context and preserve every relevance change.
+- `check_delegation`, `create_task`, `update_task`, and `task_context` coordinate work under a separate default-deny policy. MCP intentionally has no policy grant, revoke, or permanent task-delete tool.
 - `audit` runs the same ten gates available through the CLI.
 
 Relationship updates supersede the active view but retain the previous observation in append-only graph history. Permission-like and credential-like attributes are rejected recursively. See [relationships and learning](docs/relationships.md).
@@ -172,6 +180,8 @@ Relationship updates supersede the active view but retain the previous observati
 Attention is deliberately restrained: the current task wins, private cues require an explicit private read, quiet hours and presentation throttles suppress repetition, and deletion removes retained attention history. Lifecycle hooks inject only counts and cue kinds—never the cue text. See [attention](docs/attention.md).
 
 Safe learning is evidence-first: candidates are invisible until reviewed, automatic promotion is off by default and limited to project facts and references, and every accepted change can be superseded or rolled back without touching source Markdown. See [safe learning](docs/learning.md).
+
+Delegation is intentionally narrower than authority: a relationship such as `responsible-for` never permits assignment. Cross-entity task actions require an explicit local actor/action/target grant, while tasks, open threads, and handoffs remain context-only. See [delegation and coordination](docs/coordination.md).
 
 ## Optional four-layer starter
 
@@ -197,7 +207,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.1` establishes the preservation kernel, context resolver, relationship, sparse-attention, and safe-learning foundations, MCP surface, dual-host plugin layout, and executable tests. Pluggable shared memory remains staged in the [roadmap](docs/roadmap.md) behind the same permission boundary.
+AgentSpine is in active early development. `v0.1` establishes the preservation kernel; current `main` also includes relationship, sparse-attention, safe-learning, and default-deny coordination foundations, a provider-neutral MCP surface, dual-host plugin layout, and executable tests. Pluggable shared memory remains staged in the [roadmap](docs/roadmap.md) behind the same permission boundary.
 
 ## Documentation
 
@@ -209,6 +219,7 @@ AgentSpine is in active early development. `v0.1` establishes the preservation k
 | Understand relationships and history | [Relationships](docs/relationships.md) |
 | Configure sparse follow-ups | [Attention](docs/attention.md) |
 | Review evidence-backed observations | [Safe learning](docs/learning.md) |
+| Coordinate agents without memory-based authority | [Delegation and coordination](docs/coordination.md) |
 | Run the Definition of Done | [Ten quality gates](docs/quality-gates.md) |
 | See planned capabilities | [Roadmap](docs/roadmap.md) |
 | Cut a release | [Release process](docs/releasing.md) |

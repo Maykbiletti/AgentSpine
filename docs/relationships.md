@@ -44,7 +44,7 @@ This is supersession in relevance, not deletion or a claim that the newest state
 
 ## Authority boundary
 
-Every entity, relationship, annotation, and history entry carries `authority: context-only`. Permission-like and credential-like attribute keys are rejected recursively. Responsibilities such as `responsible-for` describe the team; they do not authorize task assignment, tool use, access, delegation, billing, deployment, or data disclosure.
+Every entity, relationship, annotation, and history entry carries `authority: context-only`. Permission-like and credential-like attribute keys are rejected recursively. Responsibilities such as `responsible-for` describe the team; they do not authorize task assignment, tool use, access, delegation, billing, deployment, or data disclosure. Cross-entity task coordination uses the separate default-deny policy described in [delegation and coordination](coordination.md); no relationship edge can satisfy that policy.
 
 ## CLI example
 

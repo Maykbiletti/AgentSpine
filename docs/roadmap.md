@@ -8,6 +8,7 @@ flowchart TB
     B --> C["3 · Relationships"]
     C --> D["4 · Attention"]
     D --> E["5 · Safe learning"]
+    E --> F["6 · Delegation + coordination"]
 ```
 
 ## 1. Preservation kernel
@@ -31,7 +32,7 @@ Status: local foundation and candidate workflow implemented; shared adapters rem
 
 ## 3. Relationships
 
-Status: foundation implemented; delegation policy and open-thread UX remain planned.
+Status: local relationship, explicit delegation, and open-thread foundations implemented.
 
 - distinct identities for people, agents, channels, groups, and projects;
 - privacy-scoped relationship state per agent and counterpart;
@@ -59,6 +60,17 @@ Status: local evidence, review, promotion, supersession, and rollback workflow i
 - automatic promotion is default-off, thresholded, and limited to project facts and references;
 - acceptance proof and rollback are audited;
 - code, secrets, billing, permissions, and production access remain approval-bound.
+
+## 6. Delegation and coordination
+
+Status: local default-deny foundation implemented; remote dispatch remains deliberately out of scope.
+
+- delegation policy physically separated from context and absent from MCP mutation tools;
+- explicit actor, action, and target matching with owner-confirmed local grants;
+- tasks, open threads, and handoffs with assignment snapshots and retained history;
+- self-management without widening cross-entity delegation;
+- exact private and group audiences, atomic writes, cross-process locking, and fail-closed validation;
+- no task dispatch, messaging, host permissions, tool rights, deployment, billing, or spending authority.
 
 ## Definition of done for every stage
 

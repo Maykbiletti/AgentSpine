@@ -11,12 +11,12 @@ agentspine audit /path/to/project --json
 |---:|---|---|
 | 1 | Supported Node.js runtime | Runtime is below Node 20 |
 | 2 | Catalog schema and discovery | Sources could not be represented deterministically |
-| 3 | External generated state | Catalog, graph, attention, or learning state landed inside the scanned project |
+| 3 | External generated state | Catalog, graph, attention, learning, delegation policy, or coordination state landed inside the scanned project |
 | 4 | Native hierarchy mapping | A recognized host source lacks host mapping |
 | 5 | Markdown link integrity | An indexed local `.md` link has no target |
 | 6 | Conflict visibility | Precedence and competing candidates are surfaced for review |
-| 7 | Authority boundary | Overlay state contains a non-context authority claim or forbidden field |
-| 8 | Context privacy | Graph, attention, or learning privacy, group binding, policy, acceptance proof, or safety boundary is invalid |
+| 7 | Authority boundary | Context state claims authority, a delegation grant lacks explicit local provenance, or an assignment snapshot has no matching policy history |
+| 8 | Context privacy | Graph, attention, learning, or coordination privacy, group binding, policy, acceptance proof, or safety boundary is invalid |
 | 9 | Context budget | Loaded bytes exceed the requested ceiling |
 | 10 | Byte preservation | A source hash changed during the audit or differs from the saved scan |
 
@@ -24,6 +24,6 @@ Gate 6 is informational when findings are represented correctly; AgentSpine expo
 
 ## CI and troubleshooting
 
-The repository test matrix covers Linux, macOS, and Windows on supported Node.js release lines. Package integrity runs separately. For an integration project, run the JSON form and retain only the audit result—never upload source content, the private graph, attention state, or learning state as CI evidence.
+The repository test matrix covers Linux, macOS, and Windows on supported Node.js release lines. Package integrity runs separately. For an integration project, run the JSON form and retain only the audit result—never upload source content, the private graph, attention state, learning state, delegation policy, or coordination state as CI evidence.
 
 Broken links are reported with source and target in the catalog. Competing constitution candidates record either native host precedence or `agent-review-required`. Fix the project only through its normal owner workflow; AgentSpine deliberately has no auto-fix mode.
