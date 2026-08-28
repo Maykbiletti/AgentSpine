@@ -4,7 +4,7 @@ import { lstat, mkdir, mkdtemp, open, readFile, realpath, rm, writeFile } from "
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { verifyEnvelope } from "./authentication.js";
 import { buildCatalog } from "./catalog.js";
 import { isInside } from "./paths.js";
@@ -70,6 +70,23 @@ function eventId(document) {
 
 function eventFilename(id) {
   return `${createHash("sha256").update(id).digest("hex")}.json`;
+}
+
+async function prospectiveCanonicalPath(path) {
+  let ancestor = path;
+  const missing = [];
+  while (true) {
+    try {
+      const canonicalAncestor = await realpath(ancestor);
+      return resolve(canonicalAncestor, ...missing.reverse());
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      const parent = dirname(ancestor);
+      if (parent === ancestor) throw error;
+      missing.push(basename(ancestor));
+      ancestor = parent;
+    }
+  }
 }
 
 export function validateHttpsEndpoint(value) {
@@ -300,7 +317,8 @@ export async function exportHttpsSnapshot({
   const snapshot = validateHttpsSnapshot({ ...body, digest: digest(body) });
   const catalog = await buildCatalog(root);
   const target = resolve(output);
-  if (isInside(catalog.root, target)) {
+  const prospectiveTarget = await prospectiveCanonicalPath(target);
+  if (isInside(catalog.root, prospectiveTarget)) {
     throw new Error("HTTPS snapshot output must remain outside the scanned project");
   }
   let parent = dirname(target);

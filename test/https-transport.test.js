@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { spawnSync } from "node:child_process";
-import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -263,4 +263,17 @@ test("CLI exports a strict signed snapshot outside the project without altering 
   assert.notEqual(rejected.status, 0);
   assert.match(rejected.stderr, /outside the scanned project/);
   await assert.rejects(lstat(insideDirectory), { code: "ENOENT" });
+
+  const aliasParent = await mkdtemp(join(tmpdir(), "agentspine-https-alias-"));
+  t.after(() => rm(aliasParent, { recursive: true }));
+  const rootAlias = join(aliasParent, "project-alias");
+  await symlink(rootA, rootAlias, process.platform === "win32" ? "junction" : "dir");
+  const aliasedInside = join(rootAlias, "alias-must-not-be-created", "snapshot.json");
+  const aliasRejected = spawnSync(process.execPath, [cli,
+    "share-snapshot-export", adapter, "--root", rootAlias, "--out", aliasedInside,
+    "--confirm-local-share", "--json"
+  ], { encoding: "utf8", env: { ...process.env, AGENTSPINE_STATE_DIR: state } });
+  assert.notEqual(aliasRejected.status, 0);
+  assert.match(aliasRejected.stderr, /outside the scanned project/);
+  await assert.rejects(lstat(join(rootA, "alias-must-not-be-created")), { code: "ENOENT" });
 });
