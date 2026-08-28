@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { scanAndSave, verifyCatalog } from "./lib/catalog.js";
 import { readDocument, resolveContext } from "./lib/context.js";
+import { sessionBriefing } from "./lib/briefing.js";
 import { runAudit } from "./lib/audit.js";
 import {
   attentionContext, configureAttention, deleteAttention, loadAttention,
@@ -70,13 +71,14 @@ function help() {
 Usage:
   agentspine scan [root] [--json]
   agentspine context [root] [--cwd path] [--host codex|claude|generic] [--max-bytes n] [--json]
+  agentspine briefing [root] [--host codex|claude|generic] [--entity id] [--group id] [--project id] [--current-task id] [--include-private] [--max-bytes n] [--allow-attention] [--no-source-content]
   agentspine read <relative-path> [--root path] [--offset n] [--length n] [--json]
   agentspine verify [root] [--json]
   agentspine link <from.md> <to.md> --relation related [--reason text] [--confidence 0.8]
   agentspine annotate <path.md> --layer soul [--reason text] [--confidence 0.8]
   agentspine entity <id> --kind person [--name text] [--privacy private]
   agentspine relate <from> <to> --relation works-with [--privacy private]
-  agentspine relationships <entity-id> [--include-private] [--json]
+  agentspine relationships <entity-id> [--group id] [--include-private] [--json]
   agentspine attention [root] [--group id] [--include-private] [--focus-active] [--mark-presented]
   agentspine attention-add [id] --kind promise --summary text [--entity id] [--group id] [--due date]
   agentspine attention-resolve <id> [--status completed|dismissed|open]
@@ -152,6 +154,19 @@ export async function run(argv = process.argv.slice(2)) {
     return output(result, json);
   }
 
+  if (command === "briefing") {
+    const root = positional[0] || process.cwd();
+    return output(await sessionBriefing({
+      root, cwd: flags.cwd || root, host: flags.host || "generic",
+      entityId: flags.entity || null, groupId: flags.group || null,
+      projectId: flags.project || null, currentTaskId: flags["current-task"] || null,
+      includePrivate: booleanFlag(flags["include-private"]),
+      focusActive: !booleanFlag(flags["allow-attention"]),
+      includeSourceContent: !booleanFlag(flags["no-source-content"]),
+      maxBytes: Number(flags["max-bytes"] ?? 16384)
+    }), json);
+  }
+
   if (command === "read") {
     const result = await readDocument({
       root: flags.root || process.cwd(),
@@ -207,7 +222,7 @@ export async function run(argv = process.argv.slice(2)) {
   if (command === "relationships") {
     return output(await relationshipContext({
       root: flags.root || process.cwd(), entityId: positional[0],
-      includePrivate: Boolean(flags["include-private"])
+      includePrivate: Boolean(flags["include-private"]), groupId: flags.group || null
     }), json);
   }
 

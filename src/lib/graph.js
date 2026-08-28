@@ -218,15 +218,41 @@ export async function linkEntities({ root = process.cwd(), from, to, relation = 
   return { edge, graphPath };
 }
 
-export async function relationshipContext({ root = process.cwd(), entityId, includePrivate = false }) {
+function relationshipAudience(graph, groupId) {
+  const ids = new Set([groupId]);
+  for (const edge of graph.entityEdges) {
+    if (edge.relation !== "member-of" || edge.privacy === "private") continue;
+    if (edge.from === groupId) ids.add(edge.to);
+    if (edge.to === groupId) ids.add(edge.from);
+  }
+  return ids;
+}
+
+export async function relationshipContext({
+  root = process.cwd(), entityId, includePrivate = false, groupId = null, catalog: providedCatalog = null
+}) {
   if (!entityId) throw new Error("entityId is required");
-  const { graph } = await loadGraph(root);
+  const { graph } = await loadGraph(root, providedCatalog);
+  if (groupId !== null) {
+    const group = graph.entities.find((item) => item.id === groupId && item.kind === "group");
+    if (!group) throw new Error(`unknown group entity: ${groupId}`);
+    if (includePrivate) throw new Error("private relationship context cannot be assembled for a group audience");
+  }
   const entity = graph.entities.find((item) => item.id === entityId);
   if (!entity) throw new Error(`unknown entity: ${entityId}`);
-  const visible = (item) => includePrivate || item.privacy !== "private";
+  const audience = groupId === null ? null : relationshipAudience(graph, groupId);
+  if (audience && !audience.has(entityId)) throw new Error(`entity is not a visible member of group: ${groupId}`);
+  const visible = (item) => {
+    if (item.privacy === "private") return includePrivate && groupId === null;
+    if (item.privacy === "group" && !audience) return false;
+    if (audience && item.id && !audience.has(item.id)) return false;
+    return true;
+  };
   if (!visible(entity)) throw new Error(`private relationship context requires includePrivate: ${entityId}`);
   const entities = new Map(graph.entities.map((item) => [item.id, item]));
-  const visibleEdge = (edge) => visible(edge) && [edge.from, edge.to].every((id) => !entities.has(id) || visible(entities.get(id)));
+  const visibleEdge = (edge) => visible(edge)
+    && (!audience || [edge.from, edge.to].every((id) => audience.has(id)))
+    && [edge.from, edge.to].every((id) => !entities.has(id) || visible(entities.get(id)));
   const edges = graph.entityEdges.filter((edge) => (edge.from === entityId || edge.to === entityId) && visibleEdge(edge));
   const ids = new Set(edges.flatMap((edge) => [edge.from, edge.to]));
   ids.add(entityId);
@@ -241,6 +267,7 @@ export async function relationshipContext({ root = process.cwd(), entityId, incl
       if ((value.from || value.to) && !visibleEdge(value)) return false;
       return value.id === entityId || value.from === entityId || value.to === entityId;
     }),
+    groupId,
     authority: "context-only"
   };
 }

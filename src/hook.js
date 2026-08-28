@@ -130,7 +130,7 @@ export async function runHook(payload = null) {
     try {
       const learned = await learningContext({ root, includePrivate: false, maxItems: 50, catalog });
       learningNote = learned.items.length
-        ? ` ${learned.items.length} accepted learning item(s) are available (${[...new Set(learned.items.map((item) => item.kind))].join(", ")}); load only relevant items with learning_context.`
+        ? ` ${learned.items.length} accepted learning item(s) are available (${[...new Set(learned.items.map((item) => item.kind))].join(", ")}).`
         : "";
     } catch {
       learningNote = " Learning state needs review; run agentspine audit before using learned context.";
@@ -138,7 +138,7 @@ export async function runHook(payload = null) {
     try {
       const tasks = await taskContext({ root, includePrivate: false, includeClosed: false, maxItems: 50, catalog });
       coordinationNote = tasks.items.length
-        ? ` ${tasks.items.length} shared coordination item(s) are open (${[...new Set(tasks.items.map((item) => item.kind))].join(", ")}); load relevant details with task_context and check delegation before acting for another entity.`
+        ? ` ${tasks.items.length} shared coordination item(s) are open (${[...new Set(tasks.items.map((item) => item.kind))].join(", ")}).`
         : "";
     } catch {
       coordinationNote = " Coordination state needs review; run agentspine audit before using tasks or delegation decisions.";
@@ -146,12 +146,15 @@ export async function runHook(payload = null) {
     try {
       const shared = await sharedContext({ root, includePrivate: false, maxItems: 50, catalog });
       sharingNote = shared.items.length
-        ? ` ${shared.items.length} locally reviewed shared-memory item(s) are available (${[...new Set(shared.items.map((item) => item.kind))].join(", ")}); load only relevant items with shared_context.`
+        ? ` ${shared.items.length} locally reviewed shared-memory item(s) are available (${[...new Set(shared.items.map((item) => item.kind))].join(", ")}).`
         : "";
     } catch {
       sharingNote = " Shared-memory state needs review; run agentspine audit before using imported context.";
     }
-    const summary = `AgentSpine indexed ${catalog.summary.total} Markdown sources (${catalog.summary.protected} protected). Source files remain byte-for-byte untouched.${attentionNote}${learningNote}${coordinationNote}${sharingNote} Catalog: ${catalogPath}`;
+    const available = attentionNote || learningNote || coordinationNote || sharingNote
+      ? " Load only the current scope with session_briefing; it is byte-budgeted and read-only."
+      : "";
+    const summary = `AgentSpine indexed ${catalog.summary.total} Markdown sources (${catalog.summary.protected} protected). Source files remain byte-for-byte untouched.${attentionNote}${learningNote}${coordinationNote}${sharingNote}${available} Catalog: ${catalogPath}`;
     if (payload) return { blocked: false, context: summary };
     process.stdout.write(`${JSON.stringify({
       hookSpecificOutput: { hookEventName: event, additionalContext: summary }

@@ -7,6 +7,7 @@ import { coordinationFindings, delegationPolicyFindings, inspectCoordination } f
 import { inspectSharing, sharingAuthenticationFindings, sharingFindings } from "./sharing.js";
 import { inspectSignerRegistry, inspectTrust, trustFindings } from "./authentication.js";
 import { resolveContext } from "./context.js";
+import { sessionBriefing } from "./briefing.js";
 
 function gate(id, name, ok, detail, severity = "error") {
   return { id, name, ok, severity, detail };
@@ -66,6 +67,16 @@ export async function runAudit(root = process.cwd()) {
   const { trust, trustPath, error: trustLoadError } = await inspectTrust(before.root, catalog);
   const { registry, registryPath, signerDirectory, errors: signerErrors } = await inspectSignerRegistry(before.root, catalog);
   const context = await resolveContext({ root: before.root, cwd: before.root, host: "generic", maxBytes: 16384, includeContent: true, catalog });
+  let briefing = null;
+  let briefingError = null;
+  try {
+    briefing = await sessionBriefing({
+      root: before.root, cwd: before.root, host: "generic", maxBytes: 16384,
+      includePrivate: false, focusActive: true, includeSourceContent: true
+    });
+  } catch (error) {
+    briefingError = error.message;
+  }
   const verification = await verifyCatalog(before.root);
   const after = await buildCatalog(before.root);
   const beforeHashes = new Map(before.documents.map((document) => [document.relativePath, document.sha256]));
@@ -139,6 +150,9 @@ export async function runAudit(root = process.cwd()) {
   const sharingContextIssues = sharingIssues.filter((issue) => !sharingAuthorityIssues.includes(issue));
   const nativeMapped = catalog.documents.filter((document) => document.hosts.some((host) => host !== "generic"));
   const loadedBytes = context.documents.filter((document) => document.loaded).reduce((sum, document) => sum + document.bytes, 0);
+  const briefingBytes = briefing ? Buffer.byteLength(JSON.stringify(briefing)) : null;
+  const briefingBudgetValid = briefing !== null && briefingBytes === briefing.budget.usedBytes
+    && briefingBytes <= briefing.budget.maxBytes;
 
   const gates = [
     gate(1, "Runtime", Number(process.versions.node.split(".")[0]) >= 20, `Node ${process.versions.node}`),
@@ -149,7 +163,9 @@ export async function runAudit(root = process.cwd()) {
     gate(6, "Conflict visibility", Array.isArray(catalog.conflicts), `${reviewConflicts.length} precedence or classification findings exposed`, "warning"),
     gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0 && sharingAuthorityIssues.length === 0, `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings; ${sharingAuthorityIssues.length} shared authority findings`),
     gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && learningIssues.length === 0 && coordinationContextIssues.length === 0 && sharingContextIssues.length === 0 && authenticationIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${learning.candidates.length} learning records, ${coordination.tasks.length} coordination items, ${sharing.records.length} shared records, ${trust.records.length} trusted keys, and ${registry.signers.length} local signers checked`),
-    gate(9, "Context budget", loadedBytes <= context.budget.maxBytes, `${loadedBytes}/${context.budget.maxBytes} bytes loaded`),
+    gate(9, "Context budget", loadedBytes <= context.budget.maxBytes && briefingBudgetValid, briefingError
+      ? `${loadedBytes}/${context.budget.maxBytes} source bytes; briefing failed closed: ${briefingError}`
+      : `${loadedBytes}/${context.budget.maxBytes} source bytes; ${briefingBytes}/${briefing.budget.maxBytes} briefing bytes`),
     gate(10, "Byte preservation", byteStable && verification.ok, verification.ok ? "Sources remained byte-for-byte unchanged" : "Source drift detected")
   ];
   return {

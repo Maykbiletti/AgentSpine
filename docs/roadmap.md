@@ -11,6 +11,7 @@ flowchart TB
     E --> F["6 · Delegation + coordination"]
     F --> G["7 · Portable shared memory"]
     G --> H["8 · Hardened HTTPS snapshots"]
+    H --> I["9 · Budgeted session briefing"]
 ```
 
 ## 1. Preservation kernel
@@ -100,6 +101,17 @@ Status: provider-neutral static transport implemented; writable object-store, da
 - strict bundle digest plus independent manifest and event signature verification before local mutation;
 - import through the same quarantine, second local review, trust, privacy, supersession, rollback, and authority boundaries as the directory adapter;
 - CLI-only transport administration; no network or token surface in MCP or hooks.
+
+## 9. Budgeted session briefing
+
+Status: provider-neutral CLI, MCP, hook guidance, privacy enforcement, and behavioral tests implemented.
+
+- one read across native sources, relationships, accepted local learning, reviewed shared memory, open coordination, and optional attention;
+- current-task-first ordering and local-over-shared deduplication;
+- hard compact-JSON UTF-8 byte ceiling with atomic record inclusion and per-section omission counts;
+- focus active by default and no attention presentation mutation during reads;
+- exact group membership, no private/group mixing, and metadata-only source handling for group audiences;
+- descriptive context only; no policy, credentials, transport administration, messages, or authority.
 
 ## Definition of done for every stage
 

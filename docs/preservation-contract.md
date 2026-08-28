@@ -16,7 +16,7 @@ The scanner:
 - uses an atomic temporary-file replacement for its own catalog;
 - keeps every discovered document visible even when another file has higher precedence.
 
-The resolver may omit content from an individual response when its configured byte budget is exhausted. Omission is explicit. The original remains retrievable through a ranged read with its SHA-256 digest. Ranged reads include both UTF-8 text and base64 bytes so callers can verify exact data even when a boundary splits a multibyte character.
+The resolver may omit content from an individual response when its configured byte budget is exhausted. Omission is explicit. The session briefing also measures its complete compact JSON result and includes only whole records; it never shortens source or state values to make them fit. The original remains retrievable through a ranged read with its SHA-256 digest. Ranged reads include both UTF-8 text and base64 bytes so callers can verify exact data even when a boundary splits a multibyte character.
 
 Filename and path classification is a hint. An agent may add a context-only overlay annotation, but cannot promote an arbitrary source into the constitution layer. Only filenames understood by the native host adapter are instruction candidates.
 
@@ -39,7 +39,7 @@ AgentSpine does not resolve semantic disagreement by editing content. It exposes
 
 ## Uninstall
 
-Uninstall removes the plugin and its generated state only. It never touches scanned projects. Acceptance tests snapshot source bytes before scanning, resolving, reading, attention mutation, learning proposal/review/rollback, delegation and task workflows, signing, trust, shared adapter publication/import/review, HTTPS snapshot export/import, verifying, and hook execution, then compare the source tree afterward.
+Uninstall removes the plugin and its generated state only. It never touches scanned projects. Acceptance tests snapshot source bytes before scanning, resolving, session briefing, reading, attention mutation, learning proposal/review/rollback, delegation and task workflows, signing, trust, shared adapter publication/import/review, HTTPS snapshot export/import, verifying, and hook execution, then compare the source tree afterward.
 
 ## Not guaranteed
 

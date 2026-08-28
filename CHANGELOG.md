@@ -30,6 +30,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Installation-local signer generation and rotation plus project-local trust, revocation, and audit replay
 - Immutable signed HTTPS snapshot export and dependency-free provider-neutral pull transport
 - DNS pinning, default SSRF blocking, redirect and compression rejection, bounded responses, optional environment-only bearer authentication, and explicit private-network opt-in
+- Provider-neutral `session_briefing` across native sources, relationships, accepted learning, reviewed shared memory, coordination, and attention
+- Current-task priority, local/shared deduplication, exact compact-JSON byte accounting, atomic omission, and group-safe metadata-only source handling
 
 ### Changed
 
@@ -46,6 +48,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Accepted learning must carry auditable manual-confirmation proof or an evidence-threshold policy snapshot
 - Cross-entity coordination now requires a matching explicit local policy grant; relationship responsibility remains descriptive only
 - Session hooks expose only counts and kinds of locally reviewed shared memory; pending claims remain hidden
+- Session hooks point to one explicit scoped briefing without automatically injecting its content
 
 ### Security
 
@@ -59,6 +62,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Adapter administration is excluded from MCP; malformed, oversized, symlinked, collided, or tampered exchange state fails closed
 - Private signing keys remain outside projects and agent surfaces; unknown, revoked, swapped, or mismatched signers fail closed
 - HTTPS snapshot transport validates TLS endpoints, every DNS answer, bundle integrity, strict schema, and all nested signatures before quarantine mutation
+- Group briefings reject private reads, foreign membership, and unscoped source content; briefing output remains context-only and read-only
 
 ### Planned
 

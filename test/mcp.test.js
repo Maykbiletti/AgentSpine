@@ -35,7 +35,7 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   assert.equal(messages[0].result.serverInfo.name, "agent-spine");
   const names = messages[1].result.tools.map((tool) => tool.name);
   assert.deepEqual(names, [
-    "scan", "resolve_context", "read_document", "verify",
+    "scan", "resolve_context", "session_briefing", "read_document", "verify",
     "link_documents", "annotate_document", "upsert_entity",
     "link_entities", "relationship_context", "upsert_attention",
     "record_activity", "attention_context", "resolve_attention",
@@ -81,6 +81,38 @@ test("agentspine mcp CLI launches the stdio server", async (t) => {
   });
   assert.equal(response.id, 7);
   assert.equal(response.result.serverInfo.name, "agent-spine");
+});
+
+test("MCP session briefing is read-only, scoped, and byte-budgeted", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-mcp-briefing-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-mcp-briefing-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "AGENTS.md"), "# Synthetic rules\n", "utf8");
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.setEncoding("utf8");
+  let response = "";
+  output.on("data", (chunk) => { response += chunk; });
+  startMcpServer(input, output);
+  input.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 8, method: "tools/call",
+    params: { name: "session_briefing", arguments: { root, host: "codex", maxBytes: 4096 } }
+  })}\n`);
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("MCP briefing response timeout")), 2000);
+    const check = () => {
+      if (response.includes("\n")) { clearTimeout(timeout); resolve(); } else setTimeout(check, 5);
+    };
+    check();
+  });
+  const message = JSON.parse(response.trim());
+  const briefing = JSON.parse(message.result.content[0].text);
+  assert.equal(message.result.isError, false);
+  assert.equal(briefing.schema, "agentspine.session-briefing/v1");
+  assert.equal(briefing.host, "codex");
+  assert.equal(briefing.budget.usedBytes <= 4096, true);
+  assert.equal(briefing.authority, "context-only");
 });
 
 test("MCP attention tools persist and resolve a shared cue", async (t) => {

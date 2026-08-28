@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { scanAndSave, verifyCatalog } from "./lib/catalog.js";
 import { readDocument, resolveContext } from "./lib/context.js";
+import { sessionBriefing } from "./lib/briefing.js";
 import { runAudit } from "./lib/audit.js";
 import {
   attentionContext, configureAttention, deleteAttention,
@@ -32,6 +33,25 @@ const tools = [
         root: { type: "string" }, cwd: { type: "string" },
         host: { type: "string", enum: ["codex", "claude", "generic"] },
         maxBytes: { type: "integer", minimum: 0 }, includeContent: { type: "boolean" }
+      }
+    }
+  },
+  {
+    name: "session_briefing",
+    description: "Assemble one byte-budgeted, privacy-filtered session packet across native sources, relationships, accepted learning, reviewed shared memory, tasks, and optional attention cues. Read-only and context-only.",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        root: { type: "string" }, cwd: { type: "string" },
+        host: { type: "string", enum: ["codex", "claude", "generic"] },
+        entityId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        projectId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        currentTaskId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        includePrivate: { type: "boolean" }, focusActive: { type: "boolean" },
+        includeSourceContent: { type: "boolean" },
+        maxBytes: { type: "integer", minimum: 4096, maximum: 262144 },
+        now: { type: "string" }
       }
     }
   },
@@ -109,7 +129,8 @@ const tools = [
     inputSchema: {
       type: "object", required: ["entityId"],
       properties: {
-        root: { type: "string" }, entityId: { type: "string" }, includePrivate: { type: "boolean" }
+        root: { type: "string" }, entityId: { type: "string" }, includePrivate: { type: "boolean" },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] }
       }
     }
   },
@@ -412,6 +433,7 @@ async function callTool(name, args = {}) {
     maxBytes: args.maxBytes ?? 65536,
     includeContent: args.includeContent ?? true
   }));
+  if (name === "session_briefing") return textResult(await sessionBriefing({ ...args, root }));
   if (name === "read_document") return textResult(await readDocument({
     root, path: args.path, offset: args.offset ?? 0, length: args.length ?? 65536
   }));

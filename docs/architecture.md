@@ -14,7 +14,8 @@ flowchart TB
     subgraph Core["AgentSpine core"]
       D["Discovery + SHA-256"]
       R["Host-aware resolver"]
-    G["Context-only graph + attention + learning + tasks + shared quarantine"]
+      G["Context-only graph + attention + learning + tasks + shared quarantine"]
+      B["Scoped byte-budgeted session briefing"]
       P["Separate default-deny delegation policy"]
     end
     subgraph Hosts["Agent hosts"]
@@ -25,10 +26,11 @@ flowchart TB
     S --> D
     M --> D
     D --> R
-    G --> R
+    G --> B
     P --> G
-    R --> X
-    R --> L
+    R --> B
+    B --> X
+    B --> L
 ```
 
 Source files are never copied into a canonical replacement. The catalog contains metadata and provenance. When content is required, it is read from the original path and checked against its fingerprint.
@@ -51,6 +53,23 @@ sequenceDiagram
 ```
 
 Selection is intentionally conservative. Native host files are selected according to directory scope. Filename and folder classifications are only initial hints. Agents interpret the actual content and can add reasoned, confidence-scored annotations and links to a separate overlay graph. Explicit Markdown links and agent-created graph edges are followed without rewriting their source. Unrelated documents remain cataloged but do not consume context.
+
+## Session assembly
+
+```mermaid
+sequenceDiagram
+    participant H as Host
+    participant B as Session briefing
+    participant C as Constrained context readers
+    H->>B: host + entity/group/project/task + maxBytes
+    B->>C: native sources, relationships, tasks, accepted learning, reviewed sharing
+    B->>C: attention with focus active by default
+    C-->>B: independently privacy-filtered records
+    B->>B: scope, deduplicate, prioritize, atomic fit
+    B-->>H: compact JSON at or below maxBytes
+```
+
+The briefing layer does not query raw state directly. It composes the same fail-closed read models exposed separately through MCP, then applies a narrower session scope. It includes the current task first, prefers locally confirmed learning over equivalent reviewed imports, and accounts for the whole serialized response. In a group audience it rejects private inclusion and never loads arbitrary Markdown content. It performs no writes and does not mark attention cues as presented.
 
 ## The three-layer spine
 

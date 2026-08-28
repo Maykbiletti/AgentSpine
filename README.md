@@ -32,10 +32,11 @@ flowchart TB
     A["Existing Markdown sources"] --> B["Read-only discovery"]
     B --> C["Provenance catalog"]
     C --> D["Host-aware resolver"]
-    F["Relationships + attention + safe learning + tasks + reviewed sharing"] --> D
+    F["Relationships + attention + safe learning + tasks + reviewed sharing"] --> G["Budgeted session briefing"]
+    D --> G
     P["Separate default-deny delegation policy"] --> F
     X["Optional provider-neutral adapter"] --> S["Optional Ed25519 origin check"] --> Q["Local import quarantine"] --> F
-    D --> E["Claude Code · Codex · MCP"]
+    G --> E["Claude Code · Codex · MCP"]
 ```
 
 The resolver keeps three concerns separate:
@@ -65,6 +66,7 @@ Then point AgentSpine at any existing project:
 ```bash
 agentspine scan /path/to/project
 agentspine context /path/to/project --host codex
+agentspine briefing /path/to/project --host codex --max-bytes 16384
 agentspine verify /path/to/project
 agentspine audit /path/to/project
 ```
@@ -122,6 +124,7 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 |---|---|
 | `agentspine scan [root]` | Discover, classify, fingerprint, and save an external catalog |
 | `agentspine context [root] --host …` | Resolve relevant sources in deterministic order |
+| `agentspine briefing [root] …` | Assemble one scoped, privacy-filtered, byte-budgeted session packet |
 | `agentspine read <path>` | Read an indexed source range with SHA-256 provenance |
 | `agentspine verify [root]` | Report added, removed, or byte-changed Markdown |
 | `agentspine link …` | Add an agent-inferred document relationship to the overlay graph |
@@ -171,7 +174,8 @@ Every command supports `--json` where structured output is useful.
 ```mermaid
 flowchart LR
     S["scan"] --> R["resolve_context"]
-    R --> Q["read_document"]
+    R --> B["session_briefing"]
+    B --> Q["read_document"]
     Q --> V["verify"]
     E["upsert_entity"] --> L["link_entities"]
     L --> C["relationship_context"]
@@ -179,6 +183,7 @@ flowchart LR
 
 - `scan` builds the source map.
 - `resolve_context` selects constitution, soul, memory index, and linked facts for the current host and directory.
+- `session_briefing` combines only the relevant native sources, current tasks, relationships, accepted learning, reviewed shared memory, and optional cues within a hard compact-JSON byte budget.
 - `read_document` retrieves exact byte ranges that did not fit the context budget.
 - `verify` proves whether source bytes changed since the last scan.
 - `link_documents` and `annotate_document` let agents build their own semantic map without editing sources.
@@ -198,6 +203,8 @@ Safe learning is evidence-first: candidates are invisible until reviewed, automa
 Delegation is intentionally narrower than authority: a relationship such as `responsible-for` never permits assignment. Cross-entity task actions require an explicit local actor/action/target grant, while tasks, open threads, and handoffs remain context-only. See [delegation and coordination](docs/coordination.md).
 
 Shared memory is transport-neutral and double-reviewed: only accepted non-private learning may be published, every import enters quarantine, and the receiving installation must confirm it again before it can appear in context. The reference directory adapter works without a cloud account. Signed adapters can also be exported as immutable snapshots and pulled from an operator-controlled HTTPS endpoint with pinned DNS, SSRF protection, strict limits, and optional environment-supplied bearer authentication. Digests and Ed25519 envelopes protect transport integrity and configured origins; neither grants authority or approves content. See [shared memory adapters](docs/shared-memory.md) and [HTTPS snapshots](docs/https-transport.md).
+
+Session briefing keeps that growing context usable: one scoped read prioritizes the current task, deduplicates local and shared facts, defaults to focus mode, enforces exact group audiences, and measures the entire compact JSON result against the requested byte ceiling. See [session briefing](docs/session-briefing.md).
 
 ## Optional four-layer starter
 
@@ -223,7 +230,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.1` establishes the preservation kernel; current `main` also includes relationship, sparse-attention, safe-learning, default-deny coordination, optional provider-neutral shared memory with Ed25519 origin authentication and hardened static HTTPS snapshots, a provider-neutral MCP surface, dual-host plugin layout, and executable tests. Writable hosted transports remain optional extension work.
+AgentSpine is in active early development. `v0.1` establishes the preservation kernel; current `main` also includes relationships, sparse attention, safe learning, default-deny coordination, optional provider-neutral shared memory with Ed25519 origin authentication and hardened static HTTPS snapshots, a budgeted session briefing, a provider-neutral MCP surface, dual-host plugin layout, and executable tests. Writable hosted transports remain optional extension work.
 
 ## Documentation
 
@@ -232,6 +239,7 @@ AgentSpine is in active early development. `v0.1` establishes the preservation k
 | Understand the system | [Architecture](docs/architecture.md) |
 | Audit non-destructive behavior | [Preservation contract](docs/preservation-contract.md) |
 | Integrate a host | [Claude Code and Codex](docs/host-integration.md) |
+| Load one compact session packet | [Session briefing](docs/session-briefing.md) |
 | Understand relationships and history | [Relationships](docs/relationships.md) |
 | Configure sparse follow-ups | [Attention](docs/attention.md) |
 | Review evidence-backed observations | [Safe learning](docs/learning.md) |
