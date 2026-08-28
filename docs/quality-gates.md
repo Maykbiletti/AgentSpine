@@ -33,3 +33,14 @@ Gate 8 validates attention lifecycle schema, provenance, event and receipt ident
 The optional SQLite suite runs where `node:sqlite` is available and proves external-path enforcement, signed-manifest binding, strict schema and integrity validation, append-only revision continuity, atomic-head validation, idempotency, tamper rejection, quarantined pull, CLI integration, agent-surface exclusion, and source preservation. Older supported Node.js jobs load the package without activating this optional transport.
 
 Gate 9 also assembles a read-only generic `session_briefing`, verifies its reported compact UTF-8 JSON byte count, and confirms it remains inside the configured packet ceiling. Focus is active and private context is excluded during this audit read.
+
+## Visible lifecycle acceptance
+
+The ten-gate audit validates one installed project's invariants. The complementary `agentspine acceptance` command proves the entire automatic cross-host behavior in an isolated synthetic environment:
+
+```bash
+agentspine acceptance
+agentspine acceptance --json
+```
+
+Its 14 visible gates cover canonical identities, Swedish and Spanish continuity, heartbeat/promise/blocker persistence, Claude restart, Codex compaction, person and group isolation, correction history, rollback, authorized resume, denied foreign effect, durable checkpointing, person purge, source-byte preservation, and the final audit. Every gate prints a deterministic SHA-256 receipt, and the machine report explicitly records zero MCP calls. Fresh-install and upgrade validation run this same acceptance entry point from the staged installed bundle. See [visible cross-host acceptance](acceptance.md).

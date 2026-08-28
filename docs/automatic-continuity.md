@@ -1,6 +1,6 @@
 # Automatic continuity
 
-AgentSpine `0.4.0` connects the portal-neutral memory, briefing, attention, and exactly authorized job-checkpoint layers to installed Claude Code and Codex lifecycle hooks. The result is real host context, durable scoped attention state, and an optional rights-bound resume path at lifecycle boundaries—not a counter or a suggestion that the model should call an MCP tool later.
+AgentSpine `0.5.0` connects the portal-neutral memory, briefing, attention, and exactly authorized job-checkpoint layers to installed Claude Code and Codex lifecycle hooks. The result is real host context, durable scoped attention state, and an optional rights-bound resume path at lifecycle boundaries—not a counter or a suggestion that the model should call an MCP tool later.
 
 ## One-time setup
 
@@ -74,4 +74,4 @@ Generated state remains in the operating system's private user-state directory. 
 
 ## Deliberate boundary
 
-Promises, blockers, and heartbeats now persist through automatic lifecycle events with exact actor, group, project, and task scope. AgentSpine still does not start or resume jobs. The rights-bound self-starter remains the next ordered milestone and requires a separate current host/owner authorization proof before every effect.
+Promises, blockers, and heartbeats persist through automatic lifecycle events with exact actor, group, project, and task scope. A waiting job can start or resume only through the separate rights-bound self-starter and only while a current exact local host/owner grant passes again before every effect. Learning, attention, and briefing content never satisfy that grant. The full path is reproducible through the [visible cross-host acceptance](acceptance.md).

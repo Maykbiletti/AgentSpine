@@ -24,17 +24,17 @@ async function makePreviousCache(target) {
   for (const path of ["package.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
     const file = join(target, path);
     const value = JSON.parse(await readFile(file, "utf8"));
-    value.version = "0.3.0";
+    value.version = "0.4.0";
     await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   }
   const marketplacePath = join(target, ".claude-plugin/marketplace.json");
   const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
-  marketplace.plugins[0].version = "0.3.0";
+  marketplace.plugins[0].version = "0.4.0";
   await writeFile(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
   const hooksPath = join(target, "hooks/hooks.json");
   const hooks = JSON.parse(await readFile(hooksPath, "utf8"));
-  hooks.version = "0.3.0";
-  hooks.contract = "agentspine.attention-events/v1";
+  hooks.version = "0.4.0";
+  hooks.contract = "agentspine.selfstarter/v1";
   await writeFile(hooksPath, `${JSON.stringify(hooks, null, 2)}\n`, "utf8");
 }
 
@@ -161,6 +161,22 @@ async function invokeInstalledSelfstarter(pluginRoot, projectRoot, stateRoot, ho
   };
 }
 
+async function invokeInstalledAcceptance(pluginRoot) {
+  const acceptance = await import(pathToFileURL(join(pluginRoot, "src/lib/acceptance.js")).href);
+  const report = await acceptance.runVisibleAcceptance();
+  if (!report.ok || report.passed !== report.total || report.mcpCalls !== 0) {
+    throw new Error("installed bundle did not pass visible lifecycle acceptance");
+  }
+  return {
+    passed: report.passed,
+    total: report.total,
+    receiptDigest: report.receiptDigest,
+    hosts: report.hosts,
+    languages: report.languages,
+    mcpCalls: report.mcpCalls
+  };
+}
+
 async function prepareInstalledAttention(pluginRoot, projectRoot, stateRoot) {
   const previous = process.env.AGENTSPINE_STATE_DIR;
   process.env.AGENTSPINE_STATE_DIR = stateRoot;
@@ -223,6 +239,7 @@ export async function checkInstall(root = process.cwd()) {
     const freshHook = await invokeInstalledHook(fresh, userProject, freshState, "claude");
     const freshAttention = await invokeInstalledAttention(fresh, userProject, freshState, "claude");
     const freshSelfstarter = await invokeInstalledSelfstarter(fresh, userProject, freshState, "claude");
+    const freshAcceptance = await invokeInstalledAcceptance(fresh);
 
     const installed = join(workspace, "cache", "agent-spine");
     await copyBundle(root, installed);
@@ -240,6 +257,7 @@ export async function checkInstall(root = process.cwd()) {
     const upgradedHook = await invokeInstalledHook(installed, userProject, upgradeState, "codex");
     const upgradedAttention = await invokeInstalledAttention(installed, userProject, upgradeState, "codex");
     const upgradedSelfstarter = await invokeInstalledSelfstarter(installed, userProject, upgradeState, "codex");
+    const upgradedAcceptance = await invokeInstalledAcceptance(installed);
 
     await rm(fresh, { recursive: true });
     await rm(installed, { recursive: true });
@@ -252,6 +270,7 @@ export async function checkInstall(root = process.cwd()) {
       automaticBriefing: { fresh: freshHook, upgrade: upgradedHook },
       automaticAttention: { fresh: freshAttention, upgrade: upgradedAttention },
       automaticSelfstarter: { fresh: freshSelfstarter, upgrade: upgradedSelfstarter },
+      visibleAcceptance: { fresh: freshAcceptance, upgrade: upgradedAcceptance },
       canonicalAliasLaunch: aliasResult.ok,
       previousCacheRejected: legacyFailed,
       uninstallPreservedSources: true,

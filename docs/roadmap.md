@@ -20,6 +20,7 @@ flowchart TB
     N --> O["15 · Automatic live continuity"]
     O --> P["16 · Native attention events"]
     P --> Q["17 · Rights-bound self-starter"]
+    Q --> R["18 · Visible cross-host acceptance"]
 ```
 
 ## 1. Preservation kernel
@@ -227,7 +228,7 @@ Status: implemented in `v0.3.0` as the second ordered milestone. The rights-boun
 
 ## 17. Rights-bound self-starter
 
-Status: implemented in `v0.4.0` as the third ordered milestone. The visible multi-person, multi-group, multilingual restart acceptance run remains the next stage.
+Status: implemented in `v0.4.0` as the third ordered milestone. The visible multi-person, multi-group, multilingual restart acceptance followed in `v0.5.0`.
 
 - separate explicit local execution policy binding exact actor, actions, job, task, target, project, optional group, host, and finite tool capabilities;
 - durable waiting, running, blocked, exhausted, completed, and cancelled job state outside the project;
@@ -239,6 +240,20 @@ Status: implemented in `v0.4.0` as the third ordered milestone. The visible mult
 - execution-policy and job administration absent from MCP;
 - `0.4.0` cache boundary and fresh-install/`0.3.0` upgrade proof for exactly one MCP server and one lifecycle hook set;
 - no authority from memory, Markdown, learning, relationships, attention, task text, model claims, previous approval, or MCP.
+
+## 18. Visible cross-host acceptance
+
+Status: implemented in `v0.5.0` as the fourth and final ordered live-runtime milestone.
+
+- one visible 14-gate scenario using the production Claude Code and Codex lifecycle adapter and zero model-side MCP calls;
+- new synthetic people, separated groups, projects, and tasks with exact positive and negative visibility;
+- Swedish and Spanish style continuity across a new session and a native compaction boundary;
+- durable heartbeat, promise, blocker, correction, supersession history, atomic rollback, and complete person purge;
+- exactly authorized start and resume, denied foreign effect, one atomic checkpoint, leases, and idempotent receipts;
+- source hashes before and after the full run plus the ten-gate audit;
+- deterministic SHA-256 receipt per visible status line and one ordered overall digest;
+- `0.5.0` cache boundary and fresh-install/`0.4.0` upgrade proof for exactly one MCP server and one lifecycle hook set;
+- host trust and local continuity/execution consent remain genuine user or owner decisions and are never simulated.
 
 ## Definition of done for every stage
 

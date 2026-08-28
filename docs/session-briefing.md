@@ -1,6 +1,6 @@
 # Session briefing
 
-As of `0.4.0`, native lifecycle hooks generate and inject this packet automatically at start, resume, prompt, and compaction boundaries. Exact current-task heartbeat, promise, and blocker events can enter the same constrained attention section. An independently authorized waiting job can also add its exact durable checkpoint at start and resume; execution rights never come from briefing content. MCP and CLI remain inspection surfaces, and model-side tool selection is not part of automatic continuity.
+As of `0.5.0`, native lifecycle hooks generate and inject this packet automatically at start, resume, prompt, and compaction boundaries. Exact current-task heartbeat, promise, and blocker events can enter the same constrained attention section. An independently authorized waiting job can also add its exact durable checkpoint at start and resume; execution rights never come from briefing content. MCP and CLI remain inspection surfaces, and model-side tool selection is not part of automatic continuity.
 
 `session_briefing` assembles the smallest useful, provider-neutral context packet for one Claude Code, Codex, or generic MCP session. It replaces a chain of separate context reads without turning aggregation into authority.
 
@@ -68,4 +68,4 @@ Direct private context remains an explicit, non-group request.
 
 The whole packet and every overlay record remain `context-only`. A current task describes focus; it does not authorize execution. Relationships, learned claims, shared claims, attention cues, Markdown, and a `responsible-for` edge cannot create permissions or delegation. Host policy controls tools and external actions. AgentSpine's separate explicit local delegation policy controls only its own cross-entity coordination operations.
 
-Lifecycle hooks inject only counts and kinds. They may recommend this single scoped read, but never inject briefing contents automatically.
+Lifecycle hooks inject the complete scoped packet within the configured byte budget. They fail closed visibly when identity, scope, source, or dependent state cannot be validated; they never replace a missing briefing with counters or a suggestion that the model call MCP.

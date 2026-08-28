@@ -21,11 +21,12 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
-The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Version `0.4.0` replaces the `0.3.0` cache identity; both host manifests and the hook bundle carry that version, while the bundle declares the `agentspine.selfstarter/v1` runtime contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise clean install, previous-version cache rejection, upgrade, automatic briefing, attention, exact job start, tool checkpoint, new-session resume, and uninstall preservation:
+The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Version `0.5.0` replaces the `0.4.0` cache identity; both host manifests and the hook bundle carry that version, while the bundle declares the `agentspine.acceptance/v1` runtime contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise clean install, previous-version cache rejection, upgrade, automatic multilingual briefing, attention, exact job start, tool checkpoint, new-session resume, purge, and uninstall preservation:
 
 ```bash
 npm run host:check
 npm run host:install-check
+npm run acceptance
 ```
 
 ### Claude MCP troubleshooting
@@ -90,3 +91,5 @@ Identity and audience come from explicit hook scope fields or the locally config
 Hook stdin is JSON-only and limited to 64 KiB. State transitions use external atomic files and locks. Hook stdout contains only host protocol JSON; diagnostics are bounded to stderr by the host process. Hooks do not expose transport, key, trust, database, network, message, payment, production, delegation, or policy administration.
 
 The first executable-component trust approval remains mandatory. AgentSpine cannot approve itself. After approval and the one-time continuity opt-in, no per-session enablement or voluntary tool call is required.
+
+The visible acceptance runner invokes the same production lifecycle adapter with new synthetic people, separated groups, Swedish and Spanish prompts, restarts, compaction, correction, rollback, purge, current-rights checks, and durable checkpoints. It prints one reproducible receipt per gate and proves `mcpCalls: 0`. See [visible cross-host acceptance](acceptance.md).

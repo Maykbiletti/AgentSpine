@@ -188,8 +188,8 @@ function heartbeatReceipt(input, scope) {
 function minimalAttentionSignal(prompt) {
   if (typeof prompt !== "string" || Buffer.byteLength(prompt) > 16384) return null;
   const rules = [
-    { kind: "promise", re: /^(?:i promise(?: to)?|i will|ich verspreche(?:,)?|ich werde)\s+(.+)$/i, prefix: "Promise: " },
-    { kind: "blocker", re: /^(?:blocker|blocked(?: by)?|i am blocked(?: by)?|ich bin blockiert(?: durch)?|blockiert durch)\s*[:,-]?\s*(.+)$/i, prefix: "Blocker: " }
+    { kind: "promise", re: /^(?:i promise(?: to)?|i will|ich verspreche(?:,)?|ich werde|prometo(?: que)?|voy a|jag lovar att|jag kommer att)\s+(.+)$/i, prefix: "Promise: " },
+    { kind: "blocker", re: /^(?:blocker|blocked(?: by)?|i am blocked(?: by)?|ich bin blockiert(?: durch)?|blockiert durch|bloquead[oa](?: por)?|estoy bloquead[oa](?: por)?|blockerad(?: av)?|jag är blockerad(?: av)?)\s*[:,-]?\s*(.+)$/i, prefix: "Blocker: " }
   ];
   for (const rule of rules) {
     const match = prompt.trim().match(rule.re);

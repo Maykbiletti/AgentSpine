@@ -90,7 +90,7 @@ claude --plugin-dir .
 ```
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
-Version `0.4.0` explicitly registers `.mcp.json`, ships one version-bound native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.3.0` plugin cache. Fresh-install and upgrade checks prove that exactly one MCP server and one hook set load, then exercise automatic briefing, attention, exact job start, checkpoint, stop, and new-session resume.
+Version `0.5.0` explicitly registers `.mcp.json`, ships one version-bound native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.4.0` plugin cache. Fresh-install and upgrade checks prove that exactly one MCP server and one hook set load, then run the complete visible multilingual acceptance with automatic briefing, attention, exact job start, checkpoint, stop, and new-session resume.
 
 Verify the installed registration from a checkout with:
 
@@ -216,6 +216,7 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine share-context …` | Read only locally accepted, privacy-filtered shared memory |
 | `agentspine share-rollback …` | Roll back shared supersession and restore the prior record |
 | `agentspine audit [root]` | Run ten deterministic quality and preservation gates |
+| `agentspine acceptance` | Run the visible synthetic Claude/Codex lifecycle acceptance and print reproducible receipts |
 | `agentspine doctor` | Check runtime and preservation mode |
 | `agentspine mcp` | Start the stdio MCP server |
 
@@ -286,7 +287,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.4` adds an exact-policy, leased, checkpointed self-starter to the automatic Claude Code and Codex lifecycle bundle. It resumes without a model-side MCP call, while every effect remains current-rights-bound and default-deny. Existing source Markdown remains immutable. The next ordered milestone is the visible multi-person, multi-group, multilingual restart acceptance run.
+AgentSpine is in active early development. `v0.5` completes the ordered live-runtime milestones with a visible multi-person, multi-group, multilingual Claude Code and Codex acceptance run. All automatic paths operate through installed lifecycle hooks without a model-side MCP call; every self-starter effect remains current-rights-bound and default-deny. Existing source Markdown remains immutable.
 
 ## Documentation
 
@@ -295,6 +296,7 @@ AgentSpine is in active early development. `v0.4` adds an exact-policy, leased, 
 | Understand the system | [Architecture](docs/architecture.md) |
 | Audit non-destructive behavior | [Preservation contract](docs/preservation-contract.md) |
 | Integrate a host | [Claude Code and Codex](docs/host-integration.md) |
+| Reproduce the complete host behavior | [Visible cross-host acceptance](docs/acceptance.md) |
 | Enable automatic continuity | [Automatic continuity](docs/automatic-continuity.md) |
 | Load one compact session packet | [Session briefing](docs/session-briefing.md) |
 | Resume one exactly authorized job | [Rights-bound self-starter](docs/selfstarter.md) |

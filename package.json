@@ -1,6 +1,6 @@
 {
   "name": "agent-spine",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A non-destructive identity and memory spine for AI agents.",
   "type": "module",
   "bin": {
@@ -29,6 +29,7 @@
   ],
   "scripts": {
     "check": "npm run lint && npm test && npm run host:check && npm run host:install-check && npm run smoke && npm run audit:self",
+    "acceptance": "node scripts/run-acceptance.js",
     "audit:self": "node bin/agentspine.js audit . --json",
     "host:check": "node scripts/check-hosts.js --json",
     "host:install-check": "node scripts/check-install.js --json",

@@ -20,6 +20,7 @@ flowchart TB
       P["Separate default-deny delegation policy"]
       E["Exact local execution policy"]
       J["Leased job + atomic checkpoint"]
+      A["Visible receipt-bound acceptance"]
     end
     subgraph Hosts["Agent hosts"]
       X["Codex"]
@@ -35,6 +36,7 @@ flowchart TB
     J --> H
     R --> B
     B --> H
+    H --> A
     H --> X
     H --> L
 ```
@@ -137,6 +139,10 @@ Generated catalogs live outside the scanned repository:
 Task mutations read and validate policy while holding the policy lock, then write coordination state under a second lock. This lock order prevents a policy revocation from racing a new assignment. Invalid or malformed policy and coordination state fails closed and is never automatically overwritten.
 
 Self-starter mutations use the same fixed ordering: execution policy first, then job state. A host session holds at most one expiring job lease. `PreToolUse` records one pending effect only after the current exact grant and content-bound workspace digest pass; `PostToolUse` advances the checkpoint once. A crash can resume only when the workspace still equals the pending effect's pre-write digest. See [rights-bound self-starter](selfstarter.md).
+
+## Acceptance boundary
+
+The visible acceptance runner is an observer of the production lifecycle adapter, not a parallel implementation. It creates only synthetic project and state directories, invokes Claude Code and Codex event equivalents directly, and emits receipt-bound results after the same scope, privacy, authority, lease, checkpoint, purge, and audit checks pass. No MCP tool is selected. The runner deletes its temporary state and never treats a receipt as host trust or execution authority. See [visible cross-host acceptance](acceptance.md).
 
 ## Transport boundary
 

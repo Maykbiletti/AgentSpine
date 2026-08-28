@@ -14,7 +14,7 @@ const MAX_STATE_BYTES = 2 * 1024 * 1024;
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
 const SAFE_KINDS = new Set(["preference", "no-go", "correction", "project-fact", "reference"]);
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret|passwort|geheimnis)\s*[:=]\s*\S{8,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i;
-const BLOCKED_RE = /\b(?:birthday|birthdate|geburtstag|relationship|beziehung|spouse|partner|children?|kinder?|pets?|haustiere?|address|adresse|phone|telefon|e-?mail|health|gesundheit|medical|medizin|diagnosis|diagnose|religion|politic|politik|sexual|finances?|finanzen|salary|gehalt|same person|same identity|alias of|merge identit|identit(?:y|ät)|permission|permissions|rights?|roles?|delegat|authorized|authorisation|authorization|berechtigt|rechte|rolle|freigabe|approval|approve|admin|deploy|production|produktion|billing|payment|zahlung|spending|network|netzwerk|database|datenbank|tool access|dateizugriff|file access|private group|private gruppe|private chat|privater chat)\b/i;
+const BLOCKED_RE = /\b(?:birthday|birthdate|geburtstag|relationship|beziehung|spouse|partner|children?|kinder?|pets?|haustiere?|address|adresse|phone|telefon|e-?mail|health|gesundheit|medical|medizin|diagnosis|diagnose|religion|politic|politik|sexual|finances?|finanzen|salary|gehalt|same person|same identity|alias of|merge identit|identit(?:y|ät)|permission|permissions|rights?|roles?|delegat|authorized|authorisation|authorization|berechtigt|rechte|rolle|freigabe|approval|approve|admin|deploy|production|produktion|billing|payment|zahlung|spending|network|netzwerk|database|datenbank|tool access|dateizugriff|file access|private group|private gruppe|private chat|privater chat|permisos?|derechos?|autorizad[oa]|roles?|delegación|aprobación|producción|pagos?|red|base de datos|rättigheter|behörighet|roller?|delegering|godkännande|produktion|betalning|nätverk|databas|privat grupp|privat chatt)\b/i;
 
 function defaults() {
   return {
@@ -174,12 +174,13 @@ function fragment(value) {
 
 function detectSignal(prompt) {
   const rules = [
-    { kind: "no-go", re: /^(?:please\s+)?(?:never|do not|don't|bitte\s+nie|niemals)\s+(.+)$/i, prefix: "Avoid: ", explicit: true },
-    { kind: "correction", re: /^(?:correction|korrektur|nein)[,:]\s*(.+)$/i, prefix: "Correction: ", explicit: true },
-    { kind: "preference", re: /^(?:please|bitte)\s+(?:always\s+|immer\s+)?(?:answer|respond|write|antworte|schreibe)\s+(?:always\s+|immer\s+)?(.+)$/i, prefix: "Response preference: ", explicit: true },
-    { kind: "preference", re: /^(?:i prefer|ich bevorzuge|ich möchte)\s+(.+)$/i, prefix: "Preference: ", explicit: true },
-    { kind: "project-fact", re: /^(?:the project|das projekt)\s+(?:uses|verwendet|ist)\s+(.+)$/i, prefix: "Project fact: ", explicit: false },
-    { kind: "reference", re: /^(?:reference|referenz)\s*:\s*(.+)$/i, prefix: "Reference: ", explicit: false }
+    { kind: "no-go", re: /^(?:please\s+)?(?:never|do not|don't|bitte\s+nie|niemals|por favor\s+nunca|nunca|vänligen\s+aldrig|aldrig)\s+(.+)$/i, prefix: "Avoid: ", explicit: true },
+    { kind: "correction", re: /^(?:correction|korrektur|nein|corrección|korrigering)[,:]\s*(.+)$/i, prefix: "Correction: ", explicit: true },
+    { kind: "preference", re: /^(?:please|bitte|por favor|vänligen)\s+(?:always\s+|immer\s+|siempre\s+|alltid\s+)?(?:answer|respond|write|antworte|schreibe|responde|escribe|svara|skriv)\s+(?:always\s+|immer\s+|siempre\s+|alltid\s+)?(.+)$/i, prefix: "Response preference: ", explicit: true },
+    { kind: "preference", re: /^(?:svara|skriv|responde|escribe)\s+(?:alltid|siempre)\s+(.+)$/i, prefix: "Response preference: ", explicit: true },
+    { kind: "preference", re: /^(?:i prefer|ich bevorzuge|ich möchte|prefiero|quiero|jag föredrar|jag vill)\s+(.+)$/i, prefix: "Preference: ", explicit: true },
+    { kind: "project-fact", re: /^(?:the project|das projekt|el proyecto|projektet)\s+(?:uses|verwendet|ist|usa|utiliza|es|använder|är)\s+(.+)$/i, prefix: "Project fact: ", explicit: false },
+    { kind: "reference", re: /^(?:reference|referenz|referencia|referens)\s*:\s*(.+)$/i, prefix: "Reference: ", explicit: false }
   ];
   for (const rule of rules) {
     const match = prompt.trim().match(rule.re);

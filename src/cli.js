@@ -40,6 +40,7 @@ import {
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
 import { checkHosts } from "../scripts/check-hosts.js";
+import { renderAcceptanceReport, runVisibleAcceptance } from "./lib/acceptance.js";
 import { VERSION } from "./version.js";
 import { isMainModule } from "./lib/runtime.js";
 
@@ -153,6 +154,7 @@ Usage:
   agentspine share-delete <id> [--confirm-local-share]
   agentspine share-config [root] --max-items 12
   agentspine audit [root] [--json]
+  agentspine acceptance [--json]
   agentspine doctor [--json]
   agentspine mcp
 
@@ -164,6 +166,16 @@ export async function run(argv = process.argv.slice(2)) {
   const json = Boolean(flags.json);
   if (command === "help" || command === "--help" || command === "-h") return output(help());
   if (command === "version" || command === "--version" || command === "-v") return output(VERSION);
+
+  if (command === "acceptance") {
+    if (positional.length || Object.keys(flags).some((name) => name !== "json")) {
+      throw new Error("acceptance supports only --json");
+    }
+    const report = await runVisibleAcceptance();
+    if (json) return output(report, true);
+    process.stdout.write(renderAcceptanceReport(report));
+    return;
+  }
 
   if (command === "scan") {
     const result = await scanAndSave(positional[0] || process.cwd());

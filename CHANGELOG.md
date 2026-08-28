@@ -4,6 +4,26 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-28
+
+### Added
+
+- Visible 14-gate cross-host acceptance using new synthetic people, separated groups, Swedish and Spanish prompts, real lifecycle restart and compaction boundaries, and zero model-side MCP calls
+- Deterministic SHA-256 receipts for identity, multilingual continuity, attention, isolation, correction, rollback, purge, authorized resume, denied foreign effects, durable checkpoints, source preservation, and the final audit
+- Installed-bundle acceptance for both fresh installation and upgrade from `0.4.0`
+
+### Changed
+
+- Package, lockfile, Claude Code, Codex, marketplace, and hook-bundle versions advance together to `0.5.0`
+- The lifecycle bundle declares `agentspine.acceptance/v1`
+- Safe direct style, correction, no-go, project-fact, promise, and blocker recognition covers the Swedish and Spanish acceptance paths
+
+### Security
+
+- Person and exact-group negative visibility, a denied foreign lease effect, complete person purge, and byte-for-byte source preservation are visible acceptance gates
+- Acceptance state is synthetic, external, temporary, and transcript-free; its receipts create no identity, trust, approval, or authority
+- Fresh-install and upgrade proofs require exactly one MCP server, exactly one hook set, and complete automatic behavior with `mcpCalls: 0`
+
 ## [0.4.0] - 2026-08-28
 
 ### Added
@@ -155,7 +175,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.1.0...v0.2.0
