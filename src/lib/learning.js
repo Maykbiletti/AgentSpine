@@ -145,7 +145,24 @@ async function saveState(state, path) {
   if (Buffer.byteLength(content) > MAX_STATE_BYTES) throw new Error("learning state exceeds 5 MiB; reject or delete old candidates first");
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, content, { mode: 0o600 });
-  await rename(temporary, path);
+  try {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await rename(temporary, path);
+        break;
+      } catch (error) {
+        const transientWindowsReplace = process.platform === "win32"
+          && ["EACCES", "EBUSY", "EPERM"].includes(error.code);
+        if (!transientWindowsReplace || attempt >= 7) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
+      }
+    }
+  } catch (error) {
+    await unlink(temporary).catch((cleanupError) => {
+      if (cleanupError.code !== "ENOENT") error.cleanupError = cleanupError;
+    });
+    throw error;
+  }
 }
 
 async function withLock(path, root, task) {
