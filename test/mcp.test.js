@@ -50,6 +50,9 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   assert.equal(names.includes("publish_learning"), false);
   assert.equal(names.includes("pull_shared"), false);
   assert.equal(names.includes("review_shared"), false);
+  assert.equal(names.includes("generate_signing_identity"), false);
+  assert.equal(names.includes("trust_signer"), false);
+  assert.equal(names.includes("revoke_trusted_signer"), false);
 });
 
 test("agentspine mcp CLI launches the stdio server", async (t) => {

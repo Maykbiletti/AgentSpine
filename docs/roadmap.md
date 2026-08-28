@@ -76,7 +76,7 @@ Status: local default-deny foundation implemented; remote dispatch remains delib
 
 ## 7. Portable shared memory
 
-Status: optional reference transport implemented; authenticated remote transports remain extension work.
+Status: optional reference transport and Ed25519 origin authentication implemented; network and hosted transports remain extension work.
 
 - directory adapter usable locally, on a network drive, or through a user-selected synchronization service;
 - strict immutable event schema, canonical SHA-256 integrity, deterministic IDs, limits, and collision detection;
@@ -84,7 +84,9 @@ Status: optional reference transport implemented; authenticated remote transport
 - imported events quarantined and invisible until a second local user review;
 - exact group audience, idempotent concurrent pulls, retained supersession, rollback, and permanent local deletion;
 - MCP restricted to reading reviewed shared context; adapter administration remains local CLI;
-- digest integrity is not author authentication; future signed transports must preserve the same local trust boundary.
+- digest integrity remains available for compatibility; signed mode verifies trusted Ed25519 manifest and event origins;
+- local signer generation, explicit rotation, per-project public-key trust, revocation, retained proof, and audit replay;
+- signatures authenticate configured keys only and never replace quarantine, content review, privacy, or authority boundaries.
 
 ## Definition of done for every stage
 

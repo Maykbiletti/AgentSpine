@@ -19,6 +19,10 @@ import {
   reviewShared, rollbackShared, sharedContext, sharedInbox
 } from "./lib/sharing.js";
 import {
+  generateSigningIdentity, listSigningIdentities, revokeTrustedSigner,
+  trustedSignerContext, trustSigner
+} from "./lib/authentication.js";
+import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
@@ -95,9 +99,14 @@ Usage:
   agentspine task-update <id> --actor id [--status in-progress] [--assignee id|--unassign]
   agentspine tasks [root] [--assignee id] [--project id] [--include-private] [--group id]
   agentspine task-delete <id> [--confirm-local-policy]
-  agentspine share-init <directory> --scope team:id [--adapter adapter:id] [--confirm-local-share]
-  agentspine share-publish <directory> --learning id [--id shared:id] [--supersedes shared:id] [--confirm-local-share]
-  agentspine share-pull <directory> [--root path]
+  agentspine share-keygen <signer-id> [--public-out signer.json] [--rotate] [--confirm-local-share]
+  agentspine share-signers [root]
+  agentspine share-trust <signer.json> [--root path] [--confirm-local-share]
+  agentspine share-trust-revoke <key-id> --reason text [--root path] [--confirm-local-share]
+  agentspine share-trust-list [root] [--include-revoked]
+  agentspine share-init <directory> --scope team:id [--adapter adapter:id] [--signer signer:id] [--confirm-local-share]
+  agentspine share-publish <directory> --learning id [--id shared:id] [--signer signer:id] [--supersedes shared:id] [--confirm-local-share]
+  agentspine share-pull <directory> [--root path] [--require-authenticated]
   agentspine share-inbox [root] [--status pending|accepted|rejected|superseded|rolled-back]
   agentspine share-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine share-context [root] [--scope team:id] [--group group:id] [--kind preference,goal]
@@ -396,20 +405,56 @@ export async function run(argv = process.argv.slice(2)) {
   if (command === "share-init") {
     return output(await initDirectoryAdapter({
       root: flags.root || process.cwd(), directory: positional[0], scopeId: flags.scope,
-      adapterId: flags.adapter, confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+      adapterId: flags.adapter, signerId: flags.signer || null,
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-keygen") {
+    return output(await generateSigningIdentity({
+      root: flags.root || process.cwd(), signerId: positional[0], rotate: booleanFlag(flags.rotate),
+      publicOut: flags["public-out"] || null,
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-signers") {
+    return output(await listSigningIdentities({ root: positional[0] || process.cwd() }), json);
+  }
+
+  if (command === "share-trust") {
+    return output(await trustSigner({
+      root: flags.root || process.cwd(), publicIdentityPath: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-trust-revoke") {
+    return output(await revokeTrustedSigner({
+      root: flags.root || process.cwd(), keyId: positional[0], reason: flags.reason,
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-trust-list") {
+    return output(await trustedSignerContext({
+      root: positional[0] || process.cwd(), includeRevoked: booleanFlag(flags["include-revoked"])
     }), json);
   }
 
   if (command === "share-publish") {
     return output(await publishLearning({
       root: flags.root || process.cwd(), directory: positional[0], learningId: flags.learning,
-      eventId: flags.id, supersedesEventId: flags.supersedes || null,
+      eventId: flags.id, supersedesEventId: flags.supersedes || null, signerId: flags.signer || null,
       confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
     }), json);
   }
 
   if (command === "share-pull") {
-    return output(await pullShared({ root: flags.root || process.cwd(), directory: positional[0] }), json);
+    return output(await pullShared({
+      root: flags.root || process.cwd(), directory: positional[0],
+      requireAuthenticated: booleanFlag(flags["require-authenticated"])
+    }), json);
   }
 
   if (command === "share-inbox") {

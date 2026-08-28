@@ -95,9 +95,14 @@ Generated catalogs live outside the scanned repository:
       delegation-policy.json
       coordination.json
       sharing.json
+      sharing-trust.json
+    signers/
+      registry.json
+      private/
+        <key-fingerprint>.pem
 ```
 
-`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. `coordination.json` stores context-only tasks, open threads, handoffs, and their prior versions. `delegation-policy.json` is physically separate and contains only explicit local task-coordination grants. `sharing.json` quarantines imports and retains local review, supersession, and rollback history. Policy mutation and adapter administration are not writable through MCP. All are private user state. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
+`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. `coordination.json` stores context-only tasks, open threads, handoffs, and their prior versions. `delegation-policy.json` is physically separate and contains only explicit local task-coordination grants. `sharing.json` quarantines imports and retains local review, supersession, rollback, and signature proof. `sharing-trust.json` is a project-local allowlist of public signing keys; the installation-wide signer registry keeps private keys separate. Policy, trust, keys, and adapter administration are not writable through MCP. All are private user state. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
 
 Task mutations read and validate policy while holding the policy lock, then write coordination state under a second lock. This lock order prevents a policy revocation from racing a new assignment. Invalid or malformed policy and coordination state fails closed and is never automatically overwritten.
 
@@ -105,9 +110,9 @@ Task mutations read and validate policy while holding the policy lock, then writ
 
 Future modules plug in behind the core boundary:
 
-- authenticated or remote transports implementing the provider-neutral shared-event contract;
+- network or hosted transports implementing the provider-neutral signed-envelope and shared-event contracts;
 - additional host resolvers.
 
 Each extension consumes read-only provenance and emits separate state. None receives permission authority.
 
-The reference directory adapter is optional external transport, not canonical storage. It exports only owner-selected accepted learning, while a receiving installation keeps every import outside active context until a second local review. See [shared memory adapters](shared-memory.md).
+The reference directory adapter is optional external transport, not canonical storage. It exports only owner-selected accepted learning, while a receiving installation keeps every import outside active context until a second local review. In signed mode, Ed25519 proves that an envelope matches a locally trusted public key; it does not make the payload authoritative. See [shared memory adapters](shared-memory.md).

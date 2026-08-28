@@ -34,7 +34,7 @@ flowchart TB
     C --> D["Host-aware resolver"]
     F["Relationships + attention + safe learning + tasks + reviewed sharing"] --> D
     P["Separate default-deny delegation policy"] --> F
-    X["Optional provider-neutral adapter"] --> Q["Local import quarantine"] --> F
+    X["Optional provider-neutral adapter"] --> S["Optional Ed25519 origin check"] --> Q["Local import quarantine"] --> F
     D --> E["Claude Code · Codex · MCP"]
 ```
 
@@ -149,6 +149,9 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine task-update …` | Update status, assignee, or details while retaining the prior version |
 | `agentspine tasks …` | Read privacy-filtered current coordination context |
 | `agentspine share-init …` | Initialize an optional provider-neutral directory adapter outside the project |
+| `agentspine share-keygen …` | Create or explicitly rotate a local Ed25519 signing identity |
+| `agentspine share-trust …` | Trust one exported public identity for the current project |
+| `agentspine share-trust-revoke …` | Revoke a trusted key without turning signatures into authority |
 | `agentspine share-publish …` | Publish one explicitly selected accepted, non-private learning |
 | `agentspine share-pull …` | Import immutable events into local quarantine, never active context |
 | `agentspine share-inbox …` | Review pending, accepted, rejected, superseded, or rolled-back imports |
@@ -192,7 +195,7 @@ Safe learning is evidence-first: candidates are invisible until reviewed, automa
 
 Delegation is intentionally narrower than authority: a relationship such as `responsible-for` never permits assignment. Cross-entity task actions require an explicit local actor/action/target grant, while tasks, open threads, and handoffs remain context-only. See [delegation and coordination](docs/coordination.md).
 
-Shared memory is transport-neutral and double-reviewed: only accepted non-private learning may be published, every import enters quarantine, and the receiving installation must confirm it again before it can appear in context. The reference directory adapter works without a cloud account; a digest detects damage but is not author authentication. See [shared memory adapters](docs/shared-memory.md).
+Shared memory is transport-neutral and double-reviewed: only accepted non-private learning may be published, every import enters quarantine, and the receiving installation must confirm it again before it can appear in context. The reference directory adapter works without a cloud account. Its baseline digest detects damage; optional Ed25519 envelopes authenticate a configured origin against a local trust store. Neither mechanism grants authority or approves content. See [shared memory adapters](docs/shared-memory.md).
 
 ## Optional four-layer starter
 
@@ -218,7 +221,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.1` establishes the preservation kernel; current `main` also includes relationship, sparse-attention, safe-learning, default-deny coordination, and optional provider-neutral shared-memory foundations, a provider-neutral MCP surface, dual-host plugin layout, and executable tests. Authenticated remote transports remain staged behind the same permission boundary.
+AgentSpine is in active early development. `v0.1` establishes the preservation kernel; current `main` also includes relationship, sparse-attention, safe-learning, default-deny coordination, and optional provider-neutral shared-memory foundations with Ed25519 origin authentication, a provider-neutral MCP surface, dual-host plugin layout, and executable tests. Network and hosted transports remain optional extension work.
 
 ## Documentation
 

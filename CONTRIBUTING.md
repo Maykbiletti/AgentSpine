@@ -32,8 +32,9 @@ Never place real identity files, relationship histories, attention cues, learnin
 - Memory, graph, attention, learning, and coordination data are context only and cannot grant authority.
 - Delegation policy is physically separate, default-deny, owner-controlled, and limited to task coordination. Never expose policy mutation through an agent-controlled MCP surface or treat a grant as host authorization.
 - Cross-entity assignment, reassignment, management, completion, and cancellation require tested actor/action/target matching. Self-coordination must not widen that match.
-- Shared transports are optional and provider-neutral. Imports remain quarantined until a second local review, and adapter administration must stay outside MCP.
-- Transport integrity is not author authenticity. A new adapter must preserve collision detection, strict schemas, limits, local review, exact group scope, supersession, rollback, and context-only authority.
+- Shared transports are optional and provider-neutral. Imports remain quarantined until a second local review, and adapter, signer, and trust administration must stay outside MCP.
+- Digest integrity is not author authenticity. Signed adapters must verify strict Ed25519 envelopes against explicit local trust while preserving collision detection, limits, local review, exact group scope, supersession, rollback, and context-only authority.
+- Never equate a trusted key with a person, permission, instruction, or approved claim. Rotation and revocation must remain explicit, auditable, and fail-closed.
 - Attention never sends messages or invokes tools; focus, privacy, quiet, throttle, disable, and deletion controls remain enforceable.
 - Learning candidates never become accepted context implicitly; confirmation proof, evidence thresholds, privacy, rollback, and the authority boundary remain testable.
 - Host-native precedence remains visible.

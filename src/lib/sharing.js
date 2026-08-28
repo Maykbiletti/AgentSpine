@@ -7,6 +7,9 @@ import { buildCatalog } from "./catalog.js";
 import { loadGraph } from "./graph.js";
 import { learningFindings, loadLearning } from "./learning.js";
 import { isInside, projectStateDir } from "./paths.js";
+import {
+  assertTrustedIdentity, loadTrust, signEnvelope, trustFindings, verifyEnvelope
+} from "./authentication.js";
 
 const KINDS = new Set(["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference"]);
 const PRIVACY = new Set(["shared", "group"]);
@@ -228,6 +231,17 @@ function validateManifest(manifest) {
   return manifest;
 }
 
+function validateAuthentication(authentication) {
+  return authentication === null || authentication === undefined || (
+    exactKeys(authentication, ["mode", "signerId", "keyId", "signedAt", "verifiedAt", "signature", "authority"])
+    && authentication.mode === "signed" && ID_RE.test(authentication.signerId || "")
+    && ID_RE.test(authentication.keyId || "") && validDateValue(authentication.signedAt)
+    && validDateValue(authentication.verifiedAt) && typeof authentication.signature === "string"
+    && authentication.signature.length >= 80 && authentication.signature.length <= 96
+    && authentication.authority === "context-only"
+  );
+}
+
 async function assertRegularFile(path, field) {
   const metadata = await lstat(path);
   if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`${field} must be a regular file, not a symlink`);
@@ -267,16 +281,27 @@ async function openAdapter(root, directory) {
   const manifestPath = join(adapterDirectory, ".agentspine-exchange.json");
   const metadata = await assertRegularFile(manifestPath, "adapter manifest");
   if (metadata.size > MAX_EVENT_BYTES) throw new Error("adapter manifest exceeds 64 KiB");
-  const manifest = validateManifest(JSON.parse(await readFile(manifestPath, "utf8")));
+  const manifestDocument = JSON.parse(await readFile(manifestPath, "utf8"));
+  let manifest;
+  let authentication = null;
+  let publicIdentity = null;
+  if (manifestDocument?.schema === "agentspine.signed-envelope/v1") {
+    const verified = verifyEnvelope(manifestDocument, "manifest");
+    manifest = validateManifest(verified.payload);
+    authentication = verified.authentication;
+    publicIdentity = verified.publicIdentity;
+  } else {
+    manifest = validateManifest(manifestDocument);
+  }
   const eventsDirectory = join(adapterDirectory, "events");
   const eventsMetadata = await lstat(eventsDirectory);
   if (!eventsMetadata.isDirectory() || eventsMetadata.isSymbolicLink()) throw new Error("adapter events path must be a real directory");
-  return { adapterDirectory, manifestPath, manifest, eventsDirectory };
+  return { adapterDirectory, manifestPath, manifest, eventsDirectory, authentication, publicIdentity };
 }
 
 export async function initDirectoryAdapter({
   root = process.cwd(), directory, scopeId, adapterId = `adapter:${randomUUID()}`,
-  confirmation, now = new Date()
+  signerId = null, confirmation, now = new Date()
 }) {
   requireConfirmation(confirmation);
   if (!ID_RE.test(scopeId || "")) throw new Error("scopeId must be a stable, whitespace-free identifier");
@@ -290,18 +315,31 @@ export async function initDirectoryAdapter({
   return withLock(lockTarget, async () => ({}), async () => {
     try {
       await assertRegularFile(manifestPath, "adapter manifest");
-      const existing = validateManifest(JSON.parse(await readFile(manifestPath, "utf8")));
+      const existingDocument = JSON.parse(await readFile(manifestPath, "utf8"));
+      const verified = existingDocument?.schema === "agentspine.signed-envelope/v1"
+        ? verifyEnvelope(existingDocument, "manifest") : null;
+      const existing = validateManifest(verified ? verified.payload : existingDocument);
       if (existing.scopeId !== scopeId) throw new Error(`adapter already belongs to scope ${existing.scopeId}`);
-      return { created: false, manifest: existing, adapterDirectory, manifestPath };
+      if (signerId && verified?.publicIdentity.signerId !== signerId) throw new Error("adapter is signed by a different identity");
+      return {
+        created: false, manifest: existing, signed: Boolean(verified),
+        signer: verified?.publicIdentity || null, adapterDirectory, manifestPath
+      };
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
     const body = manifestBody({ adapterId, scopeId, createdAt: date(now, "now") });
     const manifest = { ...body, digest: digest(body) };
+    const document = signerId
+      ? await signEnvelope({ root: catalog.root, signerId, kind: "manifest", payload: manifest, now })
+      : manifest;
     const temporary = `${manifestPath}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+    await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
     await rename(temporary, manifestPath);
-    return { created: true, manifest, adapterDirectory, manifestPath };
+    return {
+      created: true, manifest, signed: Boolean(signerId),
+      signer: document.signer || null, adapterDirectory, manifestPath
+    };
   }, false);
 }
 
@@ -370,12 +408,22 @@ function eventFilename(id) {
 async function readEventFile(path, scopeId) {
   const metadata = await assertRegularFile(path, "shared event");
   if (metadata.size > MAX_EVENT_BYTES) throw new Error("shared event exceeds 64 KiB");
-  return validateSharedEvent(JSON.parse(await readFile(path, "utf8")), scopeId);
+  const document = JSON.parse(await readFile(path, "utf8"));
+  if (document?.schema === "agentspine.signed-envelope/v1") {
+    const verified = verifyEnvelope(document, "event");
+    return {
+      event: validateSharedEvent(verified.payload, scopeId),
+      authentication: verified.authentication,
+      publicIdentity: verified.publicIdentity,
+      document
+    };
+  }
+  return { event: validateSharedEvent(document, scopeId), authentication: null, publicIdentity: null, document };
 }
 
 export async function publishLearning({
   root = process.cwd(), directory, learningId, eventId = `shared:${randomUUID()}`,
-  supersedesEventId = null, confirmation, now = new Date()
+  supersedesEventId = null, signerId = null, confirmation, now = new Date()
 }) {
   requireConfirmation(confirmation);
   if (!ID_RE.test(learningId || "")) throw new Error("learningId is required");
@@ -383,6 +431,8 @@ export async function publishLearning({
   if (supersedesEventId !== null && !ID_RE.test(supersedesEventId || "")) throw new Error("supersedesEventId is invalid");
   const catalog = await buildCatalog(root);
   const adapter = await openAdapter(catalog.root, directory);
+  if (adapter.authentication && !signerId) throw new Error("signed adapters require an explicit local signer");
+  if (!adapter.authentication && signerId) throw new Error("an unsigned adapter cannot accept signed events");
   const { learning } = await loadLearning(catalog.root, catalog);
   const { graph } = await loadGraph(catalog.root, catalog);
   const learningIssues = learningFindings(learning, graph);
@@ -401,7 +451,7 @@ export async function publishLearning({
   validateSharedEvent(event, adapter.manifest.scopeId);
   if (supersedesEventId !== null) {
     const previousPath = join(adapter.eventsDirectory, eventFilename(supersedesEventId));
-    const previous = await readEventFile(previousPath, adapter.manifest.scopeId);
+    const previous = (await readEventFile(previousPath, adapter.manifest.scopeId)).event;
     if (previous.kind !== event.kind || previous.subjectId !== event.subjectId
       || previous.privacy !== event.privacy || previous.groupId !== event.groupId) {
       throw new Error("a superseding shared event must keep kind, subject, and privacy scope");
@@ -409,18 +459,29 @@ export async function publishLearning({
   }
   const target = join(adapter.eventsDirectory, eventFilename(event.id));
   const lockTarget = join(adapter.adapterDirectory, ".agentspine-adapter");
+  const document = signerId
+    ? await signEnvelope({ root: catalog.root, signerId, kind: "event", payload: event, now })
+    : event;
   return withLock(lockTarget, async () => ({}), async () => {
     try {
       const existing = await readEventFile(target, adapter.manifest.scopeId);
-      if (existing.digest !== event.digest) throw new Error(`shared event ID collision: ${event.id}`);
-      return { created: false, event: existing, eventPath: target, manifest: adapter.manifest };
+      if (existing.event.digest !== event.digest) throw new Error(`shared event ID collision: ${event.id}`);
+      return {
+        created: false, event: existing.event, authentication: existing.authentication,
+        eventPath: target, manifest: adapter.manifest
+      };
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
     const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(event, null, 2)}\n`, { mode: 0o600 });
+    await writeFile(temporary, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
     await rename(temporary, target);
-    return { created: true, event, eventPath: target, manifest: adapter.manifest };
+    return {
+      created: true, event,
+      authentication: document.schema === "agentspine.signed-envelope/v1"
+        ? verifyEnvelope(document, "event").authentication : null,
+      eventPath: target, manifest: adapter.manifest
+    };
   }, false);
 }
 
@@ -436,23 +497,33 @@ async function readAdapterEvents(adapter) {
     const metadata = await lstat(path);
     totalBytes += metadata.size;
     if (totalBytes > MAX_ADAPTER_BYTES) throw new Error("adapter event payload exceeds the 20 MiB pull limit");
-    const event = await readEventFile(path, adapter.manifest.scopeId);
-    if (entry.name !== eventFilename(event.id)) throw new Error(`shared event filename does not match its ID: ${event.id}`);
-    events.push(event);
+    const item = await readEventFile(path, adapter.manifest.scopeId);
+    if (entry.name !== eventFilename(item.event.id)) throw new Error(`shared event filename does not match its ID: ${item.event.id}`);
+    events.push(item);
   }
   const byId = new Map();
-  for (const event of events) {
-    const previous = byId.get(event.id);
-    if (previous && previous.digest !== event.digest) throw new Error(`shared event ID collision: ${event.id}`);
-    byId.set(event.id, event);
+  for (const item of events) {
+    const previous = byId.get(item.event.id);
+    if (previous && previous.event.digest !== item.event.digest) throw new Error(`shared event ID collision: ${item.event.id}`);
+    byId.set(item.event.id, item);
   }
-  return [...byId.values()].sort((a, b) => a.publishedAt.localeCompare(b.publishedAt) || a.id.localeCompare(b.id));
+  return [...byId.values()].sort((a, b) => a.event.publishedAt.localeCompare(b.event.publishedAt) || a.event.id.localeCompare(b.event.id));
 }
 
-export async function pullShared({ root = process.cwd(), directory, now = new Date() }) {
+export async function pullShared({ root = process.cwd(), directory, requireAuthenticated = false, now = new Date() }) {
   const catalog = await buildCatalog(root);
   const adapter = await openAdapter(catalog.root, directory);
+  if (requireAuthenticated && !adapter.authentication) throw new Error("adapter is not authenticated");
+  const { trust } = await loadTrust(catalog.root, catalog);
+  if (adapter.authentication) assertTrustedIdentity(adapter.publicIdentity, trust);
   const events = await readAdapterEvents(adapter);
+  if (adapter.authentication && events.some((item) => !item.authentication)) {
+    throw new Error("signed adapters cannot contain unsigned events");
+  }
+  if (!adapter.authentication && events.some((item) => item.authentication)) {
+    throw new Error("unsigned adapters cannot mix signed events");
+  }
+  for (const item of events) if (item.authentication) assertTrustedIdentity(item.publicIdentity, trust);
   const receivedAt = date(now, "now");
   return mutation(catalog.root, (state, _catalog, sharingPath) => {
     const known = new Map([
@@ -461,7 +532,8 @@ export async function pullShared({ root = process.cwd(), directory, now = new Da
     ]);
     const imported = [];
     const skipped = [];
-    for (const event of events) {
+    for (const item of events) {
+      const event = item.event;
       const knownDigest = known.get(event.id);
       if (knownDigest && knownDigest !== event.digest) throw new Error(`shared event ID collision in local state: ${event.id}`);
       if (knownDigest || event.originInstanceId === state.instanceId) {
@@ -470,6 +542,7 @@ export async function pullShared({ root = process.cwd(), directory, now = new Da
       }
       state.records.push({
         event,
+        authentication: item.authentication ? { ...item.authentication, verifiedAt: receivedAt } : null,
         adapterId: adapter.manifest.adapterId,
         receivedAt,
         status: "pending",
@@ -482,7 +555,19 @@ export async function pullShared({ root = process.cwd(), directory, now = new Da
       imported.push(event.id);
     }
     state.records.sort((a, b) => a.event.id.localeCompare(b.event.id));
-    return { imported, skipped, scopeId: adapter.manifest.scopeId, adapterId: adapter.manifest.adapterId, sharingPath };
+    return {
+      imported, skipped, scopeId: adapter.manifest.scopeId, adapterId: adapter.manifest.adapterId,
+      authenticated: Boolean(adapter.authentication),
+      manifestSigner: adapter.authentication ? {
+        signerId: adapter.authentication.signerId, keyId: adapter.authentication.keyId,
+        authority: "context-only"
+      } : null,
+      eventSigners: [...new Map(events.filter((item) => item.authentication).map((item) => [
+        item.authentication.keyId,
+        { signerId: item.authentication.signerId, keyId: item.authentication.keyId, authority: "context-only" }
+      ])).values()],
+      sharingPath
+    };
   });
 }
 
@@ -493,6 +578,7 @@ export async function reviewShared({
   if (!new Set(["accept", "reject"]).has(decision)) throw new Error("decision must be accept or reject");
   const reviewReason = safeText(reason, "reason", 500);
   const reviewedAt = date(now, "now");
+  const acceptedTrust = decision === "accept" ? (await loadTrust(root)).trust : null;
   return mutation(root, (state, _catalog, sharingPath, graph) => {
     const record = state.records.find((item) => item.event.id === id);
     if (!record) throw new Error(`unknown shared event: ${id}`);
@@ -509,6 +595,14 @@ export async function reviewShared({
       return { record: rejected, sharingPath };
     }
     if (!confirmedByUser) throw new Error("acceptance requires explicit local user confirmation");
+    if (record.authentication) {
+      const proofFindings = sharingAuthenticationFindings({ records: [record], history: [] }, acceptedTrust);
+      if (proofFindings.length) throw new Error(`signed shared context failed verification: ${proofFindings.join(", ")}`);
+      const trusted = acceptedTrust.records.find((item) => item.keyId === record.authentication.keyId);
+      if (!trusted || trusted.status !== "trusted" || trusted.signerId !== record.authentication.signerId) {
+        throw new Error("signed shared context must still have a trusted signer at local review time");
+      }
+    }
     validateLocalScope(record.event, graph);
     const newer = state.records.find((item) => item.status === "accepted" && item.event.supersedesEventId === id);
     if (newer) throw new Error(`shared event is already superseded by accepted event: ${newer.event.id}`);
@@ -599,8 +693,11 @@ export async function sharedContext({
   const catalog = providedCatalog || await buildCatalog(root);
   const { sharing } = await loadSharing(catalog.root, catalog);
   const { graph } = await loadGraph(catalog.root, catalog);
+  const { trust } = await loadTrust(catalog.root, catalog);
   const findings = sharingFindings(sharing, graph);
   if (findings.length) throw new Error(`sharing state failed closed: ${findings.join(", ")}`);
+  const authenticationFindings = sharingAuthenticationFindings(sharing, trust);
+  if (authenticationFindings.length) throw new Error(`shared authentication failed closed: ${authenticationFindings.join(", ")}`);
   if (scopeId !== null && !ID_RE.test(scopeId || "")) throw new Error("scopeId is invalid");
   const entities = new Map(graph.entities.map((entity) => [entity.id, entity]));
   if (groupId !== null) {
@@ -633,6 +730,11 @@ export async function sharedContext({
       sourceLearningId: record.event.source.learningId,
       publishedAt: record.event.publishedAt,
       acceptedAt: record.acceptedAt,
+      authentication: record.authentication ? {
+        mode: "signed", signerId: record.authentication.signerId,
+        keyId: record.authentication.keyId, verifiedAt: record.authentication.verifiedAt,
+        authority: "context-only"
+      } : { mode: "integrity-only", authority: "context-only" },
       authority: "context-only"
     }));
   return {
@@ -667,6 +769,11 @@ export async function sharedInbox({ root = process.cwd(), status = "pending" } =
       originInstanceId: record.event.originInstanceId,
       publishedAt: record.event.publishedAt,
       receivedAt: record.receivedAt,
+      authentication: record.authentication ? {
+        mode: "signed", signerId: record.authentication.signerId,
+        keyId: record.authentication.keyId, signedAt: record.authentication.signedAt,
+        verifiedAt: record.authentication.verifiedAt, authority: "context-only"
+      } : { mode: "integrity-only", authority: "context-only" },
       authority: "context-only"
     })),
     sharingPath,
@@ -711,11 +818,12 @@ export function sharingFindings(sharing, graph = null) {
   ];
   for (const { record, current } of records) {
     try { validateSharedEvent(record.event); } catch { findings.push(`invalid-shared-event:${record.event?.id || "unknown"}`); }
-    const allowedRecordKeys = new Set(["event", "adapterId", "receivedAt", "status", "review", "acceptedAt", "supersededIds", "rollback", "authority"]);
+    const allowedRecordKeys = new Set(["event", "authentication", "adapterId", "receivedAt", "status", "review", "acceptedAt", "supersededIds", "rollback", "authority"]);
     if (Object.keys(record).some((key) => !allowedRecordKeys.has(key))
       || !STATUSES.has(record.status) || record.authority !== "context-only" || !ID_RE.test(record.adapterId || "")
       || !validDateValue(record.receivedAt) || !Array.isArray(record.supersededIds)
       || record.supersededIds.some((id) => !ID_RE.test(id || ""))) findings.push(`invalid-shared-record:${record.event?.id || "unknown"}`);
+    if (!validateAuthentication(record.authentication)) findings.push(`invalid-shared-authentication:${record.event?.id || "unknown"}`);
     const nested = [record.review, record.rollback].filter(Boolean);
     if (nested.some((item) => item.authority !== "context-only")) findings.push(`shared-authority:${record.event?.id || "unknown"}`);
     if (nested.some((item) => SECRET_RE.test(item.reason || ""))) findings.push(`unsafe-shared-review:${record.event?.id || "unknown"}`);
@@ -774,6 +882,40 @@ export function sharingFindings(sharing, graph = null) {
     || entry.kind !== "shared-record" || entry.recordId !== entry.value?.event?.id
     || entry.privacy !== entry.value?.event?.privacy || !validDateValue(entry.supersededAt)
     || entry.authority !== "context-only" || entry.value?.authority !== "context-only")) findings.push("invalid-sharing-history");
+  return [...new Set(findings)];
+}
+
+export function sharingAuthenticationFindings(sharing, trust) {
+  const findings = [];
+  const trustIssues = trustFindings(trust);
+  if (trustIssues.length) return trustIssues;
+  const records = [
+    ...sharing.records.map((record) => ({ record, current: true })),
+    ...sharing.history.map((entry) => entry.value).filter(Boolean).map((record) => ({ record, current: false }))
+  ];
+  for (const { record, current } of records.filter((item) => item.record.authentication)) {
+    const trusted = trust.records.find((item) => item.keyId === record.authentication.keyId);
+    if (!trusted || trusted.signerId !== record.authentication.signerId) {
+      findings.push(`missing-shared-signing-key:${record.event.id}`);
+      continue;
+    }
+    try {
+      verifyEnvelope({
+        schema: "agentspine.signed-envelope/v1",
+        kind: "event",
+        signer: trusted.publicIdentity,
+        payload: record.event,
+        signedAt: record.authentication.signedAt,
+        authority: "context-only",
+        signature: record.authentication.signature
+      }, "event");
+    } catch {
+      findings.push(`invalid-stored-shared-signature:${record.event.id}`);
+    }
+    if (current && record.status === "accepted" && trusted.status !== "trusted") {
+      findings.push(`untrusted-accepted-shared-event:${record.event.id}`);
+    }
+  }
   return [...new Set(findings)];
 }
 

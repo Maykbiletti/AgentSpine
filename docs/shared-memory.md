@@ -54,6 +54,101 @@ The manifest binds the directory to one stable scope. Events are immutable JSON 
 
 The directory must be outside the scanned project, including after symlink resolution. Adapter manifests, event files, and the event directory must be regular filesystem objects rather than symlinks. A pull is capped at 2,000 events and 20 MiB; each manifest or event is capped at 64 KiB.
 
+## Authenticated signed mode
+
+The baseline adapter uses canonical SHA-256 integrity for compatibility. Anyone with write access can replace a baseline event and recompute its digest. Signed mode adds Ed25519 origin authentication while preserving the same event payload, quarantine, privacy, and review workflow.
+
+```mermaid
+flowchart LR
+    K["Publisher private key\ninstallation-local"] --> S["Signed manifest + events"]
+    P["Exported public identity"] --> T["Receiver project trust store"]
+    S --> V["Signature verification"]
+    T --> V
+    V --> Q["Pending quarantine"]
+    Q --> R["Independent local content review"]
+    R --> C["Context-only memory"]
+    V -. "authenticates key, not permission" .-> A["No host or delegation authority"]
+```
+
+Create a local signer and export only its public identity:
+
+```bash
+agentspine share-keygen signer:team-alpha \
+  --root /path/to/publisher-project \
+  --public-out /safe/exchange/team-alpha-signer.json \
+  --confirm-local-share
+```
+
+The private key is generated under the AgentSpine installation state directory. It is never returned by the command, copied into the project, placed in the adapter, exposed through MCP, or injected by hooks. The exported JSON contains the Ed25519 public key, stable signer ID, cryptographic key fingerprint, creation time, and integrity digest.
+
+The receiving project must trust that exact exported key through a genuine local owner action:
+
+```bash
+agentspine share-trust /safe/exchange/team-alpha-signer.json \
+  --root /path/to/receiving-project \
+  --confirm-local-share
+
+agentspine share-trust-list /path/to/receiving-project --json
+```
+
+Create and publish through a signed adapter:
+
+```bash
+agentspine share-init /srv/agent-memory/team-alpha \
+  --root /path/to/publisher-project \
+  --scope team:alpha \
+  --signer signer:team-alpha \
+  --confirm-local-share
+
+agentspine share-publish /srv/agent-memory/team-alpha \
+  --root /path/to/publisher-project \
+  --learning learning:release-process \
+  --id shared:release-process-v1 \
+  --signer signer:team-alpha \
+  --confirm-local-share
+```
+
+Require authentication at the receiver:
+
+```bash
+agentspine share-pull /srv/agent-memory/team-alpha \
+  --root /path/to/receiving-project \
+  --require-authenticated
+```
+
+Pull verifies the signed manifest and every signed event before any quarantine write. A signed adapter cannot mix unsigned events, and an unsigned adapter cannot smuggle signed files. Each event signer is checked independently, so a trusted adapter owner does not implicitly trust another writer.
+
+### What a signature means
+
+A valid signature proves that the envelope matches the private key corresponding to a public key explicitly trusted for this receiving project. It does not prove the operator's legal identity, truthfulness, current role, relationship, or permission. It does not approve the claim, grant delegation, authorize a tool, or bypass the second local content review.
+
+Public-key exchange must therefore use a channel appropriate to the deployment. Compare the full key fingerprint out of band when identity matters. Encrypt the transport when metadata confidentiality matters; signatures provide authenticity and integrity, not encryption.
+
+### Rotation and revocation
+
+Rotation is explicit and never overwrites the old public identity silently:
+
+```bash
+agentspine share-keygen signer:team-alpha \
+  --root /path/to/publisher-project \
+  --rotate \
+  --public-out /safe/exchange/team-alpha-signer-v2.json \
+  --confirm-local-share
+```
+
+The installation retains the retired public identity in history and removes the retired local private key. Receivers import the new public identity as a separate trusted fingerprint. Old signatures remain cryptographically verifiable as long as the old public trust record remains available.
+
+Revoke a compromised or retired key locally:
+
+```bash
+agentspine share-trust-revoke ed25519:<full-fingerprint> \
+  --root /path/to/receiving-project \
+  --reason "Key retired after verified rotation" \
+  --confirm-local-share
+```
+
+Revocation blocks new acceptance immediately. If already accepted context depends on that key, shared context and audit fail closed until the user rolls back, rejects, or permanently deletes the affected import. Revocation never rewrites source Markdown or remote adapter files.
+
 ## Publish and receive
 
 Publish an already accepted learning:
@@ -106,9 +201,11 @@ Every `agentspine.shared-event/v1` contains only:
 - `authority: context-only`;
 - a SHA-256 digest over canonical JSON.
 
+Signed mode wraps the unchanged event in an `agentspine.signed-envelope/v1` containing a strict public identity, envelope kind, signing timestamp, `context-only` marker, and Ed25519 signature. The receiver retains the minimal signature proof with the quarantined record and replays it during reads and audits. Public keys and signatures are intentionally omitted from hook text and MCP context results; callers see only a signer ID, key fingerprint, and verification time.
+
 Unknown fields are rejected. IDs are identifiers, not identities or authentication claims. An `originInstanceId` distinguishes local installations but does not prove who operated one.
 
-The digest detects accidental damage and unsophisticated mutation. It is not a signature: anyone who can write the adapter directory can replace an event and recompute its digest. This is why imported events remain quarantined until a second local review. Deployments requiring authenticated authors should implement a future signed adapter without weakening the same quarantine and authority boundaries.
+The baseline digest detects accidental damage and unsophisticated mutation. It is not a signature: anyone who can write the adapter directory can replace an event and recompute its digest. Signed mode detects that replacement unless the attacker also controls a locally trusted private key. Both modes retain quarantine because authentication and content trust are different decisions.
 
 ## Supersession and rollback
 
@@ -141,19 +238,20 @@ Lifecycle hooks have no group audience. They expose only counts and kinds of alr
 
 ## MCP boundary
 
-MCP exposes only `shared_context`, which reads locally accepted records. Adapter initialization, publication, pulling, inbox review, rollback, configuration, and deletion remain local CLI operations. An agent therefore cannot use AgentSpine's MCP surface to connect an arbitrary path, export data, accept its own import, or widen trust.
+MCP exposes only `shared_context`, which reads locally accepted records. Adapter initialization, publication, pulling, inbox review, rollback, configuration, deletion, key generation, rotation, trust, and revocation remain local CLI operations. An agent therefore cannot use AgentSpine's MCP surface to connect an arbitrary path, export data, accept its own import, read a private key, trust itself, or widen trust.
 
 ## Adapter compatibility
 
 A future adapter may use object storage, a database, a peer protocol, or a hosted API. To remain compatible it must produce the same strict manifest and event semantics or map its transport into them before local import:
 
 1. immutable stable event IDs;
-2. canonical integrity digest or stronger authenticated proof;
+2. canonical integrity digest and, for authenticated transports, a verifiable signed envelope;
 3. one explicit scope per adapter connection;
 4. no private, authority, source-document, evidence-text, task, or policy payloads;
 5. quarantine before local review;
 6. idempotent import and collision detection;
 7. retained supersession history and rollback;
 8. no dependency for local AgentSpine operation.
+9. explicit key trust, rotation, and revocation without converting signatures into authority.
 
 Transport plugins may strengthen authenticity, encryption, retention, and remote access control. They may never weaken privacy filtering, local confirmation, the context-only authority marker, or protected-source preservation.

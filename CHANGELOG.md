@@ -26,6 +26,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Provider-neutral shared-event contract and optional directory adapter with immutable event files
 - Quarantined, idempotent shared-memory import with a second local review before context
 - Shared supersession, rollback, exact group filtering, CLI administration, read-only MCP context, hooks, and audit coverage
+- Optional Ed25519 manifest and event envelopes with strict public identities and retained verification proof
+- Installation-local signer generation and rotation plus project-local trust, revocation, and audit replay
 
 ### Changed
 
@@ -53,10 +55,11 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Task coordination grants no host, tool, file, network, deployment, production, billing, or spending authority
 - Private learning, source content, evidence text, tasks, policy, and credentials are excluded from shared events
 - Adapter administration is excluded from MCP; malformed, oversized, symlinked, collided, or tampered exchange state fails closed
+- Private signing keys remain outside projects and agent surfaces; unknown, revoked, swapped, or mismatched signers fail closed
 
 ### Planned
 
-- Authenticated remote transports implementing the provider-neutral shared-event contract
+- Optional network and hosted transports implementing the signed-envelope and shared-event contracts
 
 ## [0.1.0] - 2026-08-27
 

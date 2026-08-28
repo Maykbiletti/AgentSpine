@@ -11,12 +11,12 @@ agentspine audit /path/to/project --json
 |---:|---|---|
 | 1 | Supported Node.js runtime | Runtime is below Node 20 |
 | 2 | Catalog schema and discovery | Sources could not be represented deterministically |
-| 3 | External generated state | Catalog, graph, attention, learning, delegation policy, coordination, or imported sharing state landed inside the scanned project |
+| 3 | External generated state | Catalog, graph, attention, learning, delegation policy, coordination, sharing, trust, or signer state landed inside the scanned project |
 | 4 | Native hierarchy mapping | A recognized host source lacks host mapping |
 | 5 | Markdown link integrity | An indexed local `.md` link has no target |
 | 6 | Conflict visibility | Precedence and competing candidates are surfaced for review |
 | 7 | Authority boundary | Context or shared state claims authority, a delegation grant lacks explicit local provenance, or an assignment snapshot has no matching policy history |
-| 8 | Context privacy | Graph, attention, learning, coordination, or sharing privacy, group binding, integrity, local-review proof, or safety boundary is invalid |
+| 8 | Context privacy | Graph, attention, learning, coordination, sharing, signer, trust, signature, group binding, local-review proof, or safety boundary is invalid |
 | 9 | Context budget | Loaded bytes exceed the requested ceiling |
 | 10 | Byte preservation | A source hash changed during the audit or differs from the saved scan |
 
@@ -28,4 +28,4 @@ The repository test matrix covers Linux, macOS, and Windows on supported Node.js
 
 Broken links are reported with source and target in the catalog. Competing constitution candidates record either native host precedence or `agent-review-required`. Fix the project only through its normal owner workflow; AgentSpine deliberately has no auto-fix mode.
 
-Gate 8 validates the local sharing quarantine, accepted imports, review proof, event integrity, and group scope. `agentspine audit` does not crawl every configured external transport path; directory manifests and events are validated with stricter file, size, schema, digest, and collision checks whenever the adapter is opened, published to, or pulled.
+Gate 8 validates the local sharing quarantine, accepted imports, review proof, event integrity, group scope, trusted public keys, private/public key matches, private-key file safety, and retained event signatures. `agentspine audit` does not crawl every configured external transport path; directory manifests and events are validated with stricter file, size, schema, digest, signature, trust, and collision checks whenever the adapter is opened, published to, or pulled.

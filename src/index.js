@@ -17,8 +17,13 @@ export {
 export {
   configureSharing, deleteShared, initDirectoryAdapter, inspectSharing, loadSharing,
   publishLearning, pullShared, reviewShared, rollbackShared, sharedContext, sharedInbox,
-  sharingFindings, validateSharedEvent
+  sharingAuthenticationFindings, sharingFindings, validateSharedEvent
 } from "./lib/sharing.js";
+export {
+  assertTrustedIdentity, generateSigningIdentity, inspectSignerRegistry, inspectTrust, listSigningIdentities,
+  loadTrust, revokeTrustedSigner, signEnvelope, trustedSignerContext, trustFindings,
+  trustSigner, validatePublicIdentity, verifyEnvelope
+} from "./lib/authentication.js";
 export {
   annotateDocument, linkDocuments, linkEntities, loadGraph,
   relationshipContext, upsertEntity
