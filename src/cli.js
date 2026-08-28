@@ -28,6 +28,9 @@ import { publishHttpsSnapshot } from "./lib/object-transport.js";
 import { loadHttpsFeedState, publishHttpsFeed, pullHttpsFeed } from "./lib/feed-transport.js";
 import { pullPeerCommand, servePeerOnce } from "./lib/peer-transport.js";
 import {
+  initSqliteAdapter, inspectSqliteAdapter, publishSqliteSnapshot, pullSqliteSnapshot
+} from "./lib/sqlite-transport.js";
+import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
@@ -121,6 +124,10 @@ Usage:
   agentspine share-feed-state [root]
   agentspine share-peer-serve <directory> --root path --signer signer:id [--timeout-ms 10000] --confirm-local-share
   agentspine share-peer-pull --root path --command-json '["ssh","host","agentspine",…]' [--timeout-ms 10000] [--max-bytes n] --confirm-local-share
+  agentspine share-sqlite-init <directory> --database path --confirm-local-share
+  agentspine share-sqlite-publish <directory> --database path [--id snapshot:id] --confirm-local-share
+  agentspine share-sqlite-inspect --database path [--root path]
+  agentspine share-sqlite-pull --database path [--root path]
   agentspine share-inbox [root] [--status pending|accepted|rejected|superseded|rolled-back]
   agentspine share-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine share-context [root] [--scope team:id] [--group group:id] [--kind preference,goal]
@@ -550,6 +557,33 @@ export async function run(argv = process.argv.slice(2)) {
       timeoutMs: Number(flags["timeout-ms"] ?? 10000),
       maxBytes: Number(flags["max-bytes"] ?? 22 * 1024 * 1024),
       confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-sqlite-init") {
+    return output(await initSqliteAdapter({
+      root: flags.root || process.cwd(), directory: positional[0], database: flags.database,
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-sqlite-publish") {
+    return output(await publishSqliteSnapshot({
+      root: flags.root || process.cwd(), directory: positional[0], database: flags.database,
+      snapshotId: flags.id,
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-sqlite-inspect") {
+    return output(await inspectSqliteAdapter({
+      root: flags.root || process.cwd(), database: flags.database
+    }), json);
+  }
+
+  if (command === "share-sqlite-pull") {
+    return output(await pullSqliteSnapshot({
+      root: flags.root || process.cwd(), database: flags.database
     }), json);
   }
 

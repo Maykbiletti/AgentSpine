@@ -134,6 +134,8 @@ flowchart LR
     P --> H["Operator-controlled HTTPS object"]
     H --> F["Signed ETag feed + local continuity receipt"]
     H --> P2["Live challenge-response over owner-selected stdio carrier"]
+    D --> DB["Append-only local SQLite revisions"]
+    DB --> V
     S --> H
     H --> V["TLS + DNS + size + schema + signature validation"]
     V --> Q["Local pending quarantine"]
@@ -146,11 +148,13 @@ HTTPS snapshots are temporary transport artifacts, not canonical memory. The obj
 
 A peer pull uses the same snapshot validator and quarantine importer without introducing an AgentSpine network listener. The receiver spawns one explicitly selected carrier with the shell disabled, sends a fresh random challenge, and accepts one signed bounded response. The live-response key must match both local trust and the snapshot-manifest key. AgentSpine does not persist the carrier command or protocol frames, and transport success remains context-only.
 
+The optional SQLite transport stores complete validated signed snapshots in an external local file. One immutable manifest binding anchors the adapter identity; append-only revisions form a digest chain and an atomic head advances in the same `BEGIN IMMEDIATE` transaction. Reads validate the exact application schema, database integrity, every retained snapshot, the full chain, and the head before reusing the signed quarantine importer. Database paths and administration remain CLI-only and outside the scanned project.
+
 ## Extension points
 
 Future modules plug in behind the core boundary:
 
-- database or hosted transports implementing the provider-neutral signed-envelope and shared-event contracts;
+- hosted database transports implementing the provider-neutral signed-envelope and shared-event contracts;
 - additional host resolvers.
 
 Each extension consumes read-only provenance and emits separate state. None receives permission authority.

@@ -16,6 +16,7 @@ flowchart TB
     J --> K["11 · Verifiable releases"]
     K --> L["12 · Signed mutable feeds"]
     L --> M["13 · Challenge-response peers"]
+    M --> N["14 · Local SQLite snapshots"]
 ```
 
 ## 1. Preservation kernel
@@ -82,7 +83,7 @@ Status: local default-deny foundation implemented; remote dispatch remains delib
 
 ## 7. Portable shared memory
 
-Status: optional directory transport, Ed25519 origin authentication, hardened HTTPS snapshots, immutable object publication, signed mutable feeds, and one-shot peer exchange implemented; database transports remain extension work.
+Status: optional directory transport, Ed25519 origin authentication, hardened HTTPS snapshots, immutable object publication, signed mutable feeds, one-shot peer exchange, and local SQLite snapshot history implemented; hosted database transports remain extension work.
 
 - directory adapter usable locally, on a network drive, or through a user-selected synchronization service;
 - strict immutable event schema, canonical SHA-256 integrity, deterministic IDs, limits, and collision detection;
@@ -96,7 +97,7 @@ Status: optional directory transport, Ed25519 origin authentication, hardened HT
 
 ## 8. Hardened HTTPS snapshots
 
-Status: provider-neutral static export, hardened pull, create-only object publication, signed mutable-feed discovery, and challenge-response peer exchange implemented; database adapters remain extension work.
+Status: provider-neutral static export, hardened pull, create-only object publication, signed mutable-feed discovery, challenge-response peer exchange, and local SQLite snapshot retention implemented; hosted database adapters remain extension work.
 
 - immutable signed snapshot export outside the scanned project;
 - dependency-free HTTPS pull with TLS verification, vetted and pinned DNS, default SSRF protection, no redirects, and exact response limits;
@@ -119,7 +120,7 @@ Status: provider-neutral CLI, MCP, hook guidance, privacy enforcement, and behav
 
 ## 10. Immutable HTTPS objects
 
-Status: provider-neutral create-only publish and verified read-back implemented; deletion, database, and peer transports remain out of scope. Signed feed discovery is implemented separately in stage 12.
+Status: provider-neutral create-only publish and verified read-back implemented; deletion remains out of scope. Feeds, peers, and local SQLite are implemented separately in later stages.
 
 - signed snapshot publication under a deterministic SHA-256 object address;
 - atomic create-only `PUT` with `If-None-Match: *` and no overwrite path;
@@ -148,7 +149,7 @@ Status: deterministic local gate and tag-authorized GitHub release pipeline impl
 
 ## 12. Signed mutable feeds
 
-Status: provider-neutral signed feed publication, continuity tracking, and quarantined pull implemented; database transports remain extension work. Direct peers are implemented separately in stage 13.
+Status: provider-neutral signed feed publication, continuity tracking, and quarantined pull implemented; hosted database transports remain extension work. Direct peers and local SQLite are implemented separately in stages 13 and 14.
 
 - bounded 256-entry hash-chain window over immutable signed snapshot objects;
 - full Ed25519 signature over feed identity, scope, adapter, sequence, and retained chain;
@@ -163,7 +164,7 @@ Status: provider-neutral signed feed publication, continuity tracking, and quara
 
 ## 13. Challenge-response peers
 
-Status: one-shot provider-neutral stdio server, owner-selected carrier process, and quarantined pull implemented; database transports remain extension work.
+Status: one-shot provider-neutral stdio server, owner-selected carrier process, and quarantined pull implemented. Local SQLite is implemented separately in stage 14; hosted database transports remain extension work.
 
 - fresh 256-bit random challenge and request ID for every pull;
 - live Ed25519 response binding the challenge to one independently validated signed snapshot;
@@ -176,6 +177,22 @@ Status: one-shot provider-neutral stdio server, owner-selected carrier process, 
 - received events enter quarantine and still need a second local content review;
 - peer and process administration absent from MCP and hooks;
 - challenge, signatures, carrier authentication, snapshots, and imports remain context-only.
+
+## 14. Local SQLite snapshots
+
+Status: provider-neutral local database initialization, append-only publication, full inspection, and quarantined pull implemented; hosted SQL services and database replication remain out of scope.
+
+- optional built-in `node:sqlite` adapter with no package dependency or vendor SDK;
+- database must remain outside the scanned project and cannot be a symbolic link;
+- immutable binding to one authenticated directory manifest, scope, adapter, signer, and key;
+- full signed snapshots retained as monotonically sequenced append-only revisions;
+- SHA-256 revision chain and one atomic head updated in a `BEGIN IMMEDIATE` transaction;
+- exact application-schema and SQLite-integrity validation plus full replay on every read or write;
+- idempotent repeated publication without history duplication;
+- read-only pull of the latest validated revision through the existing signed quarantine importer;
+- explicit local owner confirmation for initialization and publication;
+- CLI-only paths and administration; no SQLite surface in MCP or hooks;
+- SQLite state, hashes, signatures, snapshots, and imports remain context-only.
 
 ## Definition of done for every stage
 

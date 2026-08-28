@@ -100,7 +100,7 @@ The reference client:
 - deletes its temporary materialization after every success or failure;
 - exposes no HTTPS export or pull operation through MCP.
 
-The static client intentionally does not execute remote instructions, enumerate endpoints, accept remote redirects, refresh tokens, upload data, or implement a hosted control plane. Writable object-store, database, and peer adapters remain separate extension work and must preserve the same local validation and review boundary.
+The static client intentionally does not execute remote instructions, enumerate endpoints, accept remote redirects, refresh tokens, upload data, or implement a hosted control plane. Writable object, local SQLite, and peer transports are separate modules and preserve the same local validation and review boundary; hosted database adapters remain extension work.
 
 ## Snapshot schema
 

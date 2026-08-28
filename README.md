@@ -165,6 +165,10 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine share-feed-state …` | Inspect local rollback-protection receipts and retained history |
 | `agentspine share-peer-serve …` | Answer one live signed snapshot challenge over stdin/stdout |
 | `agentspine share-peer-pull …` | Pull through an owner-selected executable without invoking a shell |
+| `agentspine share-sqlite-init …` | Bind an external SQLite file to one authenticated adapter |
+| `agentspine share-sqlite-publish …` | Append a verified snapshot and atomically advance its hash-linked head |
+| `agentspine share-sqlite-inspect …` | Validate and inspect the complete local database history |
+| `agentspine share-sqlite-pull …` | Import the latest fully verified database snapshot into quarantine |
 | `agentspine share-inbox …` | Review pending, accepted, rejected, superseded, or rolled-back imports |
 | `agentspine share-review …` | Accept or reject one import through a second local decision |
 | `agentspine share-context …` | Read only locally accepted, privacy-filtered shared memory |
@@ -174,6 +178,8 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine mcp` | Start the stdio MCP server |
 
 Every command supports `--json` where structured output is useful.
+
+The optional SQLite commands use Node.js `node:sqlite` and therefore require Node.js 22.13 or newer; core discovery, CLI, MCP, and the other transports retain the package's declared Node.js support. See the [SQLite transport contract](docs/sqlite-transport.md).
 
 ## MCP tools
 

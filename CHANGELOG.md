@@ -6,6 +6,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Optional local SQLite snapshot transport with immutable signed-adapter binding, append-only hash-linked revisions, atomic head advancement, full integrity replay, quarantined pull, CLI integration, and no MCP database authority
 - One-shot challenge-response peer transport over an owner-selected stdin/stdout carrier, with a fresh nonce, live Ed25519 proof, shell-free process execution, environment minimization, quarantine import, CLI integration, and no MCP process authority
 - Provider-neutral signed HTTPS feed with strong ETag compare-and-swap publication, bounded hash-chain continuity, external rollback receipts, quarantined pull, CLI integration, audit coverage, and no MCP transport authority
 - Ten-gate `agentspine audit` command and MCP tool
@@ -75,7 +76,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Planned
 
-- Optional database and hosted transports implementing the signed-envelope and shared-event contracts
+- Optional hosted database transports implementing the signed-envelope and shared-event contracts
 
 ## [0.1.0] - 2026-08-27
 

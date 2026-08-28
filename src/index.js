@@ -36,6 +36,9 @@ export {
   servePeerOnce, validatePeerRequest, validatePeerResponse
 } from "./lib/peer-transport.js";
 export {
+  initSqliteAdapter, inspectSqliteAdapter, publishSqliteSnapshot, pullSqliteSnapshot
+} from "./lib/sqlite-transport.js";
+export {
   assertTrustedIdentity, generateSigningIdentity, inspectSignerRegistry, inspectTrust, listSigningIdentities,
   loadTrust, revokeTrustedSigner, signEnvelope, trustedSignerContext, trustFindings,
   trustSigner, validatePublicIdentity, verifyEnvelope
