@@ -113,4 +113,5 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Cross-platform preservation, hook, graph, and MCP tests
 
 [Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Maykbiletti/AgentSpine/releases/tag/v0.1.0
