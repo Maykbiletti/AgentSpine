@@ -23,6 +23,9 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Separate default-deny delegation policy with explicit actor, action, target, provenance, revision, and revocation history
 - Context-only tasks, open threads, and handoffs with assignment snapshots and retained prior versions
 - Coordination CLI, read/check MCP surfaces, privacy-filtered hook metadata, audit integration, and concurrency tests
+- Provider-neutral shared-event contract and optional directory adapter with immutable event files
+- Quarantined, idempotent shared-memory import with a second local review before context
+- Shared supersession, rollback, exact group filtering, CLI administration, read-only MCP context, hooks, and audit coverage
 
 ### Changed
 
@@ -38,6 +41,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - The ten-gate audit now validates attention authority, privacy, configuration, and external-state placement
 - Accepted learning must carry auditable manual-confirmation proof or an evidence-threshold policy snapshot
 - Cross-entity coordination now requires a matching explicit local policy grant; relationship responsibility remains descriptive only
+- Session hooks expose only counts and kinds of locally reviewed shared memory; pending claims remain hidden
 
 ### Security
 
@@ -47,10 +51,12 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Secret-shaped observations and authority assertions are rejected before learning storage
 - Delegation policy mutation is excluded from MCP, and malformed policy or coordination state fails closed without overwrite
 - Task coordination grants no host, tool, file, network, deployment, production, billing, or spending authority
+- Private learning, source content, evidence text, tasks, policy, and credentials are excluded from shared events
+- Adapter administration is excluded from MCP; malformed, oversized, symlinked, collided, or tampered exchange state fails closed
 
 ### Planned
 
-- Optional shared-memory adapters
+- Authenticated remote transports implementing the provider-neutral shared-event contract
 
 ## [0.1.0] - 2026-08-27
 

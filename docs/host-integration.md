@@ -48,7 +48,7 @@ Any MCP client that supports stdio can launch:
 }
 ```
 
-The server implements `initialize`, `ping`, `tools/list`, and `tools/call`. It has no network dependency and exposes no source-file or delegation-policy mutation tool. Overlay tools write only private AgentSpine context state outside the scanned project. Explicit delegation grants and revocations remain on the local CLI administration surface.
+The server implements `initialize`, `ping`, `tools/list`, and `tools/call`. It has no network dependency and exposes no source-file, delegation-policy, or shared-adapter administration tool. Overlay tools write only private AgentSpine context state outside the scanned project. Explicit delegation grants, adapter connections, publication, pulls, import review, and destructive sharing operations remain on the local CLI surface. MCP can only read already reviewed `shared_context`.
 
 Verify either installation against a synthetic or real project without changing its Markdown:
 
@@ -59,4 +59,4 @@ agentspine audit /path/to/project --json
 
 The audit exits non-zero when a required gate fails, making it suitable for installation smoke tests and CI.
 
-At session and compaction boundaries, the hook may add counts and kinds for due shared attention cues, accepted shared learning, and open shared coordination. It never injects cue summaries, learned claims, task titles or notes, delegation policy, private relationship data, or group context without an audience. The agent must explicitly call `attention_context`, `learning_context`, or `task_context`, respect current-task priority, and set `markPresented` only when it actually surfaces a cue. Cross-entity task actions require an explicit `check_delegation` decision in addition to normal host authorization.
+At session and compaction boundaries, the hook may add counts and kinds for due shared attention cues, accepted local learning, open shared coordination, and locally reviewed shared memory. It never injects cue summaries, learned or imported claims, pending inbox items, adapter paths, task titles or notes, delegation policy, private relationship data, or group context without an audience. The agent must explicitly call `attention_context`, `learning_context`, `task_context`, or `shared_context`, respect current-task priority, and set `markPresented` only when it actually surfaces a cue. Cross-entity task actions require an explicit `check_delegation` decision in addition to normal host authorization.

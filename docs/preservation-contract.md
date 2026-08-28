@@ -11,7 +11,7 @@ The scanner:
 - opens source Markdown read-only;
 - never renames, moves, merges, normalizes, truncates, or rewrites it;
 - does not follow filesystem symlinks;
-- writes catalogs, graph overlays, attention, learning, delegation policy, and coordination state only to the user state directory;
+- writes catalogs, graph overlays, attention, learning, delegation policy, coordination, and imported sharing state only to the user state directory;
 - uses an atomic temporary-file replacement for its own catalog;
 - keeps every discovered document visible even when another file has higher precedence.
 
@@ -38,7 +38,7 @@ AgentSpine does not resolve semantic disagreement by editing content. It exposes
 
 ## Uninstall
 
-Uninstall removes the plugin and its generated state only. It never touches scanned projects. Acceptance tests snapshot source bytes before scanning, resolving, reading, attention mutation, learning proposal/review/rollback, delegation and task workflows, verifying, and hook execution, then compare the source tree afterward.
+Uninstall removes the plugin and its generated state only. It never touches scanned projects. Acceptance tests snapshot source bytes before scanning, resolving, reading, attention mutation, learning proposal/review/rollback, delegation and task workflows, shared adapter publication/import/review, verifying, and hook execution, then compare the source tree afterward.
 
 ## Not guaranteed
 

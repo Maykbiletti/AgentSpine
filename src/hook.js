@@ -6,6 +6,7 @@ import { canonicalPath, findProjectRoot } from "./lib/paths.js";
 import { attentionContext } from "./lib/attention.js";
 import { learningContext } from "./lib/learning.js";
 import { taskContext } from "./lib/coordination.js";
+import { sharedContext } from "./lib/sharing.js";
 
 async function readStdin() {
   let value = "";
@@ -117,6 +118,7 @@ export async function runHook(payload = null) {
     let attentionNote = "";
     let learningNote = "";
     let coordinationNote = "";
+    let sharingNote = "";
     try {
       const attention = await attentionContext({ root, includePrivate: false, maxItems: 3, catalog });
       attentionNote = attention.items.length
@@ -141,7 +143,15 @@ export async function runHook(payload = null) {
     } catch {
       coordinationNote = " Coordination state needs review; run agentspine audit before using tasks or delegation decisions.";
     }
-    const summary = `AgentSpine indexed ${catalog.summary.total} Markdown sources (${catalog.summary.protected} protected). Source files remain byte-for-byte untouched.${attentionNote}${learningNote}${coordinationNote} Catalog: ${catalogPath}`;
+    try {
+      const shared = await sharedContext({ root, includePrivate: false, maxItems: 50, catalog });
+      sharingNote = shared.items.length
+        ? ` ${shared.items.length} locally reviewed shared-memory item(s) are available (${[...new Set(shared.items.map((item) => item.kind))].join(", ")}); load only relevant items with shared_context.`
+        : "";
+    } catch {
+      sharingNote = " Shared-memory state needs review; run agentspine audit before using imported context.";
+    }
+    const summary = `AgentSpine indexed ${catalog.summary.total} Markdown sources (${catalog.summary.protected} protected). Source files remain byte-for-byte untouched.${attentionNote}${learningNote}${coordinationNote}${sharingNote} Catalog: ${catalogPath}`;
     if (payload) return { blocked: false, context: summary };
     process.stdout.write(`${JSON.stringify({
       hookSpecificOutput: { hookEventName: event, additionalContext: summary }

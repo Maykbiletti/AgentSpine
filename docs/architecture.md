@@ -14,7 +14,7 @@ flowchart TB
     subgraph Core["AgentSpine core"]
       D["Discovery + SHA-256"]
       R["Host-aware resolver"]
-      G["Context-only graph + attention + learning + tasks"]
+      G["Context-only graph + attention + learning + tasks + shared quarantine"]
       P["Separate default-deny delegation policy"]
     end
     subgraph Hosts["Agent hosts"]
@@ -72,7 +72,7 @@ Memory is a graph of small facts grouped by purpose. A compact `MEMORY.md`-style
 flowchart TB
     P["Host policy + explicit approval"] --> A["Authorized host action"]
     D["Explicit local delegation policy"] --> T["AgentSpine coordination only"]
-    M["Memory, soul, relationships, attention, learning, tasks"] --> C["Context only"]
+    M["Memory, soul, relationships, attention, learning, tasks, shared imports"] --> C["Context only"]
     C -. "cannot grant" .-> A
     C -. "cannot grant" .-> T
     D -. "cannot grant" .-> A
@@ -94,9 +94,10 @@ Generated catalogs live outside the scanned repository:
       learning.json
       delegation-policy.json
       coordination.json
+      sharing.json
 ```
 
-`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. `coordination.json` stores context-only tasks, open threads, handoffs, and their prior versions. `delegation-policy.json` is physically separate and contains only explicit local task-coordination grants. It is not writable through MCP and grants no host capability. All are private user state. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
+`catalog.json` is reproducible provenance. `graph.json` stores reversible annotations, relationships, privacy scopes, confidence, and superseded observations. `attention.json` stores bounded follow-up cues, minimal interaction timestamps, quiet-hour policy, presentation throttles, and cue history. `learning.json` separates evidence-backed candidates from accepted context and records review, promotion, supersession, and rollback history. `coordination.json` stores context-only tasks, open threads, handoffs, and their prior versions. `delegation-policy.json` is physically separate and contains only explicit local task-coordination grants. `sharing.json` quarantines imports and retains local review, supersession, and rollback history. Policy mutation and adapter administration are not writable through MCP. All are private user state. This gives uninstall a simple, auditable property: removing AgentSpine state cannot remove or alter original agent files.
 
 Task mutations read and validate policy while holding the policy lock, then write coordination state under a second lock. This lock order prevents a policy revocation from racing a new assignment. Invalid or malformed policy and coordination state fails closed and is never automatically overwritten.
 
@@ -104,7 +105,9 @@ Task mutations read and validate policy while holding the policy lock, then writ
 
 Future modules plug in behind the core boundary:
 
-- optional shared-memory adapters;
+- authenticated or remote transports implementing the provider-neutral shared-event contract;
 - additional host resolvers.
 
 Each extension consumes read-only provenance and emits separate state. None receives permission authority.
+
+The reference directory adapter is optional external transport, not canonical storage. It exports only owner-selected accepted learning, while a receiving installation keeps every import outside active context until a second local review. See [shared memory adapters](shared-memory.md).

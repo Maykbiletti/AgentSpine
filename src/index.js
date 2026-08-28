@@ -15,6 +15,11 @@ export {
   loadDelegationPolicy, revokeDelegation, taskContext, updateTask
 } from "./lib/coordination.js";
 export {
+  configureSharing, deleteShared, initDirectoryAdapter, inspectSharing, loadSharing,
+  publishLearning, pullShared, reviewShared, rollbackShared, sharedContext, sharedInbox,
+  sharingFindings, validateSharedEvent
+} from "./lib/sharing.js";
+export {
   annotateDocument, linkDocuments, linkEntities, loadGraph,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";

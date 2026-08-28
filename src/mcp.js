@@ -11,6 +11,7 @@ import {
   learningContext, proposeLearning, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 import { checkDelegation, createTask, taskContext, updateTask } from "./lib/coordination.js";
+import { sharedContext } from "./lib/sharing.js";
 import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
@@ -378,6 +379,19 @@ const tools = [
     }
   },
   {
+    name: "shared_context",
+    description: "Return locally reviewed, privacy-filtered shared memory. This tool cannot connect adapters, import, publish, review, or grant authority.",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        root: { type: "string" }, scopeId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        groupId: { anyOf: [{ type: "string" }, { type: "null" }] }, includePrivate: { type: "boolean" },
+        kinds: { type: "array", items: { type: "string", enum: ["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference"] } },
+        subjectIds: { type: "array", items: { type: "string" } }, maxItems: { type: "integer", minimum: 0, maximum: 50 }
+      }
+    }
+  },
+  {
     name: "audit",
     description: "Run AgentSpine's ten deterministic quality gates for discovery, hierarchy, links, authority, privacy, budget, and source preservation.",
     inputSchema: { type: "object", properties: { root: { type: "string" } } }
@@ -425,6 +439,7 @@ async function callTool(name, args = {}) {
   if (name === "create_task") return textResult(await createTask({ ...args, root }));
   if (name === "update_task") return textResult(await updateTask({ ...args, root }));
   if (name === "task_context") return textResult(await taskContext({ ...args, root }));
+  if (name === "shared_context") return textResult(await sharedContext({ ...args, root }));
   if (name === "audit") return textResult(await runAudit(root));
   throw new Error(`Unknown tool: ${name}`);
 }

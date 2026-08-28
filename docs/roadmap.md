@@ -9,6 +9,7 @@ flowchart TB
     C --> D["4 · Attention"]
     D --> E["5 · Safe learning"]
     E --> F["6 · Delegation + coordination"]
+    F --> G["7 · Portable shared memory"]
 ```
 
 ## 1. Preservation kernel
@@ -23,12 +24,13 @@ Status: implemented for `v0.1`; ongoing hardening.
 
 ## 2. Memory graph
 
-Status: local foundation and candidate workflow implemented; shared adapters remain planned.
+Status: local foundation, candidate workflow, provider-neutral exchange contract, and directory adapter implemented.
 
 - existing one-fact-per-file layouts are discovered and linked without migration;
 - compact generated index with a configurable context ceiling;
 - typed links, confidence, timestamps, source, and supersession history without deletion;
 - learning candidates separated from confirmed facts.
+- accepted non-private learning can cross installations through quarantine and a second local review.
 
 ## 3. Relationships
 
@@ -71,6 +73,18 @@ Status: local default-deny foundation implemented; remote dispatch remains delib
 - self-management without widening cross-entity delegation;
 - exact private and group audiences, atomic writes, cross-process locking, and fail-closed validation;
 - no task dispatch, messaging, host permissions, tool rights, deployment, billing, or spending authority.
+
+## 7. Portable shared memory
+
+Status: optional reference transport implemented; authenticated remote transports remain extension work.
+
+- directory adapter usable locally, on a network drive, or through a user-selected synchronization service;
+- strict immutable event schema, canonical SHA-256 integrity, deterministic IDs, limits, and collision detection;
+- private/source/evidence/task/policy data excluded before publication;
+- imported events quarantined and invisible until a second local user review;
+- exact group audience, idempotent concurrent pulls, retained supersession, rollback, and permanent local deletion;
+- MCP restricted to reading reviewed shared context; adapter administration remains local CLI;
+- digest integrity is not author authentication; future signed transports must preserve the same local trust boundary.
 
 ## Definition of done for every stage
 

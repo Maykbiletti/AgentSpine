@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { startMcpServer } from "../src/mcp.js";
 import { grantDelegation } from "../src/lib/coordination.js";
 import { upsertEntity } from "../src/lib/graph.js";
+import { proposeLearning, reviewLearning } from "../src/lib/learning.js";
+import { initDirectoryAdapter, publishLearning, pullShared, reviewShared } from "../src/lib/sharing.js";
 
 test("MCP server initializes and lists its read and graph tools", async () => {
   const input = new PassThrough();
@@ -41,10 +43,13 @@ test("MCP server initializes and lists its read and graph tools", async () => {
     "add_learning_evidence", "review_learning", "learning_context",
     "evaluate_learning", "rollback_learning", "configure_learning",
     "delete_learning", "check_delegation", "create_task", "update_task",
-    "task_context", "audit"
+    "task_context", "shared_context", "audit"
   ]);
   assert.equal(names.includes("grant_delegation"), false);
   assert.equal(names.includes("revoke_delegation"), false);
+  assert.equal(names.includes("publish_learning"), false);
+  assert.equal(names.includes("pull_shared"), false);
+  assert.equal(names.includes("review_shared"), false);
 });
 
 test("agentspine mcp CLI launches the stdio server", async (t) => {
@@ -207,4 +212,54 @@ test("MCP coordination tools enforce separately configured delegation and retain
   assert.equal(JSON.parse(messages[0].result.content[0].text).allowed, true);
   assert.equal(JSON.parse(messages[3].result.content[0].text).items[0].status, "completed");
   assert.equal(messages.every((message) => message.result.isError === false), true);
+});
+
+test("MCP exposes only locally reviewed shared context and no adapter administration", async (t) => {
+  const rootA = await mkdtemp(join(tmpdir(), "agentspine-mcp-share-a-"));
+  const rootB = await mkdtemp(join(tmpdir(), "agentspine-mcp-share-b-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-mcp-share-state-"));
+  const adapter = await mkdtemp(join(tmpdir(), "agentspine-mcp-share-adapter-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => {
+    await rm(rootA, { recursive: true }); await rm(rootB, { recursive: true });
+    await rm(state, { recursive: true }); await rm(adapter, { recursive: true });
+  });
+  await writeFile(join(rootA, "AGENTS.md"), "# Rules A\n", "utf8");
+  await writeFile(join(rootB, "AGENTS.md"), "# Rules B\n", "utf8");
+  await initDirectoryAdapter({
+    root: rootA, directory: adapter, scopeId: "team:mcp", adapterId: "adapter:mcp",
+    confirmation: "local-share-confirmed"
+  });
+  await proposeLearning({
+    root: rootA, id: "learning:mcp-share", kind: "project-fact", claim: "The synthetic MCP shared context is reviewed.",
+    privacy: "shared", evidence: { id: "evidence:mcp-share", type: "test", summary: "Synthetic MCP proof.", confidence: 1 }
+  });
+  await reviewLearning({ root: rootA, id: "learning:mcp-share", decision: "accept", reason: "Confirmed.", confirmedByUser: true });
+  await publishLearning({
+    root: rootA, directory: adapter, learningId: "learning:mcp-share", eventId: "shared:mcp",
+    confirmation: "local-share-confirmed"
+  });
+  await pullShared({ root: rootB, directory: adapter });
+  await reviewShared({ root: rootB, id: "shared:mcp", decision: "accept", reason: "Confirmed locally.", confirmedByUser: true });
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.setEncoding("utf8");
+  let response = "";
+  output.on("data", (chunk) => { response += chunk; });
+  startMcpServer(input, output);
+  input.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 41, method: "tools/call",
+    params: { name: "shared_context", arguments: { root: rootB, scopeId: "team:mcp" } }
+  })}\n`);
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("MCP shared context timeout")), 2000);
+    const check = () => {
+      if (response.includes("\n")) { clearTimeout(timeout); resolve(); } else setTimeout(check, 5);
+    };
+    check();
+  });
+  const message = JSON.parse(response.trim());
+  const context = JSON.parse(message.result.content[0].text);
+  assert.equal(context.items[0].id, "shared:mcp");
+  assert.equal(context.items[0].authority, "context-only");
 });

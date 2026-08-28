@@ -4,13 +4,14 @@ import { loadGraph } from "./graph.js";
 import { loadAttention } from "./attention.js";
 import { inspectLearning, learningFindings } from "./learning.js";
 import { coordinationFindings, delegationPolicyFindings, inspectCoordination } from "./coordination.js";
+import { inspectSharing, sharingFindings } from "./sharing.js";
 import { resolveContext } from "./context.js";
 
 function gate(id, name, ok, detail, severity = "error") {
   return { id, name, ok, severity, detail };
 }
 
-function authorityViolations(graph, attention, learning, coordination) {
+function authorityViolations(graph, attention, learning, coordination, sharing) {
   const records = [
     ...graph.edges,
     ...graph.annotations,
@@ -30,7 +31,10 @@ function authorityViolations(graph, attention, learning, coordination) {
     ...learning.history.map((entry) => entry.value).filter(Boolean),
     ...coordination.tasks,
     ...coordination.history,
-    ...coordination.history.map((entry) => entry.value).filter(Boolean)
+    ...coordination.history.map((entry) => entry.value).filter(Boolean),
+    ...sharing.records.flatMap((record) => [record, record.event, record.review, record.rollback]).filter(Boolean),
+    ...sharing.history,
+    ...sharing.history.flatMap((entry) => [entry.value, entry.value?.event, entry.value?.review, entry.value?.rollback]).filter(Boolean)
   ];
   return records.filter((record) => record.authority !== "context-only");
 }
@@ -53,6 +57,7 @@ export async function runAudit(root = process.cwd()) {
   const {
     policy, coordination, policyPath, coordinationPath, errors: coordinationLoadErrors
   } = await inspectCoordination(before.root, catalog);
+  const { sharing, sharingPath, error: sharingLoadError } = await inspectSharing(before.root, catalog);
   const context = await resolveContext({ root: before.root, cwd: before.root, host: "generic", maxBytes: 16384, includeContent: true, catalog });
   const verification = await verifyCatalog(before.root);
   const after = await buildCatalog(before.root);
@@ -60,7 +65,7 @@ export async function runAudit(root = process.cwd()) {
   const byteStable = after.documents.length === before.documents.length && after.documents.every((document) => beforeHashes.get(document.relativePath) === document.sha256);
   const brokenLinks = catalog.conflicts.filter((conflict) => conflict.type === "broken-link");
   const reviewConflicts = catalog.conflicts.filter((conflict) => conflict.type !== "broken-link");
-  const authority = authorityViolations(graph, attention, learning, coordination);
+  const authority = authorityViolations(graph, attention, learning, coordination, sharing);
   const forbidden = forbiddenEntityKeys(graph);
   const privacyValues = new Set(["private", "shared", "group"]);
   const privateRecords = [
@@ -77,7 +82,10 @@ export async function runAudit(root = process.cwd()) {
     ...learning.history.map((entry) => entry.value).filter((value) => value && "privacy" in value),
     ...coordination.tasks,
     ...coordination.history,
-    ...coordination.history.map((entry) => entry.value).filter((value) => value && "privacy" in value)
+    ...coordination.history.map((entry) => entry.value).filter((value) => value && "privacy" in value),
+    ...sharing.records.map((record) => ({ ...record, privacy: record.event?.privacy })),
+    ...sharing.history,
+    ...sharing.history.map((entry) => entry.value).filter(Boolean).map((record) => ({ ...record, privacy: record.event?.privacy }))
   ];
   const privacyInvalid = privateRecords.filter((record) => !privacyValues.has(record.privacy));
   const knownGroups = new Set(graph.entities.filter((entity) => entity.kind === "group").map((entity) => entity.id));
@@ -112,18 +120,22 @@ export async function runAudit(root = process.cwd()) {
   }
   const coordinationAuthorityIssues = coordinationIssues.filter((issue) => /assignment|policy-snapshot/.test(issue));
   const coordinationContextIssues = coordinationIssues.filter((issue) => !coordinationAuthorityIssues.includes(issue));
+  const sharingIssues = sharingFindings(sharing, graph);
+  if (sharingLoadError) sharingIssues.push(`unreadable-state:${sharingLoadError}`);
+  const sharingAuthorityIssues = sharingIssues.filter((issue) => /authority|unsafe/.test(issue));
+  const sharingContextIssues = sharingIssues.filter((issue) => !sharingAuthorityIssues.includes(issue));
   const nativeMapped = catalog.documents.filter((document) => document.hosts.some((host) => host !== "generic"));
   const loadedBytes = context.documents.filter((document) => document.loaded).reduce((sum, document) => sum + document.bytes, 0);
 
   const gates = [
     gate(1, "Runtime", Number(process.versions.node.split(".")[0]) >= 20, `Node ${process.versions.node}`),
     gate(2, "Discovery", catalog.schema === "agentspine.catalog/v1", `${catalog.documents.length} Markdown documents indexed`),
-    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath) && !isInside(catalog.root, policyPath) && !isInside(catalog.root, coordinationPath), `State remains outside ${catalog.root}`),
+    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath) && !isInside(catalog.root, policyPath) && !isInside(catalog.root, coordinationPath) && !isInside(catalog.root, sharingPath), `State remains outside ${catalog.root}`),
     gate(4, "Native hierarchy", nativeMapped.every((document) => document.hosts.length > 0), `${nativeMapped.length} host-native documents mapped`),
     gate(5, "Link integrity", brokenLinks.length === 0, brokenLinks.length ? `${brokenLinks.length} broken Markdown links` : "All indexed Markdown links resolve"),
     gate(6, "Conflict visibility", Array.isArray(catalog.conflicts), `${reviewConflicts.length} precedence or classification findings exposed`, "warning"),
-    gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0, `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings`),
-    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && learningIssues.length === 0 && coordinationContextIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${learning.candidates.length} learning records, and ${coordination.tasks.length} coordination items checked`),
+    gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0 && sharingAuthorityIssues.length === 0, `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings; ${sharingAuthorityIssues.length} shared authority findings`),
+    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && learningIssues.length === 0 && coordinationContextIssues.length === 0 && sharingContextIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${learning.candidates.length} learning records, ${coordination.tasks.length} coordination items, and ${sharing.records.length} shared records checked`),
     gate(9, "Context budget", loadedBytes <= context.budget.maxBytes, `${loadedBytes}/${context.budget.maxBytes} bytes loaded`),
     gate(10, "Byte preservation", byteStable && verification.ok, verification.ok ? "Sources remained byte-for-byte unchanged" : "Source drift detected")
   ];
@@ -139,6 +151,7 @@ export async function runAudit(root = process.cwd()) {
     attentionPath,
     learningPath,
     policyPath,
-    coordinationPath
+    coordinationPath,
+    sharingPath
   };
 }

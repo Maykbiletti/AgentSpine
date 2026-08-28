@@ -15,6 +15,10 @@ import {
   revokeDelegation, taskContext, updateTask
 } from "./lib/coordination.js";
 import {
+  configureSharing, deleteShared, initDirectoryAdapter, publishLearning, pullShared,
+  reviewShared, rollbackShared, sharedContext, sharedInbox
+} from "./lib/sharing.js";
+import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";
@@ -91,6 +95,15 @@ Usage:
   agentspine task-update <id> --actor id [--status in-progress] [--assignee id|--unassign]
   agentspine tasks [root] [--assignee id] [--project id] [--include-private] [--group id]
   agentspine task-delete <id> [--confirm-local-policy]
+  agentspine share-init <directory> --scope team:id [--adapter adapter:id] [--confirm-local-share]
+  agentspine share-publish <directory> --learning id [--id shared:id] [--supersedes shared:id] [--confirm-local-share]
+  agentspine share-pull <directory> [--root path]
+  agentspine share-inbox [root] [--status pending|accepted|rejected|superseded|rolled-back]
+  agentspine share-review <id> --decision accept|reject --reason text [--confirmed-by-user]
+  agentspine share-context [root] [--scope team:id] [--group group:id] [--kind preference,goal]
+  agentspine share-rollback <id> --reason text
+  agentspine share-delete <id> [--confirm-local-share]
+  agentspine share-config [root] --max-items 12
   agentspine audit [root] [--json]
   agentspine doctor [--json]
   agentspine mcp
@@ -377,6 +390,65 @@ export async function run(argv = process.argv.slice(2)) {
     return output(await deleteTask({
       root: flags.root || process.cwd(), id: positional[0],
       confirmation: booleanFlag(flags["confirm-local-policy"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-init") {
+    return output(await initDirectoryAdapter({
+      root: flags.root || process.cwd(), directory: positional[0], scopeId: flags.scope,
+      adapterId: flags.adapter, confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-publish") {
+    return output(await publishLearning({
+      root: flags.root || process.cwd(), directory: positional[0], learningId: flags.learning,
+      eventId: flags.id, supersedesEventId: flags.supersedes || null,
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-pull") {
+    return output(await pullShared({ root: flags.root || process.cwd(), directory: positional[0] }), json);
+  }
+
+  if (command === "share-inbox") {
+    return output(await sharedInbox({ root: positional[0] || process.cwd(), status: flags.status || "pending" }), json);
+  }
+
+  if (command === "share-review") {
+    return output(await reviewShared({
+      root: flags.root || process.cwd(), id: positional[0], decision: flags.decision,
+      reason: flags.reason, confirmedByUser: booleanFlag(flags["confirmed-by-user"])
+    }), json);
+  }
+
+  if (command === "share-context") {
+    return output(await sharedContext({
+      root: positional[0] || process.cwd(), scopeId: flags.scope || null, groupId: flags.group || null,
+      includePrivate: booleanFlag(flags["include-private"]),
+      kinds: flags.kind ? String(flags.kind).split(",").filter(Boolean) : null,
+      subjectIds: flags.subject ? String(flags.subject).split(",").filter(Boolean) : null,
+      maxItems: flags["max-items"] === undefined ? null : Number(flags["max-items"])
+    }), json);
+  }
+
+  if (command === "share-rollback") {
+    return output(await rollbackShared({
+      root: flags.root || process.cwd(), id: positional[0], reason: flags.reason
+    }), json);
+  }
+
+  if (command === "share-delete") {
+    return output(await deleteShared({
+      root: flags.root || process.cwd(), id: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+    }), json);
+  }
+
+  if (command === "share-config") {
+    return output(await configureSharing({
+      root: positional[0] || process.cwd(), maxContextItems: Number(flags["max-items"])
     }), json);
   }
 

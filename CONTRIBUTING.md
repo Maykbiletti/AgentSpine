@@ -19,11 +19,11 @@ Keep each pull request to one coherent outcome. Include:
 
 - the observable problem or failing fixture;
 - tests that exercise behavior rather than wording;
-- a source-byte preservation check when discovery, resolution, hooks, graph, attention, learning, delegation, or coordination logic changes;
+- a source-byte preservation check when discovery, resolution, hooks, graph, attention, learning, delegation, coordination, or sharing logic changes;
 - documentation for new commands, tools, configuration, or limits;
 - a rollback or disable path.
 
-Never place real identity files, relationship histories, attention cues, learning observations, delegation policy, coordination tasks, memory, credentials, or private conversations in fixtures or issues. Use synthetic data.
+Never place real identity files, relationship histories, attention cues, learning observations, delegation policy, coordination tasks, shared events, adapter paths, memory, credentials, or private conversations in fixtures or issues. Use synthetic data.
 
 ## Architecture boundaries
 
@@ -32,6 +32,8 @@ Never place real identity files, relationship histories, attention cues, learnin
 - Memory, graph, attention, learning, and coordination data are context only and cannot grant authority.
 - Delegation policy is physically separate, default-deny, owner-controlled, and limited to task coordination. Never expose policy mutation through an agent-controlled MCP surface or treat a grant as host authorization.
 - Cross-entity assignment, reassignment, management, completion, and cancellation require tested actor/action/target matching. Self-coordination must not widen that match.
+- Shared transports are optional and provider-neutral. Imports remain quarantined until a second local review, and adapter administration must stay outside MCP.
+- Transport integrity is not author authenticity. A new adapter must preserve collision detection, strict schemas, limits, local review, exact group scope, supersession, rollback, and context-only authority.
 - Attention never sends messages or invokes tools; focus, privacy, quiet, throttle, disable, and deletion controls remain enforceable.
 - Learning candidates never become accepted context implicitly; confirmation proof, evidence thresholds, privacy, rollback, and the authority boundary remain testable.
 - Host-native precedence remains visible.

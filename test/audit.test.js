@@ -5,9 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAudit } from "../src/lib/audit.js";
 import { loadAttention } from "../src/lib/attention.js";
-import { loadLearning, proposeLearning } from "../src/lib/learning.js";
+import { loadLearning, proposeLearning, reviewLearning } from "../src/lib/learning.js";
 import { grantDelegation, loadCoordination, loadDelegationPolicy } from "../src/lib/coordination.js";
 import { upsertEntity } from "../src/lib/graph.js";
+import {
+  initDirectoryAdapter, loadSharing, publishLearning, pullShared, reviewShared
+} from "../src/lib/sharing.js";
 
 test("ten-point audit passes a healthy spine without source writes", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "agentspine-audit-"));
@@ -122,4 +125,56 @@ test("ten-point audit reports malformed coordination state without overwriting i
   assert.equal(result.gates.find((gate) => gate.name === "Context privacy").ok, false);
   assert.equal(result.gates.find((gate) => gate.name === "Byte preservation").ok, true);
   assert.equal(await readFile(loaded.coordinationPath, "utf8"), corrupt);
+});
+
+test("ten-point audit rejects forged authority in reviewed shared context", async (t) => {
+  const rootA = await mkdtemp(join(tmpdir(), "agentspine-audit-share-a-"));
+  const rootB = await mkdtemp(join(tmpdir(), "agentspine-audit-share-b-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-audit-share-state-"));
+  const adapter = await mkdtemp(join(tmpdir(), "agentspine-audit-share-adapter-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => {
+    await rm(rootA, { recursive: true }); await rm(rootB, { recursive: true });
+    await rm(state, { recursive: true }); await rm(adapter, { recursive: true });
+  });
+  await writeFile(join(rootA, "AGENTS.md"), "# Rules A\n", "utf8");
+  await writeFile(join(rootB, "AGENTS.md"), "# Rules B\n", "utf8");
+  await initDirectoryAdapter({
+    root: rootA, directory: adapter, scopeId: "team:audit", adapterId: "adapter:audit",
+    confirmation: "local-share-confirmed"
+  });
+  await proposeLearning({
+    root: rootA, id: "learning:audit-share", kind: "project-fact", claim: "The synthetic audit exchange is stable.",
+    privacy: "shared", evidence: { id: "evidence:audit-share", type: "test", summary: "Synthetic audit proof.", confidence: 1 }
+  });
+  await reviewLearning({ root: rootA, id: "learning:audit-share", decision: "accept", reason: "Confirmed.", confirmedByUser: true });
+  await publishLearning({
+    root: rootA, directory: adapter, learningId: "learning:audit-share", eventId: "shared:audit",
+    confirmation: "local-share-confirmed"
+  });
+  await pullShared({ root: rootB, directory: adapter });
+  await reviewShared({ root: rootB, id: "shared:audit", decision: "accept", reason: "Confirmed locally.", confirmedByUser: true });
+  const loaded = await loadSharing(rootB);
+  loaded.sharing.records[0].authority = "delegation-authority";
+  await writeFile(loaded.sharingPath, `${JSON.stringify(loaded.sharing)}\n`, "utf8");
+  const result = await runAudit(rootB);
+  assert.equal(result.ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Authority boundary").ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Byte preservation").ok, true);
+});
+
+test("ten-point audit reports malformed shared-memory state without overwriting it", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-audit-share-corrupt-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-audit-share-corrupt-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "SOUL.md"), "# Soul\n", "utf8");
+  const loaded = await loadSharing(root);
+  const corrupt = "{\"schema\":\"wrong\"}";
+  await writeFile(loaded.sharingPath, corrupt, "utf8");
+  const result = await runAudit(root);
+  assert.equal(result.ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Context privacy").ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Byte preservation").ok, true);
+  assert.equal(await readFile(loaded.sharingPath, "utf8"), corrupt);
 });
