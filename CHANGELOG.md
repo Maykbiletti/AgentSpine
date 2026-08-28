@@ -32,6 +32,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - DNS pinning, default SSRF blocking, redirect and compression rejection, bounded responses, optional environment-only bearer authentication, and explicit private-network opt-in
 - Provider-neutral `session_briefing` across native sources, relationships, accepted learning, reviewed shared memory, coordination, and attention
 - Current-task priority, local/shared deduplication, exact compact-JSON byte accounting, atomic omission, and group-safe metadata-only source handling
+- Provider-neutral content-addressed HTTPS object publication with create-only preconditions
+- Mandatory signed read-back verification and safe idempotent retry handling for immutable remote objects
 
 ### Changed
 
@@ -63,10 +65,11 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Private signing keys remain outside projects and agent surfaces; unknown, revoked, swapped, or mismatched signers fail closed
 - HTTPS snapshot transport validates TLS endpoints, every DNS answer, bundle integrity, strict schema, and all nested signatures before quarantine mutation
 - Group briefings reject private reads, foreign membership, and unscoped source content; briefing output remains context-only and read-only
+- HTTPS publishing is CLI-only, owner-confirmed, DNS-pinned, SSRF-restricted, overwrite-free, size-bounded, and credential-safe
 
 ### Planned
 
-- Optional writable object-store, database, peer, and hosted transports implementing the signed-envelope and shared-event contracts
+- Optional database, peer, mutable-feed, and hosted transports implementing the signed-envelope and shared-event contracts
 
 ## [0.1.0] - 2026-08-27
 

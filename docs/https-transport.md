@@ -1,6 +1,6 @@
 # HTTPS snapshot transport
 
-AgentSpine can carry a signed directory exchange across ordinary HTTPS without depending on a particular cloud, database, or agent vendor. The transport is deliberately static and pull-only: AgentSpine creates one immutable JSON snapshot, an operator publishes that file through existing infrastructure, and receivers pull it into the normal local quarantine.
+AgentSpine can carry a signed directory exchange across ordinary HTTPS without depending on a particular cloud, database, or agent vendor. The basic workflow is deliberately static: AgentSpine creates one immutable JSON snapshot, an operator publishes that file through existing infrastructure, and receivers pull it into the normal local quarantine. For direct create-only uploads, use the separate [immutable HTTPS object transport](object-transport.md).
 
 ```mermaid
 sequenceDiagram
@@ -33,7 +33,7 @@ agentspine share-snapshot-export /srv/agent-memory/team-alpha \
   --confirm-local-share
 ```
 
-The output must be outside the scanned project and must not already exist. AgentSpine writes it with owner-only mode on POSIX systems. Updating a feed means exporting a new file or atomically changing a server-side alias outside AgentSpine; the CLI does not upload, delete, or overwrite remote objects.
+The output must be outside the scanned project and must not already exist. AgentSpine writes it with owner-only mode on POSIX systems. Updating a feed means exporting a new file or atomically changing a server-side alias outside this static workflow. `share-https-publish` can create immutable remote objects, but AgentSpine still has no remote overwrite, delete, listing, or mutable alias command.
 
 Serve the exact file over HTTPS with:
 

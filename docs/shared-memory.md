@@ -244,7 +244,7 @@ MCP exposes only `shared_context`, which reads locally accepted records. Adapter
 
 ## Adapter compatibility
 
-The implemented static HTTPS adapter maps a strict signed snapshot back into the reference directory semantics before local import. A future writable adapter may use object storage, a database, a peer protocol, or a hosted API. To remain compatible it must produce the same strict manifest and event semantics or map its transport into them before local import:
+The implemented HTTPS adapters can export a static signed snapshot, publish it as a create-only content-addressed object, and map it back into the reference directory semantics before local import. Future database, peer, mutable-feed, or hosted adapters must produce the same strict manifest and event semantics or map their transport into them before local import:
 
 1. immutable stable event IDs;
 2. canonical integrity digest and, for authenticated transports, a verifiable signed envelope;

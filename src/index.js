@@ -21,9 +21,12 @@ export {
   sharingAuthenticationFindings, sharingFindings, validateSharedEvent
 } from "./lib/sharing.js";
 export {
-  exportHttpsSnapshot, fetchHttpsSnapshot, importHttpsSnapshot, pullHttpsSnapshot,
+  buildHttpsSnapshot, exportHttpsSnapshot, fetchHttpsSnapshot, importHttpsSnapshot, pullHttpsSnapshot,
   resolveHttpsEndpoint, validateHttpsEndpoint, validateHttpsSnapshot
 } from "./lib/https-transport.js";
+export {
+  httpsObjectUrl, publishHttpsSnapshot, putHttpsSnapshot, validateHttpsObjectBase
+} from "./lib/object-transport.js";
 export {
   assertTrustedIdentity, generateSigningIdentity, inspectSignerRegistry, inspectTrust, listSigningIdentities,
   loadTrust, revokeTrustedSigner, signEnvelope, trustedSignerContext, trustFindings,

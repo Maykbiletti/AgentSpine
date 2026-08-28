@@ -299,13 +299,10 @@ export function validateHttpsSnapshot(snapshot) {
   return snapshot;
 }
 
-export async function exportHttpsSnapshot({
-  root = process.cwd(), directory, output, snapshotId = `snapshot:${randomUUID()}`,
-  confirmation, now = new Date()
+export async function buildHttpsSnapshot({
+  root = process.cwd(), directory, snapshotId = `snapshot:${randomUUID()}`, now = new Date()
 }) {
-  if (confirmation !== CONFIRMATION) throw new Error("HTTPS snapshot export requires explicit local owner confirmation");
   if (!ID_RE.test(snapshotId || "")) throw new Error("snapshotId must be a stable, whitespace-free identifier");
-  if (!output || typeof output !== "string") throw new Error("HTTPS snapshot output path is required");
   const exchange = await readDirectoryExchange({ root, directory, requireAuthenticated: true });
   const generatedAt = new Date(now).toISOString();
   if (!validDate(generatedAt)) throw new Error("now must be a valid date");
@@ -314,7 +311,16 @@ export async function exportHttpsSnapshot({
     generatedAt, manifest: exchange.manifest, events: exchange.events,
     authority: "context-only"
   };
-  const snapshot = validateHttpsSnapshot({ ...body, digest: digest(body) });
+  return validateHttpsSnapshot({ ...body, digest: digest(body) });
+}
+
+export async function exportHttpsSnapshot({
+  root = process.cwd(), directory, output, snapshotId = `snapshot:${randomUUID()}`,
+  confirmation, now = new Date()
+}) {
+  if (confirmation !== CONFIRMATION) throw new Error("HTTPS snapshot export requires explicit local owner confirmation");
+  if (!output || typeof output !== "string") throw new Error("HTTPS snapshot output path is required");
+  const snapshot = await buildHttpsSnapshot({ root, directory, snapshotId, now });
   const catalog = await buildCatalog(root);
   const target = resolve(output);
   const prospectiveTarget = await prospectiveCanonicalPath(target);

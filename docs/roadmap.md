@@ -12,6 +12,7 @@ flowchart TB
     F --> G["7 · Portable shared memory"]
     G --> H["8 · Hardened HTTPS snapshots"]
     H --> I["9 · Budgeted session briefing"]
+    I --> J["10 · Immutable HTTPS objects"]
 ```
 
 ## 1. Preservation kernel
@@ -78,7 +79,7 @@ Status: local default-deny foundation implemented; remote dispatch remains delib
 
 ## 7. Portable shared memory
 
-Status: optional directory transport, Ed25519 origin authentication, and hardened static HTTPS snapshots implemented; writable hosted transports remain extension work.
+Status: optional directory transport, Ed25519 origin authentication, hardened HTTPS snapshots, and immutable object publication implemented; database, peer, and mutable feeds remain extension work.
 
 - directory adapter usable locally, on a network drive, or through a user-selected synchronization service;
 - strict immutable event schema, canonical SHA-256 integrity, deterministic IDs, limits, and collision detection;
@@ -92,7 +93,7 @@ Status: optional directory transport, Ed25519 origin authentication, and hardene
 
 ## 8. Hardened HTTPS snapshots
 
-Status: provider-neutral static transport implemented; writable object-store, database, and peer adapters remain extension work.
+Status: provider-neutral static export, hardened pull, and create-only object publication implemented; database, peer, and mutable-feed adapters remain extension work.
 
 - immutable signed snapshot export outside the scanned project;
 - dependency-free HTTPS pull with TLS verification, vetted and pinned DNS, default SSRF protection, no redirects, and exact response limits;
@@ -112,6 +113,20 @@ Status: provider-neutral CLI, MCP, hook guidance, privacy enforcement, and behav
 - focus active by default and no attention presentation mutation during reads;
 - exact group membership, no private/group mixing, and metadata-only source handling for group audiences;
 - descriptive context only; no policy, credentials, transport administration, messages, or authority.
+
+## 10. Immutable HTTPS objects
+
+Status: provider-neutral create-only publish and verified read-back implemented; mutable feeds, deletion, database, and peer transports remain out of scope.
+
+- signed snapshot publication under a deterministic SHA-256 object address;
+- atomic create-only `PUT` with `If-None-Match: *` and no overwrite path;
+- `201`/`204` creation and verified `412` idempotent retry semantics;
+- mandatory hardened read-back before reporting success;
+- TLS verification, DNS pinning, SSRF protection, no redirects, strict limits, and exact body length;
+- bearer credentials read only from a named environment variable;
+- explicit local confirmation for every network write and separate private-network opt-in;
+- CLI-only transport surface; no endpoint, credential, publish, overwrite, or delete capability in MCP or hooks;
+- snapshots remain context-only and imports still enter quarantine for a second local review.
 
 ## Definition of done for every stage
 
