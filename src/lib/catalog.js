@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { canonicalPath, projectStateDir } from "./paths.js";
 import { discoverDocuments } from "./documents.js";
 
@@ -67,10 +68,34 @@ export async function buildCatalog(inputRoot = process.cwd()) {
 export async function saveCatalog(catalog) {
   const directory = await projectStateDir(catalog.root);
   const target = join(directory, "catalog.json");
+  const lockPath = `${target}.lock`;
+  let handle;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      handle = await open(lockPath, "wx", 0o600);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      try {
+        const metadata = await stat(lockPath);
+        if (Date.now() - metadata.mtimeMs > 15000) await unlink(lockPath);
+      } catch (lockError) {
+        if (lockError.code !== "ENOENT") throw lockError;
+      }
+      await delay(25);
+    }
+  }
+  if (!handle) throw new Error("catalog state is busy; retry later");
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(catalog, null, 2)}\n`, { mode: 0o600 });
-  await rename(temporary, target);
-  return target;
+  try {
+    await writeFile(temporary, `${JSON.stringify(catalog, null, 2)}\n`, { mode: 0o600 });
+    await rename(temporary, target);
+    return target;
+  } finally {
+    await handle.close();
+    await unlink(temporary).catch((error) => { if (error.code !== "ENOENT") throw error; });
+    await unlink(lockPath).catch((error) => { if (error.code !== "ENOENT") throw error; });
+  }
 }
 
 export async function scanAndSave(root) {
