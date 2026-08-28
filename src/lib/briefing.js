@@ -82,6 +82,13 @@ function taskMatchesScope(task, entityId) {
   return !entityId || task.createdBy === entityId || task.assigneeId === entityId;
 }
 
+async function settleReads(promises) {
+  const settled = await Promise.allSettled(promises);
+  const failed = settled.find((item) => item.status === "rejected");
+  if (failed) throw failed.reason;
+  return settled.map((item) => item.value);
+}
+
 /**
  * Assemble one immutable, privacy-filtered context packet for a host session.
  * The packet is descriptive only and fits maxBytes as compact UTF-8 JSON.
@@ -105,7 +112,7 @@ export async function sessionBriefing({
   const relationship = entityId
     ? await relationshipContext({ root: catalog.root, entityId, includePrivate, groupId, catalog })
     : null;
-  const [learned, attention, tasks, shared] = await Promise.all([
+  const [learned, attention, tasks, shared] = await settleReads([
     learningContext({ root: catalog.root, includePrivate, groupId, maxItems: 50, catalog }),
     attentionContext({ root: catalog.root, includePrivate, groupId, focusActive, markPresented: false, maxItems: 20, now, catalog }),
     taskContext({ root: catalog.root, includePrivate, groupId, projectId, includeClosed: false, maxItems: 100, catalog }),

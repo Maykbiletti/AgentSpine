@@ -96,6 +96,19 @@ test("focus is the default and briefing reads never consume attention cues", asy
   assert.deepEqual(await readFile(attentionPath), before);
 });
 
+test("fail-closed parallel reads fully settle before returning an error", async (t) => {
+  const { root, state } = await fixture(t);
+  const { attentionPath } = await loadAttention(root);
+  await writeFile(attentionPath, JSON.stringify({
+    schema: "agentspine.attention/v1", root,
+    config: { enabled: "invalid", minIntervalHours: 24, entitySilenceDays: 14, maxItems: 3, quietHours: null },
+    signals: [], activities: [], history: [], presentations: {}
+  }), "utf8");
+  await assert.rejects(sessionBriefing({ root }), /attention configuration is invalid/);
+  await rm(state, { recursive: true });
+  await mkdir(state, { recursive: true });
+});
+
 test("group briefing enforces one exact audience and never loads Markdown content", async (t) => {
   const { root } = await fixture(t);
   await acceptedLearning(root, {
