@@ -3,6 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { isFileLockContention } from "./filesystem-retry.js";
 import { isInside, stateRoot } from "./paths.js";
 import { markdownOutsideCode } from "./documents.js";
 
@@ -58,7 +59,7 @@ async function mutateCache(env, task) {
   let handle;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try { handle = await open(lock, "wx", 0o600); break; } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       try {
         const metadata = await stat(lock);
         if (Date.now() - metadata.mtimeMs > 15000) await unlink(lock);

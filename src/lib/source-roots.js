@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { lstat, mkdir, open, opendir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, opendir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { ancestorsBetween, canonicalPath, isInside, stateRoot } from "./paths.js";
 import { indexExplicitDocuments } from "./documents.js";
+import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { purgeIndexedMemoryCache, resolveIndexedMemory } from "./indexed-memory.js";
 
 export const SOURCE_REGISTRY_SCHEMA = "agentspine.source-roots/v1";
@@ -57,7 +58,7 @@ async function mutateRegistry(task, env = process.env) {
   let handle;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try { handle = await open(lock, "wx", 0o600); break; } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       await new Promise((done) => setTimeout(done, 25));
     }
   }
@@ -70,7 +71,7 @@ async function mutateRegistry(task, env = process.env) {
     if (Buffer.byteLength(content) > MAX_REGISTRY_BYTES) throw new Error("source-root registry exceeds 1 MiB");
     const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(temporary, content, { mode: 0o600 });
-    await rename(temporary, path);
+    await replaceFileWithRetry(temporary, path);
     return { ...result, registryPath: path, revision: registry.revision };
   } finally {
     await handle.close();

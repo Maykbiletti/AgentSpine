@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCatalog } from "./catalog.js";
 import { loadCoordination } from "./coordination.js";
+import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { loadGraph } from "./graph.js";
 import { projectStateDir } from "./paths.js";
 
@@ -205,7 +206,7 @@ async function saveAttention(state, path) {
   if (Buffer.byteLength(content) > MAX_STATE_BYTES) throw new Error("attention state exceeds 5 MiB; resolve or delete old cues first");
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, content, { mode: 0o600 });
-  await rename(temporary, path);
+  await replaceFileWithRetry(temporary, path);
 }
 
 async function withAttentionLock(path, task) {
@@ -216,7 +217,7 @@ async function withAttentionLock(path, task) {
       handle = await open(lockPath, "wx", 0o600);
       break;
     } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       try {
         const metadata = await stat(lockPath);
         if (Date.now() - metadata.mtimeMs > 15000) await unlink(lockPath);

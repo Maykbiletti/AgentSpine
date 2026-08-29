@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, open, opendir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, open, opendir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { buildCatalog } from "./catalog.js";
+import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { loadCoordination } from "./coordination.js";
 import { loadGraph } from "./graph.js";
 import { projectStateDir } from "./paths.js";
@@ -98,7 +99,7 @@ async function saveJson(value, path) {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, content, { mode: 0o600 });
-    await rename(temporary, path);
+    await replaceFileWithRetry(temporary, path);
   } finally {
     await unlink(temporary).catch((error) => { if (error.code !== "ENOENT") throw error; });
   }
@@ -110,7 +111,7 @@ async function acquireLock(path) {
     try {
       return { handle: await open(lockPath, "wx", 0o600), lockPath };
     } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       try {
         const metadata = await stat(lockPath);
         if (Date.now() - metadata.mtimeMs > 90000) await unlink(lockPath);

@@ -57,5 +57,5 @@ try {
     process.stdout.write("Hermetic " + mode + " profile: " + (results.length - failures.length) + "/" + results.length + " test files passed\n");
     if (failures.length) failed = true;
   }
-} finally { await rm(base, { recursive: true, force: true }); }
+} finally { await rm(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 if (failed) process.exitCode = 1;

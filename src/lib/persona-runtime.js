@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { lstat, open, opendir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, open, opendir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { buildCatalog } from "./catalog.js";
+import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { linkEntities, loadGraph, unlinkEntities, upsertEntity } from "./graph.js";
 import { isInside, projectStateDir } from "./paths.js";
 
@@ -159,7 +160,7 @@ async function writeJson(path, value) {
   const temporary = path + "." + process.pid + "." + randomUUID() + ".tmp";
   try {
     await writeFile(temporary, content, { mode: 0o600 });
-    await rename(temporary, path);
+    await replaceFileWithRetry(temporary, path);
   } finally {
     await unlink(temporary).catch((error) => { if (error.code !== "ENOENT") throw error; });
   }
@@ -170,7 +171,7 @@ async function withLock(paths, task) {
   let handle;
   for (let attempt = 0; attempt < 120; attempt += 1) {
     try { handle = await open(lockPath, "wx", 0o600); break; } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       try {
         const metadata = await stat(lockPath);
         if (Date.now() - metadata.mtimeMs > 90000) await unlink(lockPath);

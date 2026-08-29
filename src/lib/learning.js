@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCatalog } from "./catalog.js";
+import { isFileLockContention } from "./filesystem-retry.js";
 import { loadGraph } from "./graph.js";
 import { projectStateDir } from "./paths.js";
 
@@ -173,7 +174,7 @@ async function withLock(path, root, task) {
       handle = await open(lockPath, "wx", 0o600);
       break;
     } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       try {
         const metadata = await stat(lockPath);
         if (Date.now() - metadata.mtimeMs > 15000) await unlink(lockPath);

@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCatalog } from "./catalog.js";
+import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { attentionFindings, loadAttention } from "./attention.js";
 import {
   channelRuntimeFindings, loadChannelPolicy, loadChannelRuntime
@@ -207,7 +208,7 @@ async function writeJson(path, value) {
   const content = JSON.stringify(value, null, 2) + "\n";
   if (Buffer.byteLength(content) > MAX_BYTES) throw new Error("gateway state exceeds 8 MiB");
   const temporary = path + "." + process.pid + "." + randomUUID() + ".tmp";
-  try { await writeFile(temporary, content, { mode: 0o600 }); await rename(temporary, path); }
+  try { await writeFile(temporary, content, { mode: 0o600 }); await replaceFileWithRetry(temporary, path); }
   finally { await unlink(temporary).catch((error) => { if (error.code !== "ENOENT") throw error; }); }
 }
 
@@ -216,7 +217,7 @@ async function withLock(paths, task) {
   let handle;
   for (let attempt = 0; attempt < 160; attempt += 1) {
     try { handle = await open(lockPath, "wx", 0o600); break; } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       try { const metadata = await stat(lockPath); if (Date.now() - metadata.mtimeMs > 120000) await unlink(lockPath); }
       catch (lockError) { if (lockError.code !== "ENOENT") throw lockError; }
       await new Promise((resolve) => setTimeout(resolve, 25));

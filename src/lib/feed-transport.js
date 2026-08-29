@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns/promises";
-import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import {
   assertTrustedIdentity, loadTrust, signEnvelope, verifyEnvelope
 } from "./authentication.js";
 import { buildCatalog } from "./catalog.js";
+import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import {
   buildHttpsSnapshot, fetchHttpsSnapshot, importHttpsSnapshot, resolveHttpsEndpoint
 } from "./https-transport.js";
@@ -376,7 +377,7 @@ async function acquireLock(path) {
   const lockPath = `${path}.lock`;
   for (let attempt = 0; attempt < 120; attempt += 1) {
     try { return { handle: await open(lockPath, "wx", 0o600), lockPath }; } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       try {
         const metadata = await stat(lockPath);
         if (Date.now() - metadata.mtimeMs > 90000) await unlink(lockPath);
@@ -393,7 +394,7 @@ async function saveState(path, state) {
   if (Buffer.byteLength(content) > MAX_STATE_BYTES) throw new Error("HTTPS feed state exceeds 4 MiB");
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, content, { mode: 0o600 });
-  await rename(temporary, path);
+  await replaceFileWithRetry(temporary, path);
 }
 
 function assessFeed(feed, receipt) {
