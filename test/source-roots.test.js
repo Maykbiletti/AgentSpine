@@ -205,9 +205,11 @@ test("Claude project memory loads only files indexed by MEMORY.md", async (t) =>
   const outside = join(workspace, "outside.md");
   await writeFile(outside, "# Outside\n", "utf8");
   const linkedSymlink = join(memory, "linked-symlink.md");
+  let indexedSymlink = 0;
   try {
     await symlink(outside, linkedSymlink);
     await writeFile(index, `${await readFile(index, "utf8")}[Symlink](linked-symlink.md) <!-- agentspine:always -->\n`, "utf8");
+    indexedSymlink = 1;
   } catch (error) {
     if (process.platform !== "win32" || !["EPERM", "EACCES"].includes(error.code)) throw error;
   }
@@ -228,13 +230,13 @@ test("Claude project memory loads only files indexed by MEMORY.md", async (t) =>
   assert.equal(result.catalog.documents.some((item) => item.path === outside), false);
   assert.equal(result.diagnostics.scopes["project-memory"], 2);
   assert.deepEqual(result.diagnostics.memory, {
-    indexed: process.platform === "win32" ? 3 : 4,
-    relevant: process.platform === "win32" ? 3 : 4,
+    indexed: 3 + indexedSymlink,
+    relevant: 3 + indexedSymlink,
     loaded: 1,
     cacheHits: 0,
     cacheMisses: 2,
     missing: 1,
-    rejected: { scope: 0, path: 1, symlink: process.platform === "win32" ? 0 : 1, race: 0, size: 0 },
+    rejected: { scope: 0, path: 1, symlink: indexedSymlink, race: 0, size: 0 },
     directoryEnumeration: 0
   });
   for (const [path, expected] of before) assert.equal(hash(await readFile(path)), expected);
