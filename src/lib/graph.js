@@ -218,6 +218,17 @@ export async function linkEntities({ root = process.cwd(), from, to, relation = 
   return { edge, graphPath };
 }
 
+export async function unlinkEntities({ root = process.cwd(), from, to, relation = "related" }) {
+  if (!ENTITY_RELATIONS.has(relation)) throw new Error(`unsupported entity relation: ${relation}`);
+  const { graph, graphPath } = await loadGraph(root);
+  const previous = graph.entityEdges.find((item) => item.from === from && item.to === to && item.relation === relation);
+  if (!previous) return { removed: null, duplicate: true, graphPath };
+  preservePrevious(graph, "entity-edge", previous);
+  graph.entityEdges = graph.entityEdges.filter((item) => !(item.from === from && item.to === to && item.relation === relation));
+  await saveGraph(graph, graphPath);
+  return { removed: previous, duplicate: false, graphPath };
+}
+
 function relationshipAudience(graph, groupId) {
   const ids = new Set([groupId]);
   for (const edge of graph.entityEdges) {

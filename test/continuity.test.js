@@ -80,6 +80,8 @@ test("Claude and Codex receive accepted scoped style on a new session and after 
     assert.equal(packet.briefing.scope.entityId, "person:alpha");
     assert.equal(packet.briefing.learning[0].claim, "Response preference: kurz");
     assert.equal(packet.briefing.learning[0].automatic, true);
+    assert.deepEqual(packet.briefing.voiceBrief.preferences, ["Response preference: kurz"]);
+    assert.equal(packet.briefing.voiceBrief.personaSources.some((path) => path.endsWith("SOUL.md")), true);
     assert.ok(Buffer.byteLength(JSON.stringify(packet.briefing)) <= packet.briefing.budget.maxBytes);
     assert.match(packet.instruction, /Do not call an MCP tool/);
   }

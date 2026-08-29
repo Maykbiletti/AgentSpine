@@ -205,7 +205,7 @@ test("corrupt attention configuration fails closed without breaking session inde
   await assert.rejects(attentionContext({ root }), /configuration is invalid/);
   const hook = await runHook({ hook_event_name: "SessionStart", cwd: root });
   const context = JSON.parse(hook.context);
-  assert.equal(context.indexedSources, 1);
+  assert.ok(context.indexedSources >= 1, "the project source remains indexed alongside any host-global sources");
   assert.equal(context.failedClosed, true);
   assert.match(context.error, /attention configuration is invalid/);
 });

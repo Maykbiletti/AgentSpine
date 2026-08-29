@@ -31,7 +31,7 @@ test("acceptance CLI emits a reproducible machine-readable receipt", () => {
   assert.equal(result.status, 0, result.stderr);
   const report = JSON.parse(result.stdout);
   assert.equal(report.schema, "agentspine.acceptance/v1");
-  assert.equal(report.version, "0.7.0");
+  assert.equal(report.version, "0.8.0");
   assert.equal(report.total, 14);
   assert.equal(report.mcpCalls, 0);
 });

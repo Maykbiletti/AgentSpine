@@ -1,6 +1,4 @@
 {
-  "version": "0.7.0",
-  "contract": "agentspine.source-roots/v1",
   "description": "Resolves host-native user, project, and memory roots before injecting scoped context, persisting attention and checkpoints, rechecking rights, and protecting sources.",
   "hooks": {
     "SessionStart": [

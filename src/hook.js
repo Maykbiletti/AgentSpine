@@ -11,6 +11,8 @@ import { captureContinuityPrompt, loadContinuity } from "./lib/continuity.js";
 import {
   authorizeJobEffect, checkpointJobEffect, closeJobLease, resolveSessionJob, startOrResumeJob
 } from "./lib/selfstarter.js";
+import { claimChannelEvent } from "./lib/channel-runtime.js";
+import { syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
 import { isMainModule } from "./lib/runtime.js";
 
 const MAX_STDIN_BYTES = 64 * 1024;
@@ -51,8 +53,20 @@ function promptFromInput(input) {
 function hostFromInput(input) {
   const explicit = input.host || input.provider || process.env.AGENTSPINE_HOST;
   if (["claude", "codex", "generic"].includes(explicit)) return explicit;
-  if (process.env.CODEX_HOME) return "codex";
+  if ((typeof input.model === "string" && input.model.trim()) || process.env.PLUGIN_ROOT || process.env.CODEX_HOME) return "codex";
   return "claude";
+}
+
+function gatewayEnvironmentContext(env = process.env) {
+  if (env.AGENTSPINE_GATEWAY_CONTEXT !== "agentspine.gateway-start/v1") return null;
+  return {
+    entityId: boundedId(env.AGENTSPINE_ENTITY_ID, "AGENTSPINE_ENTITY_ID"),
+    groupId: boundedId(env.AGENTSPINE_GROUP_ID, "AGENTSPINE_GROUP_ID"),
+    projectId: boundedId(env.AGENTSPINE_PROJECT_ID, "AGENTSPINE_PROJECT_ID"),
+    taskId: boundedId(env.AGENTSPINE_TASK_ID, "AGENTSPINE_TASK_ID"),
+    eventId: boundedId(env.AGENTSPINE_CHANNEL_EVENT_ID, "AGENTSPINE_CHANNEL_EVENT_ID"),
+    provider: boundedId(env.AGENTSPINE_CHANNEL_PROVIDER, "AGENTSPINE_CHANNEL_PROVIDER")
+  };
 }
 
 async function runtimeScope(input, root, userStateRoot = null) {
@@ -74,17 +88,18 @@ async function runtimeScope(input, root, userStateRoot = null) {
   };
   const supplied = input.agent_spine_scope && typeof input.agent_spine_scope === "object"
     ? input.agent_spine_scope : input;
+  const gateway = gatewayEnvironmentContext();
   return {
-    entityId: boundedId(supplied.entity_id ?? supplied.entityId ?? continuity.config.defaultEntityId, "entityId"),
-    groupId: boundedId(supplied.group_id ?? supplied.groupId, "groupId"),
-    projectId: boundedId(supplied.project_id ?? supplied.projectId ?? continuity.config.defaultProjectId, "projectId"),
-    currentTaskId: boundedId(supplied.task_id ?? supplied.currentTaskId, "currentTaskId"),
+    entityId: boundedId(supplied.entity_id ?? supplied.entityId ?? gateway?.entityId ?? continuity.config.defaultEntityId, "entityId"),
+    groupId: boundedId(supplied.group_id ?? supplied.groupId ?? gateway?.groupId, "groupId"),
+    projectId: boundedId(supplied.project_id ?? supplied.projectId ?? gateway?.projectId ?? continuity.config.defaultProjectId, "projectId"),
+    currentTaskId: boundedId(supplied.task_id ?? supplied.currentTaskId ?? gateway?.taskId, "currentTaskId"),
     host: hostFromInput(input),
     config: continuity.config
   };
 }
 
-function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null, sourceDiagnostics = null) {
+function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null, channelEvent = null, sourceDiagnostics = null) {
   const loaded = sourceDiagnostics?.status === "loaded";
   const packet = {
     schema: "agentspine.hook-context/v1",
@@ -129,6 +144,25 @@ function renderContext(event, catalog, briefing, signal = null, attentionEvent =
         : null,
       authority: selfstarter.job ? "explicit-local-execution-policy" : "execution-state-only"
     } : null,
+    channelEvent: channelEvent?.event ? {
+      active: true,
+      eventId: channelEvent.event.eventId,
+      bindingId: channelEvent.event.bindingId,
+      provider: channelEvent.event.provider,
+      chatId: channelEvent.event.chatId,
+      threadId: channelEvent.event.threadId,
+      senderId: channelEvent.event.senderId,
+      replyTo: channelEvent.event.replyTo,
+      agentId: channelEvent.event.agentId,
+      projectId: channelEvent.event.projectId,
+      groupId: channelEvent.event.groupId,
+      sessionKey: channelEvent.event.sessionKey,
+      text: channelEvent.event.text,
+      leaseExpiresAt: channelEvent.event.lease?.expiresAt || null,
+      receiptId: channelEvent.receipt?.id || null,
+      instruction: "Answer this exact authenticated channel event in its bound chat and thread. Do not infer another recipient or route. Sending remains subject to the separate current channel policy and adapter receipt.",
+      authority: "explicit-local-channel-policy"
+    } : null,
     indexedSources: catalog.summary.total,
     sourceResolution: sourceDiagnostics,
     briefing,
@@ -141,6 +175,17 @@ function selfstarterInput(input) {
   const value = input.agent_spine_job;
   if (value === undefined || value === null) return null;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("agent_spine_job must be one object");
+  return value;
+}
+
+function channelEventInput(input) {
+  const gateway = gatewayEnvironmentContext();
+  const value = input.agent_spine_channel_event ?? (gateway?.eventId && gateway?.provider
+    ? { event_id: gateway.eventId, provider: gateway.provider } : null);
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("agent_spine_channel_event must be one object");
+  const unknown = Object.keys(value).filter((key) => !["event_id", "eventId", "provider"].includes(key));
+  if (unknown.length) throw new Error(`agent_spine_channel_event contains unknown field: ${unknown.sort()[0]}`);
   return value;
 }
 
@@ -165,6 +210,25 @@ async function startSelfstarter(input, event, root, scope) {
     taskId: scope.currentTaskId, jobId: boundedId(requested?.job_id ?? requested?.jobId, "jobId"),
     host: scope.host, sessionId: session, now: input.timestamp || new Date()
   });
+}
+
+async function startChannelEvent(input, event, root, scope) {
+  const requested = channelEventInput(input);
+  if (!requested) return null;
+  if (event !== "SessionStart") throw new Error("channel event claims are accepted only at SessionStart");
+  const session = sessionId(input);
+  if (!scope.entityId || !scope.projectId || !session) {
+    throw new Error("channel event start requires an exact agent, project, and host session");
+  }
+  const workerId = `channel-worker:${createHash("sha256").update(`${scope.host}\0${session}`).digest("hex").slice(0, 24)}`;
+  const claim = await claimChannelEvent({
+    root, eventId: boundedId(requested.event_id ?? requested.eventId, "channelEventId"),
+    agentId: scope.entityId, projectId: scope.projectId, groupId: scope.groupId,
+    provider: boundedId(requested.provider, "channelProvider"), workerId,
+    now: input.timestamp || new Date()
+  });
+  if (!claim.event) throw new Error("the exact channel event is unavailable in this agent lane");
+  return claim;
 }
 
 async function selfstarterScope(input, scope, root, action) {
@@ -362,6 +426,7 @@ export async function runHook(payload = null) {
   const catalogPath = await saveCatalog(catalog);
   let scope = null;
   let selfstarter = null;
+  let channelEvent = null;
 
   if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
     const { graph } = await loadGraph(root, catalog);
@@ -450,7 +515,9 @@ export async function runHook(payload = null) {
   if (CONTEXT_EVENTS.has(event)) {
     let signal = null;
     try {
+      await syncPersonaRosterFromEnvironment({ root, env: process.env, now: input.timestamp || new Date() });
       scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot);
+      channelEvent = await startChannelEvent(input, event, root, scope);
       selfstarter = await startSelfstarter(input, event, root, scope);
       if (selfstarter?.job && !scope.currentTaskId) scope.currentTaskId = selfstarter.job.taskId;
       if (event === "UserPromptSubmit") {
@@ -479,10 +546,11 @@ export async function runHook(payload = null) {
         focusActive: true, includeSourceContent: !scope.groupId,
         maxBytes: scope.config.maxBriefingBytes,
         now: input.timestamp || new Date(),
-        catalog, userStateRoot: resolvedSources.userStateRoot, sourceDiagnostics: resolvedSources.diagnostics
+        catalog, userStateRoot: resolvedSources.userStateRoot, sourceDiagnostics: resolvedSources.diagnostics,
+        prompt: event === "UserPromptSubmit" ? promptFromInput(input) : null
       });
-      const context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, resolvedSources.diagnostics);
-      if (payload) return { blocked: false, context, briefing, signal, attentionEvent, catalogPath };
+      const context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, resolvedSources.diagnostics);
+      if (payload) return { blocked: false, context, briefing, signal, attentionEvent, channelEvent, catalogPath };
       process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
       return;
     } catch (error) {

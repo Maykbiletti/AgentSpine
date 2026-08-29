@@ -13,6 +13,11 @@ import { continuityFindings, inspectContinuity } from "./continuity.js";
 import {
   executionPolicyFindings, inspectSelfstarter, selfstarterFindings
 } from "./selfstarter.js";
+import {
+  channelPolicyFindings, channelRuntimeFindings, inspectChannelRuntime
+} from "./channel-runtime.js";
+import { inspectPersonaRuntime, personaRuntimeFindings } from "./persona-runtime.js";
+import { gatewayHealthFindings, gatewayRuntimeFindings, inspectGatewayRuntime } from "./gateway-runtime.js";
 import { fileURLToPath } from "node:url";
 import { checkHosts } from "../../scripts/check-hosts.js";
 import { resolveHostSourceCatalog } from "./source-roots.js";
@@ -105,6 +110,18 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
     policy: executionPolicy, state: selfstarter, executionPolicyPath, selfstarterPath,
     errors: selfstarterLoadErrors
   } = await inspectSelfstarter(before.root, catalog);
+  const {
+    policy: channelPolicy, runtime: channelRuntime, channelPolicyPath, channelRuntimePath,
+    errors: channelLoadErrors
+  } = await inspectChannelRuntime(before.root, catalog);
+  const {
+    policy: personaPolicy, runtime: personaRuntime, personaPolicyPath, personaRuntimePath,
+    errors: personaLoadErrors
+  } = await inspectPersonaRuntime(before.root, catalog);
+  const {
+    policy: gatewayPolicy, runtime: gatewayRuntime, gatewayPolicyPath, gatewayRuntimePath,
+    errors: gatewayLoadErrors
+  } = await inspectGatewayRuntime(before.root, catalog);
   const { sharing, sharingPath, error: sharingLoadError } = await inspectSharing(before.root, catalog);
   const { trust, trustPath, error: trustLoadError } = await inspectTrust(before.root, catalog);
   const { registry, registryPath, signerDirectory, errors: signerErrors } = await inspectSignerRegistry(before.root, catalog);
@@ -201,6 +218,28 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
   }
   const selfstarterAuthorityIssues = selfstarterIssues.filter((issue) => /grant|policy|task-mismatch/.test(issue));
   const selfstarterStateIssues = selfstarterIssues.filter((issue) => !selfstarterAuthorityIssues.includes(issue));
+  const channelPolicyIssues = channelPolicyFindings(channelPolicy, graph);
+  const channelRuntimeIssues = channelRuntimeFindings(channelRuntime, channelPolicy, graph)
+    .filter((issue) => !channelPolicyIssues.includes(issue));
+  for (const error of channelLoadErrors) {
+    if (error.startsWith("policy:")) channelPolicyIssues.push(`unreadable-state:${error}`);
+    else channelRuntimeIssues.push(`unreadable-state:${error}`);
+  }
+  const personaIssues = personaRuntimeFindings(personaPolicy, personaRuntime, graph);
+  const personaPolicyIssues = personaIssues.filter((issue) => /binding/.test(issue));
+  const personaStateIssues = personaIssues.filter((issue) => !personaPolicyIssues.includes(issue));
+  for (const error of personaLoadErrors) {
+    if (error.startsWith("policy:")) personaPolicyIssues.push(`unreadable-state:${error}`);
+    else personaStateIssues.push(`unreadable-state:${error}`);
+  }
+  const gatewayIssues = [...gatewayRuntimeFindings(gatewayPolicy, gatewayRuntime),
+    ...gatewayHealthFindings(gatewayPolicy, gatewayRuntime)];
+  const gatewayPolicyIssues = gatewayIssues.filter((issue) => /goal/.test(issue));
+  const gatewayStateIssues = gatewayIssues.filter((issue) => !gatewayPolicyIssues.includes(issue));
+  for (const error of gatewayLoadErrors) {
+    if (error.startsWith("policy:")) gatewayPolicyIssues.push(`unreadable-state:${error}`);
+    else gatewayStateIssues.push(`unreadable-state:${error}`);
+  }
   const sharingIssues = sharingFindings(sharing, graph);
   if (sharingLoadError) sharingIssues.push(`unreadable-state:${sharingLoadError}`);
   const authenticationIssues = [
@@ -227,12 +266,12 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
       ? `${catalog.documents.length} project documents; host-native source resolution failed closed: ${sourceResolutionError}`
       : sourceResolution ? `${sourceResolution.scopes.user} user, ${sourceResolution.scopes.project} project, and ${sourceResolution.scopes["project-memory"]} memory sources; broad home scan disabled`
         : `${catalog.documents.length} Markdown documents indexed`),
-    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath) && !isInside(catalog.root, continuityPath) && !isInside(catalog.root, policyPath) && !isInside(catalog.root, coordinationPath) && !isInside(catalog.root, executionPolicyPath) && !isInside(catalog.root, selfstarterPath) && !isInside(catalog.root, sharingPath) && !isInside(catalog.root, trustPath) && !isInside(catalog.root, registryPath) && !isInside(catalog.root, signerDirectory) && !isInside(catalog.root, feedStatePath), `State remains outside ${catalog.root}`),
+    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath) && !isInside(catalog.root, continuityPath) && !isInside(catalog.root, policyPath) && !isInside(catalog.root, coordinationPath) && !isInside(catalog.root, executionPolicyPath) && !isInside(catalog.root, selfstarterPath) && !isInside(catalog.root, channelPolicyPath) && !isInside(catalog.root, channelRuntimePath) && !isInside(catalog.root, personaPolicyPath) && !isInside(catalog.root, personaRuntimePath) && !isInside(catalog.root, gatewayPolicyPath) && !isInside(catalog.root, gatewayRuntimePath) && !isInside(catalog.root, sharingPath) && !isInside(catalog.root, trustPath) && !isInside(catalog.root, registryPath) && !isInside(catalog.root, signerDirectory) && !isInside(catalog.root, feedStatePath), `State remains outside ${catalog.root}`),
     gate(4, "Native hierarchy", nativeMapped.every((document) => document.hosts.length > 0), `${nativeMapped.length} host-native documents mapped`),
     gate(5, "Link integrity", brokenLinks.length === 0, brokenLinks.length ? `${brokenLinks.length} broken Markdown links` : "All indexed Markdown links resolve"),
     gate(6, "Conflict visibility", Array.isArray(catalog.conflicts), `${reviewConflicts.length} precedence or classification findings exposed`, "warning"),
-    gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0 && executionPolicyIssues.length === 0 && selfstarterAuthorityIssues.length === 0 && sharingAuthorityIssues.length === 0, `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings; ${executionPolicyIssues.length} execution policy findings; ${selfstarterAuthorityIssues.length} self-starter authority findings; ${sharingAuthorityIssues.length} shared authority findings`),
-    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && attentionIssues.length === 0 && learningIssues.length === 0 && continuityIssues.length === 0 && coordinationContextIssues.length === 0 && selfstarterStateIssues.length === 0 && sharingContextIssues.length === 0 && authenticationIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${attention.events.length} lifecycle events, ${learning.candidates.length} learning records, ${continuity.signals.length} continuity signals, ${coordination.tasks.length} coordination items, ${selfstarter.jobs.length} self-starter jobs, ${sharing.records.length} shared records, ${trust.records.length} trusted keys, ${registry.signers.length} local signers, and ${feedState.feeds.length} feed receipts checked`),
+    gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0 && executionPolicyIssues.length === 0 && selfstarterAuthorityIssues.length === 0 && channelPolicyIssues.length === 0 && personaPolicyIssues.length === 0 && gatewayPolicyIssues.length === 0 && sharingAuthorityIssues.length === 0, `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings; ${executionPolicyIssues.length} execution policy findings; ${selfstarterAuthorityIssues.length} self-starter authority findings; ${channelPolicyIssues.length} channel policy findings; ${personaPolicyIssues.length} persona policy findings; ${gatewayPolicyIssues.length} gateway policy findings; ${sharingAuthorityIssues.length} shared authority findings`),
+    gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && attentionIssues.length === 0 && learningIssues.length === 0 && continuityIssues.length === 0 && coordinationContextIssues.length === 0 && selfstarterStateIssues.length === 0 && channelRuntimeIssues.length === 0 && personaStateIssues.length === 0 && gatewayStateIssues.length === 0 && sharingContextIssues.length === 0 && authenticationIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${attention.events.length} lifecycle events, ${learning.candidates.length} learning records, ${continuity.signals.length} continuity signals, ${coordination.tasks.length} coordination items, ${selfstarter.jobs.length} self-starter jobs, ${channelRuntime.events.length} channel events, ${personaRuntime.personas.length} authenticated personas, ${gatewayRuntime.queue.length} gateway queue items, ${gatewayRuntime.outbox.length} delivery records, ${sharing.records.length} shared records, ${trust.records.length} trusted keys, ${registry.signers.length} local signers, and ${feedState.feeds.length} feed receipts checked`),
     gate(9, "Context budget", loadedBytes <= context.budget.maxBytes && briefingBudgetValid, briefingError
       ? `${loadedBytes}/${context.budget.maxBytes} source bytes; briefing failed closed: ${briefingError}`
       : `${loadedBytes}/${context.budget.maxBytes} source bytes; ${briefingBytes}/${briefing.budget.maxBytes} briefing bytes`),
@@ -254,6 +293,12 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
     coordinationPath,
     executionPolicyPath,
     selfstarterPath,
+    channelPolicyPath,
+    channelRuntimePath,
+    personaPolicyPath,
+    personaRuntimePath,
+    gatewayPolicyPath,
+    gatewayRuntimePath,
     sharingPath,
     trustPath,
     registryPath,

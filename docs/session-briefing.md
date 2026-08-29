@@ -1,8 +1,8 @@
 # Session briefing
 
-As of `0.7.0`, native lifecycle hooks resolve host-native user, project, and indexed lazy memory roots, then generate and inject this packet automatically at start, resume, prompt, and compaction boundaries. Exact current-task heartbeat, promise, and blocker events can enter the same constrained attention section. An independently authorized waiting job can also add its exact durable checkpoint at start and resume; execution rights never come from briefing content. MCP and CLI remain inspection surfaces, and model-side tool selection is not part of automatic continuity.
+As of `0.8.0`, native lifecycle hooks resolve host-native user, project, and indexed lazy memory roots, then generate and inject this packet automatically at start, resume, prompt, and compaction boundaries. Exact current-task heartbeat, promise, and blocker events can enter the same constrained attention section. An independently authorized waiting job can also add its exact durable checkpoint at start and resume; execution rights never come from briefing content. MCP and CLI remain inspection surfaces, and model-side tool selection is not part of automatic continuity.
 
-`session_briefing` assembles the smallest useful, provider-neutral context packet for one Claude Code, Codex, or generic MCP session. It replaces a chain of separate context reads without turning aggregation into authority.
+`session_briefing` assembles the smallest useful, provider-neutral context packet for one Claude Code, Codex, or generic MCP session. It replaces a chain of separate context reads without turning aggregation into authority. The packet includes a compact `agentspine.voice-brief/v1` so exact visible persona and interaction signals affect the response automatically instead of depending on a voluntary second tool call.
 
 ```mermaid
 flowchart LR
@@ -37,11 +37,14 @@ The packet contains:
 - host-native instruction, soul, memory-index, and linked-source descriptors;
 - the current task first, followed by other visible scoped work;
 - the requested entity and its visible relationship neighborhood;
+- a voice brief containing only visible persona descriptors, allowed voice fields, accepted preferences, corrections, no-gos, the current task, and active promise or blocker signals;
 - accepted local learning relevant to the entity or project;
 - locally reviewed shared memory, deduplicated against equivalent local learning;
 - due attention suggestions only when focus mode is explicitly disabled.
 
 Candidates, rejected or superseded learning, pending shared imports, delegation grants, assignment proof, credentials, adapter configuration, signer material, and private keys are never included.
+
+The voice brief does not claim that the agent has feelings or consciousness. It asks the host to lead with the useful outcome, avoid re-asking known facts, apply the current persona naturally, and acknowledge a relevant correction, blocker, frustration, uncertainty, or success briefly before acting. Its profile keys are limited to warmth, directness, humor, length, rhythm, and formality; arbitrary entity attributes cannot become behavioral instructions.
 
 ## Budget behavior
 

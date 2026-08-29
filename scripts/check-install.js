@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { spawn } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -24,18 +24,17 @@ async function makePreviousCache(target) {
   for (const path of ["package.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
     const file = join(target, path);
     const value = JSON.parse(await readFile(file, "utf8"));
-    value.version = "0.6.0";
+    value.version = "0.7.0";
     await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   }
   const marketplacePath = join(target, ".claude-plugin/marketplace.json");
   const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
-  marketplace.plugins[0].version = "0.6.0";
+  marketplace.plugins[0].version = "0.7.0";
   await writeFile(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
-  const hooksPath = join(target, "hooks/hooks.json");
-  const hooks = JSON.parse(await readFile(hooksPath, "utf8"));
-  hooks.version = "0.6.0";
-  hooks.contract = "agentspine.acceptance/v1";
-  await writeFile(hooksPath, `${JSON.stringify(hooks, null, 2)}\n`, "utf8");
+  const hookVersionPath = join(target, "hooks/version.json");
+  const hookVersion = JSON.parse(await readFile(hookVersionPath, "utf8"));
+  hookVersion.version = "0.7.0";
+  await writeFile(hookVersionPath, `${JSON.stringify(hookVersion, null, 2)}\n`, "utf8");
 }
 
 async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, payload = null, { requireBriefing = true, extraEnv = {} } = {}) {
@@ -82,6 +81,8 @@ async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, pay
           attentionKinds: context?.briefing?.attention?.items?.map((item) => item.kind) || [],
           capturedAttentionKind: context?.attentionEvent?.kind || null,
           selfstarter: context?.selfstarter || null,
+          channelEvent: context?.channelEvent || null,
+          voiceBrief: context?.briefing?.voiceBrief || null,
           decision: protocol.decision || null,
           reason: protocol.reason || null
         });
@@ -305,6 +306,142 @@ async function invokeInstalledAttention(pluginRoot, projectRoot, stateRoot, host
   return { captured: captured.capturedAttentionKind, restarted: restarted.attentionKinds };
 }
 
+async function prepareInstalledChannelWake(pluginRoot, projectRoot, stateRoot) {
+  const previous = process.env.AGENTSPINE_STATE_DIR;
+  process.env.AGENTSPINE_STATE_DIR = stateRoot;
+  try {
+    const graph = await import(pathToFileURL(join(pluginRoot, "src/lib/graph.js")).href);
+    const channel = await import(pathToFileURL(join(pluginRoot, "src/lib/channel-runtime.js")).href);
+    await graph.upsertEntity({
+      root: projectRoot, id: "agent:install-channel", kind: "agent", displayName: "Franz",
+      attributes: { language: "de-DE", voice: { warmth: "warm", directness: "clear", length: "concise" } },
+      privacy: "shared"
+    });
+    await graph.upsertEntity({ root: projectRoot, id: "project:install-channel", kind: "project", privacy: "shared" });
+    await graph.upsertEntity({ root: projectRoot, id: "group:install-channel", kind: "group", privacy: "shared" });
+    await graph.linkEntities({
+      root: projectRoot, from: "agent:install-channel", to: "group:install-channel",
+      relation: "member-of", privacy: "group"
+    });
+    await channel.grantChannelBinding({
+      root: projectRoot, id: "channel-binding:install", provider: "telegram",
+      tenantId: "tenant:install", accountId: "bot:install", chatId: "chat:install", threadId: "topic:install",
+      senderIds: ["user:install"], agentId: "agent:install-channel", projectId: "project:install-channel",
+      groupId: "group:install-channel", sessionKey: "session:install-channel",
+      secretEnv: "AGENTSPINE_INSTALL_CHANNEL_SECRET", outboundSecretEnv: "AGENTSPINE_INSTALL_CHANNEL_SECRET", capabilities: ["receive", "reply"],
+      confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:00.000Z"
+    });
+    const event = {
+      schema: channel.CHANNEL_EVENT_SCHEMA, eventId: "telegram:update:install", provider: "telegram",
+      tenantId: "tenant:install", accountId: "bot:install", chatId: "chat:install", threadId: "topic:install",
+      senderId: "user:install", replyTo: "message:install", observedAt: "2032-01-01T00:00:01.000Z",
+      privacy: "group", text: "Bitte antworte im gebundenen Telegram-Thema."
+    };
+    const secret = "synthetic-installed-channel-secret-32-bytes";
+    const signature = `sha256=${createHmac("sha256", secret).update(channel.channelEventSigningPayload(event)).digest("hex")}`;
+    await channel.ingestChannelEvent({
+      root: projectRoot, event, signature, env: { AGENTSPINE_INSTALL_CHANNEL_SECRET: secret },
+      now: "2032-01-01T00:00:02.000Z"
+    });
+    return { event, secret };
+  } finally {
+    if (previous === undefined) delete process.env.AGENTSPINE_STATE_DIR;
+    else process.env.AGENTSPINE_STATE_DIR = previous;
+  }
+}
+
+async function invokeInstalledChannelWake(pluginRoot, projectRoot, stateRoot, host) {
+  const { event, secret } = await prepareInstalledChannelWake(pluginRoot, projectRoot, stateRoot);
+  const result = await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
+    hook_event_name: "SessionStart", cwd: projectRoot, host,
+    entity_id: "agent:install-channel", project_id: "project:install-channel",
+    group_id: "group:install-channel", session_id: `session:installed-${host}-channel`,
+    agent_spine_channel_event: { event_id: event.eventId, provider: event.provider }
+  }, { extraEnv: { AGENTSPINE_INSTALL_CHANNEL_SECRET: secret } });
+  if (result.channelEvent?.eventId !== event.eventId || result.channelEvent?.chatId !== event.chatId
+    || result.channelEvent?.threadId !== event.threadId || result.voiceBrief?.displayName !== "Franz"
+    || result.voiceBrief?.profile?.warmth !== "warm") {
+    throw new Error(`${host} installed hook did not inject the exact channel event and voice brief`);
+  }
+  return {
+    eventId: result.channelEvent.eventId, provider: result.channelEvent.provider,
+    route: [result.channelEvent.chatId, result.channelEvent.threadId],
+    voice: { displayName: result.voiceBrief.displayName, profile: result.voiceBrief.profile },
+    mcpCalls: 0
+  };
+}
+
+async function invokeInstalledGateway(pluginRoot, projectRoot, stateRoot) {
+  const previous = process.env.AGENTSPINE_STATE_DIR;
+  process.env.AGENTSPINE_STATE_DIR = stateRoot;
+  try {
+    const graph = await import(pathToFileURL(join(pluginRoot, "src/lib/graph.js")).href);
+    const persona = await import(pathToFileURL(join(pluginRoot, "src/lib/persona-runtime.js")).href);
+    const channel = await import(pathToFileURL(join(pluginRoot, "src/lib/channel-runtime.js")).href);
+    const gateway = await import(pathToFileURL(join(pluginRoot, "src/lib/gateway-runtime.js")).href);
+    const worker = await import(pathToFileURL(join(pluginRoot, "src/worker.js")).href);
+    await graph.upsertEntity({ root: projectRoot, id: "project:installed-gateway", kind: "project", privacy: "shared" });
+    await graph.upsertEntity({ root: projectRoot, id: "group:installed-gateway", kind: "group", privacy: "shared" });
+    const roster = await persona.applyPersonaRoster({
+      root: projectRoot,
+      bindings: [{
+        id: "persona-binding:installed-gateway", authenticator: "host-manifest", issuer: "host:installed",
+        tenantId: "tenant:installed-gateway", host: "codex", profileId: "profile:installed-gateway",
+        subjectId: "subject:installed-gateway", kind: "agent", displayName: "Installed Franz",
+        sourceBinding: ".codex/agents/installed-franz.md", groupId: "group:installed-gateway"
+      }],
+      confirmation: "local-owner-confirmed", now: "2032-01-02T00:00:00.000Z"
+    });
+    const agentId = roster.runtime.personas[0].personaId;
+    await gateway.setGatewayControl({
+      root: projectRoot, enabled: true, killSwitch: false,
+      confirmation: "local-owner-confirmed", now: "2032-01-02T00:00:00.500Z"
+    });
+    await channel.grantChannelBinding({
+      root: projectRoot, id: "channel-binding:installed-gateway", provider: "telegram",
+      tenantId: "tenant:installed-gateway", accountId: "123456789", chatId: "-1001234567890", threadId: "77",
+      senderIds: ["888"], agentId, projectId: "project:installed-gateway", groupId: "group:installed-gateway",
+      sessionKey: "session:installed-gateway", secretEnv: "AGENTSPINE_INSTALLED_GATEWAY_SECRET",
+      outboundSecretEnv: "AGENTSPINE_INSTALLED_GATEWAY_TOKEN", capabilities: ["receive", "reply"],
+      confirmation: "local-owner-confirmed", now: "2032-01-02T00:00:01.000Z"
+    });
+    const event = {
+      schema: channel.CHANNEL_EVENT_SCHEMA, eventId: "telegram:update:installed-gateway", provider: "telegram",
+      tenantId: "tenant:installed-gateway", accountId: "123456789", chatId: "-1001234567890", threadId: "77",
+      senderId: "888", replyTo: "990", observedAt: "2032-01-02T00:00:02.000Z", privacy: "group",
+      text: "Bitte führe den installierten Gateway-Test aus."
+    };
+    const secret = "synthetic-installed-gateway-secret-32-bytes";
+    await channel.ingestChannelEvent({
+      root: projectRoot, event,
+      signature: `sha256=${createHmac("sha256", secret).update(channel.channelEventSigningPayload(event)).digest("hex")}`,
+      env: { AGENTSPINE_INSTALLED_GATEWAY_SECRET: secret }, now: "2032-01-02T00:00:03.000Z"
+    });
+    let hostStart = null; let delivered = null;
+    const result = await worker.runWorkerTick({
+      root: projectRoot, workerId: "gateway-worker:installed", now: "2032-01-02T00:00:04.000Z",
+      env: { AGENTSPINE_STATE_DIR: stateRoot },
+      hostRunner: async (item) => { hostStart = item.channelStart; return { text: "Installierter Gateway-Test bestanden." }; },
+      adapter: { send: async (outbox) => { delivered = outbox; return { ok: true, receipt: "telegram-message:991" }; } }
+    });
+    const channelState = await channel.loadChannelRuntime(projectRoot);
+    if (result.status !== "delivered" || channelState.runtime.events.at(-1)?.status !== "completed"
+      || hostStart?.agent_spine_channel_event?.event_id !== event.eventId
+      || delivered?.chatId !== event.chatId || delivered?.threadId !== event.threadId || delivered?.replyTo !== event.replyTo) {
+      throw new Error("installed gateway did not complete the exact channel wake and delivery path: " + JSON.stringify({
+        result, channelStatus: channelState.runtime.events.at(-1)?.status || null,
+        hostEvent: hostStart?.agent_spine_channel_event?.event_id || null,
+        route: delivered ? [delivered.chatId, delivered.threadId, delivered.replyTo] : null
+      }));
+    }
+    return { status: result.status, eventId: event.eventId, agentId,
+      route: [delivered.chatId, delivered.threadId, delivered.replyTo], mcpCalls: 0 };
+  } finally {
+    if (previous === undefined) delete process.env.AGENTSPINE_STATE_DIR;
+    else process.env.AGENTSPINE_STATE_DIR = previous;
+  }
+}
+
 export async function checkInstall(root = process.cwd()) {
   root = resolve(root);
   const currentVersion = JSON.parse(await readFile(join(root, "package.json"), "utf8")).version;
@@ -326,6 +463,8 @@ export async function checkInstall(root = process.cwd()) {
     const freshHook = await invokeInstalledHook(fresh, userProject, freshState, "claude");
     const freshAttention = await invokeInstalledAttention(fresh, userProject, freshState, "claude");
     const freshSelfstarter = await invokeInstalledSelfstarter(fresh, userProject, freshState, "claude");
+    const freshChannelWake = await invokeInstalledChannelWake(fresh, userProject, freshState, "claude");
+    const freshGateway = await invokeInstalledGateway(fresh, userProject, freshState);
     const freshAcceptance = await invokeInstalledAcceptance(fresh);
     const freshLiveRoots = await invokeInstalledLiveRoots(fresh, workspace, join(workspace, "state-live-fresh"));
 
@@ -333,7 +472,10 @@ export async function checkInstall(root = process.cwd()) {
     await copyBundle(root, installed);
     await makePreviousCache(installed);
     let legacyFailed = false;
-    try { await checkHosts(installed); } catch { legacyFailed = true; }
+    try {
+      const legacy = await checkHosts(installed);
+      if (legacy.version !== currentVersion) legacyFailed = true;
+    } catch { legacyFailed = true; }
     if (!legacyFailed) throw new Error("legacy cache unexpectedly passed the current host inventory");
 
     const staging = `${installed}.${currentVersion}.staging`;
@@ -345,6 +487,8 @@ export async function checkInstall(root = process.cwd()) {
     const upgradedHook = await invokeInstalledHook(installed, userProject, upgradeState, "codex");
     const upgradedAttention = await invokeInstalledAttention(installed, userProject, upgradeState, "codex");
     const upgradedSelfstarter = await invokeInstalledSelfstarter(installed, userProject, upgradeState, "codex");
+    const upgradedChannelWake = await invokeInstalledChannelWake(installed, userProject, upgradeState, "codex");
+    const upgradedGateway = await invokeInstalledGateway(installed, userProject, upgradeState);
     const upgradedAcceptance = await invokeInstalledAcceptance(installed);
     const upgradedLiveRoots = await invokeInstalledLiveRoots(installed, join(workspace, "upgrade-live"), join(workspace, "state-live-upgrade"));
 
@@ -359,6 +503,8 @@ export async function checkInstall(root = process.cwd()) {
       automaticBriefing: { fresh: freshHook, upgrade: upgradedHook },
       automaticAttention: { fresh: freshAttention, upgrade: upgradedAttention },
       automaticSelfstarter: { fresh: freshSelfstarter, upgrade: upgradedSelfstarter },
+      automaticChannelWake: { fresh: freshChannelWake, upgrade: upgradedChannelWake },
+      automaticGateway: { fresh: freshGateway, upgrade: upgradedGateway },
       visibleAcceptance: { fresh: freshAcceptance, upgrade: upgradedAcceptance },
       liveRootResolution: { fresh: freshLiveRoots, upgrade: upgradedLiveRoots },
       canonicalAliasLaunch: aliasResult.ok,

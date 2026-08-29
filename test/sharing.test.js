@@ -239,7 +239,7 @@ test("malformed local sharing state fails closed without blocking indexing or be
   assert.equal(await readFile(loaded.sharingPath, "utf8"), corrupt);
   const hook = await runHook({ hook_event_name: "SessionStart", cwd: rootB });
   const injected = JSON.parse(hook.context);
-  assert.equal(injected.indexedSources, 1);
+  assert.ok(injected.indexedSources >= 1, "the project source remains indexed alongside any host-global sources");
   assert.equal(injected.failedClosed, true);
   assert.match(injected.error, /sharing state structure is invalid/);
 });

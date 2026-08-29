@@ -36,6 +36,7 @@ flowchart TB
     D --> G
     P["Separate default-deny delegation policy"] --> F
     Y["Exact local execution policy"] --> J["Leased job + atomic checkpoint"] --> G
+    W["Authenticated channel event"] --> K["Exact route + durable lease"] --> G
     X["Optional provider-neutral adapter"] --> S["Optional Ed25519 origin check"] --> Q["Local import quarantine"] --> F
     G --> E["Claude Code · Codex · MCP"]
 ```
@@ -90,7 +91,7 @@ claude --plugin-dir .
 ```
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
-Version `0.7.0` explicitly registers `.mcp.json`, ships one version-bound native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.6.0` plugin cache. Fresh-install and upgrade checks prove that exactly one MCP server and one hook set load. Claude project memory is `MEMORY.md`-indexed, lazy, race-safe, persistently cached outside the project, and independent of unrelated file count; the live path performs no memory-directory enumeration.
+Version `0.8.0` explicitly registers `.mcp.json`, ships one native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.7.0` plugin cache. Fresh-install and upgrade checks prove package containment and entrypoint behavior; actual hook discovery and trust remain host-controlled and must be inspected in the live host. Claude project memory is `MEMORY.md`-indexed, lazy, race-safe, persistently cached outside the project, and independent of unrelated file count; the live path performs no memory-directory enumeration.
 
 Verify the installed registration from a checkout with:
 
@@ -199,6 +200,15 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine jobs …` | Inspect durable status, retry, blocker, lease, and checkpoint metadata |
 | `agentspine job-cancel …` | Stop a job through an explicit local owner decision |
 | `agentspine job-delete …` | Permanently purge an unleased job, history, and receipts |
+| `agentspine channel-bind …` | Create or replace one exact locally confirmed provider-to-agent route |
+| `agentspine channel-revoke …` | Revoke a route and cancel its pending or leased events |
+| `agentspine channel-policy …` | Inspect local channel bindings without exposing secret values |
+| `agentspine channel-events …` | Inspect the exact-scope durable ingress queue and leases |
+| `agentspine persona-sync …` | Synchronize an explicitly approved external authenticated roster |
+| `agentspine personas …` | Inspect active and historical persona identities and provenance |
+| `agentspine goal-assign …` | Assign one authenticated focused goal to an active agent |
+| `agentspine gateway-control …` | Enable, stop, or kill-switch the local worker under explicit owner control |
+| `agentspine gateway-status …` | Inspect goals, queue, delivery receipts, and independent health gates |
 | `agentspine share-init …` | Initialize an optional provider-neutral directory adapter outside the project |
 | `agentspine share-keygen …` | Create or explicitly rotate a local Ed25519 signing identity |
 | `agentspine share-trust …` | Trust one exported public identity for the current project |
@@ -267,6 +277,8 @@ Shared memory is transport-neutral and double-reviewed: only accepted non-privat
 
 Session briefing keeps that growing context usable: one scoped read prioritizes the current request, explicit stops, and current task; deduplicates local and shared facts; defaults to focus mode; enforces exact group audiences; and measures the entire compact JSON result against the requested byte ceiling. Native lifecycle hooks now inject this packet automatically instead of asking the model to call MCP. See [session briefing](docs/session-briefing.md).
 
+The authenticated channel-wake runtime prevents an incoming provider message from losing its recipient or origin. A locally confirmed binding fixes provider, tenant, account, chat, thread, sender, agent, project, group, and session; HMAC-authenticated events enter one durable leased lane and the installed host hook injects the exact message with its compact voice brief. The optional `agentspine-worker` now supplies the missing gateway responsibilities: automatic external-roster synchronization, Telegram polling, exact host-run requests, bounded checkpoints, crash recovery, and idempotent delivery back to the origin. It runs only when the owner starts or supervises it and remains outside MCP. See [authenticated channel wake](docs/channel-runtime.md), [durable gateway worker](docs/gateway-runtime.md), and the [OpenClaw/Hermes reference study](docs/harness-reference.md).
+
 The rights-bound self-starter is a separate execution path. A genuine local owner action must grant one exact actor, job, task, target, project, host, and finite tool-capability set. Installed hooks then acquire one lease, recheck authority before every effect, checkpoint the workspace after every result, and resume only an unchanged checkpoint. Memory, Markdown, relationships, learning, attention, task text, previous approvals, and MCP can never create that grant. See [rights-bound self-starter](docs/selfstarter.md).
 
 ## Optional four-layer starter
@@ -293,7 +305,7 @@ The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this option
 
 ## Project status
 
-AgentSpine is in active early development. `v0.5` completes the ordered live-runtime milestones with a visible multi-person, multi-group, multilingual Claude Code and Codex acceptance run. All automatic paths operate through installed lifecycle hooks without a model-side MCP call; every self-starter effect remains current-rights-bound and default-deny. Existing source Markdown remains immutable.
+AgentSpine is in active early development. `v0.8` adds authenticated persona synchronization, a compact voice bridge, an optional durable gateway worker, exact Telegram ingress and delivery, focused goals, per-agent lanes, leases, recovery, and independent health gates. Automatic lifecycle behavior requires the host to discover and trust the current hook definition; a staged direct hook invocation is not treated as proof of that real host decision. Every external effect remains current-rights-bound and default-deny, and existing source Markdown remains immutable.
 
 ## Documentation
 
@@ -302,6 +314,9 @@ AgentSpine is in active early development. `v0.5` completes the ordered live-run
 | Understand the system | [Architecture](docs/architecture.md) |
 | Audit non-destructive behavior | [Preservation contract](docs/preservation-contract.md) |
 | Integrate a host | [Claude Code and Codex](docs/host-integration.md) |
+| Bind an authenticated external message | [Authenticated channel wake](docs/channel-runtime.md) |
+| Run automatic roster, goal, and Telegram work | [Durable gateway worker](docs/gateway-runtime.md) |
+| Compare harness design choices | [OpenClaw and Hermes reference study](docs/harness-reference.md) |
 | Reproduce the complete host behavior | [Visible cross-host acceptance](docs/acceptance.md) |
 | Enable automatic continuity | [Automatic continuity](docs/automatic-continuity.md) |
 | Load one compact session packet | [Session briefing](docs/session-briefing.md) |

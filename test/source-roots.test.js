@@ -241,3 +241,31 @@ test("Claude project memory loads only files indexed by MEMORY.md", async (t) =>
   });
   for (const [path, expected] of before) assert.equal(hash(await readFile(path)), expected);
 });
+
+test("native Codex hook fields select Codex source resolution without a synthetic host field", async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "agentspine-native-codex-hook-"));
+  const state = join(workspace, "state");
+  const codexHome = join(workspace, ".codex");
+  const project = join(workspace, "project");
+  await Promise.all([mkdir(state), mkdir(codexHome), mkdir(project)]);
+  await mkdir(join(project, ".git"));
+  await writeFile(join(codexHome, "AGENTS.md"), "# Native Codex profile\n", "utf8");
+  await writeFile(join(project, "AGENTS.md"), "# Native Codex project\n", "utf8");
+  const previous = { state: process.env.AGENTSPINE_STATE_DIR, codex: process.env.CODEX_HOME, home: process.env.HOME };
+  process.env.AGENTSPINE_STATE_DIR = state;
+  process.env.HOME = workspace;
+  delete process.env.CODEX_HOME;
+  t.after(async () => {
+    if (previous.state === undefined) delete process.env.AGENTSPINE_STATE_DIR; else process.env.AGENTSPINE_STATE_DIR = previous.state;
+    if (previous.codex === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous.codex;
+    if (previous.home === undefined) delete process.env.HOME; else process.env.HOME = previous.home;
+    await rm(workspace, { recursive: true, force: true });
+  });
+  const result = packet(await runHook({
+    hook_event_name: "SessionStart", cwd: project,
+    model: "gpt-5.6-sol", session_id: "session:native-codex-shape"
+  }));
+  assert.equal(result.briefing.host, "codex");
+  assert.equal(result.sourceResolution.host, "codex");
+  assert.equal(result.briefing.sources.documents.some((item) => item.path.startsWith("codex:")), true);
+});

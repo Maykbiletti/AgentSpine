@@ -1,6 +1,6 @@
 # Visible cross-host acceptance
 
-AgentSpine `0.7.0` retains the visible, reproducible 14-gate acceptance scenario for the complete automatic lifecycle and adds installed production-hook source-root and indexed-memory scaling smoke tests. They run the production Claude Code and Codex hook adapter directly and never select an MCP tool.
+AgentSpine `0.8.0` retains the visible, reproducible 14-gate acceptance scenario for the lifecycle adapter and adds staged installed-entrypoint source-root and indexed-memory scaling smoke tests. They execute the same bundled adapter used by Claude Code and Codex and never select an MCP tool, but they do not substitute for the hosts' own plugin discovery and hook-trust UI.
 
 ```bash
 agentspine acceptance
@@ -52,7 +52,7 @@ Every line includes a SHA-256 receipt derived from the acceptance schema, gate I
 
 ## Installation proof
 
-`npm run host:install-check` stages both a fresh installation and an upgrade from `0.6.0`. Each installed `0.7.0` bundle must expose exactly one MCP server and one hook set, then pass the complete visible acceptance run with `mcpCalls: 0`. It also starts Claude from an AgentSpine checkout and a foreign `cwd` with sources only in a custom Claude profile, and repeats Codex with a custom home, two Git projects, a fallback name, and a nested override. Uninstall removes only staged plugin and generated state; all synthetic source hashes remain unchanged.
+`npm run host:install-check` stages both a fresh installation and an upgrade from `0.7.0`. Each installed `0.8.0` bundle must contain exactly one MCP server, one hook set, and one worker entrypoint, then pass the complete visible acceptance run with `mcpCalls: 0`. It directly invokes the packaged hook entrypoint from an AgentSpine checkout and a foreign `cwd` with sources only in a custom Claude profile, and repeats the Codex-shaped event path with a custom home, two Git projects, a fallback name, and a nested override. Uninstall removes only staged plugin and generated state; all synthetic source hashes remain unchanged. A real Codex session must separately show the plugin source in `/hooks`, record trust for the current definition hash, and inject the briefing after a new session starts.
 
 ## Deliberate trust boundaries
 

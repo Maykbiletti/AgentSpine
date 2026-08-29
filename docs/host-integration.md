@@ -21,7 +21,7 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
-The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Version `0.7.0` replaces the `0.6.0` cache identity; both host manifests and the hook bundle carry that version, while the bundle declares the `agentspine.source-roots/v1` runtime contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise clean install, previous-version cache rejection, upgrade, host-native source resolution, indexed and lazy Claude memory, automatic multilingual briefing, attention, exact job start, tool checkpoint, new-session resume, purge, and uninstall preservation:
+The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Version `0.8.0` replaces the `0.7.0` plugin cache identity. The hook definition contains only portable documented hook fields; `hooks/version.json` carries the separately validated bundle release and lifecycle contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise staged clean install, previous-version cache rejection, upgrade, host-native source resolution, indexed and lazy Claude memory, automatic multilingual briefing, attention, exact job start, tool checkpoint, new-session resume, purge, and uninstall preservation:
 
 ```bash
 npm run host:check
@@ -47,14 +47,23 @@ Open `/mcp` in the new interactive session and approve or reconnect `agent-spine
 
 | Component | Path | Purpose |
 |---|---|---|
-| Manifest | `.codex-plugin/plugin.json` | Package identity, skill, and MCP registration |
+| Manifest | `.codex-plugin/plugin.json` | Package identity plus explicit skill and MCP registration |
 | Skill | `skills/agent-spine/SKILL.md` | Context rules and preservation invariants |
 | MCP | Manifest `mcpServers` | Read-only source tools plus external overlay workflows |
 | Hooks | `hooks/hooks.json` | Auto-discovered lifecycle guardrails |
 
-Open `/plugins` in Codex CLI after configuring a marketplace that contains AgentSpine. Review and trust the hook definition, then start a new session.
+Open `/plugins` in Codex CLI after configuring a marketplace that contains AgentSpine. Then open `/hooks`: Codex records trust against the exact hook-definition hash, so an installed, updated, or previously untrusted bundle is skipped until that current definition is reviewed and trusted. Start a new session after approval. This follows the official [Codex hooks trust and plugin discovery contract](https://developers.openai.com/codex/hooks).
 
-Codex sets `CLAUDE_PLUGIN_ROOT` for hook compatibility, so the same hook bundle can execute in both hosts. The MCP registration uses Codex's `PLUGIN_ROOT` expansion.
+Codex discovers the hook at the standard `hooks/hooks.json` path. The file deliberately contains only the documented top-level `description` and `hooks` fields; earlier AgentSpine builds added private `version` and `contract` metadata there, which a strict Codex parser could reject before presenting a trust decision. Cache identity remains in `.codex-plugin/plugin.json`, while Codex records hook trust against the current definition hash. Codex sets `CLAUDE_PLUGIN_ROOT` for hook compatibility, so the same hook bundle can execute in both hosts. The MCP registration uses Codex's `PLUGIN_ROOT` expansion.
+
+Verify the live host in a newly started Codex CLI session:
+
+```text
+/plugins
+/hooks
+```
+
+`npm run host:check` proves manifest shape, package containment, and a real MCP handshake. `npm run host:install-check` stages the installed bundle and executes its hook entrypoint with native event JSON. Neither command can manufacture Codex's user-controlled trust receipt; only `/hooks` in the actual host proves that final boundary.
 
 ## Direct MCP use
 
@@ -93,5 +102,11 @@ Identity and audience come from explicit hook scope fields or the locally config
 Hook stdin is JSON-only and limited to 64 KiB. State transitions use external atomic files and locks. Hook stdout contains only host protocol JSON; diagnostics are bounded to stderr by the host process. Hooks do not expose transport, key, trust, database, network, message, payment, production, delegation, or policy administration.
 
 The first executable-component trust approval remains mandatory. AgentSpine cannot approve itself. After approval and the one-time continuity opt-in, no per-session enablement or voluntary tool call is required.
+
+## Optional gateway worker
+
+The package also registers exactly one `agentspine-worker` entrypoint. It is separate from MCP and lifecycle hooks. When an owner runs it under a service manager, it synchronizes the configured authenticated persona roster, polls current Telegram bindings, prepares exact Claude/Codex start data, invokes only the absolute executable in `AGENTSPINE_HOST_RUNNER` without a shell, and returns one idempotent reply to the bound origin.
+
+The host runner is responsible for starting the selected host with the supplied scope and `agent_spine_channel_event` fields. Codex still refuses the injected context until the current hook hash has been reviewed in `/hooks`; the worker cannot bypass or manufacture that trust. Setup and the stdin/stdout contract are documented in [durable gateway worker](gateway-runtime.md).
 
 The visible acceptance runner invokes the same production lifecycle adapter with new synthetic people, separated groups, Swedish and Spanish prompts, restarts, compaction, correction, rollback, purge, current-rights checks, and durable checkpoints. It prints one reproducible receipt per gate and proves `mcpCalls: 0`. See [visible cross-host acceptance](acceptance.md).

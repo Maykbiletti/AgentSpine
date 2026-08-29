@@ -30,6 +30,27 @@ export {
   selfstarterFindings, startOrResumeJob, workspaceFingerprint
 } from "./lib/selfstarter.js";
 export {
+  CHANNEL_EVENT_SCHEMA, CHANNEL_POLICY_SCHEMA, CHANNEL_RUNTIME_SCHEMA,
+  channelEventSigningPayload, channelPolicyFindings, channelRuntimeContext,
+  channelRuntimeFindings, claimChannelEvent, completeChannelEvent,
+  grantChannelBinding, ingestChannelEvent, inspectChannelRuntime,
+  loadChannelPolicy, loadChannelRuntime, revokeChannelBinding
+} from "./lib/channel-runtime.js";
+export {
+  PERSONA_EVENT_SCHEMA, PERSONA_POLICY_SCHEMA, PERSONA_ROSTER_SCHEMA, PERSONA_RUNTIME_SCHEMA,
+  applyPersonaRoster, inspectPersonaRuntime, loadPersonaRuntime, personaContext,
+  personaRuntimeFindings, syncPersonaRosterFromEnvironment
+} from "./lib/persona-runtime.js";
+export {
+  GATEWAY_EVENT_SCHEMA, GATEWAY_POLICY_SCHEMA, GATEWAY_RUNTIME_SCHEMA,
+  assignGoal, claimGatewayWork, completeGatewayRun, deliverPrepared,
+  enqueueGatewayWake, gatewayContext, gatewayRuntimeFindings,
+  inspectGatewayRuntime, loadGatewayRuntime, reconcileGateway, setGatewayControl
+} from "./lib/gateway-runtime.js";
+export { createTelegramAdapter } from "./lib/telegram-adapter.js";
+export { evaluateVoiceOutput, voiceCue } from "./lib/voice-runtime.js";
+export { runWorker, runWorkerTick } from "./worker.js";
+export {
   configureSharing, deleteShared, initDirectoryAdapter, inspectSharing, loadSharing,
   publishLearning, pullShared, readDirectoryExchange, reviewShared, rollbackShared, sharedContext, sharedInbox,
   sharingAuthenticationFindings, sharingFindings, validateSharedEvent
@@ -58,6 +79,6 @@ export {
   trustSigner, validatePublicIdentity, verifyEnvelope
 } from "./lib/authentication.js";
 export {
-  annotateDocument, linkDocuments, linkEntities, loadGraph,
+  annotateDocument, linkDocuments, linkEntities, loadGraph, unlinkEntities,
   relationshipContext, upsertEntity
 } from "./lib/graph.js";

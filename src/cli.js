@@ -21,6 +21,11 @@ import {
   revokeExecution, selfstarterContext
 } from "./lib/selfstarter.js";
 import {
+  channelRuntimeContext, grantChannelBinding, loadChannelPolicy, revokeChannelBinding
+} from "./lib/channel-runtime.js";
+import { personaContext, syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
+import { assignGoal, gatewayContext, setGatewayControl } from "./lib/gateway-runtime.js";
+import {
   configureSharing, deleteShared, initDirectoryAdapter, publishLearning, pullShared,
   reviewShared, rollbackShared, sharedContext, sharedInbox
 } from "./lib/sharing.js";
@@ -137,6 +142,15 @@ Usage:
   agentspine jobs [root] [--actor id] [--project id] [--task id] [--include-terminal]
   agentspine job-cancel <job-id> --reason text --confirm-local-execution
   agentspine job-delete <job-id> --confirm-local-execution
+  agentspine channel-bind <binding-id> --provider telegram --tenant id --account id --chat id --senders id,id --agent agent:id --project project:id --session key --secret-env VARIABLE [--outbound-secret-env VARIABLE] --confirm-local-channel
+  agentspine channel-revoke <binding-id> --reason text --confirm-local-channel
+  agentspine channel-policy [root]
+  agentspine channel-events [root] [--agent id] [--project id] [--group id] [--provider telegram] [--include-terminal]
+  agentspine persona-sync [root] --roster absolute-path --confirm-local-persona
+  agentspine personas [root] [--persona id] [--group id] [--include-inactive]
+  agentspine goal-assign <goal-id> --agent id --owner id --project id --success text --next-step text [--group id] [--deadline date] --confirm-local-goal
+  agentspine gateway-control [root] [--enabled true|false] [--kill-switch true|false] --confirm-local-gateway
+  agentspine gateway-status [root] [--agent id]
   agentspine share-keygen <signer-id> [--public-out signer.json] [--rotate] [--confirm-local-share]
   agentspine share-signers [root]
   agentspine share-trust <signer.json> [--root path] [--confirm-local-share]
@@ -608,6 +622,79 @@ export async function run(argv = process.argv.slice(2)) {
       root: flags.root || process.cwd(), id: positional[0],
       confirmation: booleanFlag(flags["confirm-local-execution"]) ? "local-owner-confirmed" : null
     }), json);
+  }
+
+  if (command === "channel-bind") {
+    return output(await grantChannelBinding({
+      root: flags.root || process.cwd(), id: positional[0], provider: flags.provider,
+      tenantId: flags.tenant, accountId: flags.account, chatId: flags.chat,
+      threadId: flags.thread || null,
+      senderIds: String(flags.senders || "").split(",").filter(Boolean),
+      agentId: flags.agent, projectId: flags.project, groupId: flags.group || null,
+      sessionKey: flags.session, secretEnv: flags["secret-env"], outboundSecretEnv: flags["outbound-secret-env"] || null,
+      capabilities: String(flags.capabilities || "receive,reply").split(",").filter(Boolean),
+      confirmation: booleanFlag(flags["confirm-local-channel"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "channel-revoke") {
+    return output(await revokeChannelBinding({
+      root: flags.root || process.cwd(), id: positional[0], reason: flags.reason,
+      confirmation: booleanFlag(flags["confirm-local-channel"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "channel-policy") {
+    return output((await loadChannelPolicy(positional[0] || process.cwd())).policy, json);
+  }
+
+  if (command === "channel-events") {
+    return output(await channelRuntimeContext({
+      root: positional[0] || process.cwd(), agentId: flags.agent || null,
+      projectId: flags.project || null,
+      ...(flags.group !== undefined ? { groupId: flags.group || null } : {}),
+      provider: flags.provider || null,
+      includeTerminal: booleanFlag(flags["include-terminal"]),
+      maxItems: Number(flags["max-items"] ?? 20)
+    }), json);
+  }
+
+  if (command === "persona-sync") {
+    if (!booleanFlag(flags["confirm-local-persona"])) throw new Error("persona synchronization requires --confirm-local-persona");
+    return output(await syncPersonaRosterFromEnvironment({
+      root: positional[0] || process.cwd(), env: { ...process.env, AGENTSPINE_PERSONA_ROSTER_FILE: flags.roster }
+    }), json);
+  }
+
+  if (command === "personas") {
+    return output(await personaContext({
+      root: positional[0] || process.cwd(), personaId: flags.persona || null,
+      ...(flags.group !== undefined ? { groupId: flags.group || null } : {}),
+      includeInactive: booleanFlag(flags["include-inactive"])
+    }), json);
+  }
+
+  if (command === "goal-assign") {
+    return output(await assignGoal({
+      root: flags.root || process.cwd(), goalId: positional[0], agentId: flags.agent,
+      ownerSubjectId: flags.owner, projectId: flags.project, groupId: flags.group || null,
+      priority: Number(flags.priority ?? 70), successCriterion: flags.success,
+      nextSafeStep: flags["next-step"], deadline: flags.deadline || null,
+      confirmation: booleanFlag(flags["confirm-local-goal"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "gateway-control") {
+    return output(await setGatewayControl({
+      root: positional[0] || process.cwd(),
+      ...(flags.enabled !== undefined ? { enabled: booleanFlag(flags.enabled) } : {}),
+      ...(flags["kill-switch"] !== undefined ? { killSwitch: booleanFlag(flags["kill-switch"]) } : {}),
+      confirmation: booleanFlag(flags["confirm-local-gateway"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "gateway-status") {
+    return output(await gatewayContext({ root: positional[0] || process.cwd(), agentId: flags.agent || null }), json);
   }
 
   if (command === "share-init") {

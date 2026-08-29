@@ -70,6 +70,16 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   assert.equal(names.includes("start_job"), false);
   assert.equal(names.includes("checkpoint_job"), false);
   assert.equal(names.includes("cancel_job"), false);
+  assert.equal(names.includes("grant_channel_binding"), false);
+  assert.equal(names.includes("revoke_channel_binding"), false);
+  assert.equal(names.includes("ingest_channel_event"), false);
+  assert.equal(names.includes("claim_channel_event"), false);
+  assert.equal(names.includes("complete_channel_event"), false);
+  for (const forbidden of [
+    "apply_persona_roster", "sync_persona_roster", "assign_gateway_goal", "set_gateway_control",
+    "enqueue_gateway_wake", "claim_gateway_work", "complete_gateway_run", "deliver_gateway_reply",
+    "poll_telegram", "send_telegram", "start_worker"
+  ]) assert.equal(names.includes(forbidden), false, `${forbidden} must remain outside MCP`);
 });
 
 test("agentspine mcp CLI launches the stdio server", async (t) => {

@@ -1,6 +1,6 @@
 {
   "name": "agent-spine",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "A non-destructive identity and memory spine for Codex agents.",
   "author": {
     "name": "Mayk Biletti",
@@ -23,7 +23,7 @@
     "longDescription": "Maps existing rules, soul, memory, and linked Markdown into a verifiable context spine while preserving every source byte.",
     "developerName": "Mayk Biletti",
     "category": "Developer Tools",
-    "capabilities": ["Read", "MCP", "Hooks"],
+    "capabilities": ["Read", "MCP", "Hooks", "Worker"],
     "websiteURL": "https://github.com/Maykbiletti/AgentSpine",
     "defaultPrompt": [
       "Map this project's existing agent identity.",

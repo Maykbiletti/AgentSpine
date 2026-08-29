@@ -4,6 +4,42 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-29
+
+### Added
+
+- Provider-neutral authenticated channel ingress with exact provider, tenant, account, chat, thread, sender, agent, project, group, and session bindings
+- Durable per-agent event lanes with replay protection, atomic leases, expired-lease recovery, revocation cancellation, retained history, and integrity receipts
+- Automatic `agentspine.voice-brief/v1` projection from exact visible persona, preference, correction, no-go, current-task, promise, and blocker context
+- Installed-bundle proof that both Claude Code and Codex receive one exact authenticated channel event and voice profile with zero model-side MCP calls
+- Pinned OpenClaw and Hermes harness reference study documenting adopted, adapted, and deliberately excluded behavior
+- Authenticated external persona-roster synchronization with stable identities and append-only join, rename, leave, group-change, and rejoin events
+- Bounded native Claude Code and Codex agent-manifest discovery under one approved roster scope, including distinct deactivation, exact profile/tenant identity, rename stability, and immediate membership removal
+- Optional `agentspine-worker` with Telegram polling and delivery, one absolute shell-free host runner, per-agent lanes, focused goals, checkpoints, retries, health state, and a local kill switch
+- Event-driven desired-state wake, deadline reconciliation, restartable prepared outbox delivery, bounded host-failure retry, independent stale-heartbeat audit, and explicit dead-letter versus delivery-unknown terminal states
+- Transient German, English, Swedish, and Spanish response cues plus an advisory voice guard against fabricated attachment, emotion, or consciousness claims
+- Empty- and populated-profile hermetic test execution so real user state cannot change test expectations
+
+### Changed
+
+- The shared hook document now uses only the documented `description` and `hooks` top-level fields; version/cache identity stays in the host manifests
+- Host checks no longer report live Codex hook trust as proven merely because the shared hook entrypoint can execute directly
+- Native Codex hook input is recognized from its Codex-specific `model` field or plugin environment even when no synthetic `host` field and no explicit `CODEX_HOME` override exist
+- Session briefings reserve a bounded voice section and report voice omissions in the same compact-JSON budget
+- Channel policy and runtime inspection are available through local CLI commands while every channel administration and execution operation remains absent from MCP
+- A configured roster file is reread before every worker reconciliation, so authenticated team additions and removals become visible without a new chat prompt
+- Promise and resolved-blocker lifecycle events now enter the same durable wake queue as direct messages and owner-assigned goals
+
+### Security
+
+- Channel policy changes require explicit local owner confirmation; wildcard routes and senders, unknown agents/projects/groups, and invalid group membership fail closed
+- HMAC secrets remain environment-only, signatures are never stored, secret-bearing messages are rejected, and event ID collisions cannot overwrite earlier payloads
+- Current and retained events, policy history, payload digests, route bindings, receipt digests, and authority markers are replayed by the ten-gate audit
+- Channel state and voice context cannot grant host, tool, file, network, send, delegation, production, or execution rights
+- Persona events, roster receipts, gateway history, queue and delivery IDs, lanes, checkpoints, and receipts fail closed under structural or digest manipulation
+- Persona activity and exact group membership plus revoked reply grants are rechecked at claim, run completion, and immediately before network effect; known no-effect exhaustion cannot enter a supervisor restart loop
+- Provider and ingress credentials remain environment-only and are removed from the environment passed to the host runner
+
 ## [0.7.0] - 2026-08-29
 
 ### Added
@@ -217,7 +253,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.4.0...v0.5.0

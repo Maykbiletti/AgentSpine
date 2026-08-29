@@ -1,6 +1,6 @@
 # Host-native source roots
 
-AgentSpine `0.7.0` resolves active user, project, and host-memory sources before every production lifecycle hook. Resolution does not depend on the directory from which the plugin was installed, and it never treats the entire home directory as one project.
+AgentSpine `0.8.0` resolves active user, project, and host-memory sources before every production lifecycle hook. Resolution does not depend on the directory from which the plugin was installed, and it never treats the entire home directory as one project.
 
 ## Resolution contract
 

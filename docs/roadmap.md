@@ -21,6 +21,9 @@ flowchart TB
     O --> P["16 · Native attention events"]
     P --> Q["17 · Rights-bound self-starter"]
     Q --> R["18 · Visible cross-host acceptance"]
+    R --> S["19 · Host-native source roots"]
+    S --> T["20 · Indexed memory"]
+    T --> U["21 · Channel wake + voice bridge"]
 ```
 
 ## 1. Preservation kernel
@@ -278,6 +281,21 @@ Status: implemented in `v0.7.0` after the correct Claude project-memory root sti
 - orphan enumeration exists only as an explicit offline Doctor operation and never runs in a lifecycle hook;
 - a real temporary 50,000-file acceptance proves that live work scales with indexed relevant links and invokes no directory-enumeration primitive;
 - fresh-install and `0.6.0` upgrade checks exercise the same production hook bundle with exactly one MCP server, one hook set, and zero model-side MCP calls.
+
+## 21. Authenticated channel wake and voice bridge
+
+Status: implemented in `v0.8.0`; live Codex hook trust remains a host-controlled installation check.
+
+- owner-confirmed exact provider, tenant, account, chat, thread, sender, agent, project, group, and session bindings;
+- HMAC-authenticated bounded ingress with replay and collision protection;
+- one durable per-agent lane with atomic leases, crash recovery, revocation, retained history, and audit receipts;
+- automatic native `SessionStart` injection without a model-side MCP call;
+- compact voice brief from exact visible persona, preference, correction, no-go, current-task, promise, and blocker signals;
+- automatic authenticated external-roster synchronization adds, renames, leaves, and rejoins people, agents, and bots without rewriting their Markdown;
+- the optional supervised gateway worker polls exact Telegram bindings, creates host-native channel start envelopes, and returns idempotent replies to the origin;
+- focused goals, promise and resolved-blocker wakes, persistent checkpoints, bounded retries, per-agent lanes, and a local kill switch keep useful work moving without chat repetition;
+- multilingual transient voice cues recognize correction, frustration, uncertainty, and success while rejecting attachment and consciousness claims;
+- OpenClaw and Hermes behavior is recorded at pinned upstream commits, with adopted, adapted, and deliberately excluded design choices.
 
 ## Definition of done for every stage
 

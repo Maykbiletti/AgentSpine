@@ -13,9 +13,9 @@ import { proposeLearning, reviewLearning } from "../src/lib/learning.js";
 import { loadAttention, upsertAttention } from "../src/lib/attention.js";
 import { initDirectoryAdapter, publishLearning, pullShared, reviewShared } from "../src/lib/sharing.js";
 
-async function acceptedLearning(root, { id, claim, subjectId = null, privacy = "shared", groupId = null }) {
+async function acceptedLearning(root, { id, claim, kind = "project-fact", subjectId = null, privacy = "shared", groupId = null }) {
   await proposeLearning({
-    root, id, kind: "project-fact", claim, subjectId, privacy, groupId,
+    root, id, kind, claim, subjectId, privacy, groupId,
     evidence: { id: `evidence:${id}`, type: "user-statement", summary: `Synthetic evidence for ${id}.`, confidence: 1 }
   });
   await reviewLearning({ root, id, decision: "accept", reason: "Synthetic confirmation.", confirmedByUser: true });
@@ -34,7 +34,10 @@ async function fixture(t) {
   await writeFile(join(root, "memory", "fact.md"), "# Fact\n\nSynthetic stable fact.\n", "utf8");
   await upsertEntity({ root, id: "group:alpha", kind: "group", privacy: "shared" });
   await upsertEntity({ root, id: "group:beta", kind: "group", privacy: "shared" });
-  await upsertEntity({ root, id: "person:alpha", kind: "person", displayName: "Alpha", privacy: "shared" });
+  await upsertEntity({
+    root, id: "person:alpha", kind: "person", displayName: "Alpha", privacy: "shared",
+    attributes: { language: "de-AT", voice: { warmth: "grounded", directness: "high", humor: "light" } }
+  });
   await upsertEntity({ root, id: "person:teammate", kind: "person", displayName: "Teammate", privacy: "shared" });
   await upsertEntity({ root, id: "person:outsider", kind: "person", displayName: "Outsider", privacy: "group" });
   await upsertEntity({ root, id: "person:private", kind: "person", displayName: "Private Person", privacy: "private" });
@@ -54,7 +57,10 @@ function hash(value) {
 test("session briefing combines current context within an exact compact JSON byte budget", async (t) => {
   const { root } = await fixture(t);
   const sourceBefore = hash(await readFile(join(root, "AGENTS.md")));
-  await acceptedLearning(root, { id: "learning:alpha", claim: "Alpha prefers concise synthetic updates.", subjectId: "person:alpha" });
+  await acceptedLearning(root, {
+    id: "learning:alpha", kind: "preference", claim: "Alpha prefers concise synthetic updates.",
+    subjectId: "person:alpha"
+  });
   await createTask({
     root, id: "task:current", actorId: "person:alpha", assigneeId: "person:alpha",
     title: "Current synthetic task", projectId: "project:demo", privacy: "shared", priority: 90
@@ -73,6 +79,14 @@ test("session briefing combines current context within an exact compact JSON byt
   assert.equal(result.relationship.relatedEntities.some((item) => item.id === "person:teammate"), true);
   assert.equal(result.learning[0].id, "learning:alpha");
   assert.equal(result.attention.items[0].key, "cue:signal:alpha");
+  assert.equal(result.voiceBrief.personaId, "person:alpha");
+  assert.equal(result.voiceBrief.displayName, "Alpha");
+  assert.equal(result.voiceBrief.language, "de-AT");
+  assert.equal(result.voiceBrief.profile.warmth, "grounded");
+  assert.deepEqual(result.voiceBrief.preferences, ["Alpha prefers concise synthetic updates."]);
+  assert.equal(result.voiceBrief.currentTask.id, "task:current");
+  assert.equal(result.voiceBrief.activeSignals[0].kind, "promise");
+  assert.equal(result.voiceBrief.personaSources.includes("SOUL.md"), true);
   assert.equal(result.sources.documents.some((item) => item.path === "AGENTS.md"), true);
   assert.equal(result.budget.measurement, "compact-json-utf8");
   assert.equal(Buffer.byteLength(JSON.stringify(result)), result.budget.usedBytes);

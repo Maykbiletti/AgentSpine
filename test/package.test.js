@@ -10,17 +10,17 @@ async function json(relativePath) {
 }
 
 test("package and host manifests keep one release version", async () => {
-  const [pkg, lock, claude, codex, marketplace, hooks] = await Promise.all([
+  const [pkg, lock, claude, codex, marketplace, hooks, hookVersion] = await Promise.all([
     json("package.json"), json("package-lock.json"), json(".claude-plugin/plugin.json"),
-    json(".codex-plugin/plugin.json"), json(".claude-plugin/marketplace.json"), json("hooks/hooks.json")
+    json(".codex-plugin/plugin.json"), json(".claude-plugin/marketplace.json"), json("hooks/hooks.json"), json("hooks/version.json")
   ]);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[""].version, pkg.version);
   assert.equal(claude.version, pkg.version);
   assert.equal(codex.version, pkg.version);
   assert.equal(marketplace.plugins[0].version, pkg.version);
-  assert.equal(hooks.version, pkg.version);
-  assert.equal(hooks.contract, "agentspine.source-roots/v1");
+  assert.equal(hookVersion.version, pkg.version);
+  assert.deepEqual(Object.keys(hooks).sort(), ["description", "hooks"]);
   assert.notEqual(pkg.version, "0.1.0");
   assert.equal(pkg.engines.node, ">=20.9.0");
 });
@@ -43,31 +43,52 @@ test("Claude and Codex registrations complete a real MCP initialize handshake", 
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
-  assert.equal(result.version, "0.7.0");
-  assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
+  assert.equal(result.version, "0.8.0");
+  assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
+  assert.deepEqual(result.hookDiscovery, {
+    claude: "default-hooks-directory", codex: "default-hooks-directory",
+    trust: "host-user-required", liveTrustVerified: false
+  });
   assert.equal(result.hooks.claude.events.includes("PostCompact"), true);
   assert.equal(result.hooks.codex.events.includes("UserPromptSubmit"), true);
 });
 
-test("fresh install, stale-cache upgrade, and uninstall keep exactly one runtime and preserve user sources", async () => {
+test("staged install, stale-cache upgrade, and uninstall preserve one bundle and user sources", async () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   const result = await checkInstall(root);
   assert.equal(result.ok, true);
   assert.equal(result.previousCacheRejected, true);
-  assert.deepEqual(result.fresh, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
-  assert.deepEqual(result.upgrade, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
+  assert.deepEqual(result.fresh, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
+  assert.deepEqual(result.upgrade, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
   assert.deepEqual(
-    { event: result.automaticBriefing.fresh.event, host: result.automaticBriefing.fresh.host, sources: result.automaticBriefing.fresh.sources },
-    { event: "SessionStart", host: "claude", sources: 1 }
+    { event: result.automaticBriefing.fresh.event, host: result.automaticBriefing.fresh.host },
+    { event: "SessionStart", host: "claude" }
   );
+  assert.ok(result.automaticBriefing.fresh.sources >= 1, "the staged project source is included");
   assert.deepEqual(
-    { event: result.automaticBriefing.upgrade.event, host: result.automaticBriefing.upgrade.host, sources: result.automaticBriefing.upgrade.sources },
-    { event: "SessionStart", host: "codex", sources: 1 }
+    { event: result.automaticBriefing.upgrade.event, host: result.automaticBriefing.upgrade.host },
+    { event: "SessionStart", host: "codex" }
   );
+  assert.ok(result.automaticBriefing.upgrade.sources >= 1, "the staged project source is included");
   assert.deepEqual(result.automaticAttention.fresh, { captured: "promise", restarted: ["promise"] });
   assert.deepEqual(result.automaticAttention.upgrade, { captured: "promise", restarted: ["promise"] });
   assert.deepEqual(result.automaticSelfstarter.fresh, { started: "start", resumed: "resume", checkpointSequence: 1, mcpCalls: 0 });
   assert.deepEqual(result.automaticSelfstarter.upgrade, { started: "start", resumed: "resume", checkpointSequence: 1, mcpCalls: 0 });
+  for (const installed of [result.automaticChannelWake.fresh, result.automaticChannelWake.upgrade]) {
+    assert.equal(installed.eventId, "telegram:update:install");
+    assert.equal(installed.provider, "telegram");
+    assert.deepEqual(installed.route, ["chat:install", "topic:install"]);
+    assert.equal(installed.voice.displayName, "Franz");
+    assert.equal(installed.voice.profile.warmth, "warm");
+    assert.equal(installed.mcpCalls, 0);
+  }
+  for (const installed of [result.automaticGateway.fresh, result.automaticGateway.upgrade]) {
+    assert.equal(installed.status, "delivered");
+    assert.equal(installed.eventId, "telegram:update:installed-gateway");
+    assert.deepEqual(installed.route, ["-1001234567890", "77", "990"]);
+    assert.match(installed.agentId, /^agent:runtime:/);
+    assert.equal(installed.mcpCalls, 0);
+  }
   for (const installed of [result.visibleAcceptance.fresh, result.visibleAcceptance.upgrade]) {
     assert.equal(installed.passed, 14);
     assert.equal(installed.total, 14);

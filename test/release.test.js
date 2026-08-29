@@ -17,11 +17,11 @@ test("release check validates every host version and the exact safe package boun
   const source = await readFile(join(root, "AGENTS.md"));
   const before = sha(source);
   const result = await releaseCheck({
-    root, tag: "v0.7.0", allowDirty: true, skipPack: false, json: true
+    root, tag: "v0.8.0", allowDirty: true, skipPack: false, json: true
   });
   assert.equal(result.ok, true);
-  assert.equal(result.version, "0.7.0");
-  assert.equal(result.package.filename, "agent-spine-0.7.0.tgz");
+  assert.equal(result.version, "0.8.0");
+  assert.equal(result.package.filename, "agent-spine-0.8.0.tgz");
   assert.match(result.package.integrity, /^sha512-/);
   assert.equal(result.package.files > 40, true);
   assert.equal(sha(await readFile(join(root, "AGENTS.md"))), before);
@@ -32,6 +32,7 @@ test("release check fails closed when one host manifest has a different version"
   t.after(() => rm(fixture, { recursive: true }));
   await mkdir(join(fixture, ".claude-plugin"), { recursive: true });
   await mkdir(join(fixture, ".codex-plugin"), { recursive: true });
+  await mkdir(join(fixture, "hooks"), { recursive: true });
   await writeFile(join(fixture, "package.json"), JSON.stringify({
     name: "agent-spine", version: "1.2.3",
     repository: { url: "git+https://github.com/Maykbiletti/AgentSpine.git" }
@@ -42,6 +43,9 @@ test("release check fails closed when one host manifest has a different version"
   await writeFile(join(fixture, ".claude-plugin", "plugin.json"), JSON.stringify({ version: "1.2.2" }));
   await writeFile(join(fixture, ".codex-plugin", "plugin.json"), JSON.stringify({ version: "1.2.3" }));
   await writeFile(join(fixture, ".claude-plugin", "marketplace.json"), JSON.stringify({ plugins: [{ version: "1.2.3" }] }));
+  await writeFile(join(fixture, "hooks", "version.json"), JSON.stringify({
+    schema: "agentspine.hook-bundle/v1", version: "1.2.3", contract: "agentspine.lifecycle/v1"
+  }));
   await writeFile(join(fixture, "CHANGELOG.md"), "## [1.2.3] - 2030-01-01\n");
   await assert.rejects(releaseCheck({
     root: fixture, tag: "v1.2.3", allowDirty: true, skipPack: true, json: true
