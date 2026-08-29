@@ -7,6 +7,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 ### Fixed
 
 - Windows Node 24 state writes now treat transient lock access errors as contention across every lock-backed store, retry atomic replacements with a bounded backoff, and tolerate briefly retained handles during hermetic cleanup
+- CI now identifies the failing check phase and annotates the exact hermetic test file or runner error, so public Windows failures can be diagnosed without access to private job logs
 
 ## [0.8.0] - 2026-08-29
 

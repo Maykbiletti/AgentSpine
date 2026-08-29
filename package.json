@@ -29,7 +29,7 @@
     "README.md"
   ],
   "scripts": {
-    "check": "npm run lint && npm test && npm run host:check && npm run host:install-check && npm run smoke && npm run audit:self",
+    "check": "node scripts/run-checks.js",
     "acceptance": "node scripts/run-acceptance.js",
     "audit:self": "node bin/agentspine.js audit . --json",
     "host:check": "node scripts/check-hosts.js --json",

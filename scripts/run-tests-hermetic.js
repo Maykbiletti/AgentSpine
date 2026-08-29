@@ -4,6 +4,7 @@ import { cpus, tmpdir } from "node:os";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { githubErrorCommand } from "./github-actions.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const base = await mkdtemp(join(tmpdir(), "agentspine-hermetic-tests-"));
@@ -44,18 +45,29 @@ async function runMode(mode) {
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
   for (const result of results.sort((a, b) => a.file.localeCompare(b.file))) {
     if (result.code !== 0) {
+      if (process.env.GITHUB_ACTIONS === "true") {
+        process.stderr.write(githubErrorCommand(`${mode}: ${result.file}`, result.stdout + result.stderr) + "\n");
+      }
       process.stderr.write("\n[" + mode + "] " + result.file + " failed\n" + result.stdout + result.stderr);
     }
   }
   return results;
 }
 
-let failed = false;
+let failed = false; let runnerError = null;
 try {
   for (const mode of ["empty", "populated"]) {
     const results = await runMode(mode); const failures = results.filter((item) => item.code !== 0);
     process.stdout.write("Hermetic " + mode + " profile: " + (results.length - failures.length) + "/" + results.length + " test files passed\n");
     if (failures.length) failed = true;
   }
-} finally { await rm(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+} catch (error) { runnerError = error; }
+try { await rm(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+catch (error) { runnerError = runnerError ? new AggregateError([runnerError, error], "Hermetic test run and cleanup failed") : error; }
+if (runnerError) {
+  if (process.env.GITHUB_ACTIONS === "true") {
+    process.stderr.write(githubErrorCommand("Hermetic test runner", runnerError.stack || runnerError.message) + "\n");
+  }
+  throw runnerError;
+}
 if (failed) process.exitCode = 1;
