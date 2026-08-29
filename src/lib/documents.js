@@ -15,6 +15,7 @@ const RULE_NAMES = new Set([
 const MEMORY_NAMES = new Set(["MEMORY.md"]);
 const SOUL_RE = /(^|[_-])(soul|persona|voice)([_-]|\.)/i;
 const MEMORY_PATH_RE = /(^|\/)(memory|memories)(\/|$)/i;
+const DOCUMENT_CONTENT = new WeakMap();
 
 function sha256(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
@@ -41,18 +42,51 @@ function hostsFor(name) {
   return ["generic"];
 }
 
+export function documentSnapshotContent(document) {
+  const value = DOCUMENT_CONTENT.get(document);
+  return value ? Buffer.from(value) : null;
+}
+
+export function attachDocumentSnapshot(document, buffer) {
+  if (buffer) DOCUMENT_CONTENT.set(document, Buffer.from(buffer));
+  return document;
+}
+
+export function markdownOutsideCode(text) {
+  let fence = null;
+  return String(text).split(/\r?\n/).map((line) => {
+    const marker = line.match(/^\s{0,3}(`{3,}|~{3,})/)?.[1] || null;
+    if (!fence && marker) { fence = marker[0]; return ""; }
+    if (fence && marker?.[0] === fence) { fence = null; return ""; }
+    if (fence) return "";
+    return line.replace(/`+[^`\n]*`+/g, "");
+  }).join("\n");
+}
+
 export async function indexExplicitDocuments(entries) {
   const documents = [];
   for (const entry of entries) {
-    const supplied = await lstat(entry.path);
-    if (supplied.isSymbolicLink() || !supplied.isFile()) throw new Error(`source is not a regular non-symlink file: ${entry.id}`);
-    const path = await realpath(entry.path);
-    const metadata = await lstat(path);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`source is not a regular non-symlink file: ${entry.id}`);
-    const buffer = await readFile(path);
+    let path;
+    let metadata;
+    let buffer;
+    if (entry.snapshot) {
+      path = entry.snapshot.path;
+      metadata = entry.snapshot.metadata;
+      buffer = Buffer.from(entry.snapshot.buffer);
+      if (buffer.byteLength !== metadata.bytes || sha256(buffer) !== metadata.sha256) {
+        throw new Error(`source snapshot integrity failed: ${entry.id}`);
+      }
+    } else {
+      const supplied = await lstat(entry.path);
+      if (supplied.isSymbolicLink() || !supplied.isFile()) throw new Error(`source is not a regular non-symlink file: ${entry.id}`);
+      path = await realpath(entry.path);
+      metadata = await lstat(path);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`source is not a regular non-symlink file: ${entry.id}`);
+      buffer = await readFile(path);
+    }
     if (buffer.byteLength > (entry.maxBytes || 4 * 1024 * 1024)) throw new Error(`source exceeds its byte limit: ${entry.id}`);
     const classification = classify(entry.id);
-    documents.push({
+    const document = {
       path,
       relativePath: entry.id,
       name: basename(path),
@@ -63,19 +97,23 @@ export async function indexExplicitDocuments(entries) {
       classificationSource: "host-native-source-binding",
       hosts: [entry.host],
       bytes: buffer.byteLength,
-      modifiedAt: metadata.mtime.toISOString(),
-      sha256: sha256(buffer),
+      modifiedAt: entry.snapshot ? metadata.modifiedAt : metadata.mtime.toISOString(),
+      sha256: entry.snapshot ? metadata.sha256 : sha256(buffer),
       links: [],
       sourceScope: entry.scope,
       sourceBinding: entry.binding,
-      precedence: entry.precedence
-    });
+      precedence: entry.precedence,
+      relevance: entry.relevance || null
+    };
+    attachDocumentSnapshot(document, entry.snapshot ? buffer : null);
+    documents.push(document);
   }
   return documents;
 }
 
-function extractMarkdownLinks(text, filePath, root) {
+export function extractMarkdownLinks(text, filePath, root) {
   const links = new Set();
+  text = markdownOutsideCode(text);
   const patterns = [
     /\[[^\]]*\]\(([^)]+\.md)(?:#[^)]+)?\)/gi,
     /(?:^|\s)@([^\s`'\"]+\.md)(?:\s|$)/gim

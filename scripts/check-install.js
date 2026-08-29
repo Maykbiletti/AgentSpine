@@ -24,16 +24,16 @@ async function makePreviousCache(target) {
   for (const path of ["package.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
     const file = join(target, path);
     const value = JSON.parse(await readFile(file, "utf8"));
-    value.version = "0.5.0";
+    value.version = "0.6.0";
     await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   }
   const marketplacePath = join(target, ".claude-plugin/marketplace.json");
   const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
-  marketplace.plugins[0].version = "0.5.0";
+  marketplace.plugins[0].version = "0.6.0";
   await writeFile(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
   const hooksPath = join(target, "hooks/hooks.json");
   const hooks = JSON.parse(await readFile(hooksPath, "utf8"));
-  hooks.version = "0.5.0";
+  hooks.version = "0.6.0";
   hooks.contract = "agentspine.acceptance/v1";
   await writeFile(hooksPath, `${JSON.stringify(hooks, null, 2)}\n`, "utf8");
 }
@@ -109,7 +109,9 @@ async function invokeInstalledLiveRoots(pluginRoot, workspace, stateRoot) {
     [join(claudeHome, "CLAUDE.md"), "# Installed user style\n\nBe calm and humane.\n"],
     [join(projectA, "CLAUDE.md"), "# Installed project A\n"],
     [join(projectB, "CLAUDE.md"), "# Installed project B\n"],
-    [join(memory, "MEMORY.md"), "# Installed project A memory\n"],
+    [join(memory, "MEMORY.md"), "# Installed project A memory\n\n- [Communication style](style.md) <!-- agentspine:always -->\n"],
+    [join(memory, "style.md"), "# Installed indexed style\n\nKeep answers calm and direct.\n"],
+    [join(memory, "unindexed.md"), "# Installed unindexed private note\n\nThis must never enter the live hook.\n"],
     [join(codexHome, "AGENTS.override.md"), "# Installed Codex user style\n"],
     [join(projectA, "AGENTS.md"), "# Installed Codex A\n"],
     [join(projectB, "TEAM_GUIDE.md"), "# Installed Codex B\n"],
@@ -142,8 +144,16 @@ async function invokeInstalledLiveRoots(pluginRoot, workspace, stateRoot) {
     hook_event_name: "PostCompact", host: "codex", cwd: nestedB
   }, { extraEnv: codexEnv });
   if (!claudeA.sourceIds.includes("claude:user/CLAUDE.md") || !claudeA.sourceIds.includes("claude:memory/MEMORY.md")
-    || !claudeRestart.sourceIds.includes("claude:memory/MEMORY.md") || claudeLoose.sourceIds.some((id) => id.startsWith("claude:memory/"))) {
+    || !claudeA.sourceIds.includes("claude:memory/style.md") || claudeA.sourceIds.includes("claude:memory/unindexed.md")
+    || !claudeRestart.sourceIds.includes("claude:memory/MEMORY.md") || !claudeRestart.sourceIds.includes("claude:memory/style.md")
+    || claudeRestart.sourceIds.includes("claude:memory/unindexed.md") || claudeLoose.sourceIds.some((id) => id.startsWith("claude:memory/"))) {
     throw new Error("installed Claude hook did not preserve exact user/project/memory source scope across restart and foreign cwd");
+  }
+  for (const result of [claudeA, claudeRestart]) {
+    const diagnostic = result.sourceResolution?.memory;
+    if (diagnostic?.indexed !== 1 || diagnostic.loaded !== 1 || diagnostic.directoryEnumeration !== 0) {
+      throw new Error("installed Claude hook did not use bounded indexed-memory resolution");
+    }
   }
   if (claudeA.sourceContents.some((content) => content.includes("Never scan this"))
     || claudeLoose.sourceContents.some((content) => content.includes("Installed project A"))) {
@@ -159,7 +169,8 @@ async function invokeInstalledLiveRoots(pluginRoot, workspace, stateRoot) {
     if (hash(await readFile(path)) !== expected) throw new Error(`installed live-root hook changed a protected source: ${basename(path)}`);
   }
   return {
-    claude: { project: claudeA.sourceIds, restart: claudeRestart.sourceIds, foreign: claudeLoose.sourceIds },
+    claude: { project: claudeA.sourceIds, restart: claudeRestart.sourceIds, foreign: claudeLoose.sourceIds,
+      indexedMemory: claudeA.sourceResolution.memory },
     codex: { projectA: codexAIds, projectB: codexBIds }, broadHomeScan: false, mcpCalls: 0
   };
 }

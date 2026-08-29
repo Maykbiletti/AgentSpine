@@ -90,7 +90,7 @@ claude --plugin-dir .
 ```
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
-Version `0.6.0` explicitly registers `.mcp.json`, ships one version-bound native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.5.0` plugin cache. Fresh-install and upgrade checks prove that exactly one MCP server and one hook set load, then reproduce host-native user, project, and memory discovery from both the AgentSpine checkout and a foreign working directory without a broad home scan.
+Version `0.7.0` explicitly registers `.mcp.json`, ships one version-bound native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.6.0` plugin cache. Fresh-install and upgrade checks prove that exactly one MCP server and one hook set load. Claude project memory is `MEMORY.md`-indexed, lazy, race-safe, persistently cached outside the project, and independent of unrelated file count; the live path performs no memory-directory enumeration.
 
 Verify the installed registration from a checkout with:
 

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { ancestorsBetween, canonicalPath, isInside } from "./paths.js";
 import { buildCatalog } from "./catalog.js";
+import { attachDocumentSnapshot, documentSnapshotContent } from "./documents.js";
 import { loadGraph } from "./graph.js";
 
 function depth(root, path) {
@@ -86,12 +87,13 @@ export async function resolveContext({ root = process.cwd(), cwd = root, host = 
   const documents = addLinkedDocuments(catalog, seed, graph)
     .map((document) => {
       const annotation = annotations.get(document.relativePath);
-      return {
+      const resolved = {
         ...document,
         effectiveLayer: annotation?.layer || document.layer,
         authority: annotation ? "context-only" : document.authority,
         classificationSource: annotation ? "agent-overlay" : document.classificationSource
       };
+      return attachDocumentSnapshot(resolved, documentSnapshotContent(document));
     })
     .sort((a, b) => catalog.sourceRegistry
       ? a.precedence - b.precedence || a.relativePath.localeCompare(b.relativePath)
@@ -103,7 +105,8 @@ export async function resolveContext({ root = process.cwd(), cwd = root, host = 
     let content = null;
     let loaded = false;
     if (includeContent && document.bytes <= remaining) {
-      content = await readFile(document.path, "utf8");
+      const snapshot = documentSnapshotContent(document);
+      content = snapshot ? snapshot.toString("utf8") : await readFile(document.path, "utf8");
       remaining -= Buffer.byteLength(content);
       loaded = true;
     }

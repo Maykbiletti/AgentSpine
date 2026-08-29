@@ -266,6 +266,19 @@ Status: implemented in `v0.6.0` after a real installed session exposed `cwd` cou
 - visible empty/fail-closed Doctor, Audit, and hook diagnostics;
 - fresh-install and `0.5.0` upgrade smoke tests through the installed production hook bundle.
 
+## 20. Indexed-memory hardening
+
+Status: implemented in `v0.7.0` after the correct Claude project-memory root still exposed a file-count scaling defect.
+
+- `MEMORY.md` is the only live project-memory index; only direct relevant Markdown links are eligible and fact files cannot load further links;
+- an external bounded integrity cache avoids rereading and rehashing unchanged indexed bytes while corrections, deletion, link removal, rollback, and purge invalidate stale records;
+- no-follow filehandle reads validate path scope, regular-file identity, metadata, size, and replacement races before and after every read;
+- conservative `always`, person, project, group, task, and prompt-keyword relevance markers control lazy loading without affecting host precedence or authority;
+- hook, Doctor, source-status, and Audit diagnostics expose bounded counts but no private fact content or unnecessary absolute paths;
+- orphan enumeration exists only as an explicit offline Doctor operation and never runs in a lifecycle hook;
+- a real temporary 50,000-file acceptance proves that live work scales with indexed relevant links and invokes no directory-enumeration primitive;
+- fresh-install and `0.6.0` upgrade checks exercise the same production hook bundle with exactly one MCP server, one hook set, and zero model-side MCP calls.
+
 ## Definition of done for every stage
 
 1. A failing case is reproducible.

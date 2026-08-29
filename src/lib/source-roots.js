@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { lstat, mkdir, open, opendir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { ancestorsBetween, canonicalPath, isInside, stateRoot } from "./paths.js";
 import { indexExplicitDocuments } from "./documents.js";
+import { purgeIndexedMemoryCache, resolveIndexedMemory } from "./indexed-memory.js";
 
 export const SOURCE_REGISTRY_SCHEMA = "agentspine.source-roots/v1";
 const MAX_REGISTRY_BYTES = 1024 * 1024;
@@ -239,7 +240,7 @@ export async function bindSourceRoot({ host, hostHome, projectRoot, sourceRoot, 
 
 export async function rollbackSourceBinding({ id, confirmation, env = process.env }) {
   if (confirmation !== "local-user-confirmed") throw new Error("source binding rollback requires explicit local user confirmation");
-  return mutateRegistry((registry) => {
+  const result = await mutateRegistry((registry) => {
     const binding = registry.bindings.find((item) => item.id === id && item.active);
     if (!binding) throw new Error(`active source binding not found: ${id}`);
     binding.active = false;
@@ -247,17 +248,22 @@ export async function rollbackSourceBinding({ id, confirmation, env = process.en
     registry.history.push({ kind: "rolled-back", bindingId: id, at: binding.rolledBackAt, authority: "context-only" });
     return { binding };
   }, env);
+  if (result.binding.scope === "project-memory") await purgeIndexedMemoryCache(result.binding.sourceRoot, env);
+  return result;
 }
 
 export async function purgeSourceBinding({ id, confirmation, env = process.env }) {
   if (confirmation !== "local-user-confirmed") throw new Error("source binding purge requires explicit local user confirmation");
-  return mutateRegistry((registry) => {
+  const result = await mutateRegistry((registry) => {
+    const removed = registry.bindings.find((item) => item.id === id);
     const before = registry.bindings.length;
     registry.bindings = registry.bindings.filter((item) => item.id !== id);
     if (registry.bindings.length === before) throw new Error(`source binding not found: ${id}`);
     registry.history.push({ kind: "purged", bindingDigest: digest(id), at: new Date().toISOString(), authority: "context-only" });
-    return { purged: true };
+    return { purged: true, removed };
   }, env);
+  if (result.removed?.scope === "project-memory") await purgeIndexedMemoryCache(result.removed.sourceRoot, env);
+  return { ...result, removed: undefined };
 }
 
 export async function inspectSourceRegistry(env = process.env) {
@@ -265,7 +271,7 @@ export async function inspectSourceRegistry(env = process.env) {
   return { registry, registryPath: path };
 }
 
-async function claudeSources({ cwd, projectRoot, configDir, input, env, registry, deadline }) {
+async function claudeSources({ cwd, projectRoot, configDir, input, env, registry, deadline, memoryHooks }) {
   const sources = [];
   await addFile(sources, join(configDir, "CLAUDE.md"), { id: "claude:user/CLAUDE.md", host: "claude", scope: "user", binding: "CLAUDE_CONFIG_DIR", precedence: 100 });
   sources.push(...await boundedMarkdownTree(join(configDir, "rules"), "claude:user/rules", "claude", "user", 110, deadline));
@@ -311,8 +317,30 @@ async function claudeSources({ cwd, projectRoot, configDir, input, env, registry
     memoryRoot = activeBinding(registry, "claude", configDir, projectRoot, "project-memory")?.sourceRoot || null;
     memoryProvenance = memoryRoot ? "source-root-registry" : null;
   }
-  if (memoryRoot) sources.push(...await boundedMarkdownTree(memoryRoot, "claude:memory", "claude", "project-memory", 2000, deadline));
-  return { sources, memoryRoot, memoryProvenance };
+  let memoryDiagnostics = null;
+  if (memoryRoot) {
+    const supplied = input.agent_spine_scope && typeof input.agent_spine_scope === "object"
+      ? input.agent_spine_scope : input;
+    const resolved = await resolveIndexedMemory({
+      root: memoryRoot, env, hooks: memoryHooks, deadline,
+      scope: {
+        entityId: supplied.entity_id ?? supplied.entityId ?? null,
+        groupId: supplied.group_id ?? supplied.groupId ?? null,
+        projectId: supplied.project_id ?? supplied.projectId ?? null,
+        currentTaskId: supplied.task_id ?? supplied.currentTaskId ?? null,
+        prompt: input.prompt ?? input.user_prompt ?? input.message ?? input.input ?? null
+      }
+    });
+    memoryDiagnostics = resolved.diagnostics;
+    for (const item of resolved.sources) {
+      sources.push({
+        path: item.path, id: `claude:memory/${item.relativePath}`, host: "claude", scope: "project-memory",
+        binding: "host-native-memory-index", precedence: 2000 + sources.length,
+        snapshot: item.snapshot, relevance: item.relevance
+      });
+    }
+  }
+  return { sources, memoryRoot, memoryProvenance, memoryDiagnostics };
 }
 
 async function codexSources({ cwd, projectRoot, codexHome, config }) {
@@ -338,7 +366,7 @@ async function codexSources({ cwd, projectRoot, codexHome, config }) {
   return sources;
 }
 
-export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), input = {}, env = process.env } = {}) {
+export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), input = {}, env = process.env, memoryHooks = {} } = {}) {
   if (!["claude", "codex"].includes(host)) throw new Error(`host-native source resolution requires claude or codex, received ${host}`);
   const canonicalCwd = await canonicalPath(cwd);
   const deadline = Date.now() + SOURCE_RESOLUTION_MS;
@@ -358,9 +386,10 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     hostHome = await existingDirectory(resolve(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")))
       || resolve(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
     projectRoot = env.AGENTSPINE_ROOT ? await canonicalPath(env.AGENTSPINE_ROOT) : await findRoot(canonicalCwd, [".git"]);
-    const result = await claudeSources({ cwd: canonicalCwd, projectRoot, configDir: hostHome, input, env, registry, deadline });
+    const result = await claudeSources({ cwd: canonicalCwd, projectRoot, configDir: hostHome, input, env, registry, deadline, memoryHooks });
     sources = result.sources;
-    hostDetails = { memoryRoot: result.memoryRoot, memoryProvenance: result.memoryProvenance };
+    hostDetails = { memoryRoot: result.memoryRoot, memoryProvenance: result.memoryProvenance,
+      memoryDiagnostics: result.memoryDiagnostics };
   }
   if (projectRoot !== homedir() && projectRoot !== dirname(hostHome)) {
     sources.push(...await boundedMarkdownTree(projectRoot, "agentspine:project", host, "project", 3000, deadline,
@@ -389,7 +418,11 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     ...(host === "claude" ? {
       memoryBound: Boolean(hostDetails.memoryRoot),
       memoryRootDigest: hostDetails.memoryRoot ? digest(hostDetails.memoryRoot).slice(0, 16) : null,
-      memoryProvenance: hostDetails.memoryProvenance
+      memoryProvenance: hostDetails.memoryProvenance,
+      memory: hostDetails.memoryDiagnostics || {
+        indexed: 0, relevant: 0, loaded: 0, cacheHits: 0, cacheMisses: 0, missing: 0,
+        rejected: { scope: 0, path: 0, symlink: 0, race: 0, size: 0 }, directoryEnumeration: 0
+      }
     } : hostDetails)
   };
   const catalog = {
@@ -398,5 +431,6 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     summary: { total: documents.length, protected: documents.filter((item) => item.protected).length, conflicts: 0,
       byLayer: Object.fromEntries([...new Set(documents.map((item) => item.layer))].sort().map((layer) => [layer, documents.filter((item) => item.layer === layer).length])) }
   };
-  return { host, hostHome, projectRoot, cwd: canonicalCwd, catalog, diagnostics, userStateRoot: activeUserState?.sourceRoot || null };
+  return { host, hostHome, projectRoot, cwd: canonicalCwd, catalog, diagnostics,
+    userStateRoot: activeUserState?.sourceRoot || null, memoryRoot: hostDetails.memoryRoot || null };
 }

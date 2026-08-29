@@ -4,6 +4,27 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-29
+
+### Added
+
+- External, integrity-checked indexed-memory metadata/content cache with atomic multi-process updates, immediate link-removal pruning, and cache purge on source-binding rollback or purge
+- Explicit relevance markers for `always`, person, project, group, task, and prompt-keyword scopes; unproven fact files remain unopened and omitted
+- Privacy-bounded indexed-memory diagnostics for indexed, relevant, loaded, cache-hit, cache-miss, missing, scope, path, symlink, size, and race outcomes
+- Explicit `doctor --offline-memory-orphans` enumeration that reports counts only and remains outside every live lifecycle path
+- Real temporary 50,000-file acceptance with deterministic open-count instrumentation and a source-level ban on directory enumeration in the live indexed-memory module
+
+### Changed
+
+- Claude project-memory resolution now treats `MEMORY.md` as the explicit index and opens only directly linked, relevant Markdown facts instead of walking the complete memory tree
+- Package, lockfile, Claude Code, Codex, marketplace, and hook-bundle versions advance together to `0.7.0`; upgrade acceptance rejects the cached `0.6.0` bundle
+
+### Security
+
+- Indexed memory targets are opened with no-follow semantics and validated through one filehandle before and after reading; file replacement races retry and then reject visibly
+- Missing targets, path escapes, symlinked paths, non-regular files, oversized sources, transitive links, stale cache records, and corrupt cache state cannot enter the briefing
+- Cache and relevance remain context-only and cannot create identity, rights, delegation, trust, capabilities, network access, or self-starter policy
+
 ## [0.6.0] - 2026-08-28
 
 ### Added
@@ -196,7 +217,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.3.0...v0.4.0

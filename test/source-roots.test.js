@@ -178,3 +178,64 @@ test("empty host roots are visible and never reported as loaded continuity", asy
   assert.equal(denied.blocked, true);
   assert.match(denied.reason, /source resolution failed closed/);
 });
+
+test("Claude project memory loads only files indexed by MEMORY.md", async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "agentspine-indexed-memory-"));
+  const state = join(workspace, "state");
+  const profile = join(workspace, "profile");
+  const project = join(workspace, "project");
+  const session = join(profile, "projects", "project", "session.jsonl");
+  const memory = join(profile, "projects", "project", "memory");
+  const facts = join(memory, "facts");
+  await Promise.all([mkdir(state), mkdir(project), mkdir(facts, { recursive: true })]);
+  await mkdir(join(project, ".git"));
+  await writeFile(session, "{}\n", "utf8");
+  const index = join(memory, "MEMORY.md");
+  const linked = join(facts, "linked.md");
+  const unindexed = join(facts, "unindexed.md");
+  await writeFile(index, [
+    "# Memory", "", "[Linked fact](facts/linked.md) <!-- agentspine:always -->", "[Missing fact](facts/missing.md) <!-- agentspine:always -->",
+    "[Outside](../../../../outside.md) <!-- agentspine:always -->", ""
+  ].join("\n"), "utf8");
+  await writeFile(linked, "# Linked\n\nLoad this fact.\n", "utf8");
+  await writeFile(unindexed, "# Unindexed\n\nNever load this fact.\n", "utf8");
+  await Promise.all(Array.from({ length: 256 }, (_, number) => writeFile(
+    join(facts, `irrelevant-${String(number).padStart(3, "0")}.md`), "", "utf8"
+  )));
+  const outside = join(workspace, "outside.md");
+  await writeFile(outside, "# Outside\n", "utf8");
+  const linkedSymlink = join(memory, "linked-symlink.md");
+  try {
+    await symlink(outside, linkedSymlink);
+    await writeFile(index, `${await readFile(index, "utf8")}[Symlink](linked-symlink.md) <!-- agentspine:always -->\n`, "utf8");
+  } catch (error) {
+    if (process.platform !== "win32" || !["EPERM", "EACCES"].includes(error.code)) throw error;
+  }
+  const before = new Map(await Promise.all([index, linked, unindexed, outside].map(async (path) => [path, hash(await readFile(path))])));
+  const previous = { state: process.env.AGENTSPINE_STATE_DIR, claude: process.env.CLAUDE_CONFIG_DIR };
+  process.env.AGENTSPINE_STATE_DIR = state;
+  process.env.CLAUDE_CONFIG_DIR = profile;
+  t.after(async () => {
+    if (previous.state === undefined) delete process.env.AGENTSPINE_STATE_DIR; else process.env.AGENTSPINE_STATE_DIR = previous.state;
+    if (previous.claude === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = previous.claude;
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  const result = await resolveHostSourceCatalog({ host: "claude", cwd: project, input: { transcript_path: session } });
+  assert.deepEqual(result.catalog.documents.filter((item) => item.sourceScope === "project-memory")
+    .map((item) => item.relativePath), ["claude:memory/MEMORY.md", "claude:memory/facts/linked.md"]);
+  assert.equal(result.catalog.documents.some((item) => item.path === unindexed), false);
+  assert.equal(result.catalog.documents.some((item) => item.path === outside), false);
+  assert.equal(result.diagnostics.scopes["project-memory"], 2);
+  assert.deepEqual(result.diagnostics.memory, {
+    indexed: process.platform === "win32" ? 3 : 4,
+    relevant: process.platform === "win32" ? 3 : 4,
+    loaded: 1,
+    cacheHits: 0,
+    cacheMisses: 2,
+    missing: 1,
+    rejected: { scope: 0, path: 1, symlink: process.platform === "win32" ? 0 : 1, race: 0, size: 0 },
+    directoryEnumeration: 0
+  });
+  for (const [path, expected] of before) assert.equal(hash(await readFile(path)), expected);
+});

@@ -24,6 +24,8 @@ Gate 6 is informational when findings are represented correctly; AgentSpine expo
 
 With `--host claude` or `--host codex`, Gate 2 uses the production source-root resolver instead of recursively scanning the supplied path. It fails when the host profile and active project scopes are empty, conflicting, damaged, or stale, and reports scope counts plus the concrete fail-closed reason. This mode never falls back to scanning the home directory.
 
+For Claude project memory, Gate 2 also reports indexed, relevant, loaded, cache-hit, cache-miss, missing, scope-rejected, path-rejected, symlink-rejected, size-rejected, and race-rejected counts. The live hook never enumerates the memory directory. Orphan counting is available only through the explicit offline diagnostic `agentspine doctor --host claude --offline-memory-orphans`; it reads no orphan content and cannot affect recall or authority.
+
 ## CI and troubleshooting
 
 The repository test matrix covers Linux, macOS, and Windows on supported Node.js release lines. Package integrity runs separately. For an integration project, run the JSON form and retain only the audit result—never upload source content, the private graph, attention state, learning state, delegation policy, coordination state, sharing inbox, or adapter events as CI evidence.

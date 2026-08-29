@@ -43,7 +43,7 @@ test("Claude and Codex registrations complete a real MCP initialize handshake", 
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
-  assert.equal(result.version, "0.6.0");
+  assert.equal(result.version, "0.7.0");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1 });
   assert.equal(result.hooks.claude.events.includes("PostCompact"), true);
   assert.equal(result.hooks.codex.events.includes("UserPromptSubmit"), true);
@@ -75,6 +75,15 @@ test("fresh install, stale-cache upgrade, and uninstall keep exactly one runtime
     assert.deepEqual(installed.hosts, ["claude", "codex"]);
     assert.deepEqual(installed.languages, ["sv-SE", "es-ES"]);
     assert.match(installed.receiptDigest, /^[a-f0-9]{64}$/);
+  }
+  for (const installed of [result.liveRootResolution.fresh, result.liveRootResolution.upgrade]) {
+    assert.equal(installed.mcpCalls, 0);
+    assert.equal(installed.claude.project.includes("claude:memory/style.md"), true);
+    assert.equal(installed.claude.project.includes("claude:memory/unindexed.md"), false);
+    assert.deepEqual(installed.claude.indexedMemory, {
+      indexed: 1, relevant: 1, loaded: 1, cacheHits: 0, cacheMisses: 2, missing: 0,
+      rejected: { scope: 0, path: 0, symlink: 0, race: 0, size: 0 }, directoryEnumeration: 0
+    });
   }
   assert.equal(result.canonicalAliasLaunch, true);
   assert.equal(result.uninstallPreservedSources, true);

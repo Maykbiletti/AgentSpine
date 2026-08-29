@@ -47,6 +47,7 @@ import {
 } from "./lib/source-roots.js";
 import { VERSION } from "./version.js";
 import { isMainModule } from "./lib/runtime.js";
+import { scanIndexedMemoryOrphans } from "./lib/indexed-memory-offline.js";
 
 function parse(argv) {
   const [command = "help", ...rest] = argv;
@@ -117,6 +118,7 @@ Usage:
   agentspine continuity-status [root]
   agentspine continuity-purge <entity-id> [--root path] --confirm-local-purge
   agentspine source-status --host claude|codex [--cwd path]
+  agentspine doctor --host claude [--cwd path] [--offline-memory-orphans]
   agentspine source-bind <state-root> --host all|claude|codex --scope state-user --project path --host-home path --confirm-local-binding
   agentspine source-rollback <binding-id> --confirm-local-binding
   agentspine source-purge <binding-id> --confirm-local-binding
@@ -807,9 +809,17 @@ export async function run(argv = process.argv.slice(2)) {
       hostIntegration = { ok: false, error: error.message };
     }
     let sourceResolution = null;
+    let orphanScan = null;
     const sourceHost = flags.host || process.env.AGENTSPINE_HOST;
     if (["claude", "codex"].includes(sourceHost)) {
-      try { sourceResolution = (await resolveHostSourceCatalog({ host: sourceHost, cwd: flags.cwd || process.cwd() })).diagnostics; }
+      try {
+        const resolved = await resolveHostSourceCatalog({ host: sourceHost, cwd: flags.cwd || process.cwd() });
+        sourceResolution = resolved.diagnostics;
+        if (booleanFlag(flags["offline-memory-orphans"])) {
+          if (sourceHost !== "claude" || !resolved.memoryRoot) throw new Error("offline memory orphan scan requires a resolved Claude project-memory root");
+          orphanScan = await scanIndexedMemoryOrphans(resolved.memoryRoot);
+        }
+      }
       catch (error) { sourceResolution = { status: "failed-closed", reason: error.message }; }
     }
     const result = {
@@ -821,7 +831,8 @@ export async function run(argv = process.argv.slice(2)) {
       preservationMode: "read-only-source-overlay",
       stateDirectory: process.env.AGENTSPINE_STATE_DIR || "platform-default",
       hostIntegration,
-      sourceResolution
+      sourceResolution,
+      orphanScan
     };
     output(result, json);
     if (!result.ok) process.exitCode = 1;
