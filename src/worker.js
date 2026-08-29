@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { watch } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { claimGatewayWork, completeGatewayRun, deliverPrepared, failGatewayRun, loadGatewayRuntime, reconcileGateway, updateGatewayHealth } from "./lib/gateway-runtime.js";
 import { createTelegramAdapter } from "./lib/telegram-adapter.js";
@@ -11,9 +12,11 @@ import { isMainModule } from "./lib/runtime.js";
 const MAX_FRAME = 64 * 1024;
 const WAKE_FILES = new Set(["attention.json", "channel-runtime.json", "gateway-policy.json", "persona-policy.json", "persona-runtime.json"]);
 
-export async function waitForGatewayWake(root, delayMs, { watchFactory = watch } = {}) {
+export async function waitForGatewayWake(root, delayMs, { watchFactory = watch, realpathFactory = realpath } = {}) {
   const delay = Math.max(250, Math.min(60000, Number(delayMs) || 60000));
   const { directory } = await loadGatewayRuntime(root);
+  let watchPath;
+  try { watchPath = await realpathFactory(directory); } catch { return "watch-unavailable"; }
   return new Promise((resolvePromise) => {
     let settled = false; let watcher;
     const finish = (reason) => {
@@ -24,7 +27,7 @@ export async function waitForGatewayWake(root, delayMs, { watchFactory = watch }
     };
     const timer = setTimeout(() => finish("timer"), delay);
     try {
-      watcher = watchFactory(directory, { persistent: true }, (_eventType, filename) => {
+      watcher = watchFactory(watchPath, { persistent: true }, (_eventType, filename) => {
         const name = filename === null ? null : String(filename);
         if (name === null || WAKE_FILES.has(name)) finish("event");
       });

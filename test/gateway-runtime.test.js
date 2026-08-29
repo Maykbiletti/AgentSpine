@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyPersonaRoster, loadPersonaRuntime } from "../src/lib/persona-runtime.js";
@@ -318,6 +318,27 @@ test("worker wait wakes on relevant desired-state changes and ignores its own ru
     return { close() {}, on() {} };
   } });
   assert.equal(await timerWake, "timer");
+});
+
+test("worker passes a canonical Windows directory to the native file watcher", { skip: process.platform !== "win32" }, async (t) => {
+  const { root } = await fixture(t);
+  process.env.AGENTSPINE_STATE_DIR = process.env.AGENTSPINE_STATE_DIR.toUpperCase();
+  const { directory } = await loadGatewayRuntime(root);
+  let watchedPath = null;
+  const wake = waitForGatewayWake(root, 250, { watchFactory: (path) => {
+    watchedPath = path;
+    return { close() {}, on() {} };
+  } });
+  assert.equal(await wake, "timer");
+  assert.notEqual(directory, await realpath(directory));
+  assert.equal(watchedPath, await realpath(directory));
+});
+
+test("worker wait degrades safely when the state directory cannot be canonicalized", async (t) => {
+  const { root } = await fixture(t);
+  assert.equal(await waitForGatewayWake(root, 250, {
+    realpathFactory: async () => { throw new Error("synthetic path failure"); }
+  }), "watch-unavailable");
 });
 
 test("resolved blockers and open promises enter the bounded attention wake queue", async (t) => {
