@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCatalog } from "./catalog.js";
 import { loadGraph } from "./graph.js";
@@ -8,6 +8,7 @@ import {
   proposeLearning, purgeLearningBySubject
 } from "./learning.js";
 import { projectStateDir } from "./paths.js";
+import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 
 const SCHEMA = "agentspine.continuity/v1";
 const MAX_STATE_BYTES = 2 * 1024 * 1024;
@@ -78,7 +79,14 @@ async function saveState(state, path) {
   if (Buffer.byteLength(content) > MAX_STATE_BYTES) throw new Error("continuity state exceeds 2 MiB");
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, content, { mode: 0o600 });
-  await rename(temporary, path);
+  try {
+    await replaceFileWithRetry(temporary, path);
+  } catch (error) {
+    await unlink(temporary).catch((cleanupError) => {
+      if (cleanupError.code !== "ENOENT") error.cleanupError = cleanupError;
+    });
+    throw error;
+  }
 }
 
 async function withLock(path, root, task) {
@@ -89,7 +97,7 @@ async function withLock(path, root, task) {
       handle = await open(lockPath, "wx", 0o600);
       break;
     } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       try {
         const metadata = await stat(lockPath);
         if (Date.now() - metadata.mtimeMs > 15000) await unlink(lockPath);

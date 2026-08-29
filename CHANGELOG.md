@@ -4,6 +4,10 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows Node 24 state writes now treat transient lock access errors as contention and retry atomic catalog, continuity, and sharing replacements with a bounded backoff
+
 ## [0.8.0] - 2026-08-29
 
 ### Added

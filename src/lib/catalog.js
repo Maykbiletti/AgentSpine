@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { canonicalPath, projectStateDir } from "./paths.js";
 import { discoverDocuments } from "./documents.js";
+import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 
 export const CATALOG_SCHEMA = "agentspine.catalog/v1";
 
@@ -75,7 +76,7 @@ export async function saveCatalog(catalog) {
       handle = await open(lockPath, "wx", 0o600);
       break;
     } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       try {
         const metadata = await stat(lockPath);
         if (Date.now() - metadata.mtimeMs > 15000) await unlink(lockPath);
@@ -89,7 +90,7 @@ export async function saveCatalog(catalog) {
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, `${JSON.stringify(catalog, null, 2)}\n`, { mode: 0o600 });
-    await rename(temporary, target);
+    await replaceFileWithRetry(temporary, target);
     return target;
   } finally {
     await handle.close();

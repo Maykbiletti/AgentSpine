@@ -4,6 +4,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { buildCatalog } from "./catalog.js";
+import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { loadGraph } from "./graph.js";
 import { learningFindings, loadLearning } from "./learning.js";
 import { isInside, projectStateDir } from "./paths.js";
@@ -120,7 +121,14 @@ async function writeJson(path, state) {
   if (Buffer.byteLength(content) > MAX_STATE_BYTES) throw new Error("sharing state exceeds 5 MiB; reject or delete old imports first");
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, content, { mode: 0o600 });
-  await rename(temporary, path);
+  try {
+    await replaceFileWithRetry(temporary, path);
+  } catch (error) {
+    await unlink(temporary).catch((cleanupError) => {
+      if (cleanupError.code !== "ENOENT") error.cleanupError = cleanupError;
+    });
+    throw error;
+  }
 }
 
 async function acquireLock(path) {
@@ -129,7 +137,7 @@ async function acquireLock(path) {
     try {
       return { handle: await open(lockPath, "wx", 0o600), lockPath };
     } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+      if (!isFileLockContention(error)) throw error;
       try {
         const metadata = await stat(lockPath);
         if (Date.now() - metadata.mtimeMs > 15000) await unlink(lockPath);
