@@ -426,11 +426,12 @@ function normalizeResult(value, providerId, query) {
   });
   return { items, rejected: Number.isInteger(value.rejected) && value.rejected >= 0 ? value.rejected : 0 };
 }
-async function commandProvider(provider, query, env, runner = null) {
-  if (runner) return runner(provider, query);
-  const executable = await realpath(provider.command);
-  const metadata = await lstat(executable);
-  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`retrieval adapter ${provider.id} is not a regular executable`);
+function providerInputError(provider, error) {
+  const wrapped = new Error(`retrieval adapter ${provider.id} input failed (${error.code || "stream-error"})`);
+  wrapped.code = error.code;
+  return wrapped;
+}
+function commandProviderAttempt(provider, query, env, executable) {
   return new Promise((resolvePromise, rejectPromise) => {
     const childEnv = { PATH: env.PATH || "" };
     for (const name of provider.credentialEnv) {
@@ -444,13 +445,30 @@ async function commandProvider(provider, query, env, runner = null) {
     child.stdout.on("data", (chunk) => { bytes += chunk.length; if (bytes > MAX_PROVIDER_BYTES) { child.kill("SIGKILL"); finish(new Error("retrieval response exceeds 1 MiB")); } else stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderrBytes = Math.min(2048, stderrBytes + chunk.length); });
     child.once("error", (error) => finish(error));
+    child.stdin.once("error", (error) => {
+      if (settled) return;
+      child.kill("SIGKILL");
+      finish(providerInputError(provider, error));
+    });
     child.once("close", (code) => {
       if (settled) return;
       if (code !== 0) return finish(new Error(`retrieval adapter ${provider.id} failed (${code}; stderr-bytes<=${stderrBytes})`));
       try { finish(null, JSON.parse(stdout)); } catch { finish(new Error(`retrieval adapter ${provider.id} returned invalid JSON`)); }
     });
-    child.stdin.end(JSON.stringify(query));
+    try { child.stdin.end(JSON.stringify(query)); }
+    catch (error) { child.kill("SIGKILL"); finish(providerInputError(provider, error)); }
   });
+}
+async function commandProvider(provider, query, env, runner = null) {
+  if (runner) return runner(provider, query);
+  const executable = await realpath(provider.command);
+  const metadata = await lstat(executable);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`retrieval adapter ${provider.id} is not a regular executable`);
+  try { return await commandProviderAttempt(provider, query, env, executable); }
+  catch (error) {
+    if (error.code !== "EPIPE") throw error;
+    return commandProviderAttempt(provider, query, env, executable);
+  }
 }
 
 export async function runPreflight({ input, scope, resolvedSources, prompt, now = new Date(), env = process.env,

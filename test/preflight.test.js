@@ -116,17 +116,21 @@ test("a required instruction replaced through its pathname during the handle rea
   const setup = await fixture(t);
   const projectRulesPath = join(setup.root, setup.filename);
   const projectRules = await realpath(projectRulesPath);
+  let attempted = false;
   let exchanged = false;
   await assert.rejects(runPreflight({ ...setup, prompt: setup.input.prompt, fileHooks: {
     afterRead: async (path) => {
       if (path !== projectRules || exchanged) return;
-      exchanged = true;
+      attempted = true;
       const replacement = join(setup.root, "replacement.md");
       await writeFile(replacement, "# Replaced rules\n", "utf8");
       await rename(replacement, projectRulesPath);
+      exchanged = true;
     }
-  } }), /(?:changed|replaced) during preflight/);
-  assert.equal(exchanged, true);
+  } }), (error) => /(?:changed|replaced) during preflight/.test(error.message)
+    || (process.platform === "win32" && attempted && !exchanged && ["EPERM", "EACCES"].includes(error.code)));
+  assert.equal(attempted, true);
+  assert.equal(exchanged || process.platform === "win32", true);
 });
 
 test("receipt verification rejects every changed turn scope, policy, memory, and instruction set", async (t) => {
