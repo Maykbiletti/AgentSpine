@@ -10,6 +10,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Fixed
 
+- Routine BLUN hook results now render as one short human-readable status line instead of exposing compact internal JSON in the TUI, while actionable attention, self-starter, channel, and failure details remain available immediately
 - BLUN hooks now inject a compact runtime status instead of the complete session briefing on every prompt; detailed continuity remains available on demand while active attention, self-starter, and authenticated channel signals remain immediate
 - BLUN lifecycle hooks now index large real workspaces without absorbing embedded test profiles or failing at the smaller host-rule limit
 - Windows Node 24 state writes now treat transient lock access errors as contention across every lock-backed store, retry atomic replacements with a bounded backoff, and tolerate briefly retained handles during hermetic cleanup

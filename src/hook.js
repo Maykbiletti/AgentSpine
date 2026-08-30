@@ -376,9 +376,30 @@ export function blunRuntimeContext(context) {
   return JSON.stringify(runtime);
 }
 
+export function blunRuntimeMessage(context) {
+  const runtime = JSON.parse(blunRuntimeContext(context));
+  const base = runtime.loaded
+    ? `AgentSpine ready: ${runtime.indexedSources} sources indexed. Load detailed continuity only on demand through session_briefing.`
+    : `AgentSpine unavailable${runtime.sourceResolution?.reason ? `: ${runtime.sourceResolution.reason}` : ""}. ${runtime.instruction}`;
+  const active = {};
+  if (runtime.signal && (runtime.signal.captured || runtime.signal.accepted
+    || String(runtime.signal.reason || "").startsWith("rejected:"))) {
+    active.signal = runtime.signal;
+  }
+  if (runtime.attentionEvent && (runtime.attentionEvent.captured || runtime.attentionEvent.duplicate
+    || String(runtime.attentionEvent.reason || "").startsWith("rejected:"))) {
+    active.attentionEvent = runtime.attentionEvent;
+  }
+  if (runtime.selfstarter) active.selfstarter = runtime.selfstarter;
+  if (runtime.channelEvent) active.channelEvent = runtime.channelEvent;
+  return Object.keys(active).length === 0
+    ? base
+    : `${base}\nActive AgentSpine runtime data: ${JSON.stringify(active)}`;
+}
+
 function hookOutput(event, context) {
   if (process.env.BLUN_PLUGIN_ROOT) {
-    return { hookSpecificOutput: { hookEventName: event, message: blunRuntimeContext(context) } };
+    return { hookSpecificOutput: { hookEventName: event, message: blunRuntimeMessage(context) } };
   }
   return { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
 }

@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { blunRuntimeContext, runHook } from "../src/hook.js";
+import { blunRuntimeContext, blunRuntimeMessage, runHook } from "../src/hook.js";
 
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -66,15 +66,14 @@ test("installed BLUN hook keeps the full briefing out of the runtime message", a
     blunHome,
     input: { hook_event_name: "UserPromptSubmit", cwd: root, prompt: [{ type: "text", text: "Hallo" }] }
   });
-  const runtime = JSON.parse(output.hookSpecificOutput.message);
-  assert.equal(runtime.schema, "agentspine.blun-runtime-context/v1");
-  assert.equal(runtime.event, "UserPromptSubmit");
-  assert.equal(runtime.loaded, true);
-  assert.equal(runtime.indexedSources, 145);
-  assert.equal(runtime.sourceResolution.status, "loaded");
-  assert.equal("briefing" in runtime, false);
+  assert.equal(
+    output.hookSpecificOutput.message,
+    "AgentSpine ready: 145 sources indexed. Load detailed continuity only on demand through session_briefing."
+  );
+  assert.equal(output.hookSpecificOutput.message.startsWith("{"), false);
+  assert.equal(output.hookSpecificOutput.message.includes("agentspine.blun-runtime-context"), false);
   assert.equal("additionalContext" in output.hookSpecificOutput, false);
-  assert.equal(Buffer.byteLength(output.hookSpecificOutput.message) <= 1024, true);
+  assert.equal(Buffer.byteLength(output.hookSpecificOutput.message) <= 160, true);
 
   const compatibleOutput = await runInstalledHook({
     cwd: root,
@@ -124,6 +123,22 @@ test("compact BLUN runtime context preserves active execution and authenticated 
   assert.deepEqual(runtime.channelEvent, channelEvent);
   assert.equal("briefing" in runtime, false);
   assert.deepEqual(runtime.sourceResolution, { status: "loaded", reason: null });
+
+  const message = blunRuntimeMessage(JSON.stringify({
+    schema: "agentspine.hook-context/v1",
+    event: "SessionStart",
+    loaded: true,
+    indexedSources: 149,
+    sourceResolution: { status: "loaded" },
+    selfstarter,
+    channelEvent,
+    briefing: { sources: { documents: Array(149).fill({ content: "large" }) } },
+    authority: "context-only"
+  }));
+  assert.match(message, /^AgentSpine ready: 149 sources indexed\./);
+  const active = JSON.parse(message.split("Active AgentSpine runtime data: ")[1]);
+  assert.deepEqual(active.selfstarter, selfstarter);
+  assert.deepEqual(active.channelEvent, channelEvent);
 });
 
 test("compact BLUN runtime context preserves a failed-closed source resolution", () => {
@@ -140,6 +155,21 @@ test("compact BLUN runtime context preserves a failed-closed source resolution",
   assert.equal(runtime.failedClosed, true);
   assert.deepEqual(runtime.sourceResolution, { status: "failed-closed", reason: "synthetic failure" });
   assert.equal(runtime.instruction, "Do not claim AgentSpine recall succeeded.");
+
+  const message = blunRuntimeMessage(JSON.stringify({
+    schema: "agentspine.hook-context/v1",
+    event: "UserPromptSubmit",
+    loaded: false,
+    failedClosed: true,
+    indexedSources: 0,
+    sourceResolution: { status: "failed-closed", reason: "synthetic failure" },
+    instruction: "Do not claim AgentSpine recall succeeded.",
+    authority: "context-only"
+  }));
+  assert.equal(
+    message,
+    "AgentSpine unavailable: synthetic failure. Do not claim AgentSpine recall succeeded."
+  );
 });
 
 test("PreToolUse blocks an agent write to a protected source", async (t) => {
