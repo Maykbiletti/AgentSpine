@@ -11,8 +11,10 @@ export const SOURCE_REGISTRY_SCHEMA = "agentspine.source-roots/v1";
 const MAX_REGISTRY_BYTES = 1024 * 1024;
 const MAX_SOURCES = 256;
 const MAX_RULE_FILES = 128;
+const MAX_PROJECT_FILES = 240;
 const MAX_TOTAL_SOURCE_BYTES = 8 * 1024 * 1024;
 const MAX_DIRECTORY_ENTRIES = 4096;
+const MAX_PROJECT_DIRECTORY_ENTRIES = 8192;
 const SOURCE_RESOLUTION_MS = 2000;
 const SAFE_NAME = /^[A-Za-z0-9._-]{1,128}$/;
 const SKIP_EXTRA_DIRS = new Set([".git", ".hg", ".svn", ".claude", ".codex", "node_modules", "vendor", "dist", "build", "coverage"]);
@@ -168,23 +170,35 @@ async function containsProjectMarker(directory) {
   }
 }
 
-async function boundedMarkdownTree(directory, prefix, host, scope, precedenceStart, deadline, { projectBoundary = false } = {}) {
+async function containsEmbeddedHostProfile(directory) {
+  return Boolean(
+    await existingDirectory(join(directory, ".runtime-private"))
+    && await existingRegular(join(directory, "config.toml"))
+  );
+}
+
+async function boundedMarkdownTree(directory, prefix, host, scope, precedenceStart, deadline, {
+  projectBoundary = false,
+  maxFiles = MAX_RULE_FILES,
+  maxDirectoryEntries = MAX_DIRECTORY_ENTRIES
+} = {}) {
   const root = await existingDirectory(directory);
   if (!root) return [];
   const output = [];
   let visitedEntries = 0;
   async function walk(current) {
     if (Date.now() > deadline) throw new Error(`host-native source resolution exceeded ${SOURCE_RESOLUTION_MS} ms`);
-    if (projectBoundary && current !== root && await containsProjectMarker(current)) return;
+    if (projectBoundary && current !== root
+      && (await containsProjectMarker(current) || await containsEmbeddedHostProfile(current))) return;
     const entries = [];
     for await (const entry of await opendir(current)) {
       visitedEntries += 1;
-      if (visitedEntries > MAX_DIRECTORY_ENTRIES) throw new Error(`host-native source tree exceeds ${MAX_DIRECTORY_ENTRIES} entries`);
+      if (visitedEntries > maxDirectoryEntries) throw new Error(`host-native source tree exceeds ${maxDirectoryEntries} entries`);
       entries.push(entry);
     }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
-      if (output.length >= MAX_RULE_FILES) throw new Error(`host-native rule tree exceeds ${MAX_RULE_FILES} files`);
+      if (output.length >= maxFiles) throw new Error(`host-native rule tree exceeds ${maxFiles} files`);
       if (entry.isSymbolicLink()) continue;
       const path = join(current, entry.name);
       if (entry.isDirectory() && !entry.name.startsWith(".") && !SKIP_EXTRA_DIRS.has(entry.name)) await walk(path);
@@ -394,7 +408,7 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   }
   if (projectRoot !== homedir() && projectRoot !== dirname(hostHome)) {
     sources.push(...await boundedMarkdownTree(projectRoot, "agentspine:project", host, "project", 3000, deadline,
-      { projectBoundary: true }));
+      { projectBoundary: true, maxFiles: MAX_PROJECT_FILES, maxDirectoryEntries: MAX_PROJECT_DIRECTORY_ENTRIES }));
   }
   const nativeNames = new Set(host === "codex"
     ? ["AGENTS.override.md", "AGENTS.md", ...(hostDetails.fallbackNames || [])]

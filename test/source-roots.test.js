@@ -188,6 +188,50 @@ test("BLUN lifecycle uses BLUN_HOME as the isolated Codex-compatible host profil
   assert.equal(learned.signal?.accepted, true);
 });
 
+test("BLUN lifecycle indexes a large real project without absorbing an embedded host profile", async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "agentspine-blun-large-project-"));
+  const state = join(workspace, "state");
+  const blunHome = join(workspace, ".blun");
+  const project = join(workspace, "project");
+  const embeddedProfile = join(project, "handoffs", "old-run", "test-profile");
+  await Promise.all([
+    mkdir(state),
+    mkdir(blunHome),
+    mkdir(join(project, ".git"), { recursive: true }),
+    mkdir(join(project, "notes"), { recursive: true }),
+    mkdir(join(embeddedProfile, ".runtime-private"), { recursive: true })
+  ]);
+  await writeFile(join(blunHome, "AGENTS.md"), "# BLUN user rules\n", "utf8");
+  await writeFile(join(project, "AGENTS.md"), "# BLUN project rules\n", "utf8");
+  await writeFile(join(embeddedProfile, "config.toml"), "profile = 'old-test'\n", "utf8");
+  await Promise.all(Array.from({ length: 149 }, (_, index) =>
+    writeFile(join(project, "notes", `project-${String(index).padStart(3, "0")}.md`), `# Project ${index}\n`, "utf8")));
+  await Promise.all(Array.from({ length: 160 }, (_, index) =>
+    writeFile(join(embeddedProfile, `profile-${String(index).padStart(3, "0")}.md`), `# Profile ${index}\n`, "utf8")));
+
+  const keys = ["AGENTSPINE_STATE_DIR", "BLUN_HOME", "BLUN_PLUGIN_ROOT", "CODEX_HOME", "PLUGIN_ROOT", "CLAUDE_CONFIG_DIR"];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  process.env.BLUN_HOME = blunHome;
+  process.env.BLUN_PLUGIN_ROOT = fileURLToPath(new URL("..", import.meta.url));
+  delete process.env.CODEX_HOME;
+  delete process.env.PLUGIN_ROOT;
+  delete process.env.CLAUDE_CONFIG_DIR;
+  t.after(async () => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  const result = packet(await runHook({ hook_event_name: "SessionStart", cwd: project }));
+  assert.equal(result.loaded, true);
+  const resolution = await resolveHostSourceCatalog({ host: "codex", cwd: project });
+  const paths = resolution.catalog.documents.map(({ relativePath }) => relativePath);
+  assert.ok(paths.includes("agentspine:project/notes/project-148.md"));
+  assert.equal(paths.some((path) => path.includes("test-profile")), false);
+});
+
 test("empty host roots are visible and never reported as loaded continuity", async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), "agentspine-empty-roots-"));
   const state = join(workspace, "state");
