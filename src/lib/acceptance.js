@@ -8,6 +8,7 @@ import { configureContinuity, purgeContinuity } from "./continuity.js";
 import { createTask } from "./coordination.js";
 import { linkEntities, upsertEntity } from "./graph.js";
 import { loadLearning, rollbackLearning } from "./learning.js";
+import { configurePreflightPolicy } from "./preflight.js";
 import {
   grantExecution, loadSelfstarter, registerJob
 } from "./selfstarter.js";
@@ -74,6 +75,28 @@ export async function runVisibleAcceptance() {
   const expectedSources = sourceHashes(sources);
   try {
     for (const [name, content] of Object.entries(sources)) await writeFile(join(projectRoot, name), content, "utf8");
+    const adapterPath = join(projectRoot, "mnemo-acceptance.mjs");
+    const adapterSource = `let body = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { body += chunk; });
+process.stdin.on("end", () => {
+  const query = JSON.parse(body);
+  process.stdout.write(JSON.stringify({
+    schema: "agentspine.retrieval-result/v1", providerId: query.providerId,
+    queryDigest: query.queryDigest, status: "ok", rejected: 1,
+    items: [{ id: "mnemo:aurora-finding", revision: "1", claim: "Prüfe die bestehenden Findings vor neuen Änderungen.",
+      source: "mnemo", scope: { agentId: query.agentId, userId: query.userId, tenantId: query.tenantId,
+        projectId: query.projectId }, validity: "current", confidence: 1, whyLoaded: "exact project scope" }]
+  }));
+});
+`;
+    await writeFile(adapterPath, adapterSource, "utf8");
+    await configurePreflightPolicy({ confirmation: "local-owner-confirmed", env: process.env, profile: {
+      id: "preflight-policy:acceptance-freja", agentId: "person:freja", host: "claude", profileId: "default",
+      tenantId: "local-tenant", enabled: true, providers: [{ schema: "agentspine.retrieval-provider/v1",
+        id: "mnemo:acceptance", adapter: "mnemo-command/v1", required: true, failClosed: true,
+        timeoutMs: 2000, command: process.execPath, args: [adapterPath], credentialEnv: [] }]
+    } });
     const entities = [
       ["person:freja", "person", "Freja Åström"],
       ["person:lucia", "person", "Lucía Ortega"],
@@ -109,6 +132,22 @@ export async function runVisibleAcceptance() {
       prompt: "Responde siempre de forma clara y breve."
     });
     requireCondition(swedish.signal?.accepted && spanish.signal?.accepted, "multilingual style signals were not accepted");
+    requireCondition(swedish.preflight?.briefing.instructions.some((item) => item.content === sources["CLAUDE.md"]),
+      "mandatory CLAUDE.md bytes were not present before the turn");
+    requireCondition(swedish.preflight?.briefing.retrieval[0]?.items[0]?.id === "mnemo:aurora-finding",
+      "required Mnemo retrieval was not present before the turn");
+    await rm(adapterPath);
+    const blockedRecall = await runHook({
+      hook_event_name: "UserPromptSubmit", host: "claude", cwd: projectRoot,
+      entity_id: "person:freja", project_id: "project:aurora", task_id: "task:aurora",
+      session_id: "session:freja:blocked", event_id: "prompt:freja:blocked", timestamp: "2031-04-05T09:00:30.000Z",
+      prompt: "Det här svaret får inte skapas utan minne."
+    });
+    requireCondition(blockedRecall.blocked && blockedRecall.failedClosed, "missing required recall did not block the turn");
+    await writeFile(adapterPath, adapterSource, "utf8");
+    addCheck(checks, "pre-answer-recall", "Verpflichtender Pre-Answer-Recall",
+      "Vollständige CLAUDE.md und Mnemo wurden vor dem Turn geladen; fehlendes Mnemo blockierte sichtbar.",
+      [swedish.preflight.receipt.id, swedish.preflight.receipt.briefingDigest, blockedRecall.blocked]);
     addCheck(checks, "languages", "Mehrsprachige Stilkontinuität", "Schwedische und spanische Stilwünsche wurden nach Opt-in minimal und belegt angenommen.", [swedish.signal.learningId, spanish.signal.learningId]);
 
     await runHook({

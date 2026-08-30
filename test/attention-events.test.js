@@ -51,7 +51,7 @@ async function fixture(t) {
 }
 
 const scope = {
-  entity_id: "person:alpha", project_id: "project:alpha", task_id: "task:alpha"
+  entity_id: "person:alpha", project_id: "project:alpha", task_id: "task:alpha", session_id: "session:test"
 };
 
 test("native prompt hooks persist a scoped promise and inject it after restart and compaction without MCP", async (t) => {
@@ -68,7 +68,8 @@ test("native prompt hooks persist a scoped promise and inject it after restart a
     session_id: "session:one", event_id: "prompt:promise", timestamp: "2027-01-01T10:00:00.000Z",
     prompt: "Ich werde die synthetische Übergabe morgen prüfen."
   });
-  assert.equal(duplicate.attentionEvent.duplicate, true);
+  assert.equal(duplicate.blocked, true);
+  assert.match(duplicate.reason, /delivery replay/);
 
   for (const [event, host, sessionId] of [
     ["SessionStart", "claude", "session:two"], ["PostCompact", "codex", "session:three"]
@@ -198,6 +199,7 @@ test("automatic event capture rejects secrets, rights, identity claims, and grou
   const group = await runHook({
     hook_event_name: "UserPromptSubmit", host: "claude", cwd: root,
     entity_id: "person:alpha", group_id: "group:alpha", project_id: "project:alpha", task_id: "task:group",
+    session_id: "session:group",
     event_id: "prompt:private-group", prompt: "Ich werde private Gruppeninhalte zusammenfassen."
   });
   assert.equal(group.attentionEvent.event, null);

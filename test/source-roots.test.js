@@ -91,6 +91,7 @@ test("installed lifecycle resolves host-native user, project, and memory roots w
   const before = Object.fromEntries(await Promise.all([...files.keys()].map(async (path) => [path, hash(await readFile(path))])));
   const learned = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude", cwd: projectA,
     transcript_path: join(claudeHome, "projects", "project-a", "session.jsonl"), event_id: "live-root:style",
+    session_id: "session:live-root",
     prompt: "Bitte antworte immer menschlich und ruhig." });
   assert.ok(learned.signal, learned.error || learned.context);
   assert.equal(learned.signal.accepted, true);
@@ -182,6 +183,7 @@ test("BLUN lifecycle uses BLUN_HOME as the isolated Codex-compatible host profil
   const learned = await runHook({
     hook_event_name: "UserPromptSubmit",
     cwd: project,
+    session_id: "session:blun",
     event_id: "blun:prompt:one",
     prompt: [{ type: "text", text: "Bitte antworte immer menschlich und ruhig." }]
   });

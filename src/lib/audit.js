@@ -21,6 +21,7 @@ import { gatewayHealthFindings, gatewayRuntimeFindings, inspectGatewayRuntime } 
 import { fileURLToPath } from "node:url";
 import { checkHosts } from "../../scripts/check-hosts.js";
 import { resolveHostSourceCatalog } from "./source-roots.js";
+import { preflightStatus } from "./preflight.js";
 
 function gate(id, name, ok, detail, severity = "error") {
   return { id, name, ok, severity, detail };
@@ -73,6 +74,9 @@ function forbiddenEntityKeys(graph) {
 }
 
 export async function runAudit(root = process.cwd(), { host = null } = {}) {
+  let preflight = null;
+  let preflightError = null;
+  try { preflight = await preflightStatus(); } catch (error) { preflightError = error.message; }
   let sourceResolution = null;
   let sourceResolutionError = null;
   let resolvedHostSources = null;
@@ -270,7 +274,9 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
     gate(4, "Native hierarchy", nativeMapped.every((document) => document.hosts.length > 0), `${nativeMapped.length} host-native documents mapped`),
     gate(5, "Link integrity", brokenLinks.length === 0, brokenLinks.length ? `${brokenLinks.length} broken Markdown links` : "All indexed Markdown links resolve"),
     gate(6, "Conflict visibility", Array.isArray(catalog.conflicts), `${reviewConflicts.length} precedence or classification findings exposed`, "warning"),
-    gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0 && executionPolicyIssues.length === 0 && selfstarterAuthorityIssues.length === 0 && channelPolicyIssues.length === 0 && personaPolicyIssues.length === 0 && gatewayPolicyIssues.length === 0 && sharingAuthorityIssues.length === 0, `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings; ${executionPolicyIssues.length} execution policy findings; ${selfstarterAuthorityIssues.length} self-starter authority findings; ${channelPolicyIssues.length} channel policy findings; ${personaPolicyIssues.length} persona policy findings; ${gatewayPolicyIssues.length} gateway policy findings; ${sharingAuthorityIssues.length} shared authority findings`),
+    gate(7, "Authority boundary", authority.length === 0 && forbidden.length === 0 && policyIssues.length === 0 && coordinationAuthorityIssues.length === 0 && executionPolicyIssues.length === 0 && selfstarterAuthorityIssues.length === 0 && channelPolicyIssues.length === 0 && personaPolicyIssues.length === 0 && gatewayPolicyIssues.length === 0 && sharingAuthorityIssues.length === 0 && !preflightError, preflightError
+      ? `preflight policy or receipt state failed closed: ${preflightError}`
+      : `${authority.length} context authority violations; ${forbidden.length} forbidden entity records; ${policyIssues.length} delegation policy findings; ${coordinationAuthorityIssues.length} assignment findings; ${executionPolicyIssues.length} execution policy findings; ${selfstarterAuthorityIssues.length} self-starter authority findings; ${channelPolicyIssues.length} channel policy findings; ${personaPolicyIssues.length} persona policy findings; ${gatewayPolicyIssues.length} gateway policy findings; ${sharingAuthorityIssues.length} shared authority findings; preflight ${preflight.status}`),
     gate(8, "Context privacy", privacyInvalid.length === 0 && attentionGroupInvalid.length === 0 && attentionConfigValid && attentionIssues.length === 0 && learningIssues.length === 0 && continuityIssues.length === 0 && coordinationContextIssues.length === 0 && selfstarterStateIssues.length === 0 && channelRuntimeIssues.length === 0 && personaStateIssues.length === 0 && gatewayStateIssues.length === 0 && sharingContextIssues.length === 0 && authenticationIssues.length === 0, `${graph.entities.length} entities, ${graph.entityEdges.length} relationships, ${attention.signals.length} attention cues, ${attention.events.length} lifecycle events, ${learning.candidates.length} learning records, ${continuity.signals.length} continuity signals, ${coordination.tasks.length} coordination items, ${selfstarter.jobs.length} self-starter jobs, ${channelRuntime.events.length} channel events, ${personaRuntime.personas.length} authenticated personas, ${gatewayRuntime.queue.length} gateway queue items, ${gatewayRuntime.outbox.length} delivery records, ${sharing.records.length} shared records, ${trust.records.length} trusted keys, ${registry.signers.length} local signers, and ${feedState.feeds.length} feed receipts checked`),
     gate(9, "Context budget", loadedBytes <= context.budget.maxBytes && briefingBudgetValid, briefingError
       ? `${loadedBytes}/${context.budget.maxBytes} source bytes; briefing failed closed: ${briefingError}`
@@ -303,6 +309,7 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
     trustPath,
     registryPath,
     feedStatePath,
-    sourceResolution
+    sourceResolution,
+    preflight
   };
 }

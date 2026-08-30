@@ -91,7 +91,7 @@ claude --plugin-dir .
 ```
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
-Version `0.8.0` explicitly registers `.mcp.json`, ships one native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.7.0` plugin cache. The unreleased BLUN adapter adds `blun.plugin.json` with native MCP and lifecycle registrations. Fresh-install and upgrade checks prove package containment and entrypoint behavior; actual hook discovery and trust remain host-controlled and must be inspected in the live host. Claude project memory is `MEMORY.md`-indexed, lazy, race-safe, persistently cached outside the project, and independent of unrelated file count; the live path performs no memory-directory enumeration.
+Version `0.9.0` explicitly registers `.mcp.json`, exactly one host-native hook set per host, one worker, and the `agentspine.preflight/v2` pre-answer contract. Claude uses `hooks/hooks.json`; Codex selects `hooks/codex.json` so Claude-only events never enter Codex configuration. Fresh-install and upgrade checks prove package containment and entrypoint behavior; actual hook discovery and trust remain host-controlled and must be inspected in the live host. Claude project memory is `MEMORY.md`-indexed, lazy, race-safe, persistently cached outside the project, and independent of unrelated file count; the live path performs no memory-directory enumeration. See [pre-answer recall gate](docs/preflight-recall.md).
 
 Verify the installed registration from a checkout with:
 

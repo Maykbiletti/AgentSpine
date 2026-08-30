@@ -13,12 +13,13 @@ import {
 } from "./lib/selfstarter.js";
 import { claimChannelEvent } from "./lib/channel-runtime.js";
 import { syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
+import { captureMustRememberPrompt, recordPreflightFailure, runPreflight, verifyPreflightReceipt } from "./lib/preflight.js";
 import { isMainModule } from "./lib/runtime.js";
 
 const MAX_STDIN_BYTES = 64 * 1024;
 const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
 const KNOWN_EVENTS = new Set([
-  ...CONTEXT_EVENTS, "PreToolUse", "PostToolUse", "Stop", "SubagentStop"
+  ...CONTEXT_EVENTS, "InstructionsLoaded", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"
 ]);
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
 const ATTENTION_WRITE_EVENTS = new Set(["UserPromptSubmit", "PostToolUse", "Stop", "SubagentStop"]);
@@ -109,7 +110,7 @@ async function runtimeScope(input, root, userStateRoot = null) {
   };
 }
 
-function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null, channelEvent = null, sourceDiagnostics = null) {
+function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null, channelEvent = null, sourceDiagnostics = null, preflight = null) {
   const loaded = sourceDiagnostics?.status === "loaded";
   const packet = {
     schema: "agentspine.hook-context/v1",
@@ -175,6 +176,23 @@ function renderContext(event, catalog, briefing, signal = null, attentionEvent =
     } : null,
     indexedSources: catalog.summary.total,
     sourceResolution: sourceDiagnostics,
+    preflight: preflight ? {
+      schema: preflight.receipt.schema,
+      receiptId: preflight.receipt.id,
+      promptDigest: preflight.receipt.promptDigest,
+      briefingDigest: preflight.receipt.briefingDigest,
+      createdAt: preflight.receipt.createdAt,
+      expiresAt: preflight.receipt.expiresAt,
+      policy: preflight.policy,
+      pendingMustRemember: preflight.pendingMustRemember ? {
+        id: preflight.pendingMustRemember.candidate?.id || null,
+        status: preflight.pendingMustRemember.candidate?.status || (preflight.pendingMustRemember.rejected ? "rejected" : null),
+        reason: preflight.pendingMustRemember.reason || null
+      } : null,
+      briefing: preflight.briefing,
+      instruction: "This exact turn passed the mandatory pre-answer gate. Apply the complete preflight briefing before answering.",
+      authority: "preflight-proof-only"
+    } : null,
     briefing,
     authority: "context-only"
   };
@@ -459,21 +477,54 @@ function deny(reason) {
   })}\n`);
 }
 
+function blockPrompt(reason) {
+  process.stdout.write(`${JSON.stringify({
+    decision: "block",
+    reason,
+    hookSpecificOutput: { hookEventName: "UserPromptSubmit", decision: "block", reason }
+  })}\n`);
+}
+
 export async function runHook(payload = null) {
   const input = payload || await readStdin();
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("hook input must be one JSON object");
   const event = input.hook_event_name || input.event_name || "";
   if (!KNOWN_EVENTS.has(event)) throw new Error(`unsupported hook event: ${event || "missing"}`);
+  if (event === "InstructionsLoaded") {
+    const file = input.file_path;
+    if (typeof file !== "string" || !file || !["User", "Project", "Local", "Managed"].includes(input.memory_type)
+      || !["session_start", "nested_traversal", "path_glob_match", "include", "compact"].includes(input.load_reason)) {
+      throw new Error("InstructionsLoaded payload is invalid");
+    }
+    if (payload) return { blocked: false, observed: true };
+    process.stdout.write("{}\n");
+    return;
+  }
   const cwd = await canonicalPath(input.cwd || process.cwd());
   const host = hostFromInput(input);
+  const instructionHost = host === "generic" ? input.instruction_host : host;
+  if (host === "generic" && !["claude", "codex"].includes(instructionHost)) {
+    const reason = "AgentSpine generic hosts must bind instruction_host to claude or codex";
+    if (event === "UserPromptSubmit") {
+      if (payload) return { blocked: true, failedClosed: true, reason };
+      blockPrompt(reason);
+      return;
+    }
+    throw new Error(reason);
+  }
   let resolvedSources;
   try {
-    resolvedSources = await resolveHostSourceCatalog({ host, cwd, input });
+    resolvedSources = await resolveHostSourceCatalog({ host: instructionHost, cwd, input });
   } catch (error) {
     const reason = `AgentSpine source resolution failed closed: ${error.message}`;
     if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
       if (payload) return { blocked: true, failedClosed: true, reason };
       deny(reason);
+      return;
+    }
+    if (event === "UserPromptSubmit") {
+      if (payload) return { blocked: true, failedClosed: true, reason };
+      blockPrompt(reason);
       return;
     }
     const context = JSON.stringify({
@@ -580,6 +631,7 @@ export async function runHook(payload = null) {
 
   if (CONTEXT_EVENTS.has(event)) {
     let signal = null;
+    let preflight = null;
     try {
       await syncPersonaRosterFromEnvironment({ root, env: process.env, now: input.timestamp || new Date() });
       scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot);
@@ -588,6 +640,15 @@ export async function runHook(payload = null) {
       if (selfstarter?.job && !scope.currentTaskId) scope.currentTaskId = selfstarter.job.taskId;
       if (event === "UserPromptSubmit") {
         const prompt = promptFromInput(input);
+        if (prompt === null) throw new Error("mandatory preflight requires the exact current prompt");
+        preflight = await runPreflight({
+          input, scope, resolvedSources, prompt, now: input.timestamp || new Date(), env: process.env
+        });
+        if (!await verifyPreflightReceipt({
+          receipt: preflight.receipt, input, scope, resolvedSources, prompt,
+          now: input.timestamp || new Date(), env: process.env
+        })) throw new Error("newly created preflight receipt failed exact turn verification");
+        preflight.pendingMustRemember = await captureMustRememberPrompt({ prompt, receipt: preflight.receipt, env: process.env });
         try {
           attentionEvent = await captureAttentionLifecycle(input, event, root, scope);
         } catch (error) {
@@ -609,17 +670,32 @@ export async function runHook(payload = null) {
         root, cwd, host: scope.host, entityId: scope.entityId, groupId: scope.groupId,
         projectId: scope.projectId, currentTaskId: scope.currentTaskId,
         includePrivate: Boolean(scope.entityId && !scope.groupId),
-        focusActive: true, includeSourceContent: !scope.groupId,
-        maxBytes: scope.config.maxBriefingBytes,
+        focusActive: true, includeSourceContent: event === "UserPromptSubmit" ? false : !scope.groupId,
+        maxBytes: event === "UserPromptSubmit" ? 4096 : scope.config.maxBriefingBytes,
         now: input.timestamp || new Date(),
         catalog, userStateRoot: resolvedSources.userStateRoot, sourceDiagnostics: resolvedSources.diagnostics,
         prompt: event === "UserPromptSubmit" ? promptFromInput(input) : null
       });
-      const context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, resolvedSources.diagnostics);
-      if (payload) return { blocked: false, context, briefing, signal, attentionEvent, channelEvent, catalogPath };
+      const context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, resolvedSources.diagnostics, preflight);
+      if (event === "UserPromptSubmit" && Buffer.byteLength(context) > 9500) {
+        throw new Error("mandatory preflight context exceeds the host hook injection limit");
+      }
+      if (event === "UserPromptSubmit" && !await verifyPreflightReceipt({
+        receipt: preflight.receipt, input, scope, resolvedSources, prompt: promptFromInput(input),
+        now: input.timestamp || new Date(), env: process.env, consume: true
+      })) throw new Error("preflight receipt could not be consumed atomically for this exact turn");
+      if (payload) return { blocked: false, context, briefing, preflight, signal, attentionEvent, channelEvent, catalogPath };
       process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
       return;
     } catch (error) {
+      if (event === "UserPromptSubmit") {
+        await recordPreflightFailure({ receiptId: preflight?.receipt?.id || null, input, host,
+          error, now: input.timestamp || new Date(), env: process.env }).catch(() => {});
+        const reason = `AgentSpine pre-answer preflight blocked this turn: ${error.message}`;
+        if (payload) return { blocked: true, failedClosed: true, reason, error: error.message, catalogPath };
+        blockPrompt(reason);
+        return;
+      }
       const context = JSON.stringify({
         schema: "agentspine.hook-context/v1", event, loaded: false, failedClosed: true,
         indexedSources: catalog.summary.total,
@@ -641,6 +717,8 @@ export async function runHook(payload = null) {
 if (isMainModule(import.meta.url)) {
   runHook().catch((error) => {
     process.stderr.write(`AgentSpine hook: ${String(error.message).slice(0, 2048)}\n`);
-    process.exitCode = 1;
+    // Claude command hooks treat exit 2 as a blocking failure. Exit 1 is
+    // fail-open, which is unsafe for malformed pre-answer payloads.
+    process.exitCode = 2;
   });
 }

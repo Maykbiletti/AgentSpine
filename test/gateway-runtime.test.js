@@ -310,8 +310,9 @@ test("startup reconciliation creates one deadline wake and health detects a sile
 test("worker wait wakes on relevant desired-state changes and ignores its own runtime file", async (t) => {
   const { root } = await fixture(t);
   const { directory } = await loadGatewayRuntime(root);
-  const eventWake = waitForGatewayWake(root, 1000);
-  setTimeout(() => { writeFile(join(directory, "attention.json"), "{}\n").catch(() => {}); }, 25);
+  const eventWake = waitForGatewayWake(root, 1000, {
+    onReady: () => { writeFile(join(directory, "attention.json"), "{}\n").catch(() => {}); }
+  });
   assert.equal(await eventWake, "event");
   const timerWake = waitForGatewayWake(root, 25, { watchFactory: (_path, _options, listener) => {
     setTimeout(() => listener("change", "gateway-runtime.json"), 10);

@@ -4,9 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-30
+
 ### Added
 
+- Mandatory `agentspine.preflight/v2` before-answer receipts bound to the exact prompt, hook delivery, host, agent, user, tenant, profile, session, project, working directory, task, group, instruction identities, retrieval queries, and briefing
+- Provider-neutral `agentspine.retrieval-query/v1` and `agentspine.retrieval-result/v1` contracts with a bounded shell-free `mnemo-command/v1` reference adapter and environment-only credential names
+- Explicitly confirmed, scoped Must-Remember candidates with append-only activation, supersession, rollback, permanent local-user purge, checksums, retention, and reserved briefing priority
+- Local preflight policy, status, Must-Remember CLI and Doctor/Audit diagnostics; none of these administration surfaces are exposed through MCP
+- Claude Code `InstructionsLoaded` observability alongside the blocking `UserPromptSubmit` gate
 - BLUN King can now install AgentSpine as a native plugin with the same lifecycle hooks, MCP server, isolated app-home source resolution, and explicit plugin-install trust step as the existing Claude Code and Codex hosts
+
+### Changed
+
+- Prompt turns now carry a compact ordinary briefing plus a separately budgeted mandatory instruction and recall section, avoiding silent source truncation
+- Package, lockfile, Claude Code, Codex, marketplace, BLUN, hook-bundle, worker and preflight versions advance together to `0.9.0`
 
 ### Fixed
 
@@ -16,6 +28,15 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Windows Node 24 state writes now treat transient lock access errors as contention across every lock-backed store, retry atomic replacements with a bounded backoff, and tolerate briefly retained handles during hermetic cleanup
 - The gateway worker now canonicalizes its state directory before opening the native file watcher, avoiding the Windows libuv path assertion on differently cased or short paths
 - CI now identifies the failing check phase and annotates the exact hermetic test file or runner error, so public Windows failures can be diagnosed without access to private job logs
+
+### Security
+
+- Controlled preflight failures return the host's blocking decision and exit code 2 instead of the previous fail-open informational packet
+- Mandatory instructions are reopened without following symlinks, checked through one filehandle before and after reading, SHA-256 bound, fully injected, and rejected on replacement, deletion, scope escape, size overflow, stale identity or second receipt consumption
+- Required recall distinguishes a verified empty result from no invocation or failure; provider output is scope-bound, content-filtered and incapable of changing policy or authority
+- Receipts are short-lived, HMAC-authenticated in private external state, one-time consumable, and contain no prompt text, rule content, memory claims, credentials or transcripts
+- Receipt consumption revalidates the current instruction set, local policy revision, active critical-memory checksums and exact turn scope; aborted prepared turns are invalidated for safe retry while consumed deliveries remain replay-blocked
+- Claude-only `InstructionsLoaded` registration is physically separated from Codex's documented lifecycle event set
 
 ## [0.8.0] - 2026-08-29
 
@@ -266,7 +287,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.5.0...v0.6.0

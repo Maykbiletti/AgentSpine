@@ -10,9 +10,10 @@ async function json(relativePath) {
 }
 
 test("package and host manifests keep one release version", async () => {
-  const [pkg, lock, blun, claude, codex, marketplace, hooks, hookVersion] = await Promise.all([
+  const [pkg, lock, blun, claude, codex, marketplace, hooks, codexHooks, hookVersion] = await Promise.all([
     json("package.json"), json("package-lock.json"), json("blun.plugin.json"),
-    json(".claude-plugin/plugin.json"), json(".codex-plugin/plugin.json"), json(".claude-plugin/marketplace.json"), json("hooks/hooks.json"), json("hooks/version.json")
+    json(".claude-plugin/plugin.json"), json(".codex-plugin/plugin.json"), json(".claude-plugin/marketplace.json"),
+    json("hooks/hooks.json"), json("hooks/codex.json"), json("hooks/version.json")
   ]);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[""].version, pkg.version);
@@ -22,6 +23,8 @@ test("package and host manifests keep one release version", async () => {
   assert.equal(marketplace.plugins[0].version, pkg.version);
   assert.equal(hookVersion.version, pkg.version);
   assert.deepEqual(Object.keys(hooks).sort(), ["description", "hooks"]);
+  assert.deepEqual(Object.keys(codexHooks).sort(), ["description", "hooks"]);
+  assert.equal(Object.hasOwn(codexHooks.hooks, "InstructionsLoaded"), false);
   assert.notEqual(pkg.version, "0.1.0");
   assert.equal(pkg.engines.node, ">=20.9.0");
 });
@@ -32,6 +35,7 @@ test("host registrations launch the same provider-neutral MCP implementation", a
   ]);
   assert.equal(claude.mcpServers, "./.mcp.json");
   assert.equal(claude.hooks, undefined);
+  assert.equal(codex.hooks, "./hooks/codex.json");
   assert.deepEqual(claudeMcp.mcpServers["agent-spine"].args, ["${CLAUDE_PLUGIN_ROOT}/src/mcp.js"]);
   assert.deepEqual(blun.mcpServers["agent-spine"].args, ["./src/mcp.js"]);
   assert.deepEqual(codex.mcpServers["agent-spine"].args, ["${PLUGIN_ROOT}/src/mcp.js"]);
@@ -51,10 +55,10 @@ test("BLUN, Claude, and Codex registrations complete a real MCP initialize hands
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
-  assert.equal(result.version, "0.8.0");
+  assert.equal(result.version, "0.9.0");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
   assert.deepEqual(result.hookDiscovery, {
-    blun: "plugin-manifest", claude: "default-hooks-directory", codex: "default-hooks-directory",
+    blun: "plugin-manifest", claude: "default-hooks-directory", codex: "plugin-manifest",
     trust: "host-user-required", liveTrustVerified: false
   });
   assert.equal(result.hooks.blun.events.includes("PreToolUse"), true);
@@ -79,8 +83,13 @@ test("staged install, stale-cache upgrade, and uninstall preserve one bundle and
     { event: "SessionStart", host: "codex" }
   );
   assert.ok(result.automaticBriefing.upgrade.sources >= 1, "the staged project source is included");
-  assert.deepEqual(result.automaticAttention.fresh, { captured: "promise", restarted: ["promise"] });
-  assert.deepEqual(result.automaticAttention.upgrade, { captured: "promise", restarted: ["promise"] });
+  for (const installed of [result.automaticAttention.fresh, result.automaticAttention.upgrade]) {
+    assert.equal(installed.captured, "promise");
+    assert.deepEqual(installed.restarted, ["promise"]);
+    assert.equal(installed.preflight.schema, "agentspine.preflight/v2");
+    assert.match(installed.preflight.receiptId, /^preflight:/);
+    assert.equal(installed.preflight.instructions >= 1, true);
+  }
   assert.deepEqual(result.automaticSelfstarter.fresh, { started: "start", resumed: "resume", checkpointSequence: 1, mcpCalls: 0 });
   assert.deepEqual(result.automaticSelfstarter.upgrade, { started: "start", resumed: "resume", checkpointSequence: 1, mcpCalls: 0 });
   for (const installed of [result.automaticChannelWake.fresh, result.automaticChannelWake.upgrade]) {
@@ -99,8 +108,8 @@ test("staged install, stale-cache upgrade, and uninstall preserve one bundle and
     assert.equal(installed.mcpCalls, 0);
   }
   for (const installed of [result.visibleAcceptance.fresh, result.visibleAcceptance.upgrade]) {
-    assert.equal(installed.passed, 14);
-    assert.equal(installed.total, 14);
+    assert.equal(installed.passed, 15);
+    assert.equal(installed.total, 15);
     assert.equal(installed.mcpCalls, 0);
     assert.deepEqual(installed.hosts, ["claude", "codex"]);
     assert.deepEqual(installed.languages, ["sv-SE", "es-ES"]);

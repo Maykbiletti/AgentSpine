@@ -25,11 +25,7 @@ async function validateEntrypoint(root, value) {
   assert(metadata.isFile(), "MCP entrypoint must be a regular file");
 }
 
-function validateHooks(root, hooks) {
-  const required = [
-    "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-    "PreCompact", "PostCompact", "Stop", "SubagentStop"
-  ];
+function validateHooks(root, hooks, { required, commandRoot }) {
   assert(hooks && typeof hooks === "object" && !Array.isArray(hooks), "hook bundle is missing");
   assert(Object.keys(hooks).every((key) => ["description", "hooks"].includes(key)), "hook bundle contains unsupported top-level metadata");
   assert(hooks.description && typeof hooks.description === "string", "hook bundle description is missing");
@@ -39,7 +35,7 @@ function validateHooks(root, hooks) {
     assert(Array.isArray(registrations[0].hooks) && registrations[0].hooks.length === 1, `${event} must have exactly one hook command`);
     const command = registrations[0].hooks[0];
     assert(command.type === "command", `${event} must use a command hook`);
-    assert(command.command === 'node "${CLAUDE_PLUGIN_ROOT}/src/hook.js"', `${event} must use the bundled lifecycle adapter`);
+    assert(command.command === `node "\${${commandRoot}}/src/hook.js"`, `${event} must use the bundled lifecycle adapter`);
     assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} timeout is unsafe`);
   }
   const extras = Object.keys(hooks.hooks || {}).filter((event) => !required.includes(event));
@@ -133,27 +129,33 @@ async function initializeServer({ label, root, variable, server, version }) {
 
 export async function checkHosts(root = process.cwd()) {
   root = resolve(root);
-  const [pkg, blunManifest, claudeManifest, claudeMcp, codexManifest, hooks, hookVersion] = await Promise.all([
+  const [pkg, blunManifest, claudeManifest, claudeMcp, codexManifest, claudeHooks, codexHooks, hookVersion] = await Promise.all([
     json(root, "package.json"),
     json(root, "blun.plugin.json"),
     json(root, ".claude-plugin/plugin.json"),
     json(root, ".mcp.json"),
     json(root, ".codex-plugin/plugin.json"),
     json(root, "hooks/hooks.json"),
+    json(root, "hooks/codex.json"),
     json(root, "hooks/version.json")
   ]);
   assert(blunManifest.version === pkg.version && claudeManifest.version === pkg.version && codexManifest.version === pkg.version,
     "host manifests must use the package cache version");
   assert(hookVersion.schema === "agentspine.hook-bundle/v1" && hookVersion.version === pkg.version,
     "hook bundle version must match the package cache version");
-  assert(hookVersion.contract === "agentspine.lifecycle/v1", "hook bundle lifecycle contract is missing");
+  assert(hookVersion.contract === "agentspine.preflight/v2", "hook bundle preflight contract is missing");
   assert(pkg.bin?.["agentspine-worker"] === "./src/worker.js", "package must register exactly one gateway worker entrypoint");
   await validateEntrypoint(root, resolve(root, pkg.bin["agentspine-worker"]));
   assert(claudeManifest.mcpServers === "./.mcp.json", "Claude manifest must explicitly reference ./.mcp.json");
   assert(claudeManifest.hooks === undefined, "default hooks/hooks.json must not also be registered through a supplemental manifest path");
+  assert(codexManifest.hooks === "./hooks/codex.json", "Codex must select its host-native hook event set explicitly");
   assert(claudeMcp.mcpServers && Object.keys(claudeMcp.mcpServers).length === 1, "Claude MCP file must contain one mcpServers registration");
   assert(codexManifest.mcpServers && Object.keys(codexManifest.mcpServers).length === 1, "Codex manifest must contain one MCP registration");
-  const hookInventory = validateHooks(root, hooks);
+  const commonEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PreCompact", "PostCompact", "Stop", "SubagentStop"];
+  const claudeHookInventory = validateHooks(root, claudeHooks, {
+    required: [...commonEvents, "InstructionsLoaded"], commandRoot: "CLAUDE_PLUGIN_ROOT"
+  });
+  const codexHookInventory = validateHooks(root, codexHooks, { required: commonEvents, commandRoot: "PLUGIN_ROOT" });
   const blunHookInventory = validateBlunHooks(root, blunManifest.hooks);
   const registrations = await Promise.all([
     initializeServer({ label: "blun", root, variable: "BLUN_PLUGIN_ROOT", server: blunManifest.mcpServers["agent-spine"], version: pkg.version }),
@@ -162,9 +164,9 @@ export async function checkHosts(root = process.cwd()) {
   ]);
   return {
     ok: true, root, version: pkg.version, registrations,
-    hooks: { blun: blunHookInventory, claude: hookInventory, codex: hookInventory },
+    hooks: { blun: blunHookInventory, claude: claudeHookInventory, codex: codexHookInventory },
     hookDiscovery: {
-      blun: "plugin-manifest", claude: "default-hooks-directory", codex: "default-hooks-directory",
+      blun: "plugin-manifest", claude: "default-hooks-directory", codex: "plugin-manifest",
       trust: "host-user-required", liveTrustVerified: false
     },
     worker: { entrypoint: pkg.bin["agentspine-worker"], setsPerInstall: 1 },

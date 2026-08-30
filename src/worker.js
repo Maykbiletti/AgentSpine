@@ -12,7 +12,7 @@ import { isMainModule } from "./lib/runtime.js";
 const MAX_FRAME = 64 * 1024;
 const WAKE_FILES = new Set(["attention.json", "channel-runtime.json", "gateway-policy.json", "persona-policy.json", "persona-runtime.json"]);
 
-export async function waitForGatewayWake(root, delayMs, { watchFactory = watch, realpathFactory = realpath } = {}) {
+export async function waitForGatewayWake(root, delayMs, { watchFactory = watch, realpathFactory = realpath, onReady = null } = {}) {
   const delay = Math.max(250, Math.min(60000, Number(delayMs) || 60000));
   const { directory } = await loadGatewayRuntime(root);
   let watchPath;
@@ -32,6 +32,7 @@ export async function waitForGatewayWake(root, delayMs, { watchFactory = watch, 
         if (name === null || WAKE_FILES.has(name)) finish("event");
       });
       watcher.on?.("error", () => finish("watch-error"));
+      onReady?.(watchPath);
     } catch { finish("watch-unavailable"); }
   });
 }

@@ -17,11 +17,11 @@ test("release check validates every host version and the exact safe package boun
   const source = await readFile(join(root, "AGENTS.md"));
   const before = sha(source);
   const result = await releaseCheck({
-    root, tag: "v0.8.0", allowDirty: true, skipPack: false, json: true
+    root, tag: "v0.9.0", allowDirty: true, skipPack: false, json: true
   });
   assert.equal(result.ok, true);
-  assert.equal(result.version, "0.8.0");
-  assert.equal(result.package.filename, "agent-spine-0.8.0.tgz");
+  assert.equal(result.version, "0.9.0");
+  assert.equal(result.package.filename, "agent-spine-0.9.0.tgz");
   assert.match(result.package.integrity, /^sha512-/);
   assert.equal(result.package.files > 40, true);
   assert.equal(sha(await readFile(join(root, "AGENTS.md"))), before);
@@ -45,7 +45,7 @@ test("release check fails closed when one host manifest has a different version"
   await writeFile(join(fixture, ".codex-plugin", "plugin.json"), JSON.stringify({ version: "1.2.3" }));
   await writeFile(join(fixture, ".claude-plugin", "marketplace.json"), JSON.stringify({ plugins: [{ version: "1.2.3" }] }));
   await writeFile(join(fixture, "hooks", "version.json"), JSON.stringify({
-    schema: "agentspine.hook-bundle/v1", version: "1.2.3", contract: "agentspine.lifecycle/v1"
+    schema: "agentspine.hook-bundle/v1", version: "1.2.3", contract: "agentspine.preflight/v2"
   }));
   await writeFile(join(fixture, "CHANGELOG.md"), "## [1.2.3] - 2030-01-01\n");
   await assert.rejects(releaseCheck({

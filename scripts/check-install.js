@@ -38,16 +38,16 @@ async function makePreviousCache(target) {
   for (const path of ["package.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
     const file = join(target, path);
     const value = JSON.parse(await readFile(file, "utf8"));
-    value.version = "0.7.0";
+    value.version = "0.8.0";
     await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   }
   const marketplacePath = join(target, ".claude-plugin/marketplace.json");
   const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
-  marketplace.plugins[0].version = "0.7.0";
+  marketplace.plugins[0].version = "0.8.0";
   await writeFile(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
   const hookVersionPath = join(target, "hooks/version.json");
   const hookVersion = JSON.parse(await readFile(hookVersionPath, "utf8"));
-  hookVersion.version = "0.7.0";
+  hookVersion.version = "0.8.0";
   await writeFile(hookVersionPath, `${JSON.stringify(hookVersion, null, 2)}\n`, "utf8");
 }
 
@@ -83,7 +83,7 @@ async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, pay
         const protocol = JSON.parse(stdout.trim());
         const context = JSON.parse(protocol.hookSpecificOutput?.additionalContext || "null");
         if (requireBriefing && (context?.briefing?.host !== host || !Array.isArray(context?.briefing?.sources?.documents))) {
-          throw new Error(`${host} installed hook did not inject a real session briefing`);
+          throw new Error(`${host} installed hook did not inject a real session briefing: ${protocol.reason || context?.error || context?.sourceResolution?.reason || "missing context"}`);
         }
         resolveResult({
           event: protocol.hookSpecificOutput?.hookEventName || payload?.hook_event_name || null, host,
@@ -97,6 +97,7 @@ async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, pay
           selfstarter: context?.selfstarter || null,
           channelEvent: context?.channelEvent || null,
           voiceBrief: context?.briefing?.voiceBrief || null,
+          preflight: context?.preflight || null,
           decision: protocol.decision || null,
           reason: protocol.reason || null
         });
@@ -305,7 +306,7 @@ async function invokeInstalledAttention(pluginRoot, projectRoot, stateRoot, host
   await prepareInstalledAttention(pluginRoot, projectRoot, stateRoot);
   const shared = {
     cwd: projectRoot, host, entity_id: "person:install",
-    project_id: "project:install", task_id: "task:install"
+    project_id: "project:install", task_id: "task:install", session_id: `session:installed-${host}-attention`
   };
   const captured = await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
     ...shared, hook_event_name: "UserPromptSubmit", event_id: "install:promise",
@@ -317,7 +318,9 @@ async function invokeInstalledAttention(pluginRoot, projectRoot, stateRoot, host
   if (captured.capturedAttentionKind !== "promise" || !restarted.attentionKinds.includes("promise")) {
     throw new Error(`${host} installed hooks did not persist and inject an attention event`);
   }
-  return { captured: captured.capturedAttentionKind, restarted: restarted.attentionKinds };
+  return { captured: captured.capturedAttentionKind, restarted: restarted.attentionKinds,
+    preflight: captured.preflight ? { schema: captured.preflight.schema,
+      receiptId: captured.preflight.receiptId, instructions: captured.preflight.briefing?.instructions?.length || 0 } : null };
 }
 
 async function prepareInstalledChannelWake(pluginRoot, projectRoot, stateRoot) {
@@ -465,7 +468,10 @@ export async function checkInstall(root = process.cwd()) {
     const source = join(userProject, "SOUL.md");
     await mkdir(userProject, { recursive: true });
     await writeFile(source, "# Existing soul\n\nNever modify me.\n", "utf8");
-    const sourceHash = hash(await readFile(source));
+    await writeFile(join(userProject, "CLAUDE.md"), "# Installed Claude rules\n\nLoad this before every answer.\n", "utf8");
+    await writeFile(join(userProject, "AGENTS.md"), "# Installed Codex rules\n\nLoad this before every answer.\n", "utf8");
+    const protectedInstallSources = [source, join(userProject, "CLAUDE.md"), join(userProject, "AGENTS.md")];
+    const sourceHashes = new Map(await Promise.all(protectedInstallSources.map(async (path) => [path, hash(await readFile(path))])));
 
     const fresh = join(workspace, "fresh", "agent-spine");
     await copyBundle(root, fresh);
@@ -508,7 +514,9 @@ export async function checkInstall(root = process.cwd()) {
 
     await removeTree(fresh);
     await removeTree(installed);
-    if (hash(await readFile(source)) !== sourceHash) throw new Error("install or uninstall changed an existing source Markdown file");
+    for (const [path, expected] of sourceHashes) {
+      if (hash(await readFile(path)) !== expected) throw new Error("install or uninstall changed an existing source Markdown file");
+    }
     return {
       ok: true,
       version: upgraded.version,

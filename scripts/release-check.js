@@ -8,8 +8,9 @@ const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?
 const REQUIRED_PACKAGE_FILES = [
   "blun.plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".mcp.json",
   "CHANGELOG.md", "LICENSE", "README.md", "bin/agentspine.js", "bin/agentspine-mcp.js",
-  "docs/acceptance.md", "docs/source-roots.md", "docs/preservation-contract.md", "scripts/run-acceptance.js",
-  "skills/agent-spine/SKILL.md", "src/index.js", "src/mcp.js", "src/worker.js", "hooks/version.json"
+  "docs/acceptance.md", "docs/source-roots.md", "docs/preflight-recall.md", "docs/preservation-contract.md", "scripts/run-acceptance.js",
+  "skills/agent-spine/SKILL.md", "src/index.js", "src/mcp.js", "src/worker.js",
+  "hooks/hooks.json", "hooks/codex.json", "hooks/version.json"
 ];
 const FORBIDDEN_PACKAGE_PATHS = [
   /(?:^|\/)\.env(?:\.|$)/i,

@@ -53,6 +53,11 @@ import {
 import { VERSION } from "./version.js";
 import { isMainModule } from "./lib/runtime.js";
 import { scanIndexedMemoryOrphans } from "./lib/indexed-memory-offline.js";
+import {
+  configurePreflightPolicy, confirmMustRemember, preflightStatus, proposeMustRemember,
+  purgeMustRemember, rollbackMustRemember
+} from "./lib/preflight.js";
+import { readFile } from "node:fs/promises";
 
 function parse(argv) {
   const [command = "help", ...rest] = argv;
@@ -122,6 +127,12 @@ Usage:
   agentspine continuity-config [root] [--enabled true|false] [--entity id] [--project id] [--confirm-local-opt-in]
   agentspine continuity-status [root]
   agentspine continuity-purge <entity-id> [--root path] --confirm-local-purge
+  agentspine preflight-policy <policy.json> --confirm-local-policy
+  agentspine preflight-status
+  agentspine remember-propose --claim text --user id --tenant id [--project id] [--group id] [--task id]
+  agentspine remember-confirm <candidate-id> [--supersedes id] --confirm-local-user
+  agentspine remember-rollback <id> --confirm-local-user
+  agentspine remember-purge <id> --confirm-local-purge
   agentspine source-status --host claude|codex [--cwd path]
   agentspine doctor --host claude [--cwd path] [--offline-memory-orphans]
   agentspine source-bind <state-root> --host all|claude|codex --scope state-user --project path --host-home path --confirm-local-binding
@@ -472,6 +483,36 @@ export async function run(argv = process.argv.slice(2)) {
       root: flags.root || process.cwd(), subjectId: positional[0],
       confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-confirmed" : null
     }), json);
+  }
+
+  if (command === "preflight-policy") {
+    if (!positional[0]) throw new Error("preflight-policy requires one local JSON policy file");
+    const profile = JSON.parse(await readFile(positional[0], "utf8"));
+    return output(await configurePreflightPolicy({ profile,
+      confirmation: booleanFlag(flags["confirm-local-policy"]) ? "local-owner-confirmed" : null }), json);
+  }
+
+  if (command === "preflight-status") return output(await preflightStatus(), json);
+
+  if (command === "remember-propose") {
+    return output(await proposeMustRemember({ claim: flags.claim, kind: flags.kind || "critical",
+      userId: flags.user, tenantId: flags.tenant, projectId: flags.project || null,
+      groupId: flags.group || null, taskId: flags.task || null, sourceDigest: flags["source-digest"] || null }), json);
+  }
+
+  if (command === "remember-confirm") {
+    return output(await confirmMustRemember({ candidateId: positional[0], supersedes: flags.supersedes || null,
+      confirmation: booleanFlag(flags["confirm-local-user"]) ? "local-user-confirmed" : null }), json);
+  }
+
+  if (command === "remember-rollback") {
+    return output(await rollbackMustRemember({ id: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-user"]) ? "local-user-confirmed" : null }), json);
+  }
+
+  if (command === "remember-purge") {
+    return output(await purgeMustRemember({ id: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null }), json);
   }
 
   if (command === "source-status") {
@@ -909,6 +950,9 @@ export async function run(argv = process.argv.slice(2)) {
       }
       catch (error) { sourceResolution = { status: "failed-closed", reason: error.message }; }
     }
+    let preflight;
+    try { preflight = await preflightStatus(); }
+    catch (error) { preflight = { status: "failed-closed", error: error.message }; }
     const result = {
       ok: Number(process.versions.node.split(".")[0]) >= 20 && hostIntegration.ok
         && (!sourceResolution || sourceResolution.status === "loaded"),
@@ -919,7 +963,8 @@ export async function run(argv = process.argv.slice(2)) {
       stateDirectory: process.env.AGENTSPINE_STATE_DIR || "platform-default",
       hostIntegration,
       sourceResolution,
-      orphanScan
+      orphanScan,
+      preflight
     };
     output(result, json);
     if (!result.ok) process.exitCode = 1;

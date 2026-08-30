@@ -49,6 +49,12 @@ export {
 } from "./lib/gateway-runtime.js";
 export { createTelegramAdapter } from "./lib/telegram-adapter.js";
 export { evaluateVoiceOutput, voiceCue } from "./lib/voice-runtime.js";
+export {
+  MUST_REMEMBER_SCHEMA, PREFLIGHT_POLICY_SCHEMA, PREFLIGHT_SCHEMA, RETRIEVAL_QUERY_SCHEMA,
+  RETRIEVAL_RESULT_SCHEMA, captureMustRememberPrompt, configurePreflightPolicy, confirmMustRemember, preflightStatus,
+  recordPreflightFailure,
+  proposeMustRemember, purgeMustRemember, rollbackMustRemember, runPreflight, verifyPreflightReceipt
+} from "./lib/preflight.js";
 export { runWorker, runWorkerTick } from "./worker.js";
 export {
   configureSharing, deleteShared, initDirectoryAdapter, inspectSharing, loadSharing,

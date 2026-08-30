@@ -64,7 +64,7 @@ test("installed BLUN hook keeps the full briefing out of the runtime message", a
     cwd: root,
     state,
     blunHome,
-    input: { hook_event_name: "UserPromptSubmit", cwd: root, prompt: [{ type: "text", text: "Hallo" }] }
+    input: { hook_event_name: "UserPromptSubmit", cwd: root, session_id: "session:blun", prompt: [{ type: "text", text: "Hallo" }] }
   });
   assert.equal(
     output.hookSpecificOutput.message,
@@ -80,14 +80,16 @@ test("installed BLUN hook keeps the full briefing out of the runtime message", a
     state,
     blunHome,
     blun: false,
-    input: { hook_event_name: "UserPromptSubmit", host: "codex", cwd: root, prompt: [{ type: "text", text: "Hallo" }] }
+    input: { hook_event_name: "UserPromptSubmit", host: "codex", cwd: root, session_id: "session:codex", prompt: [{ type: "text", text: "Hallo" }] }
   });
   assert.equal("message" in compatibleOutput.hookSpecificOutput, false);
   const detailedBytes = Buffer.byteLength(compatibleOutput.hookSpecificOutput.additionalContext);
-  assert.equal(detailedBytes > 10 * 1024, true, `expected a large detailed briefing, got ${detailedBytes} bytes`);
+  assert.equal(detailedBytes <= 9500, true, `preflight context exceeded the hard host injection budget: ${detailedBytes} bytes`);
   const detailed = JSON.parse(compatibleOutput.hookSpecificOutput.additionalContext);
   assert.equal(detailed.briefing.host, "codex");
-  assert.equal(detailed.briefing.sources.documents[0].content, rules);
+  assert.equal(detailed.briefing.sources.documents[0].content, null);
+  assert.equal(detailed.preflight.schema, "agentspine.preflight/v2");
+  assert.equal(detailed.preflight.briefing.instructions[0].content, rules);
 });
 
 test("compact BLUN runtime context preserves active execution and authenticated channel signals", () => {
@@ -263,4 +265,21 @@ test("PreToolUse allows shell reads of a protected source", async (t) => {
     tool_input: { command: "sed -n '1,20p' AGENTS.md" }
   });
   assert.equal(result.blocked, false);
+});
+
+test("generic host preflight requires an explicit instruction-host binding", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-generic-hook-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-generic-hook-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "AGENTS.md"), "# Generic TUI rules\n", "utf8");
+  const missing = await runHook({ hook_event_name: "UserPromptSubmit", host: "generic", cwd: root,
+    session_id: "session:generic", event_id: "turn:missing", prompt: "Continue." });
+  assert.equal(missing.blocked, true);
+  assert.match(missing.reason, /instruction_host/);
+  const ready = await runHook({ hook_event_name: "UserPromptSubmit", host: "generic", instruction_host: "codex", cwd: root,
+    session_id: "session:generic", event_id: "turn:ready", prompt: "Continue." });
+  assert.equal(ready.blocked, false);
+  assert.equal(ready.preflight.receipt.host, "generic");
+  assert.equal(ready.preflight.receipt.instructionHost, "codex");
 });

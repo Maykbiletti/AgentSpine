@@ -11,7 +11,7 @@ test("visible multilingual acceptance proves the complete automatic team-partner
   const report = await runVisibleAcceptance();
   assert.equal(report.ok, true);
   assert.equal(report.passed, report.total);
-  assert.equal(report.total, 14);
+  assert.equal(report.total, 15);
   assert.deepEqual(report.hosts, ["claude", "codex"]);
   assert.deepEqual(report.languages, ["sv-SE", "es-ES"]);
   assert.equal(report.mcpCalls, 0);
@@ -21,7 +21,8 @@ test("visible multilingual acceptance proves the complete automatic team-partner
   const visible = renderAcceptanceReport(report);
   assert.match(visible, /\[PASS\] Mehrsprachige Stilkontinuität/);
   assert.match(visible, /\[PASS\] Verweigerte Fremdwirkung/);
-  assert.match(visible, /\[PASS\] Gesamt — 14\/14 Gates/);
+  assert.match(visible, /\[PASS\] Verpflichtender Pre-Answer-Recall/);
+  assert.match(visible, /\[PASS\] Gesamt — 15\/15 Gates/);
 });
 
 test("acceptance CLI emits a reproducible machine-readable receipt", () => {
@@ -31,7 +32,7 @@ test("acceptance CLI emits a reproducible machine-readable receipt", () => {
   assert.equal(result.status, 0, result.stderr);
   const report = JSON.parse(result.stdout);
   assert.equal(report.schema, "agentspine.acceptance/v1");
-  assert.equal(report.version, "0.8.0");
-  assert.equal(report.total, 14);
+  assert.equal(report.version, "0.9.0");
+  assert.equal(report.total, 15);
   assert.equal(report.mcpCalls, 0);
 });
