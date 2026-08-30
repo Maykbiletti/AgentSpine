@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { watch } from "node:fs";
-import { realpath } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { lstat, realpath } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 import { claimGatewayWork, completeGatewayRun, deliverPrepared, failGatewayRun, loadGatewayRuntime, reconcileGateway, updateGatewayHealth } from "./lib/gateway-runtime.js";
 import { createTelegramAdapter } from "./lib/telegram-adapter.js";
 import { acknowledgeChannelDelivery, loadChannelRuntime } from "./lib/channel-runtime.js";
@@ -12,11 +12,25 @@ import { isMainModule } from "./lib/runtime.js";
 const MAX_FRAME = 64 * 1024;
 const WAKE_FILES = new Set(["attention.json", "channel-runtime.json", "gateway-policy.json", "persona-policy.json", "persona-runtime.json"]);
 
+async function wakeSnapshot(directory) {
+  return Promise.all([...WAKE_FILES].sort().map(async (name) => {
+    try {
+      const metadata = await lstat(join(directory, name), { bigint: true });
+      return `${name}:${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeNs}`;
+    } catch (error) {
+      if (error.code === "ENOENT") return `${name}:missing`;
+      throw error;
+    }
+  })).then((entries) => entries.join("\n"));
+}
+
 export async function waitForGatewayWake(root, delayMs, { watchFactory = watch, realpathFactory = realpath, onReady = null } = {}) {
   const delay = Math.max(250, Math.min(60000, Number(delayMs) || 60000));
   const { directory } = await loadGatewayRuntime(root);
   let watchPath;
   try { watchPath = await realpathFactory(directory); } catch { return "watch-unavailable"; }
+  let before;
+  try { before = await wakeSnapshot(watchPath); } catch { return "watch-unavailable"; }
   return new Promise((resolvePromise) => {
     let settled = false; let watcher;
     const finish = (reason) => {
@@ -32,7 +46,9 @@ export async function waitForGatewayWake(root, delayMs, { watchFactory = watch, 
         if (name === null || WAKE_FILES.has(name)) finish("event");
       });
       watcher.on?.("error", () => finish("watch-error"));
-      onReady?.(watchPath);
+      Promise.resolve().then(() => onReady?.(watchPath)).then(() => wakeSnapshot(watchPath)).then((after) => {
+        if (after !== before) finish("event");
+      }).catch(() => finish("watch-error"));
     } catch { finish("watch-unavailable"); }
   });
 }

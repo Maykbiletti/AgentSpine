@@ -311,7 +311,7 @@ test("worker wait wakes on relevant desired-state changes and ignores its own ru
   const { root } = await fixture(t);
   const { directory } = await loadGatewayRuntime(root);
   const eventWake = waitForGatewayWake(root, 1000, {
-    onReady: () => { writeFile(join(directory, "attention.json"), "{}\n").catch(() => {}); }
+    onReady: () => writeFile(join(directory, "attention.json"), "{}\n")
   });
   assert.equal(await eventWake, "event");
   const timerWake = waitForGatewayWake(root, 25, { watchFactory: (_path, _options, listener) => {
