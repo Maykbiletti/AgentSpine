@@ -5,14 +5,22 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runHook } from "../src/hook.js";
+import { blunRuntimeContext, runHook } from "../src/hook.js";
 
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
 
-async function runInstalledBlunHook({ cwd, state, blunHome, input }) {
+async function runInstalledHook({ cwd, state, blunHome, input, blun = true }) {
   return await new Promise((resolve, reject) => {
-    const env = { ...process.env, AGENTSPINE_STATE_DIR: state, BLUN_HOME: blunHome, BLUN_PLUGIN_ROOT: pluginRoot };
-    delete env.CODEX_HOME;
+    const env = { ...process.env, AGENTSPINE_STATE_DIR: state };
+    if (blun) {
+      env.BLUN_HOME = blunHome;
+      env.BLUN_PLUGIN_ROOT = pluginRoot;
+      delete env.CODEX_HOME;
+    } else {
+      env.CODEX_HOME = blunHome;
+      delete env.BLUN_HOME;
+      delete env.BLUN_PLUGIN_ROOT;
+    }
     delete env.PLUGIN_ROOT;
     delete env.CLAUDE_CONFIG_DIR;
     const child = spawn(process.execPath, [join(pluginRoot, "src", "hook.js")], {
@@ -35,7 +43,7 @@ async function runInstalledBlunHook({ cwd, state, blunHome, input }) {
   });
 }
 
-test("installed BLUN hook emits a clean message alongside Claude-compatible additionalContext", async (t) => {
+test("installed BLUN hook keeps the full briefing out of the runtime message", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "agentspine-blun-hook-"));
   const state = await mkdtemp(join(tmpdir(), "agentspine-blun-hook-state-"));
   const blunHome = await mkdtemp(join(tmpdir(), "agentspine-blun-home-"));
@@ -44,17 +52,94 @@ test("installed BLUN hook emits a clean message alongside Claude-compatible addi
     await rm(state, { recursive: true });
     await rm(blunHome, { recursive: true });
   });
-  await writeFile(join(root, "AGENTS.md"), "# BLUN project rules\n", "utf8");
+  const rules = "# BLUN project rules\n\nKeep this detailed project rule available on demand.\n";
+  await writeFile(join(root, "AGENTS.md"), rules, "utf8");
+  await Promise.all(Array.from({ length: 144 }, (_, index) => writeFile(
+    join(root, `reference-${String(index).padStart(3, "0")}.md`),
+    `# Reference ${index}\n\nSynthetic large-workspace evidence.\n`,
+    "utf8"
+  )));
 
-  const output = await runInstalledBlunHook({
+  const output = await runInstalledHook({
     cwd: root,
     state,
     blunHome,
     input: { hook_event_name: "UserPromptSubmit", cwd: root, prompt: [{ type: "text", text: "Hallo" }] }
   });
-  assert.equal(typeof output.hookSpecificOutput.additionalContext, "string");
-  assert.equal(output.hookSpecificOutput.message, output.hookSpecificOutput.additionalContext);
-  assert.equal(JSON.parse(output.hookSpecificOutput.message).briefing.host, "codex");
+  const runtime = JSON.parse(output.hookSpecificOutput.message);
+  assert.equal(runtime.schema, "agentspine.blun-runtime-context/v1");
+  assert.equal(runtime.event, "UserPromptSubmit");
+  assert.equal(runtime.loaded, true);
+  assert.equal(runtime.indexedSources, 145);
+  assert.equal(runtime.sourceResolution.status, "loaded");
+  assert.equal("briefing" in runtime, false);
+  assert.equal("additionalContext" in output.hookSpecificOutput, false);
+  assert.equal(Buffer.byteLength(output.hookSpecificOutput.message) <= 1024, true);
+
+  const compatibleOutput = await runInstalledHook({
+    cwd: root,
+    state,
+    blunHome,
+    blun: false,
+    input: { hook_event_name: "UserPromptSubmit", host: "codex", cwd: root, prompt: [{ type: "text", text: "Hallo" }] }
+  });
+  assert.equal("message" in compatibleOutput.hookSpecificOutput, false);
+  const detailedBytes = Buffer.byteLength(compatibleOutput.hookSpecificOutput.additionalContext);
+  assert.equal(detailedBytes > 10 * 1024, true, `expected a large detailed briefing, got ${detailedBytes} bytes`);
+  const detailed = JSON.parse(compatibleOutput.hookSpecificOutput.additionalContext);
+  assert.equal(detailed.briefing.host, "codex");
+  assert.equal(detailed.briefing.sources.documents[0].content, rules);
+});
+
+test("compact BLUN runtime context preserves active execution and authenticated channel signals", () => {
+  const selfstarter = {
+    active: true,
+    blocked: false,
+    jobId: "job:one",
+    taskId: "task:one",
+    capabilities: ["tool:Write"],
+    instruction: "Resume only this exact checkpointed job."
+  };
+  const channelEvent = {
+    active: true,
+    eventId: "telegram:update:one",
+    provider: "telegram",
+    chatId: "1605241602",
+    threadId: "0",
+    text: "Current authenticated request.",
+    instruction: "Answer this exact authenticated channel event."
+  };
+  const runtime = JSON.parse(blunRuntimeContext(JSON.stringify({
+    schema: "agentspine.hook-context/v1",
+    event: "SessionStart",
+    loaded: true,
+    indexedSources: 149,
+    sourceResolution: { status: "loaded", scopes: { project: 149 } },
+    selfstarter,
+    channelEvent,
+    briefing: { sources: { documents: Array(149).fill({ content: "large" }) } },
+    authority: "context-only"
+  })));
+  assert.deepEqual(runtime.selfstarter, selfstarter);
+  assert.deepEqual(runtime.channelEvent, channelEvent);
+  assert.equal("briefing" in runtime, false);
+  assert.deepEqual(runtime.sourceResolution, { status: "loaded", reason: null });
+});
+
+test("compact BLUN runtime context preserves a failed-closed source resolution", () => {
+  const runtime = JSON.parse(blunRuntimeContext(JSON.stringify({
+    schema: "agentspine.hook-context/v1",
+    event: "UserPromptSubmit",
+    loaded: false,
+    failedClosed: true,
+    indexedSources: 0,
+    sourceResolution: { status: "failed-closed", reason: "synthetic failure", diagnostics: "not injected" },
+    instruction: "Do not claim AgentSpine recall succeeded.",
+    authority: "context-only"
+  })));
+  assert.equal(runtime.failedClosed, true);
+  assert.deepEqual(runtime.sourceResolution, { status: "failed-closed", reason: "synthetic failure" });
+  assert.equal(runtime.instruction, "Do not claim AgentSpine recall succeeded.");
 });
 
 test("PreToolUse blocks an agent write to a protected source", async (t) => {

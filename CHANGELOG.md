@@ -10,6 +10,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Fixed
 
+- BLUN hooks now inject a compact runtime status instead of the complete session briefing on every prompt; detailed continuity remains available on demand while active attention, self-starter, and authenticated channel signals remain immediate
 - BLUN lifecycle hooks now index large real workspaces without absorbing embedded test profiles or failing at the smaller host-rule limit
 - Windows Node 24 state writes now treat transient lock access errors as contention across every lock-backed store, retry atomic replacements with a bounded backoff, and tolerate briefly retained handles during hermetic cleanup
 - The gateway worker now canonicalizes its state directory before opening the native file watcher, avoiding the Windows libuv path assertion on differently cased or short paths

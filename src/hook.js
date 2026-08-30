@@ -344,10 +344,43 @@ async function captureAttentionLifecycle(input, event, root, scope) {
   });
 }
 
+export function blunRuntimeContext(context) {
+  const detailed = JSON.parse(context);
+  const sourceResolution = detailed.sourceResolution ? {
+    status: detailed.sourceResolution.status || null,
+    reason: detailed.sourceResolution.reason || null
+  } : null;
+  const runtime = {
+    schema: "agentspine.blun-runtime-context/v1",
+    event: detailed.event,
+    loaded: Boolean(detailed.loaded),
+    failedClosed: detailed.failedClosed ? true : undefined,
+    indexedSources: detailed.indexedSources || 0,
+    sourceResolution,
+    instruction: detailed.loaded
+      ? "Detailed AgentSpine context is available on demand through session_briefing. Load it only when the current request needs continuity."
+      : detailed.instruction,
+    authority: "context-only"
+  };
+  if (detailed.signal && (detailed.signal.captured || detailed.signal.accepted || detailed.signal.reason)) {
+    runtime.signal = detailed.signal;
+  }
+  if (detailed.attentionEvent
+    && (detailed.attentionEvent.captured || detailed.attentionEvent.duplicate || detailed.attentionEvent.reason)) {
+    runtime.attentionEvent = detailed.attentionEvent;
+  }
+  if (detailed.selfstarter && (detailed.selfstarter.active || detailed.selfstarter.blocked)) {
+    runtime.selfstarter = detailed.selfstarter;
+  }
+  if (detailed.channelEvent?.active) runtime.channelEvent = detailed.channelEvent;
+  return JSON.stringify(runtime);
+}
+
 function hookOutput(event, context) {
-  const hookSpecificOutput = { hookEventName: event, additionalContext: context };
-  if (process.env.BLUN_PLUGIN_ROOT) hookSpecificOutput.message = context;
-  return { hookSpecificOutput };
+  if (process.env.BLUN_PLUGIN_ROOT) {
+    return { hookSpecificOutput: { hookEventName: event, message: blunRuntimeContext(context) } };
+  }
+  return { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
 }
 
 function candidatePaths(value, output = []) {
