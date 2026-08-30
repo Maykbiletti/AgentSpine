@@ -398,7 +398,6 @@ async function invokeInstalledGateway(pluginRoot, projectRoot, stateRoot) {
     const gateway = await import(pathToFileURL(join(pluginRoot, "src/lib/gateway-runtime.js")).href);
     const worker = await import(pathToFileURL(join(pluginRoot, "src/worker.js")).href);
     await graph.upsertEntity({ root: projectRoot, id: "project:installed-gateway", kind: "project", privacy: "shared" });
-    await graph.upsertEntity({ root: projectRoot, id: "group:installed-gateway", kind: "group", privacy: "shared" });
     const roster = await persona.applyPersonaRoster({
       root: projectRoot,
       bindings: [{
@@ -406,10 +405,20 @@ async function invokeInstalledGateway(pluginRoot, projectRoot, stateRoot) {
         tenantId: "tenant:installed-gateway", host: "codex", profileId: "profile:installed-gateway",
         subjectId: "subject:installed-gateway", kind: "agent", displayName: "Installed Franz",
         sourceBinding: ".codex/agents/installed-franz.md", groupId: "group:installed-gateway"
+      }, {
+        id: "persona-binding:installed-peer", authenticator: "host-manifest", issuer: "host:installed",
+        tenantId: "tenant:installed-gateway", host: "codex", profileId: "profile:installed-gateway",
+        subjectId: "subject:installed-peer", kind: "bot", displayName: "Installed Peer",
+        sourceBinding: ".codex/agents/installed-peer.md", groupId: "group:installed-gateway"
       }],
       confirmation: "local-owner-confirmed", now: "2032-01-02T00:00:00.000Z"
     });
-    const agentId = roster.runtime.personas[0].personaId;
+    const agentId = roster.runtime.personas.find((item) => item.bindingId === "persona-binding:installed-gateway").personaId;
+    const peerId = roster.runtime.personas.find((item) => item.bindingId === "persona-binding:installed-peer").personaId;
+    const relationship = await graph.relationshipContext({ root: projectRoot, entityId: agentId, groupId: "group:installed-gateway" });
+    if (!roster.graphReconciled || !relationship.relatedEntities.some((item) => item.id === peerId)) {
+      throw new Error("installed persona roster did not materialize its group-scoped team neighborhood");
+    }
     await gateway.setGatewayControl({
       root: projectRoot, enabled: true, killSwitch: false,
       confirmation: "local-owner-confirmed", now: "2032-01-02T00:00:00.500Z"
@@ -452,7 +461,8 @@ async function invokeInstalledGateway(pluginRoot, projectRoot, stateRoot) {
       }));
     }
     return { status: result.status, eventId: event.eventId, agentId,
-      route: [delivered.chatId, delivered.threadId, delivered.replyTo], mcpCalls: 0 };
+      route: [delivered.chatId, delivered.threadId, delivered.replyTo], teamPeers: 1,
+      graphChanges: roster.graphChanges, mcpCalls: 0 };
   } finally {
     if (previous === undefined) delete process.env.AGENTSPINE_STATE_DIR;
     else process.env.AGENTSPINE_STATE_DIR = previous;

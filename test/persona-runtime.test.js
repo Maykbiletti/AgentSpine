@@ -8,7 +8,7 @@ import {
   applyPersonaRoster, loadPersonaRuntime, personaContext, personaRuntimeFindings,
   syncPersonaRosterFromEnvironment
 } from "../src/lib/persona-runtime.js";
-import { loadGraph, upsertEntity } from "../src/lib/graph.js";
+import { loadGraph, relationshipContext, upsertEntity } from "../src/lib/graph.js";
 
 function hash(value) { return createHash("sha256").update(value).digest("hex"); }
 
@@ -154,6 +154,70 @@ test("an owner-configured external roster automatically adds a new authenticated
   });
   assert.equal(second.changed, true);
   assert.deepEqual((await personaContext({ root })).items.map((item) => item.displayName).sort(), ["Franz", "Otto"]);
+});
+
+test("roster reconciliation creates missing groups and exposes only exact-scope teammates", async (t) => {
+  const { root, before } = await fixture(t);
+  const result = await applyPersonaRoster({ root, bindings: [
+    binding({ groupId: "group:gamma" }),
+    binding({ id: "persona-binding:otto", subjectId: "subject:otto", displayName: "Otto", groupId: "group:gamma" }),
+    binding({ id: "persona-binding:outsider", subjectId: "subject:outsider", displayName: "Outsider", groupId: "group:delta" })
+  ], confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:00.000Z" });
+  const franz = result.runtime.personas.find((item) => item.bindingId === "persona-binding:franz");
+  const otto = result.runtime.personas.find((item) => item.bindingId === "persona-binding:otto");
+  const outsider = result.runtime.personas.find((item) => item.bindingId === "persona-binding:outsider");
+  const graph = (await loadGraph(root)).graph;
+  assert.equal(graph.entities.find((item) => item.id === "group:gamma").privacy, "group");
+  assert.equal(graph.entities.find((item) => item.id === "group:delta").kind, "group");
+  const context = await relationshipContext({ root, entityId: franz.personaId, groupId: "group:gamma" });
+  assert.equal(context.relatedEntities.some((item) => item.id === otto.personaId), true);
+  assert.equal(context.relatedEntities.some((item) => item.id === outsider.personaId), false);
+  assert.equal(context.edges.some((item) => item.from === otto.personaId && item.to === "group:gamma"), true);
+  assert.equal(JSON.stringify(context).includes("Outsider"), false);
+  assert.equal(hash(await readFile(join(root, "SOUL.md"))), before);
+});
+
+test("duplicate roster runs repair missing graph state without history churn", async (t) => {
+  const { root, before } = await fixture(t);
+  const first = await applyPersonaRoster({ root, bindings: [binding({ groupId: "group:gamma" })],
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:00.000Z" });
+  const personaId = first.runtime.personas[0].personaId;
+  const loaded = await loadGraph(root);
+  loaded.graph.entities = loaded.graph.entities.filter((item) => ![personaId, "group:gamma"].includes(item.id));
+  loaded.graph.entityEdges = loaded.graph.entityEdges.filter((item) => item.from !== personaId && item.to !== personaId);
+  await writeFile(loaded.graphPath, `${JSON.stringify(loaded.graph, null, 2)}\n`);
+
+  const repaired = await applyPersonaRoster({ root, bindings: [binding({ groupId: "group:gamma" })],
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:01.000Z" });
+  assert.equal(repaired.duplicate, true);
+  assert.equal(repaired.graphReconciled, true);
+  assert.deepEqual(repaired.graphChanges, { groupsCreated: 1, entitiesUpdated: 1, membershipsAdded: 1, membershipsRemoved: 0 });
+  const repairedGraph = await loadGraph(root);
+  assert.equal(repairedGraph.graph.entities.some((item) => item.id === personaId), true);
+  assert.equal(repairedGraph.graph.entities.some((item) => item.id === "group:gamma"), true);
+  assert.equal(repairedGraph.graph.entityEdges.some((item) => item.from === personaId && item.to === "group:gamma"), true);
+  const stable = await readFile(repairedGraph.graphPath);
+  const replay = await applyPersonaRoster({ root, bindings: [binding({ groupId: "group:gamma" })],
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:02.000Z" });
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.graphReconciled, false);
+  assert.deepEqual(await readFile(repairedGraph.graphPath), stable);
+  assert.equal(hash(await readFile(join(root, "SOUL.md"))), before);
+});
+
+test("leave removes a roster persona from every visible relationship neighborhood", async (t) => {
+  const { root } = await fixture(t);
+  const first = await applyPersonaRoster({ root, bindings: [binding(),
+    binding({ id: "persona-binding:otto", subjectId: "subject:otto", displayName: "Otto" })],
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:00.000Z" });
+  const franz = first.runtime.personas.find((item) => item.bindingId === "persona-binding:franz");
+  const otto = first.runtime.personas.find((item) => item.bindingId === "persona-binding:otto");
+  await applyPersonaRoster({ root, bindings: [binding()], confirmation: "local-owner-confirmed",
+    now: "2032-01-01T00:00:01.000Z" });
+  const context = await relationshipContext({ root, entityId: franz.personaId, groupId: "group:alpha" });
+  assert.equal(context.relatedEntities.some((item) => item.id === otto.personaId), false);
+  const graph = (await loadGraph(root)).graph;
+  assert.equal(graph.entities.find((item) => item.id === otto.personaId).attributes.identityStatus, "left");
 });
 
 test("one approved roster discovers native Claude and Codex manifests and observes leave", async (t) => {

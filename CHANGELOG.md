@@ -4,6 +4,33 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-30
+
+### Added
+
+- Self-healing authenticated persona-to-graph reconciliation on every roster sync, including unchanged replays after partial graph failure
+- Automatic context-only group materialization for exact locally approved roster group IDs
+- Exact group-scoped team neighborhoods so a persona briefing can include current visible co-members without explicit pairwise edges
+- Separate roster-change and graph-repair diagnostics with deterministic counts for created groups, updated entities, and added or removed memberships
+
+### Changed
+
+- Active `person`, `agent`, and `bot` bindings now retain user-authored non-authority graph attributes while authenticated display name, status, source binding, privacy, and membership are reconciled
+- Package, lockfile, Claude Code, Codex, marketplace, BLUN and hook-bundle versions advance together to `0.10.0`
+
+### Fixed
+
+- An unchanged roster now repairs missing persona entities, groups, and membership edges instead of remaining permanently classified as a duplicate
+- Left and deactivated personas retain append-only identity history but no longer appear in current relationship neighborhoods
+- Missing roster groups no longer cause membership edges to be silently skipped
+- Relationship reads now fail visibly after a five-second local state deadline instead of waiting indefinitely
+
+### Security
+
+- Group peer expansion requires one exact group audience and filters inactive, private, and other-group entities before returning context
+- Conflicting non-group IDs and private groups fail visibly instead of weakening group-scope isolation
+- Persona, group, and relationship context remains incapable of granting rights, delegation, tools, execution, access, or policy changes
+
 ## [0.9.0] - 2026-08-30
 
 ### Added
@@ -287,7 +314,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.6.0...v0.7.0

@@ -31,7 +31,11 @@ Set `AGENTSPINE_PERSONA_ROSTER_FILE` or pass `--persona-roster` to the worker. T
 }
 ```
 
-Every tick synchronizes authenticated identities before any work is reconciled. New bindings append `join` events; renames retain the stable persona ID; omitted members in the same explicit roster scope become `left`; `"deactivated": true` records a distinct deactivation; reappearance appends `rejoin`. Names, Markdown, memory, and chat text cannot create identity or rights. Existing source files are never changed.
+Every tick synchronizes authenticated identities before any work is reconciled. New bindings append `join` events; renames retain the stable persona ID; omitted members in the same explicit roster scope become `left`; `"deactivated": true` records a distinct deactivation; reappearance appends `rejoin`. A binding may describe a `person`, `agent`, or `bot`; equal display names never merge identities. Names, Markdown, memory, and chat text cannot create identity or rights. Existing source files are never changed.
+
+Version `0.10.0` reconciles the authenticated roster into the relationship graph on every sync, including an otherwise unchanged replay. An exact `groupId` creates a missing group-scoped, context-only group entity; a conflicting non-group or private group fails visibly. Missing persona entities and membership edges are recreated, stale memberships are removed, and left or deactivated personas remain in append-only identity history but disappear from current relationship context. Reconciliation reports whether the roster changed separately from graph repair, so a previously partial installation can self-heal instead of remaining a permanent duplicate.
+
+When a hook supplies the same exact `groupId`, `relationship_context` and `session_briefing` include current visible co-members reached through authenticated `member-of` edges. They do not infer friendships, merge names, cross tenants, expose another group, or turn membership into delegation. A direct session without an exact group scope does not receive group-private peers. Relationship reads have a five-second local state deadline and return a clear error instead of waiting indefinitely on a stalled read.
 
 The same approved envelope may contain `nativeDiscovery` scopes. AgentSpine then checks only the officially documented direct agent-manifest directories: Claude Code `~/.claude/agents/` or `<project>/.claude/agents/`, and Codex `~/.codex/agents/` or `<project>/.codex/agents/`. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` replace only their matching user scope. Each scope fixes issuer, tenant, profile, agent/bot kind, and optional group; those authenticated scope fields plus the exact source binding form the stable identity. The manifest contributes only its declared display name and an exact source descriptor; its instructions remain host-native context. Direct regular `.md` or `.toml` files are bounded to 128 entries and 256 KiB each; symlinks and files exchanged during a read fail closed. No other home or project directory is enumerated. See the official [Claude Code custom subagent locations](https://code.claude.com/docs/en/sub-agents) and [Codex custom agent locations](https://developers.openai.com/codex/agent-configuration/subagents).
 
@@ -58,6 +62,9 @@ A one-shot manual validation is available through:
 agentspine persona-sync /path/to/project \
   --roster /absolute/path/to/roster.json \
   --confirm-local-persona
+
+agentspine personas /path/to/project --json
+agentspine relationships group:engineering --group group:engineering --json
 ```
 
 ## Telegram and host runner

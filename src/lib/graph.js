@@ -239,11 +239,11 @@ function relationshipAudience(graph, groupId) {
   return ids;
 }
 
-export async function relationshipContext({
+async function assembleRelationshipContext({
   root = process.cwd(), entityId, includePrivate = false, groupId = null, catalog: providedCatalog = null
-}) {
+}, loadGraphImpl) {
   if (!entityId) throw new Error("entityId is required");
-  const { graph } = await loadGraph(root, providedCatalog);
+  const { graph } = await loadGraphImpl(root, providedCatalog);
   if (groupId !== null) {
     const group = graph.entities.find((item) => item.id === groupId && item.kind === "group");
     if (!group) throw new Error(`unknown group entity: ${groupId}`);
@@ -254,6 +254,7 @@ export async function relationshipContext({
   const audience = groupId === null ? null : relationshipAudience(graph, groupId);
   if (audience && !audience.has(entityId)) throw new Error(`entity is not a visible member of group: ${groupId}`);
   const visible = (item) => {
+    if (item.attributes?.identityBindingId && item.attributes.identityStatus !== "active") return false;
     if (item.privacy === "private") return includePrivate && groupId === null;
     if (item.privacy === "group" && !audience) return false;
     if (audience && item.id && !audience.has(item.id)) return false;
@@ -264,7 +265,12 @@ export async function relationshipContext({
   const visibleEdge = (edge) => visible(edge)
     && (!audience || [edge.from, edge.to].every((id) => audience.has(id)))
     && [edge.from, edge.to].every((id) => !entities.has(id) || visible(entities.get(id)));
-  const edges = graph.entityEdges.filter((edge) => (edge.from === entityId || edge.to === entityId) && visibleEdge(edge));
+  const directEdges = graph.entityEdges.filter((edge) => (edge.from === entityId || edge.to === entityId) && visibleEdge(edge));
+  const teamEdges = groupId === null ? [] : graph.entityEdges.filter((edge) => edge.relation === "member-of"
+    && (edge.from === groupId || edge.to === groupId) && visibleEdge(edge));
+  const edgeKey = (edge) => `${edge.from}\0${edge.to}\0${edge.relation}`;
+  const edges = [...new Map([...directEdges, ...teamEdges].map((edge) => [edgeKey(edge), edge])).values()]
+    .sort((left, right) => edgeKey(left).localeCompare(edgeKey(right)));
   const ids = new Set(edges.flatMap((edge) => [edge.from, edge.to]));
   ids.add(entityId);
   return {
@@ -281,4 +287,16 @@ export async function relationshipContext({
     groupId,
     authority: "context-only"
   };
+}
+
+export async function relationshipContext(options = {}, { loadGraphImpl = loadGraph, timeoutMs = 5000 } = {}) {
+  let timer;
+  const deadline = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`relationship context exceeded its ${timeoutMs} ms local read limit`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([assembleRelationshipContext(options, loadGraphImpl), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

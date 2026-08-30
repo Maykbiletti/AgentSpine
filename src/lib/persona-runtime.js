@@ -228,6 +228,86 @@ function nextEventTypes(previous, binding) {
   return types;
 }
 
+function runtimeEntityAttributes(persona, binding, existing) {
+  return {
+    ...(existing?.attributes || {}),
+    runtimeKind: persona.kind,
+    identityBindingId: persona.bindingId,
+    identityStatus: persona.status,
+    sourceBinding: binding?.sourceBinding || null
+  };
+}
+
+function sameRuntimeEntity(entity, persona, binding) {
+  if (!entity) return false;
+  const expectedKind = persona.kind === "bot" ? "agent" : persona.kind;
+  const expectedPrivacy = persona.groupId ? "group" : "shared";
+  const attributes = runtimeEntityAttributes(persona, binding, entity);
+  return entity.kind === expectedKind && entity.displayName === persona.displayName
+    && entity.privacy === expectedPrivacy
+    && JSON.stringify(entity.attributes) === JSON.stringify(attributes);
+}
+
+async function reconcilePersonaGraph(paths, policy, runtime) {
+  let { graph } = await loadGraph(paths.catalog.root);
+  const changes = { groupsCreated: 0, entitiesUpdated: 0, membershipsAdded: 0, membershipsRemoved: 0 };
+  const activeGroupIds = [...new Set(runtime.personas
+    .filter((item) => item.status === "active" && item.groupId !== null)
+    .map((item) => item.groupId))].sort();
+
+  for (const groupId of activeGroupIds) {
+    const existing = graph.entities.find((item) => item.id === groupId);
+    if (existing && existing.kind !== "group") {
+      throw new Error(`authenticated persona group conflicts with a non-group entity: ${groupId}`);
+    }
+    if (existing?.privacy === "private") {
+      throw new Error(`authenticated persona group cannot use private relationship visibility: ${groupId}`);
+    }
+    if (!existing) {
+      await upsertEntity({ root: paths.catalog.root, id: groupId, kind: "group", privacy: "group",
+        attributes: { identitySource: "authenticated-persona-roster" }, confidence: 1 });
+      changes.groupsCreated += 1;
+      graph = (await loadGraph(paths.catalog.root)).graph;
+    }
+  }
+
+  for (const persona of runtime.personas) {
+    const binding = policy.bindings.find((item) => item.id === persona.bindingId);
+    let existing = graph.entities.find((item) => item.id === persona.personaId);
+    if (existing && existing.kind !== (persona.kind === "bot" ? "agent" : persona.kind)) {
+      throw new Error(`authenticated persona conflicts with an existing entity kind: ${persona.personaId}`);
+    }
+    if (!sameRuntimeEntity(existing, persona, binding)) {
+      await upsertEntity({ root: paths.catalog.root, id: persona.personaId,
+        kind: persona.kind === "bot" ? "agent" : persona.kind, displayName: persona.displayName,
+        aliases: existing?.aliases || [], attributes: runtimeEntityAttributes(persona, binding, existing),
+        sourceDocument: existing?.sourceDocument
+          && paths.catalog.documents.some((item) => item.relativePath === existing.sourceDocument)
+          ? existing.sourceDocument : null,
+        privacy: persona.groupId ? "group" : "shared", confidence: 1 });
+      changes.entitiesUpdated += 1;
+      graph = (await loadGraph(paths.catalog.root)).graph;
+      existing = graph.entities.find((item) => item.id === persona.personaId);
+    }
+
+    const memberships = graph.entityEdges.filter((edge) => edge.from === persona.personaId && edge.relation === "member-of");
+    for (const edge of memberships.filter((item) => persona.status !== "active" || item.to !== persona.groupId)) {
+      await unlinkEntities({ root: paths.catalog.root, from: edge.from, to: edge.to, relation: edge.relation });
+      changes.membershipsRemoved += 1;
+      graph = (await loadGraph(paths.catalog.root)).graph;
+    }
+    if (persona.status === "active" && persona.groupId !== null
+      && !graph.entityEdges.some((edge) => edge.from === persona.personaId && edge.to === persona.groupId
+        && edge.relation === "member-of" && edge.privacy === "group")) {
+      await linkEntities({ root: paths.catalog.root, from: persona.personaId, to: persona.groupId,
+        relation: "member-of", reason: "Authenticated roster membership; context only.", confidence: 1, privacy: "group" });
+      changes.membershipsAdded += 1;
+      graph = (await loadGraph(paths.catalog.root)).graph;
+    }
+  }
+  return changes;
+}
+
 export async function applyPersonaRoster({ root = process.cwd(), bindings, rosterScopes = [], confirmation, now = new Date() }) {
   if (confirmation !== CONFIRMATION) throw new Error("persona roster changes require explicit local owner confirmation");
   if (!Array.isArray(bindings) || bindings.length > 256 || (!bindings.length && !rosterScopes.length)) {
@@ -242,7 +322,6 @@ export async function applyPersonaRoster({ root = process.cwd(), bindings, roste
     const observedAt = at(now);
     const normalized = bindings.map((item) => normalizeBinding(item, observedAt));
     let changed = false;
-    const membershipRemovals = [];
     const scopedRosterKeys = new Set([
       ...normalized.map((item) => [item.authenticator, item.issuer, item.tenantId, item.host, item.profileId].join("\0")),
       ...rosterScopes.map((item) => [item.authenticator, item.issuer, item.tenantId, item.host, item.profileId].join("\0"))
@@ -272,9 +351,6 @@ export async function applyPersonaRoster({ root = process.cwd(), bindings, roste
       policy.bindings = policy.bindings.filter((item) => item.id !== binding.id);
       policy.bindings.push(binding);
       const previous = runtime.personas.find((item) => item.personaId === binding.personaId);
-      if (previous?.groupId && (previous.groupId !== binding.groupId || !binding.active)) {
-        membershipRemovals.push({ personaId: binding.personaId, groupId: previous.groupId });
-      }
       const types = nextEventTypes(previous, binding);
       let sequence = previous?.sequence || 0;
       for (const type of types) {
@@ -293,30 +369,18 @@ export async function applyPersonaRoster({ root = process.cwd(), bindings, roste
           sequence, updatedAt: observedAt, authority: "identity-state-only" });
       }
     }
-    if (!changed) return { policy, runtime, personaPolicyPath: paths.personaPolicyPath, personaRuntimePath: paths.personaRuntimePath, duplicate: true };
-    policy.bindings.sort((a, b) => a.id.localeCompare(b.id));
-    runtime.personas.sort((a, b) => a.personaId.localeCompare(b.personaId));
-    runtime.events.sort((a, b) => a.observedAt.localeCompare(b.observedAt) || a.eventId.localeCompare(b.eventId));
-    policy.revision += 1;
-    runtime.revision += 1;
-    await Promise.all([writeJson(paths.personaPolicyPath, policy), writeJson(paths.personaRuntimePath, runtime)]);
-    for (const membership of membershipRemovals) {
-      await unlinkEntities({ root: paths.catalog.root, from: membership.personaId, to: membership.groupId, relation: "member-of" });
+    if (changed) {
+      policy.bindings.sort((a, b) => a.id.localeCompare(b.id));
+      runtime.personas.sort((a, b) => a.personaId.localeCompare(b.personaId));
+      runtime.events.sort((a, b) => a.observedAt.localeCompare(b.observedAt) || a.eventId.localeCompare(b.eventId));
+      policy.revision += 1;
+      runtime.revision += 1;
+      await Promise.all([writeJson(paths.personaPolicyPath, policy), writeJson(paths.personaRuntimePath, runtime)]);
     }
-    for (const persona of runtime.personas.filter((item) => item.status === "active")) {
-      const binding = policy.bindings.find((item) => item.id === persona.bindingId);
-      await upsertEntity({ root: paths.catalog.root, id: persona.personaId, kind: persona.kind === "bot" ? "agent" : persona.kind,
-        displayName: persona.displayName, attributes: { runtimeKind: persona.kind, identityBindingId: persona.bindingId,
-          identityStatus: persona.status, sourceBinding: binding?.sourceBinding || null }, privacy: persona.groupId ? "group" : "shared", confidence: 1 });
-      if (persona.groupId) {
-        const { graph } = await loadGraph(paths.catalog.root);
-        if (graph.entities.some((item) => item.id === persona.groupId && item.kind === "group")) {
-          await linkEntities({ root: paths.catalog.root, from: persona.personaId, to: persona.groupId,
-            relation: "member-of", reason: "Authenticated roster membership; context only.", confidence: 1, privacy: "group" });
-        }
-      }
-    }
-    return { policy, runtime, personaPolicyPath: paths.personaPolicyPath, personaRuntimePath: paths.personaRuntimePath, duplicate: false };
+    const graphChanges = await reconcilePersonaGraph(paths, policy, runtime);
+    const graphReconciled = Object.values(graphChanges).some((value) => value > 0);
+    return { policy, runtime, personaPolicyPath: paths.personaPolicyPath,
+      personaRuntimePath: paths.personaRuntimePath, duplicate: !changed, graphReconciled, graphChanges };
   });
 }
 
@@ -434,7 +498,9 @@ export async function syncPersonaRosterFromEnvironment({ root = process.cwd(), e
     tenantId: scope.tenantId, host: scope.host, profileId: scope.profileId }));
   const result = await applyPersonaRoster({ root: catalog.root, bindings, rosterScopes,
     confirmation: CONFIRMATION, now: value.observedAt || now });
-  return { configured: true, changed: !result.duplicate, revision: value.revision,
+  return { configured: true, changed: !result.duplicate || result.graphReconciled,
+    rosterChanged: !result.duplicate, graphReconciled: result.graphReconciled, graphChanges: result.graphChanges,
+    revision: value.revision,
     personas: result.runtime.personas.length, nativeManifests: nativeBindings.length,
     rosterDigest: digest(JSON.stringify(value)) };
 }
@@ -466,7 +532,13 @@ export function personaRuntimeFindings(policy, runtime, graph = null) {
       const entity = graph.entities.find((item) => item.id === persona.personaId);
       const expectedKind = persona.kind === "bot" ? "agent" : persona.kind;
       if (!entity || entity.kind !== expectedKind) findings.push("persona-graph-mismatch:" + persona.personaId);
+      if (entity?.attributes?.identityStatus !== persona.status) findings.push("persona-graph-status-mismatch:" + persona.personaId);
       const memberships = graph.entityEdges.filter((edge) => edge.from === persona.personaId && edge.relation === "member-of");
+      const group = persona.groupId === null ? null : graph.entities.find((item) => item.id === persona.groupId);
+      if (persona.status === "active" && persona.groupId !== null
+        && (!group || group.kind !== "group" || group.privacy === "private")) {
+        findings.push("persona-group-entity-mismatch:" + persona.personaId);
+      }
       if (persona.status === "active" && persona.groupId !== null
         && !memberships.some((edge) => edge.to === persona.groupId && edge.privacy === "group")) {
         findings.push("persona-group-membership-mismatch:" + persona.personaId);

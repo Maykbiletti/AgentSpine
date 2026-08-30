@@ -18,6 +18,8 @@ flowchart TB
 
 Entities have stable IDs, a kind, optional display name and aliases, attributes, provenance, confidence, and privacy. Relationships connect two known IDs with a typed relation. Name similarity never merges identities.
 
+Authenticated persona roster synchronization reconciles active `person`, `agent`, and `bot` identities into this graph. An exact roster `groupId` creates a missing group-scoped entity and an authenticated `member-of` edge. Replaying an unchanged roster repairs missing graph records without rewriting source Markdown or appending duplicate persona events.
+
 Supported privacy scopes are:
 
 | Scope | Default visibility |
@@ -59,9 +61,13 @@ agentspine relationships agent:builder --json
 
 The MCP tools expose additional attributes, aliases, source-document provenance, confidence, and explicit private reads.
 
+With an exact `groupId`, a relationship read returns the requested entity's direct visible edges plus current visible co-members of that group. This is a bounded team neighborhood, not an inferred friendship graph. Another group's members, inactive roster personas and private records remain excluded. Without an exact group audience, group-private peers are not returned.
+
 ## Limits
 
 - The graph is local user state and is not synchronized automatically.
+- Authenticated roster state is synchronized only when an owner-configured roster or native manifest scope is active; chat names never create entities.
+- Relationship reads stop with a visible error after a five-second local state deadline.
 - A 5 MiB graph ceiling stops unbounded growth instead of discarding history.
 - Attribute-key rejection cannot determine whether innocent-looking prose contains a secret.
 - Group-specific recipient policy and notification delivery are not implemented.

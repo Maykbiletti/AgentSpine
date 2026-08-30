@@ -122,6 +122,8 @@ test("fail-closed parallel reads fully settle before returning an error", async 
 
 test("group briefing enforces one exact audience and never loads Markdown content", async (t) => {
   const { root } = await fixture(t);
+  await upsertEntity({ root, id: "person:peer-only", kind: "person", displayName: "Peer Only", privacy: "group" });
+  await linkEntities({ root, from: "person:peer-only", to: "group:alpha", relation: "member-of", privacy: "group" });
   await acceptedLearning(root, {
     id: "learning:group-alpha", claim: "Alpha group context.", subjectId: "person:alpha",
     privacy: "group", groupId: "group:alpha"
@@ -137,6 +139,7 @@ test("group briefing enforces one exact audience and never loads Markdown conten
   assert.match(serialized, /Alpha group context/);
   assert.doesNotMatch(serialized, /Beta group context|Outsider|Private Person/);
   assert.equal(result.relationship.relatedEntities.some((item) => item.id === "person:teammate"), true);
+  assert.equal(result.relationship.relatedEntities.some((item) => item.id === "person:peer-only"), true);
   assert.equal(result.sources.documents.every((item) => item.loaded === false && item.content === null), true);
   assert.equal((await relationshipContext({ root, entityId: "person:alpha" })).edges.some((item) => item.privacy === "group"), false);
   await assert.rejects(
@@ -146,6 +149,13 @@ test("group briefing enforces one exact audience and never loads Markdown conten
   await assert.rejects(
     relationshipContext({ root, entityId: "person:outsider", groupId: "group:alpha" }),
     /not a visible member/
+  );
+});
+
+test("relationship context fails visibly when its local state read stalls", async () => {
+  await assert.rejects(
+    relationshipContext({ entityId: "person:alpha" }, { loadGraphImpl: () => new Promise(() => {}), timeoutMs: 10 }),
+    /relationship context exceeded its 10 ms local read limit/
   );
 });
 
