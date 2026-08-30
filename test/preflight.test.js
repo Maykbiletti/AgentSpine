@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveHostSourceCatalog } from "../src/lib/source-roots.js";
@@ -114,7 +114,8 @@ test("changed, deleted, oversized, and symlinked required instructions never reu
 
 test("a required instruction replaced through its pathname during the handle read fails closed", async (t) => {
   const setup = await fixture(t);
-  const projectRules = join(setup.root, setup.filename);
+  const projectRulesPath = join(setup.root, setup.filename);
+  const projectRules = await realpath(projectRulesPath);
   let exchanged = false;
   await assert.rejects(runPreflight({ ...setup, prompt: setup.input.prompt, fileHooks: {
     afterRead: async (path) => {
@@ -122,7 +123,7 @@ test("a required instruction replaced through its pathname during the handle rea
       exchanged = true;
       const replacement = join(setup.root, "replacement.md");
       await writeFile(replacement, "# Replaced rules\n", "utf8");
-      await rename(replacement, projectRules);
+      await rename(replacement, projectRulesPath);
     }
   } }), /(?:changed|replaced) during preflight/);
   assert.equal(exchanged, true);
