@@ -40,6 +40,7 @@ test("release check fails closed when one host manifest has a different version"
   await writeFile(join(fixture, "package-lock.json"), JSON.stringify({
     name: "agent-spine", version: "1.2.3", packages: { "": { name: "agent-spine", version: "1.2.3" } }
   }));
+  await writeFile(join(fixture, "blun.plugin.json"), JSON.stringify({ version: "1.2.3" }));
   await writeFile(join(fixture, ".claude-plugin", "plugin.json"), JSON.stringify({ version: "1.2.2" }));
   await writeFile(join(fixture, ".codex-plugin", "plugin.json"), JSON.stringify({ version: "1.2.3" }));
   await writeFile(join(fixture, ".claude-plugin", "marketplace.json"), JSON.stringify({ plugins: [{ version: "1.2.3" }] }));

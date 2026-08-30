@@ -45,7 +45,16 @@ function boundedId(value, field) {
 
 function promptFromInput(input) {
   for (const key of ["prompt", "user_prompt", "message", "input"]) {
-    if (typeof input[key] === "string") return input[key];
+    const value = input[key];
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      const text = value
+        .filter((part) => part && typeof part === "object" && part.type === "text" && typeof part.text === "string")
+        .map((part) => part.text)
+        .join("\n")
+        .trim();
+      if (text) return text;
+    }
   }
   return null;
 }
@@ -53,7 +62,8 @@ function promptFromInput(input) {
 function hostFromInput(input) {
   const explicit = input.host || input.provider || process.env.AGENTSPINE_HOST;
   if (["claude", "codex", "generic"].includes(explicit)) return explicit;
-  if ((typeof input.model === "string" && input.model.trim()) || process.env.PLUGIN_ROOT || process.env.CODEX_HOME) return "codex";
+  if ((typeof input.model === "string" && input.model.trim()) || process.env.PLUGIN_ROOT || process.env.CODEX_HOME
+    || process.env.BLUN_PLUGIN_ROOT || process.env.BLUN_HOME) return "codex";
   return "claude";
 }
 
@@ -335,7 +345,9 @@ async function captureAttentionLifecycle(input, event, root, scope) {
 }
 
 function hookOutput(event, context) {
-  return { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
+  const hookSpecificOutput = { hookEventName: event, additionalContext: context };
+  if (process.env.BLUN_PLUGIN_ROOT) hookSpecificOutput.message = context;
+  return { hookSpecificOutput };
 }
 
 function candidatePaths(value, output = []) {

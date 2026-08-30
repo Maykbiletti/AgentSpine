@@ -47,12 +47,34 @@ function validateHooks(root, hooks) {
   return { events: required, commands: required.length, entrypoint: relative(root, resolve(root, "src/hook.js")) };
 }
 
+function validateBlunHooks(root, hooks) {
+  const required = [
+    "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+    "PreCompact", "PostCompact", "Stop", "SubagentStop"
+  ];
+  assert(Array.isArray(hooks), "BLUN hook bundle is missing");
+  assert(hooks.length === required.length, "BLUN must register exactly one command per lifecycle event");
+  assert(JSON.stringify(hooks.map(({ event }) => event)) === JSON.stringify(required),
+    "BLUN lifecycle events must remain complete and ordered");
+  for (const event of required) {
+    const registrations = hooks.filter((hook) => hook.event === event);
+    assert(registrations.length === 1, `${event} must have exactly one BLUN registration`);
+    const command = registrations[0];
+    assert(command.command === 'node "./src/hook.js"', `${event} must use the bundled BLUN lifecycle adapter`);
+    assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} BLUN timeout is unsafe`);
+  }
+  return { events: required, commands: required.length, entrypoint: relative(root, resolve(root, "src/hook.js")) };
+}
+
 async function initializeServer({ label, root, variable, server, version }) {
   assert(server && typeof server === "object" && !Array.isArray(server), `${label} MCP registration is missing`);
   assert(server.command === "node", `${label} MCP registration must use the Node.js runtime`);
   assert(Array.isArray(server.args) && server.args.length === 1, `${label} MCP registration must name exactly one entrypoint`);
   const command = process.execPath;
-  const args = server.args.map((value) => expand(value, variable, root));
+  const args = server.args.map((value) => {
+    const expanded = expand(value, variable, root);
+    return isAbsolute(expanded) ? expanded : resolve(root, expanded);
+  });
   assert(!args.some((value) => value.includes("${")), `${label} MCP registration contains an unresolved variable`);
   await validateEntrypoint(root, args[0]);
 
@@ -111,15 +133,17 @@ async function initializeServer({ label, root, variable, server, version }) {
 
 export async function checkHosts(root = process.cwd()) {
   root = resolve(root);
-  const [pkg, claudeManifest, claudeMcp, codexManifest, hooks, hookVersion] = await Promise.all([
+  const [pkg, blunManifest, claudeManifest, claudeMcp, codexManifest, hooks, hookVersion] = await Promise.all([
     json(root, "package.json"),
+    json(root, "blun.plugin.json"),
     json(root, ".claude-plugin/plugin.json"),
     json(root, ".mcp.json"),
     json(root, ".codex-plugin/plugin.json"),
     json(root, "hooks/hooks.json"),
     json(root, "hooks/version.json")
   ]);
-  assert(claudeManifest.version === pkg.version && codexManifest.version === pkg.version, "host manifests must use the package cache version");
+  assert(blunManifest.version === pkg.version && claudeManifest.version === pkg.version && codexManifest.version === pkg.version,
+    "host manifests must use the package cache version");
   assert(hookVersion.schema === "agentspine.hook-bundle/v1" && hookVersion.version === pkg.version,
     "hook bundle version must match the package cache version");
   assert(hookVersion.contract === "agentspine.lifecycle/v1", "hook bundle lifecycle contract is missing");
@@ -130,15 +154,17 @@ export async function checkHosts(root = process.cwd()) {
   assert(claudeMcp.mcpServers && Object.keys(claudeMcp.mcpServers).length === 1, "Claude MCP file must contain one mcpServers registration");
   assert(codexManifest.mcpServers && Object.keys(codexManifest.mcpServers).length === 1, "Codex manifest must contain one MCP registration");
   const hookInventory = validateHooks(root, hooks);
+  const blunHookInventory = validateBlunHooks(root, blunManifest.hooks);
   const registrations = await Promise.all([
+    initializeServer({ label: "blun", root, variable: "BLUN_PLUGIN_ROOT", server: blunManifest.mcpServers["agent-spine"], version: pkg.version }),
     initializeServer({ label: "claude", root, variable: "CLAUDE_PLUGIN_ROOT", server: claudeMcp.mcpServers["agent-spine"], version: pkg.version }),
     initializeServer({ label: "codex", root, variable: "PLUGIN_ROOT", server: codexManifest.mcpServers["agent-spine"], version: pkg.version })
   ]);
   return {
     ok: true, root, version: pkg.version, registrations,
-    hooks: { claude: hookInventory, codex: hookInventory },
+    hooks: { blun: blunHookInventory, claude: hookInventory, codex: hookInventory },
     hookDiscovery: {
-      claude: "default-hooks-directory", codex: "default-hooks-directory",
+      blun: "plugin-manifest", claude: "default-hooks-directory", codex: "default-hooks-directory",
       trust: "host-user-required", liveTrustVerified: false
     },
     worker: { entrypoint: pkg.bin["agentspine-worker"], setsPerInstall: 1 },

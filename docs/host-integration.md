@@ -52,7 +52,7 @@ Open `/mcp` in the new interactive session and approve or reconnect `agent-spine
 | MCP | Manifest `mcpServers` | Read-only source tools plus external overlay workflows |
 | Hooks | `hooks/hooks.json` | Auto-discovered lifecycle guardrails |
 
-Open `/plugins` in Codex CLI after configuring a marketplace that contains AgentSpine. Then open `/hooks`: Codex records trust against the exact hook-definition hash, so an installed, updated, or previously untrusted bundle is skipped until that current definition is reviewed and trusted. Start a new session after approval. This follows the official [Codex hooks trust and plugin discovery contract](https://developers.openai.com/codex/hooks).
+Open `/plugins` in Codex CLI after configuring a marketplace that contains AgentSpine, then start a new session. Codex presents a startup review when a new or changed hook definition needs trust; there is no `/hooks` slash command. Codex records trust against the exact hook-definition hash, so an installed, updated, or previously untrusted bundle is skipped until that current definition is reviewed and trusted. This follows the official [Codex hooks trust and plugin discovery contract](https://developers.openai.com/codex/hooks).
 
 Codex discovers the hook at the standard `hooks/hooks.json` path. The file deliberately contains only the documented top-level `description` and `hooks` fields; earlier AgentSpine builds added private `version` and `contract` metadata there, which a strict Codex parser could reject before presenting a trust decision. Cache identity remains in `.codex-plugin/plugin.json`, while Codex records hook trust against the current definition hash. Codex sets `CLAUDE_PLUGIN_ROOT` for hook compatibility, so the same hook bundle can execute in both hosts. The MCP registration uses Codex's `PLUGIN_ROOT` expansion.
 
@@ -60,10 +60,27 @@ Verify the live host in a newly started Codex CLI session:
 
 ```text
 /plugins
-/hooks
+Trust all and continue
 ```
 
-`npm run host:check` proves manifest shape, package containment, and a real MCP handshake. `npm run host:install-check` stages the installed bundle and executes its hook entrypoint with native event JSON. Neither command can manufacture Codex's user-controlled trust receipt; only `/hooks` in the actual host proves that final boundary.
+`npm run host:check` proves manifest shape, package containment, and a real MCP handshake. `npm run host:install-check` stages the installed bundle and executes its hook entrypoint with native event JSON. Neither command can manufacture Codex's user-controlled trust receipt; only the startup review in the actual host proves that final boundary.
+
+## BLUN King
+
+| Component | Path | Purpose |
+|---|---|---|
+| Manifest | `blun.plugin.json` | Native BLUN plugin identity plus skill, MCP, and lifecycle-hook registration |
+| Skill | `skills/agent-spine/SKILL.md` | Context rules and preservation invariants |
+| MCP | Manifest `mcpServers` | Read-only source tools plus external overlay workflows |
+| Hooks | Manifest `hooks` | Automatic briefing, attention, protected-source guard, and checkpoints |
+
+Install the local checkout from Fredrik's TUI:
+
+```text
+/plugins install C:\path\to\AgentSpine
+```
+
+BLUN asks the user to trust a third-party plugin before installation because its MCP server and hooks execute local code. Accept that visible install decision, then use `/reload` or `/new`; BLUN has no separate `/hooks` command. The BLUN adapter maps its isolated `BLUN_HOME` to AgentSpine's Codex-compatible `AGENTS.md` source hierarchy, so user state remains under the BLUN app home instead of leaking into `.codex` or a scanned project.
 
 ## Direct MCP use
 

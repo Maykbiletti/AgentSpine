@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runHook } from "../src/hook.js";
 import { runAudit } from "../src/lib/audit.js";
 import { configureContinuity } from "../src/lib/continuity.js";
@@ -139,6 +140,52 @@ test("installed lifecycle resolves host-native user, project, and memory roots w
   assert.equal((await inspectSourceRegistry()).registry.bindings.find((item) => item.id === binding.binding.id).active, false);
   await purgeSourceBinding({ id: binding.binding.id, confirmation: "local-user-confirmed" });
   assert.equal((await inspectSourceRegistry()).registry.bindings.some((item) => item.id === binding.binding.id), false);
+});
+
+test("BLUN lifecycle uses BLUN_HOME as the isolated Codex-compatible host profile", async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "agentspine-blun-host-"));
+  const state = join(workspace, "state");
+  const blunHome = join(workspace, ".blun");
+  const project = join(workspace, "project");
+  await Promise.all([mkdir(state), mkdir(blunHome), mkdir(project)]);
+  await mkdir(join(project, ".git"));
+  await writeFile(join(blunHome, "AGENTS.md"), "# BLUN user rules\n", "utf8");
+  await writeFile(join(project, "AGENTS.md"), "# BLUN project rules\n", "utf8");
+
+  const keys = ["AGENTSPINE_STATE_DIR", "BLUN_HOME", "BLUN_PLUGIN_ROOT", "CODEX_HOME", "PLUGIN_ROOT", "CLAUDE_CONFIG_DIR"];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  process.env.BLUN_HOME = blunHome;
+  process.env.BLUN_PLUGIN_ROOT = fileURLToPath(new URL("..", import.meta.url));
+  delete process.env.CODEX_HOME;
+  delete process.env.PLUGIN_ROOT;
+  delete process.env.CLAUDE_CONFIG_DIR;
+  t.after(async () => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  const result = packet(await runHook({ hook_event_name: "SessionStart", cwd: project }));
+  assert.equal(result.briefing.host, "codex");
+  assert.deepEqual(result.briefing.sources.documents.map(({ path }) => path), [
+    "codex:user/AGENTS.md", "codex:project/AGENTS.md"
+  ]);
+
+  await upsertEntity({ root: project, id: "person:owner", kind: "person", privacy: "private" });
+  await configureContinuity({
+    root: project,
+    config: { enabled: true, defaultEntityId: "person:owner" },
+    confirmation: "local-user-opt-in"
+  });
+  const learned = await runHook({
+    hook_event_name: "UserPromptSubmit",
+    cwd: project,
+    event_id: "blun:prompt:one",
+    prompt: [{ type: "text", text: "Bitte antworte immer menschlich und ruhig." }]
+  });
+  assert.equal(learned.signal?.accepted, true);
 });
 
 test("empty host roots are visible and never reported as loaded continuity", async (t) => {

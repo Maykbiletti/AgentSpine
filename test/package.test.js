@@ -10,13 +10,14 @@ async function json(relativePath) {
 }
 
 test("package and host manifests keep one release version", async () => {
-  const [pkg, lock, claude, codex, marketplace, hooks, hookVersion] = await Promise.all([
-    json("package.json"), json("package-lock.json"), json(".claude-plugin/plugin.json"),
-    json(".codex-plugin/plugin.json"), json(".claude-plugin/marketplace.json"), json("hooks/hooks.json"), json("hooks/version.json")
+  const [pkg, lock, blun, claude, codex, marketplace, hooks, hookVersion] = await Promise.all([
+    json("package.json"), json("package-lock.json"), json("blun.plugin.json"),
+    json(".claude-plugin/plugin.json"), json(".codex-plugin/plugin.json"), json(".claude-plugin/marketplace.json"), json("hooks/hooks.json"), json("hooks/version.json")
   ]);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[""].version, pkg.version);
   assert.equal(claude.version, pkg.version);
+  assert.equal(blun.version, pkg.version);
   assert.equal(codex.version, pkg.version);
   assert.equal(marketplace.plugins[0].version, pkg.version);
   assert.equal(hookVersion.version, pkg.version);
@@ -26,29 +27,37 @@ test("package and host manifests keep one release version", async () => {
 });
 
 test("host registrations launch the same provider-neutral MCP implementation", async () => {
-  const [claude, claudeMcp, codex] = await Promise.all([
-    json(".claude-plugin/plugin.json"), json(".mcp.json"), json(".codex-plugin/plugin.json")
+  const [blun, claude, claudeMcp, codex] = await Promise.all([
+    json("blun.plugin.json"), json(".claude-plugin/plugin.json"), json(".mcp.json"), json(".codex-plugin/plugin.json")
   ]);
   assert.equal(claude.mcpServers, "./.mcp.json");
   assert.equal(claude.hooks, undefined);
   assert.deepEqual(claudeMcp.mcpServers["agent-spine"].args, ["${CLAUDE_PLUGIN_ROOT}/src/mcp.js"]);
+  assert.deepEqual(blun.mcpServers["agent-spine"].args, ["./src/mcp.js"]);
   assert.deepEqual(codex.mcpServers["agent-spine"].args, ["${PLUGIN_ROOT}/src/mcp.js"]);
+  assert.equal(blun.hooks.length, 8);
+  assert.deepEqual(blun.hooks.map(({ event }) => event), [
+    "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+    "PreCompact", "PostCompact", "Stop", "SubagentStop"
+  ]);
 });
 
-test("Claude and Codex registrations complete a real MCP initialize handshake", async () => {
+test("BLUN, Claude, and Codex registrations complete a real MCP initialize handshake", async () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   const result = await checkHosts(root);
   assert.equal(result.ok, true);
   assert.deepEqual(result.registrations.map(({ label, server }) => ({ label, server })), [
+    { label: "blun", server: "agent-spine" },
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
   assert.equal(result.version, "0.8.0");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
   assert.deepEqual(result.hookDiscovery, {
-    claude: "default-hooks-directory", codex: "default-hooks-directory",
+    blun: "plugin-manifest", claude: "default-hooks-directory", codex: "default-hooks-directory",
     trust: "host-user-required", liveTrustVerified: false
   });
+  assert.equal(result.hooks.blun.events.includes("PreToolUse"), true);
   assert.equal(result.hooks.claude.events.includes("PostCompact"), true);
   assert.equal(result.hooks.codex.events.includes("UserPromptSubmit"), true);
 });

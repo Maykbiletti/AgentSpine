@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkHosts } from "./check-hosts.js";
 
@@ -18,6 +19,19 @@ function copyFilter(source) {
 
 async function copyBundle(source, target) {
   await cp(source, target, { recursive: true, filter: copyFilter });
+}
+
+async function removeTree(path, options = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, ...options });
+      return;
+    } catch (error) {
+      const transient = process.platform === "win32" && ["EACCES", "EBUSY", "EPERM"].includes(error?.code);
+      if (!transient || attempt >= 7) throw error;
+      await delay(10 * (attempt + 1));
+    }
+  }
 }
 
 async function makePreviousCache(target) {
@@ -480,7 +494,7 @@ export async function checkInstall(root = process.cwd()) {
 
     const staging = `${installed}.${currentVersion}.staging`;
     await copyBundle(root, staging);
-    await rm(installed, { recursive: true });
+    await removeTree(installed);
     await rename(staging, installed);
     const upgraded = await checkHosts(installed);
     const upgradeState = join(workspace, "state-upgrade");
@@ -492,8 +506,8 @@ export async function checkInstall(root = process.cwd()) {
     const upgradedAcceptance = await invokeInstalledAcceptance(installed);
     const upgradedLiveRoots = await invokeInstalledLiveRoots(installed, join(workspace, "upgrade-live"), join(workspace, "state-live-upgrade"));
 
-    await rm(fresh, { recursive: true });
-    await rm(installed, { recursive: true });
+    await removeTree(fresh);
+    await removeTree(installed);
     if (hash(await readFile(source)) !== sourceHash) throw new Error("install or uninstall changed an existing source Markdown file");
     return {
       ok: true,
@@ -513,7 +527,7 @@ export async function checkInstall(root = process.cwd()) {
       authority: "installation-check-only"
     };
   } finally {
-    await rm(workspace, { recursive: true, force: true });
+    await removeTree(workspace, { force: true });
   }
 }
 

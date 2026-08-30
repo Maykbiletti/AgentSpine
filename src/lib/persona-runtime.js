@@ -336,7 +336,7 @@ function normalizeNativeDiscovery(value) {
 function nativeAgentDirectory(scope, catalog, env) {
   if (scope.scope === "project") return join(catalog.root, scope.host === "claude" ? ".claude" : ".codex", "agents");
   const home = scope.host === "claude" ? env.CLAUDE_CONFIG_DIR
-    : env.CODEX_HOME;
+    : env.CODEX_HOME || env.BLUN_HOME;
   if (home) {
     if (!isAbsolute(home)) throw new Error(scope.host + " home override must be absolute");
     return join(home, "agents");

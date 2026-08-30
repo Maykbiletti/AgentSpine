@@ -91,7 +91,7 @@ claude --plugin-dir .
 ```
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
-Version `0.8.0` explicitly registers `.mcp.json`, ships one native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.7.0` plugin cache. Fresh-install and upgrade checks prove package containment and entrypoint behavior; actual hook discovery and trust remain host-controlled and must be inspected in the live host. Claude project memory is `MEMORY.md`-indexed, lazy, race-safe, persistently cached outside the project, and independent of unrelated file count; the live path performs no memory-directory enumeration.
+Version `0.8.0` explicitly registers `.mcp.json`, ships one native `hooks/hooks.json`, and invalidates Claude Code's earlier `0.7.0` plugin cache. The unreleased BLUN adapter adds `blun.plugin.json` with native MCP and lifecycle registrations. Fresh-install and upgrade checks prove package containment and entrypoint behavior; actual hook discovery and trust remain host-controlled and must be inspected in the live host. Claude project memory is `MEMORY.md`-indexed, lazy, race-safe, persistently cached outside the project, and independent of unrelated file count; the live path performs no memory-directory enumeration.
 
 Verify the installed registration from a checkout with:
 

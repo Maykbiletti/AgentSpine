@@ -4,6 +4,10 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- BLUN King can now install AgentSpine as a native plugin with the same lifecycle hooks, MCP server, isolated app-home source resolution, and explicit plugin-install trust step as the existing Claude Code and Codex hosts
+
 ### Fixed
 
 - Windows Node 24 state writes now treat transient lock access errors as contention across every lock-backed store, retry atomic replacements with a bounded backoff, and tolerate briefly retained handles during hermetic cleanup

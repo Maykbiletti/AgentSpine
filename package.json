@@ -12,6 +12,7 @@
     ".": "./src/index.js"
   },
   "files": [
+    "blun.plugin.json",
     ".claude-plugin",
     ".codex-plugin",
     ".mcp.json",

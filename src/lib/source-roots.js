@@ -377,8 +377,8 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   let sources;
   let hostDetails = {};
   if (host === "codex") {
-    hostHome = await existingDirectory(resolve(env.CODEX_HOME || join(homedir(), ".codex")))
-      || resolve(env.CODEX_HOME || join(homedir(), ".codex"));
+    const codexHome = env.CODEX_HOME || env.BLUN_HOME || join(homedir(), ".codex");
+    hostHome = await existingDirectory(resolve(codexHome)) || resolve(codexHome);
     const config = await codexConfig(hostHome);
     projectRoot = env.AGENTSPINE_ROOT ? await canonicalPath(env.AGENTSPINE_ROOT) : await findRoot(canonicalCwd, config.rootMarkers);
     sources = await codexSources({ cwd: canonicalCwd, projectRoot, codexHome: hostHome, config });
