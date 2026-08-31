@@ -314,9 +314,9 @@ test("parallel duplicate outcome receipts are idempotent and remain one immutabl
 
 test("0.10 learning state upgrades in place and corrupt outcome receipts fail closed", async (t) => {
   const { root } = await fixture(t);
-  const { learningPath } = await loadLearning(root);
+  const { learningPath, catalog } = await loadLearning(root);
   const legacy = {
-    schema: "agentspine.learning/v1", root,
+    schema: "agentspine.learning/v1", root: catalog.root,
     config: { autoPromote: false, minConfidence: 0.85, minEvidence: 2, maxContextItems: 12 },
     candidates: [], history: []
   };
