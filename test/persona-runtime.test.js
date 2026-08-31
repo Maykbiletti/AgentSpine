@@ -8,7 +8,7 @@ import {
   applyPersonaRoster, loadPersonaRuntime, personaContext, personaRuntimeFindings,
   syncPersonaRosterFromEnvironment
 } from "../src/lib/persona-runtime.js";
-import { loadGraph, relationshipContext, upsertEntity } from "../src/lib/graph.js";
+import { linkEntities, loadGraph, relationshipContext, upsertEntity } from "../src/lib/graph.js";
 
 function hash(value) { return createHash("sha256").update(value).digest("hex"); }
 
@@ -169,10 +169,12 @@ test("roster reconciliation creates missing groups and exposes only exact-scope 
   const graph = (await loadGraph(root)).graph;
   assert.equal(graph.entities.find((item) => item.id === "group:gamma").privacy, "group");
   assert.equal(graph.entities.find((item) => item.id === "group:delta").kind, "group");
+  await linkEntities({ root, from: franz.personaId, to: outsider.personaId, relation: "works-with", privacy: "shared" });
   const context = await relationshipContext({ root, entityId: franz.personaId, groupId: "group:gamma" });
   assert.equal(context.relatedEntities.some((item) => item.id === otto.personaId), true);
   assert.equal(context.relatedEntities.some((item) => item.id === outsider.personaId), false);
   assert.equal(context.edges.some((item) => item.from === otto.personaId && item.to === "group:gamma"), true);
+  assert.equal(context.edges.some((item) => item.from === franz.personaId && item.to === outsider.personaId), false);
   assert.equal(JSON.stringify(context).includes("Outsider"), false);
   assert.equal(hash(await readFile(join(root, "SOUL.md"))), before);
 });

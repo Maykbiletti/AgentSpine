@@ -1,7 +1,7 @@
 import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCatalog } from "./catalog.js";
-import { projectStateDir } from "./paths.js";
+import { canonicalPath, projectStateDir } from "./paths.js";
 
 const RELATIONS = new Set([
   "loads", "belongs-to", "explains", "supports", "related",
@@ -97,6 +97,21 @@ export async function loadGraph(root, providedCatalog = null) {
       graphPath: path,
       catalog
     };
+  }
+}
+
+async function loadRelationshipGraph(root, providedCatalog = null, { signal = null } = {}) {
+  const canonicalRoot = providedCatalog?.root || await canonicalPath(root);
+  const directory = await projectStateDir(canonicalRoot);
+  const path = join(directory, "graph.json");
+  try {
+    const metadata = await stat(path);
+    if (metadata.size > 5 * 1024 * 1024) throw new Error("relationship graph exceeds the 5 MiB read limit");
+    const content = await readFile(path, { encoding: "utf8", signal });
+    return { graph: normalizeGraph(JSON.parse(content), canonicalRoot), graphPath: path };
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return { graph: emptyGraph(canonicalRoot), graphPath: path };
   }
 }
 
@@ -241,9 +256,9 @@ function relationshipAudience(graph, groupId) {
 
 async function assembleRelationshipContext({
   root = process.cwd(), entityId, includePrivate = false, groupId = null, catalog: providedCatalog = null
-}, loadGraphImpl) {
+}, loadGraphImpl, signal) {
   if (!entityId) throw new Error("entityId is required");
-  const { graph } = await loadGraphImpl(root, providedCatalog);
+  const { graph } = await loadGraphImpl(root, providedCatalog, { signal });
   if (groupId !== null) {
     const group = graph.entities.find((item) => item.id === groupId && item.kind === "group");
     if (!group) throw new Error(`unknown group entity: ${groupId}`);
@@ -289,14 +304,33 @@ async function assembleRelationshipContext({
   };
 }
 
-export async function relationshipContext(options = {}, { loadGraphImpl = loadGraph, timeoutMs = 5000 } = {}) {
+export async function relationshipContext(options = {}, { loadGraphImpl = loadRelationshipGraph, timeoutMs = 5000 } = {}) {
+  const controller = new AbortController();
   let timer;
+  const timeoutError = new Error(`relationship context exceeded its ${timeoutMs} ms local read limit`);
   const deadline = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`relationship context exceeded its ${timeoutMs} ms local read limit`)), timeoutMs);
+    timer = setTimeout(() => {
+      reject(timeoutError);
+      controller.abort();
+    }, timeoutMs);
   });
   try {
-    return await Promise.race([assembleRelationshipContext(options, loadGraphImpl), deadline]);
+    return await Promise.race([assembleRelationshipContext(options, loadGraphImpl, controller.signal), deadline]);
+  } catch (error) {
+    if (error !== timeoutError) throw error;
+    return {
+      status: "degraded",
+      reason: "local-state-timeout",
+      timeoutMs,
+      entity: null,
+      relatedEntities: [],
+      edges: [],
+      history: [],
+      groupId: options.groupId ?? null,
+      authority: "context-only"
+    };
   } finally {
     clearTimeout(timer);
+    controller.abort();
   }
 }

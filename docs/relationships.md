@@ -67,7 +67,7 @@ With an exact `groupId`, a relationship read returns the requested entity's dire
 
 - The graph is local user state and is not synchronized automatically.
 - Authenticated roster state is synchronized only when an owner-configured roster or native manifest scope is active; chat names never create entities.
-- Relationship reads stop with a visible error after a five-second local state deadline.
+- Relationship reads bypass project discovery, abort the graph read after a five-second local deadline, and return a visible `degraded` status without aborting the turn.
 - A 5 MiB graph ceiling stops unbounded growth instead of discarding history.
 - Attribute-key rejection cannot determine whether innocent-looking prose contains a secret.
 - Group-specific recipient policy and notification delivery are not implemented.

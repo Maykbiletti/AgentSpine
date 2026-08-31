@@ -17,6 +17,8 @@ import { captureMustRememberPrompt, recordPreflightFailure, runPreflight, verify
 import { isMainModule } from "./lib/runtime.js";
 
 const MAX_STDIN_BYTES = 64 * 1024;
+const STANDARD_HOST_CONTEXT_BYTES = 9500;
+const MAX_CLAUDE_OVERFLOW_CONTEXT_BYTES = 32 * 1024;
 const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
 const KNOWN_EVENTS = new Set([
   ...CONTEXT_EVENTS, "InstructionsLoaded", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"
@@ -58,6 +60,12 @@ function promptFromInput(input) {
     }
   }
   return null;
+}
+
+function hostContextLimit(preflight) {
+  return preflight?.receipt?.instructionBudget?.mode === "claude-required-overflow"
+    ? MAX_CLAUDE_OVERFLOW_CONTEXT_BYTES
+    : STANDARD_HOST_CONTEXT_BYTES;
 }
 
 function hostFromInput(input) {
@@ -677,7 +685,7 @@ export async function runHook(payload = null) {
         prompt: event === "UserPromptSubmit" ? promptFromInput(input) : null
       });
       const context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, resolvedSources.diagnostics, preflight);
-      if (event === "UserPromptSubmit" && Buffer.byteLength(context) > 9500) {
+      if (event === "UserPromptSubmit" && Buffer.byteLength(context) > hostContextLimit(preflight)) {
         throw new Error("mandatory preflight context exceeds the host hook injection limit");
       }
       if (event === "UserPromptSubmit" && !await verifyPreflightReceipt({

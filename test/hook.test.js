@@ -92,6 +92,39 @@ test("installed BLUN hook keeps the full briefing out of the runtime message", a
   assert.equal(detailed.preflight.briefing.instructions[0].content, rules);
 });
 
+test("installed Claude hook carries one bounded required-instruction overflow", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-claude-overflow-hook-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-claude-overflow-state-"));
+  const blunHome = await mkdtemp(join(tmpdir(), "agentspine-claude-overflow-home-"));
+  t.after(async () => {
+    await rm(root, { recursive: true });
+    await rm(state, { recursive: true });
+    await rm(blunHome, { recursive: true });
+  });
+  await writeFile(join(root, "CLAUDE.md"), `# Required Claude rules\n${"x".repeat(9000)}\n`, "utf8");
+  const output = await runInstalledHook({
+    cwd: root,
+    state,
+    blunHome,
+    input: { hook_event_name: "UserPromptSubmit", host: "claude", cwd: root,
+      session_id: "session:claude-overflow", event_id: "turn:claude-overflow",
+      prompt: [{ type: "text", text: "Hallo" }] }
+  });
+  assert.match(output.hookSpecificOutput.message, /^AgentSpine ready:/);
+
+  await writeFile(join(root, "CLAUDE.md"), `# Oversized Claude rules\n${"x".repeat(17000)}\n`, "utf8");
+  const blocked = await runInstalledHook({
+    cwd: root,
+    state,
+    blunHome,
+    input: { hook_event_name: "UserPromptSubmit", host: "claude", cwd: root,
+      session_id: "session:claude-oversized", event_id: "turn:claude-oversized",
+      prompt: [{ type: "text", text: "Hallo" }] }
+  });
+  assert.equal(blocked.decision, "block");
+  assert.match(blocked.reason, /CLAUDE\.md is \d+ bytes; mandatory limit is 16384 bytes/);
+});
+
 test("compact BLUN runtime context preserves active execution and authenticated channel signals", () => {
   const selfstarter = {
     active: true,

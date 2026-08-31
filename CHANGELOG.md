@@ -4,6 +4,25 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-31
+
+### Changed
+
+- Claude mandatory instructions retain the 8 KiB standard budget but may use one explicit, receipt-bound overflow up to 16 KiB; Codex and generic instruction hosts remain capped at 8 KiB
+- Relationship deadlines return a visible `degraded` context and abort the active graph read instead of aborting the turn
+
+### Fixed
+
+- Relationship CLI and MCP reads no longer rebuild the complete project catalog before reading the bounded graph state
+- An unmarked home-directory working directory no longer becomes a recursive project scan; known user rules are still loaded through their exact host-native paths
+- Dropbox, OneDrive, dependency, build and embedded repository directories are excluded from bounded project source traversal
+- Oversized mandatory instructions now block immediately with the measured and allowed byte counts instead of an opaque budget message
+
+### Security
+
+- Automatic group neighborhoods continue to exclude explicit cross-group edges, inactive personas, private records and every entity outside the exact authenticated group audience
+- The Claude overflow mode, byte usage and hard limit are HMAC-receipt-bound and revalidated immediately before one-time consumption
+
 ## [0.10.0] - 2026-08-30
 
 ### Added
@@ -314,7 +333,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/Maykbiletti/AgentSpine/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.7.0...v0.8.0

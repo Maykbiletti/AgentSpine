@@ -150,14 +150,20 @@ async function findRoot(cwd, markers) {
   let cursor = cwd;
   while (true) {
     for (const marker of markers) {
-      try { await lstat(join(cursor, marker)); return cursor; } catch (error) {
+      try { await lstat(join(cursor, marker)); return { root: cursor, resolution: "project-marker" }; } catch (error) {
         if (error.code !== "ENOENT") throw error;
       }
     }
     const parent = dirname(cursor);
-    if (parent === cursor) return cwd;
+    if (parent === cursor) return { root: cwd, resolution: "cwd-fallback" };
     cursor = parent;
   }
+}
+
+function skippedExtraDirectory(name) {
+  const lower = name.toLowerCase();
+  return SKIP_EXTRA_DIRS.has(name) || SKIP_EXTRA_DIRS.has(lower)
+    || lower.includes("dropbox") || lower === "onedrive" || lower.startsWith("onedrive - ");
 }
 
 async function containsProjectMarker(directory) {
@@ -201,7 +207,7 @@ async function boundedMarkdownTree(directory, prefix, host, scope, precedenceSta
       if (output.length >= maxFiles) throw new Error(`host-native rule tree exceeds ${maxFiles} files`);
       if (entry.isSymbolicLink()) continue;
       const path = join(current, entry.name);
-      if (entry.isDirectory() && !entry.name.startsWith(".") && !SKIP_EXTRA_DIRS.has(entry.name)) await walk(path);
+      if (entry.isDirectory() && !entry.name.startsWith(".") && !skippedExtraDirectory(entry.name)) await walk(path);
       else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
         output.push({ path, id: `${prefix}/${relative(root, path).replaceAll("\\", "/")}`, host, scope,
           binding: "host-native-rule-tree", precedence: precedenceStart + output.length });
@@ -390,23 +396,28 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   let projectRoot;
   let sources;
   let hostDetails = {};
+  let rootResolution = "explicit-root";
   if (host === "codex") {
     const codexHome = env.CODEX_HOME || env.BLUN_HOME || join(homedir(), ".codex");
     hostHome = await existingDirectory(resolve(codexHome)) || resolve(codexHome);
     const config = await codexConfig(hostHome);
-    projectRoot = env.AGENTSPINE_ROOT ? await canonicalPath(env.AGENTSPINE_ROOT) : await findRoot(canonicalCwd, config.rootMarkers);
+    if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
+    else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, config.rootMarkers));
     sources = await codexSources({ cwd: canonicalCwd, projectRoot, codexHome: hostHome, config });
     hostDetails = { rootMarkers: config.rootMarkers, fallbackNames: config.fallbackNames };
   } else {
     hostHome = await existingDirectory(resolve(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")))
       || resolve(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
-    projectRoot = env.AGENTSPINE_ROOT ? await canonicalPath(env.AGENTSPINE_ROOT) : await findRoot(canonicalCwd, [".git"]);
+    if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
+    else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, [".git"]));
     const result = await claudeSources({ cwd: canonicalCwd, projectRoot, configDir: hostHome, input, env, registry, deadline, memoryHooks });
     sources = result.sources;
     hostDetails = { memoryRoot: result.memoryRoot, memoryProvenance: result.memoryProvenance,
       memoryDiagnostics: result.memoryDiagnostics };
   }
-  if (projectRoot !== homedir() && projectRoot !== dirname(hostHome)) {
+  const homeRoot = await existingDirectory(homedir()) || resolve(homedir());
+  const skippedFallbackHomeTree = rootResolution === "cwd-fallback" && relative(homeRoot, projectRoot) === "";
+  if (!skippedFallbackHomeTree) {
     sources.push(...await boundedMarkdownTree(projectRoot, "agentspine:project", host, "project", 3000, deadline,
       { projectBoundary: true, maxFiles: MAX_PROJECT_FILES, maxDirectoryEntries: MAX_PROJECT_DIRECTORY_ENTRIES }));
   }
@@ -429,7 +440,8 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     scopes: Object.fromEntries(["user", "project", "project-memory"].map((scope) => [scope, documents.filter((item) => item.sourceScope === scope).length])),
     reason: documents.length ? null : "No regular, non-symlink host-native Markdown source exists in the checked scope.",
     personalContinuityLoaded: documents.some((item) => item.sourceScope === "user") || Boolean(activeUserState),
-    broadHomeScan: false, registryRevision: registry.revision,
+    broadHomeScan: false, projectTreeScan: skippedFallbackHomeTree ? "skipped-unmarked-home" : "bounded",
+    rootResolution, registryRevision: registry.revision,
     ...(host === "claude" ? {
       memoryBound: Boolean(hostDetails.memoryRoot),
       memoryRootDigest: hostDetails.memoryRoot ? digest(hostDetails.memoryRoot).slice(0, 16) : null,

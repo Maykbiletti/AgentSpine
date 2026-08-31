@@ -107,9 +107,31 @@ test("changed, deleted, oversized, and symlinked required instructions never reu
   const linkedSources = await resolveHostSourceCatalog({ host: "claude", cwd: setup.root, input: setup.input, env: setup.env });
   await assert.rejects(runPreflight({ ...turn(setup, "turn:linked"), resolvedSources: linkedSources, prompt: setup.input.prompt }), /symlink/);
   await rm(projectRules);
-  await writeFile(projectRules, `# Too large\n${"x".repeat(9000)}`, "utf8");
+  await writeFile(projectRules, `# Too large\n${"x".repeat(17000)}`, "utf8");
   const largeSources = await resolveHostSourceCatalog({ host: "claude", cwd: setup.root, input: setup.input, env: setup.env });
-  await assert.rejects(runPreflight({ ...turn(setup, "turn:large"), resolvedSources: largeSources, prompt: setup.input.prompt }), /cannot fit|exceed/);
+  await assert.rejects(runPreflight({ ...turn(setup, "turn:large"), resolvedSources: largeSources, prompt: setup.input.prompt }), /mandatory limit is 16384 bytes/);
+});
+
+test("CLAUDE instructions get one explicit overflow budget while other hosts stay at 8 KiB", async (t) => {
+  const claude = await fixture(t);
+  await writeFile(join(claude.root, "CLAUDE.md"), `# Required Claude rules\n${"x".repeat(9000)}\n`, "utf8");
+  const claudeSources = await resolveHostSourceCatalog({ host: "claude", cwd: claude.root, input: claude.input, env: claude.env });
+  const preflight = await runPreflight({ ...turn(claude, "turn:claude-overflow"), resolvedSources: claudeSources,
+    prompt: claude.input.prompt });
+  assert.equal(preflight.receipt.instructionBudget.mode, "claude-required-overflow");
+  assert.equal(preflight.receipt.instructionBudget.standardBytes, 8 * 1024);
+  assert.equal(preflight.receipt.instructionBudget.hardLimitBytes, 16 * 1024);
+  assert.equal(preflight.receipt.instructionBudget.usedBytes > 8 * 1024, true);
+  assert.equal(preflight.receipt.instructionBudget.overflowBytes,
+    preflight.receipt.instructionBudget.usedBytes - preflight.receipt.instructionBudget.standardBytes);
+  assert.equal(await verifyPreflightReceipt({ ...turn(claude, "turn:claude-overflow"), resolvedSources: claudeSources,
+    receipt: preflight.receipt, prompt: claude.input.prompt }), true);
+
+  const codex = await fixture(t, "codex");
+  await writeFile(join(codex.root, "AGENTS.md"), `# Required Codex rules\n${"x".repeat(9000)}\n`, "utf8");
+  const codexSources = await resolveHostSourceCatalog({ host: "codex", cwd: codex.root, input: codex.input, env: codex.env });
+  await assert.rejects(runPreflight({ ...turn(codex, "turn:codex-oversized"), resolvedSources: codexSources,
+    prompt: codex.input.prompt }), /mandatory limit is 8192 bytes/);
 });
 
 test("a required instruction replaced through its pathname during the handle read fails closed", async (t) => {

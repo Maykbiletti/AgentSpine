@@ -161,7 +161,13 @@ export async function sessionBriefing({
     focus: { active: Boolean(focusActive), currentTaskId },
     sources: { documents: [], diagnostics: sourceDiagnostics },
     tasks: [],
-    relationship: relationship ? { entity: null, relatedEntities: [], edges: [] } : null,
+    relationship: relationship ? {
+      status: relationship.status || "loaded",
+      reason: relationship.reason || null,
+      entity: null,
+      relatedEntities: [],
+      edges: []
+    } : null,
     voiceBrief: {
       schema: "agentspine.voice-brief/v1",
       personaId: entityId,
@@ -231,7 +237,7 @@ export async function sessionBriefing({
     if (binding?.sourceBinding && !tryAdd(result, result.voiceBrief.personaSources, binding.sourceBinding)) countOmitted(result, "voice");
   }
 
-  if (relationship) {
+  if (relationship && relationship.status !== "degraded") {
     if (!trySet(result, result.relationship, "entity", relationship.entity)) countOmitted(result, "relationships");
     if (!registeredPersona && !trySet(result, result.voiceBrief, "displayName", relationship.entity.displayName || null)) countOmitted(result, "voice");
     const language = typeof relationship.entity.attributes?.language === "string"

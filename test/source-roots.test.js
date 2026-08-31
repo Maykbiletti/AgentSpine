@@ -30,6 +30,7 @@ test("installed lifecycle resolves host-native user, project, and memory roots w
   const loose = join(workspace, "unrelated-cwd");
   const portableState = join(workspace, "portable-user-state");
   for (const path of [state, claudeHome, codexHome, projectA, nestedB, loose, portableState,
+    join(home, "Autoflasher Dropbox", "large-tree"),
     join(claudeHome, "projects", "project-a", "memory")]) await mkdir(path, { recursive: true });
   await mkdir(join(projectA, ".git"));
   await mkdir(join(projectB, ".git"));
@@ -46,6 +47,7 @@ test("installed lifecycle resolves host-native user, project, and memory roots w
     [join(projectB, "TEAM_GUIDE.md"), "# Codex B\n\nProject B root.\n"],
     [join(nestedB, "AGENTS.override.md"), "# Codex B API\n\nNested API wins here.\n"],
     [join(home, "PRIVATE.md"), "# Must never be scanned\n"],
+    [join(home, "Autoflasher Dropbox", "large-tree", "PRIVATE.md"), "# Cloud tree must never be scanned\n"],
     [join(projectA, ".private-notes", "HIDDEN.md"), "# Hidden project material must never be scanned\n"],
     [join(projectA, "vendor-repository", "FOREIGN.md"), "# Embedded repository must never be scanned\n"],
     [join(loose, "CLAUDE.md"), "# Loose project only\n"]
@@ -127,7 +129,10 @@ test("installed lifecycle resolves host-native user, project, and memory roots w
 
   const homeResolution = await resolveHostSourceCatalog({ host: "claude", cwd: home, input: {} });
   assert.equal(homeResolution.diagnostics.broadHomeScan, false);
+  assert.equal(homeResolution.diagnostics.projectTreeScan, "skipped-unmarked-home");
+  assert.equal(homeResolution.diagnostics.rootResolution, "cwd-fallback");
   assert.ok(!homeResolution.catalog.documents.some((item) => item.path === join(home, "PRIVATE.md")));
+  assert.ok(!homeResolution.catalog.documents.some((item) => item.path.includes("Autoflasher Dropbox")));
 
   for (const [path, expected] of Object.entries(before)) assert.equal(hash(await readFile(path)), expected);
   const registry = await inspectSourceRegistry();

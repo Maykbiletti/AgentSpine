@@ -152,11 +152,21 @@ test("group briefing enforces one exact audience and never loads Markdown conten
   );
 });
 
-test("relationship context fails visibly when its local state read stalls", async () => {
-  await assert.rejects(
-    relationshipContext({ entityId: "person:alpha" }, { loadGraphImpl: () => new Promise(() => {}), timeoutMs: 10 }),
-    /relationship context exceeded its 10 ms local read limit/
-  );
+test("relationship context degrades visibly and aborts its local state read when it stalls", async () => {
+  let aborted = false;
+  const context = await relationshipContext({ entityId: "person:alpha" }, {
+    loadGraphImpl: (_root, _catalog, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        aborted = true;
+        reject(new Error("relationship read aborted"));
+      }, { once: true });
+    }), timeoutMs: 10
+  });
+  assert.equal(aborted, true);
+  assert.deepEqual(context, {
+    status: "degraded", reason: "local-state-timeout", timeoutMs: 10,
+    entity: null, relatedEntities: [], edges: [], history: [], groupId: null, authority: "context-only"
+  });
 });
 
 test("small budgets retain whole values or omit them without truncation", async (t) => {
