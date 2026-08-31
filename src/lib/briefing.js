@@ -107,7 +107,7 @@ async function settleReads(promises) {
  */
 export async function sessionBriefing({
   root = process.cwd(), cwd = root, host = "generic", entityId = null,
-  groupId = null, projectId = null, currentTaskId = null,
+  userId = null, tenantId = null, groupId = null, projectId = null, currentTaskId = null,
   includePrivate = false, focusActive = true, includeSourceContent = true,
   maxBytes = 16384, now = new Date(), catalog: providedCatalog = null, userStateRoot = null,
   sourceDiagnostics = null, prompt = null
@@ -123,13 +123,16 @@ export async function sessionBriefing({
     catalog
   });
   const portableRelationship = Boolean(entityId && userStateRoot && userStateRoot !== catalog.root);
+  const learningScope = {
+    personaId: entityId, userId, tenantId, projectId, groupId, taskId: currentTaskId
+  };
   const relationship = entityId
     ? await relationshipContext(userStateRoot && userStateRoot !== catalog.root
       ? { root: userStateRoot, entityId, includePrivate, groupId }
       : { root: catalog.root, entityId, includePrivate, groupId, catalog })
     : null;
   const [learned, attention, tasks, shared, userLearned, personas, gateway] = await settleReads([
-    learningContext({ root: catalog.root, includePrivate, groupId, maxItems: 50, catalog }),
+    learningContext({ root: catalog.root, includePrivate, groupId, scope: learningScope, maxItems: 50, catalog, now }),
     attentionContext({
       root: catalog.root, includePrivate, entityId, groupId, projectId, currentTaskId,
       focusActive, markPresented: false, maxItems: 20, now, catalog
@@ -137,7 +140,7 @@ export async function sessionBriefing({
     taskContext({ root: catalog.root, includePrivate, groupId, projectId, includeClosed: false, maxItems: 100, catalog }),
     sharedContext({ root: catalog.root, includePrivate, groupId, maxItems: 50, catalog }),
     userStateRoot && userStateRoot !== catalog.root
-      ? learningContext({ root: userStateRoot, includePrivate, groupId, maxItems: 50 })
+      ? learningContext({ root: userStateRoot, includePrivate, groupId, scope: learningScope, maxItems: 50, now })
       : Promise.resolve({ items: [] }),
     loadPersonaRuntime(catalog.root, catalog),
     loadGatewayRuntime(catalog.root, catalog)
@@ -157,7 +160,7 @@ export async function sessionBriefing({
     root: catalog.root,
     cwd: sources.cwd,
     host,
-    scope: { entityId, groupId, projectId, includePrivate },
+    scope: { entityId, userId, tenantId, groupId, projectId, includePrivate },
     focus: { active: Boolean(focusActive), currentTaskId },
     sources: { documents: [], diagnostics: sourceDiagnostics },
     tasks: [],

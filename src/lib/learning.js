@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCatalog } from "./catalog.js";
@@ -6,19 +6,36 @@ import { isFileLockContention } from "./filesystem-retry.js";
 import { loadGraph } from "./graph.js";
 import { projectStateDir } from "./paths.js";
 
-const KINDS = new Set(["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference"]);
+const KINDS = new Set(["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference", "behavior"]);
 const EVIDENCE_TYPES = new Set(["user-statement", "document", "interaction", "test"]);
 const PRIVACY = new Set(["private", "shared", "group"]);
 const STATUSES = new Set(["candidate", "accepted", "rejected", "superseded", "rolled-back"]);
 const AUTO_KINDS = new Set(["project-fact", "reference"]);
+const OUTCOME_AUTO_KINDS = new Set(["behavior"]);
 const CONTINUITY_AUTO_KINDS = new Set(["preference", "no-go", "correction", "project-fact", "reference"]);
+const OUTCOME_PHASES = new Set(["before", "after"]);
+const MEASUREMENT_KINDS = new Set(["objective", "user-feedback", "model-suggestion"]);
+const METRIC_DIRECTIONS = new Set(["higher", "lower"]);
+const SCOPE_FIELDS = ["personaId", "userId", "tenantId", "projectId", "groupId", "taskId"];
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
 const MAX_STATE_BYTES = 5 * 1024 * 1024;
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret)\s*[:=]\s*\S{8,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i;
 const AUTHORITY_ASSERTION_RE = /\b(?:user|agent|person|they|he|she|i|ich|wir|nutzer|benutzer).{0,60}\b(?:may|can|is allowed|is authorized|has|have|darf|berechtigt|hat|haben).{0,50}\b(?:admin(?:istrator)?|permissions?|rights?|authorization|production access|deploy|billing|spending|policy exception|bypass|zugang|rechte|berechtigung|produktion|abrechnung|ausnahme|umgehen)\b/i;
+const PROTECTED_LESSON_RE = /\b(?:security|safety|identity|authentication|authorization|permissions?|credentials?|secrets?|policy|production|deployment|payments?|billing|tool access|file access|network access|database access|sicherheit|identität|authentifizierung|berechtigungen?|zugang|richtlinie|produktion|zahlungen?)\b/i;
 
 function defaults() {
-  return { autoPromote: false, minConfidence: 0.85, minEvidence: 2, maxContextItems: 12 };
+  return {
+    autoPromote: false,
+    minConfidence: 0.85,
+    minEvidence: 2,
+    maxContextItems: 12,
+    minOutcomeReceipts: 2,
+    minImprovement: 0.05,
+    regressionTolerance: 0,
+    outcomeMaxAgeDays: 30,
+    canaryReceipts: 2,
+    canaryTtlDays: 14
+  };
 }
 
 function emptyLearning(root) {
@@ -27,6 +44,7 @@ function emptyLearning(root) {
     root,
     config: defaults(),
     candidates: [],
+    outcomes: [],
     history: []
   };
 }
@@ -36,17 +54,89 @@ function normalizeState(value, root) {
     || value.schema !== "agentspine.learning/v1" || value.root !== root
     || !value.config || typeof value.config !== "object" || Array.isArray(value.config)
     || !Array.isArray(value.candidates) || !value.candidates.every((item) => item && typeof item === "object" && Array.isArray(item.evidence))
+    || (value.outcomes !== undefined && (!Array.isArray(value.outcomes) || !value.outcomes.every((item) => item && typeof item === "object")))
     || !Array.isArray(value.history) || !value.history.every((item) => item && typeof item === "object")) {
     throw new Error("learning state structure is invalid; run the audit before learning");
   }
-  return value;
+  const normalized = {
+    ...value,
+    config: { ...defaults(), ...value.config },
+    candidates: value.candidates.map((candidate) => ({
+      ...candidate,
+      scope: normalizeStoredScope(candidate.scope, candidate.subjectId, candidate.groupId),
+      requiresLocalReview: candidate.requiresLocalReview ?? PROTECTED_LESSON_RE.test(candidate.claim || "")
+    })),
+    outcomes: value.outcomes || []
+  };
+  if (normalized.outcomes.some((receipt) => !storedOutcomeStructure(receipt))) {
+    throw new Error("learning outcome state is invalid; run the audit before learning");
+  }
+  if (normalized.outcomes.some((receipt) => {
+    const candidate = normalized.candidates.find((item) => item.id === receipt.learningId);
+    return !candidate || !scopeContains(candidate.scope, receipt.scope);
+  })) throw new Error("learning outcome scope is invalid; run the audit before learning");
+  return normalized;
 }
 
 function validConfig(config) {
   return typeof config?.autoPromote === "boolean"
     && Number.isFinite(config.minConfidence) && config.minConfidence >= 0.5 && config.minConfidence <= 1
     && Number.isInteger(config.minEvidence) && config.minEvidence >= 1 && config.minEvidence <= 10
-    && Number.isInteger(config.maxContextItems) && config.maxContextItems >= 1 && config.maxContextItems <= 50;
+    && Number.isInteger(config.maxContextItems) && config.maxContextItems >= 1 && config.maxContextItems <= 50
+    && Number.isInteger(config.minOutcomeReceipts) && config.minOutcomeReceipts >= 2 && config.minOutcomeReceipts <= 10
+    && Number.isFinite(config.minImprovement) && config.minImprovement >= 0 && config.minImprovement <= 1
+    && Number.isFinite(config.regressionTolerance) && config.regressionTolerance >= 0 && config.regressionTolerance <= 1
+    && Number.isInteger(config.outcomeMaxAgeDays) && config.outcomeMaxAgeDays >= 1 && config.outcomeMaxAgeDays <= 365
+    && Number.isInteger(config.canaryReceipts) && config.canaryReceipts >= 1 && config.canaryReceipts <= 10
+    && Number.isInteger(config.canaryTtlDays) && config.canaryTtlDays >= 1 && config.canaryTtlDays <= 90;
+}
+
+function normalizeStoredScope(scope, subjectId = null, groupId = null) {
+  const source = scope && typeof scope === "object" && !Array.isArray(scope) ? scope : {};
+  const normalized = {};
+  for (const field of SCOPE_FIELDS) normalized[field] = source[field] ?? null;
+  if (normalized.groupId === null && groupId) normalized.groupId = groupId;
+  return normalized;
+}
+
+function normalizeScope(scope, subjectId = null, groupId = null) {
+  const normalized = normalizeStoredScope(scope, subjectId, groupId);
+  for (const [field, value] of Object.entries(normalized)) {
+    if (value !== null && !ID_RE.test(value)) throw new Error(`scope.${field} must be a stable, whitespace-free identifier`);
+  }
+  return normalized;
+}
+
+function scopeKey(scope) {
+  return JSON.stringify(SCOPE_FIELDS.map((field) => scope?.[field] ?? null));
+}
+
+function scopeContains(candidateScope, runtimeScope) {
+  return SCOPE_FIELDS.every((field) => candidateScope?.[field] === null || candidateScope?.[field] === runtimeScope?.[field]);
+}
+
+function exactScope(left, right) {
+  return scopeKey(left) === scopeKey(right);
+}
+
+function digest(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function storedOutcomeStructure(receipt) {
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
+  const payload = outcomePayload(receipt);
+  return receipt.schema === "agentspine.learning-outcome/v1" && ID_RE.test(receipt.id || "")
+    && ID_RE.test(receipt.learningId || "") && OUTCOME_PHASES.has(receipt.phase)
+    && SCOPE_FIELDS.every((field) => receipt.scope?.[field] === null || ID_RE.test(receipt.scope?.[field] || ""))
+    && typeof receipt.metric?.name === "string" && receipt.metric.name.length > 0
+    && METRIC_DIRECTIONS.has(receipt.metric?.direction)
+    && Number.isFinite(receipt.metric?.value) && receipt.metric.value >= 0 && receipt.metric.value <= 1
+    && Number.isInteger(receipt.metric?.blockingDefects) && receipt.metric.blockingDefects >= 0
+    && MEASUREMENT_KINDS.has(receipt.measurement?.kind) && ID_RE.test(receipt.measurement?.evaluatorId || "")
+    && (receipt.measurement?.sourceDigest === null || /^[a-f0-9]{64}$/.test(receipt.measurement?.sourceDigest || ""))
+    && receipt.authority === "context-only" && receipt.measurement?.authority === "context-only"
+    && Number.isFinite(new Date(receipt.measuredAt).getTime()) && receipt.digest === digest(payload);
 }
 
 function date(value, field = "date") {
@@ -249,12 +339,14 @@ function evidenceConfidence(evidence) {
 
 export async function proposeLearning({
   root = process.cwd(), id = `learning:${randomUUID()}`, kind, claim, subjectId = null,
-  privacy = "private", groupId = null, evidence, supersedesId = null, now = new Date()
+  privacy = "private", groupId = null, scope = null, evidence, supersedesId = null, now = new Date()
 }) {
   if (!ID_RE.test(id)) throw new Error("id must be a stable, whitespace-free identifier");
   if (!KINDS.has(kind)) throw new Error(`unsupported learning kind: ${kind}`);
   claim = safeText(claim, "claim", 1000);
   assertSafeClaim(claim);
+  const normalizedScope = normalizeScope(scope, subjectId, groupId);
+  if (normalizedScope.groupId !== (groupId ?? null)) throw new Error("scope.groupId must match the privacy groupId");
   const timestamp = date(now, "now");
   return mutation(root, async (state, catalog, learningPath) => {
     if (state.candidates.some((candidate) => candidate.id === id)) {
@@ -262,13 +354,27 @@ export async function proposeLearning({
     }
     const { graph } = await loadGraph(catalog.root, catalog);
     validateScope(privacy, groupId, graph, subjectId);
+    const duplicate = state.candidates.find((candidate) => candidate.kind === kind
+      && candidate.claim === claim && exactScope(candidate.scope, normalizedScope)
+      && candidate.privacy === privacy && candidate.status !== "rejected" && candidate.status !== "rolled-back");
+    if (duplicate) return { candidate: duplicate, learningPath, unchanged: true };
     const normalizedEvidence = normalizeEvidence(evidence, catalog, timestamp);
     const superseded = supersedesId ? state.candidates.find((candidate) => candidate.id === supersedesId) : null;
     if (supersedesId && (!superseded || superseded.status !== "accepted")) {
       throw new Error(`supersedesId must reference an accepted learning: ${supersedesId}`);
     }
-    if (superseded && (superseded.kind !== kind || superseded.subjectId !== subjectId || superseded.privacy !== privacy || superseded.groupId !== groupId)) {
+    if (superseded && (superseded.kind !== kind || superseded.subjectId !== subjectId || superseded.privacy !== privacy
+      || superseded.groupId !== groupId || !exactScope(superseded.scope, normalizedScope))) {
       throw new Error("a superseding candidate must keep kind, subject, and privacy scope");
+    }
+    const conflictsWith = state.candidates.filter((candidate) => candidate.kind === kind
+      && candidate.claim !== claim && exactScope(candidate.scope, normalizedScope)
+      && ["candidate", "accepted"].includes(candidate.status) && candidate.id !== supersedesId)
+      .map((candidate) => candidate.id).sort();
+    if (conflictsWith.length) {
+      state.candidates = state.candidates.map((candidate) => conflictsWith.includes(candidate.id)
+        ? { ...candidate, conflictsWith: [...new Set([...(candidate.conflictsWith || []), id])].sort(), updatedAt: timestamp }
+        : candidate);
     }
     const candidate = {
       id,
@@ -277,11 +383,14 @@ export async function proposeLearning({
       subjectId,
       privacy,
       groupId,
+      scope: normalizedScope,
       status: "candidate",
       evidence: [normalizedEvidence],
       confidence: normalizedEvidence.confidence,
       supersedesId,
       supersededIds: [],
+      conflictsWith,
+      requiresLocalReview: PROTECTED_LESSON_RE.test(claim),
       automatic: false,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -376,26 +485,222 @@ function distinctEvidence(candidate) {
   return new Set(candidate.evidence.map((item) => item.sourceSha256 || item.sourceDocument || item.id)).size;
 }
 
+function outcomePayload({ id, learningId, phase, scope, metric, measurement, measuredAt }) {
+  return {
+    schema: "agentspine.learning-outcome/v1",
+    id,
+    learningId,
+    phase,
+    scope,
+    metric,
+    measurement,
+    measuredAt,
+    authority: "context-only"
+  };
+}
+
+function normalizeOutcome(input, candidate, timestamp) {
+  const id = input.id || `outcome:${randomUUID()}`;
+  if (!ID_RE.test(id)) throw new Error("outcome.id must be a stable, whitespace-free identifier");
+  const phase = input.phase;
+  if (!OUTCOME_PHASES.has(phase)) throw new Error("outcome.phase must be before or after");
+  const scope = normalizeScope(input.scope);
+  if (!scopeContains(candidate.scope, scope)) throw new Error("outcome scope does not match the learning candidate");
+  const name = safeText(input.metric?.name, "outcome.metric.name", 120);
+  const direction = input.metric?.direction;
+  if (!METRIC_DIRECTIONS.has(direction)) throw new Error("outcome.metric.direction must be higher or lower");
+  const metric = {
+    name,
+    direction,
+    value: number(input.metric?.value, "outcome.metric.value", 0, 1),
+    blockingDefects: integer(input.metric?.blockingDefects ?? 0, "outcome.metric.blockingDefects", 0, 1000)
+  };
+  const kind = input.measurement?.kind;
+  if (!MEASUREMENT_KINDS.has(kind)) throw new Error("outcome.measurement.kind is unsupported");
+  const evaluatorId = input.measurement?.evaluatorId;
+  if (!ID_RE.test(evaluatorId || "")) throw new Error("outcome.measurement.evaluatorId is required");
+  const sourceDigest = input.measurement?.sourceDigest ?? null;
+  if (sourceDigest !== null && !/^[a-f0-9]{64}$/.test(sourceDigest)) {
+    throw new Error("outcome.measurement.sourceDigest must be a SHA-256 digest");
+  }
+  const measurement = { kind, evaluatorId, sourceDigest, authority: "context-only" };
+  const measuredAt = date(input.measuredAt || timestamp, "outcome.measuredAt");
+  const payload = outcomePayload({ id, learningId: candidate.id, phase, scope, metric, measurement, measuredAt });
+  return { ...payload, digest: digest(payload) };
+}
+
+function outcomeFresh(receipt, config, now) {
+  return new Date(receipt.measuredAt).getTime() >= new Date(now).getTime() - config.outcomeMaxAgeDays * 86400000;
+}
+
+function promotableReceipts(state, candidate, timestamp) {
+  const all = state.outcomes.filter((item) => item.learningId === candidate.id && item.phase === "before"
+    && outcomeFresh(item, state.config, timestamp));
+  const eligible = all.filter((item) => item.measurement.kind !== "model-suggestion");
+  if (!eligible.some((item) => item.measurement.kind === "objective")) return [];
+  const groups = new Map();
+  for (const item of eligible) {
+    const key = JSON.stringify([scopeKey(item.scope), item.metric.name, item.metric.direction]);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return [...groups.values()]
+    .filter((items) => new Set(items.map((item) => item.measurement.evaluatorId)).size >= state.config.minOutcomeReceipts)
+    .sort((a, b) => b.length - a.length || a[0].id.localeCompare(b[0].id))[0] || [];
+}
+
+function improvement(direction, baseline, value) {
+  return direction === "higher" ? value - baseline : baseline - value;
+}
+
+function rollbackCandidate(state, candidate, reason, timestamp, mode = "manual") {
+  preserve(state, "learning-candidate", candidate, timestamp);
+  const restored = [];
+  for (const previousId of candidate.supersededIds || []) {
+    const previous = state.candidates.find((entry) => entry.id === previousId);
+    if (previous?.status === "superseded") {
+      preserve(state, "learning-candidate", previous, timestamp);
+      state.candidates = state.candidates.map((entry) => entry.id === previousId
+        ? { ...entry, status: "accepted", updatedAt: timestamp, authority: "context-only" }
+        : entry);
+      restored.push(previousId);
+    }
+  }
+  const rolledBack = {
+    ...candidate,
+    status: "rolled-back",
+    updatedAt: timestamp,
+    rollback: { reason, mode, rolledBackAt: timestamp, authority: "context-only" },
+    authority: "context-only"
+  };
+  state.candidates = state.candidates.map((entry) => entry.id === candidate.id ? rolledBack : entry);
+  return { candidate: rolledBack, restored };
+}
+
+function reconcileCanary(state, candidate, timestamp) {
+  const canary = candidate.promotion?.canary;
+  if (candidate.status !== "accepted" || candidate.promotion?.mode !== "outcome-canary" || canary?.status !== "active") {
+    return { candidate, decision: "unchanged", restored: [] };
+  }
+  if (new Date(canary.expiresAt).getTime() < new Date(timestamp).getTime()) {
+    const result = rollbackCandidate(state, candidate, "outcome canary expired before validation", timestamp, "automatic-stale");
+    return { ...result, decision: "rolled-back" };
+  }
+  const receipts = state.outcomes.filter((item) => item.learningId === candidate.id && item.phase === "after"
+    && exactScope(item.scope, canary.scope) && item.metric.name === canary.metric.name
+    && item.metric.direction === canary.metric.direction && outcomeFresh(item, state.config, timestamp));
+  if (receipts.some((item) => item.metric.blockingDefects > 0)) {
+    const result = rollbackCandidate(state, candidate, "outcome canary recorded a blocking defect", timestamp, "automatic-regression");
+    return { ...result, decision: "rolled-back" };
+  }
+  const eligible = receipts.filter((item) => item.measurement.kind !== "model-suggestion");
+  const independent = new Set(eligible.map((item) => item.measurement.evaluatorId)).size;
+  const deltas = eligible.map((item) => improvement(canary.metric.direction, canary.baseline, item.metric.value));
+  if (deltas.some((value) => value < -state.config.regressionTolerance)) {
+    const result = rollbackCandidate(state, candidate, "outcome canary regressed against its baseline", timestamp, "automatic-regression");
+    return { ...result, decision: "rolled-back" };
+  }
+  if (independent < state.config.canaryReceipts || !eligible.some((item) => item.measurement.kind === "objective")) {
+    return { candidate, decision: "active", restored: [] };
+  }
+  const average = deltas.reduce((sum, value) => sum + value, 0) / deltas.length;
+  if (average < state.config.minImprovement) {
+    const result = rollbackCandidate(state, candidate, "outcome canary did not meet the minimum measured improvement", timestamp, "automatic-no-improvement");
+    return { ...result, decision: "rolled-back" };
+  }
+  preserve(state, "learning-candidate", candidate, timestamp);
+  const validated = {
+    ...candidate,
+    promotion: {
+      ...candidate.promotion,
+      canary: { ...canary, status: "validated", validatedAt: timestamp, afterReceipts: eligible.map((item) => item.id), improvement: average }
+    },
+    updatedAt: timestamp,
+    authority: "context-only"
+  };
+  state.candidates = state.candidates.map((entry) => entry.id === candidate.id ? validated : entry);
+  return { candidate: validated, decision: "validated", restored: [] };
+}
+
+export async function recordLearningOutcome({ root = process.cwd(), id, learningId, phase, scope, metric, measurement, measuredAt, now = new Date() }) {
+  if (!ID_RE.test(learningId || "")) throw new Error("learningId is required");
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const candidate = state.candidates.find((entry) => entry.id === learningId);
+    if (!candidate) throw new Error(`unknown learning candidate: ${learningId}`);
+    if (phase === "before" && candidate.status !== "candidate") throw new Error("before outcomes require an unreviewed candidate");
+    if (phase === "after" && (candidate.status !== "accepted" || candidate.promotion?.mode !== "outcome-canary")) {
+      throw new Error("after outcomes require an active outcome canary");
+    }
+    const receipt = normalizeOutcome({ id, phase, scope, metric, measurement, measuredAt }, candidate, timestamp);
+    const existing = state.outcomes.find((item) => item.id === receipt.id);
+    if (existing) {
+      const retry = measuredAt === undefined
+        ? normalizeOutcome({ id, phase, scope, metric, measurement, measuredAt: existing.measuredAt }, candidate, timestamp)
+        : receipt;
+      if (existing.digest === retry.digest) return { receipt: existing, candidate, decision: "unchanged", learningPath, unchanged: true };
+      throw new Error("outcome receipt IDs are immutable");
+    }
+    const duplicate = state.outcomes.find((item) => item.digest === receipt.digest);
+    if (duplicate) return { receipt: duplicate, candidate, decision: "unchanged", learningPath, unchanged: true };
+    state.outcomes.push(receipt);
+    state.outcomes.sort((a, b) => a.id.localeCompare(b.id));
+    const reconciled = phase === "after" ? reconcileCanary(state, candidate, timestamp) : { candidate, decision: "recorded", restored: [] };
+    return { receipt, ...reconciled, learningPath, unchanged: false };
+  });
+}
+
 export async function evaluateLearning({ root = process.cwd(), now = new Date() } = {}) {
   const timestamp = date(now, "now");
   return mutation(root, (state, _catalog, learningPath) => {
     const accepted = [];
+    const reconciled = [];
+    for (const current of state.candidates.filter((entry) => entry.status === "accepted" && entry.promotion?.mode === "outcome-canary")) {
+      const result = reconcileCanary(state, current, timestamp);
+      if (result.decision !== "unchanged" && result.decision !== "active") reconciled.push({ id: current.id, decision: result.decision });
+    }
     if (state.config.autoPromote) {
       for (const candidate of state.candidates.filter((entry) => entry.status === "candidate")) {
-        if (!AUTO_KINDS.has(candidate.kind)) continue;
         if (candidate.confidence < state.config.minConfidence) continue;
         if (distinctEvidence(candidate) < state.config.minEvidence) continue;
-        accepted.push(acceptCandidate(state, candidate, timestamp, true, {
-          mode: "automatic-low-risk",
-          minConfidence: state.config.minConfidence,
-          minEvidence: state.config.minEvidence,
-          evidenceCount: distinctEvidence(candidate),
-          evaluatedAt: timestamp,
-          authority: "context-only"
-        }));
+        if (candidate.conflictsWith?.some((id) => state.candidates.some((entry) => entry.id === id && ["candidate", "accepted"].includes(entry.status)))) continue;
+        if (OUTCOME_AUTO_KINDS.has(candidate.kind)) {
+          if (SCOPE_FIELDS.every((field) => candidate.scope?.[field] === null)) continue;
+          if (candidate.requiresLocalReview) continue;
+          const receipts = promotableReceipts(state, candidate, timestamp);
+          if (receipts.length < state.config.minOutcomeReceipts) continue;
+          const baseline = receipts.reduce((sum, item) => sum + item.metric.value, 0) / receipts.length;
+          accepted.push(acceptCandidate(state, candidate, timestamp, true, {
+            mode: "outcome-canary",
+            minConfidence: state.config.minConfidence,
+            minEvidence: state.config.minEvidence,
+            evidenceCount: distinctEvidence(candidate),
+            evaluatedAt: timestamp,
+            canary: {
+              status: "active",
+              scope: receipts[0].scope,
+              metric: { name: receipts[0].metric.name, direction: receipts[0].metric.direction },
+              baseline,
+              beforeReceipts: receipts.map((item) => item.id),
+              expiresAt: new Date(new Date(timestamp).getTime() + state.config.canaryTtlDays * 86400000).toISOString()
+            },
+            authority: "context-only"
+          }));
+          continue;
+        }
+        if (AUTO_KINDS.has(candidate.kind)) {
+          accepted.push(acceptCandidate(state, candidate, timestamp, true, {
+            mode: "automatic-low-risk",
+            minConfidence: state.config.minConfidence,
+            minEvidence: state.config.minEvidence,
+            evidenceCount: distinctEvidence(candidate),
+            evaluatedAt: timestamp,
+            authority: "context-only"
+          }));
+        }
       }
     }
-    return { enabled: state.config.autoPromote, accepted, learningPath, authority: "context-only" };
+    return { enabled: state.config.autoPromote, accepted, reconciled, learningPath, authority: "context-only" };
   });
 }
 
@@ -449,27 +754,8 @@ export async function rollbackLearning({ root = process.cwd(), id, reason, now =
   return mutation(root, (state, _catalog, learningPath) => {
     const candidate = state.candidates.find((entry) => entry.id === id);
     if (!candidate || candidate.status !== "accepted") throw new Error("only an accepted learning can be rolled back");
-    preserve(state, "learning-candidate", candidate, timestamp);
-    const restored = [];
-    for (const previousId of candidate.supersededIds || []) {
-      const previous = state.candidates.find((entry) => entry.id === previousId);
-      if (previous?.status === "superseded") {
-        preserve(state, "learning-candidate", previous, timestamp);
-        state.candidates = state.candidates.map((entry) => entry.id === previousId
-          ? { ...entry, status: "accepted", updatedAt: timestamp, authority: "context-only" }
-          : entry);
-        restored.push(previousId);
-      }
-    }
-    const rolledBack = {
-      ...candidate,
-      status: "rolled-back",
-      updatedAt: timestamp,
-      rollback: { reason: rollbackReason, rolledBackAt: timestamp, authority: "context-only" },
-      authority: "context-only"
-    };
-    state.candidates = state.candidates.map((entry) => entry.id === id ? rolledBack : entry);
-    return { candidate: rolledBack, restored, learningPath };
+    const result = rollbackCandidate(state, candidate, rollbackReason, timestamp, "manual");
+    return { ...result, learningPath };
   });
 }
 
@@ -497,7 +783,7 @@ function visible(candidate, entities, audience, includePrivate, groupId) {
 
 export async function learningContext({
   root = process.cwd(), includePrivate = false, groupId = null, kinds = null,
-  subjectIds = null, maxItems = null, catalog: providedCatalog = null
+  subjectIds = null, scope = null, maxItems = null, catalog: providedCatalog = null, now = new Date()
 } = {}) {
   const catalog = providedCatalog || await buildCatalog(root);
   const { learning } = await loadLearning(catalog.root, catalog);
@@ -509,12 +795,21 @@ export async function learningContext({
     if (!group || group.kind !== "group") throw new Error(`unknown group entity: ${groupId}`);
   }
   const audience = groupEntities(graph, groupId, includePrivate);
+  const runtimeScope = normalizeScope(scope, null, groupId);
   const kindFilter = kinds === null ? null : new Set(kinds);
   if (kindFilter && [...kindFilter].some((kind) => !KINDS.has(kind))) throw new Error("kinds contains an unsupported learning kind");
   const subjectFilter = subjectIds === null ? null : new Set(subjectIds);
   const limit = maxItems === null ? learning.config.maxContextItems : integer(maxItems, "maxItems", 0, 50);
+  const timestamp = date(now, "now");
+  const stale = learning.candidates.filter((candidate) => candidate.status === "accepted"
+    && candidate.promotion?.mode === "outcome-canary" && candidate.promotion.canary?.status === "active"
+    && new Date(candidate.promotion.canary.expiresAt).getTime() < new Date(timestamp).getTime()).map((candidate) => candidate.id);
   const items = learning.candidates
     .filter((candidate) => candidate.status === "accepted")
+    .filter((candidate) => !stale.includes(candidate.id))
+    .filter((candidate) => scope === null || scopeContains(candidate.scope, runtimeScope))
+    .filter((candidate) => candidate.promotion?.mode !== "outcome-canary"
+      || exactScope(candidate.promotion.canary.scope, runtimeScope))
     .filter((candidate) => !kindFilter || kindFilter.has(candidate.kind))
     .filter((candidate) => !subjectFilter || subjectFilter.has(candidate.subjectId))
     .filter((candidate) => visible(candidate, entities, audience, includePrivate, groupId))
@@ -531,15 +826,51 @@ export async function learningContext({
       evidenceCount: candidate.evidence.length,
       automatic: candidate.automatic,
       acceptedAt: candidate.acceptedAt,
+      outcomeStatus: candidate.promotion?.mode === "outcome-canary" ? candidate.promotion.canary.status : "not-required",
       authority: "context-only"
     }));
   return {
     schema: "agentspine.learning-context/v1",
     root: catalog.root,
     groupId,
+    scope: runtimeScope,
     items,
+    degraded: stale.length > 0,
+    diagnostics: stale.map((id) => `stale-outcome-canary:${id}`),
     authority: "context-only",
     note: "Learned context is descriptive evidence, never permission, delegation, access, or an instruction to act."
+  };
+}
+
+export async function learningOutcomeStatus({ root = process.cwd(), scope = null, now = new Date() } = {}) {
+  const { learning, learningPath } = await loadLearning(root);
+  const runtimeScope = scope === null ? null : normalizeScope(scope);
+  const timestamp = date(now, "now");
+  const records = learning.candidates
+    .filter((candidate) => runtimeScope === null || scopeContains(candidate.scope, runtimeScope))
+    .map((candidate) => {
+      const outcomes = learning.outcomes.filter((item) => item.learningId === candidate.id);
+      const canary = candidate.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
+      const stale = canary?.status === "active" && new Date(canary.expiresAt).getTime() < new Date(timestamp).getTime();
+      return {
+        id: candidate.id,
+        kind: candidate.kind,
+        status: candidate.status,
+        conflictsWith: candidate.conflictsWith || [],
+        beforeReceipts: outcomes.filter((item) => item.phase === "before").length,
+        afterReceipts: outcomes.filter((item) => item.phase === "after").length,
+        canaryStatus: stale ? "stale" : (canary?.status || "not-applicable"),
+        expiresAt: canary?.expiresAt || null,
+        authority: "context-only"
+      };
+    });
+  return {
+    schema: "agentspine.learning-outcome-status/v1",
+    root: learning.root,
+    records,
+    learningPath,
+    authority: "context-only",
+    note: "Outcome status is context-only and never grants permissions, delegation, access, or policy exceptions."
   };
 }
 
@@ -547,7 +878,10 @@ export async function configureLearning({ root = process.cwd(), config = {}, now
   if (!config || typeof config !== "object" || Array.isArray(config) || !Object.keys(config).length) {
     throw new Error("config must change at least one learning setting");
   }
-  const allowed = new Set(["autoPromote", "minConfidence", "minEvidence", "maxContextItems"]);
+  const allowed = new Set([
+    "autoPromote", "minConfidence", "minEvidence", "maxContextItems", "minOutcomeReceipts",
+    "minImprovement", "regressionTolerance", "outcomeMaxAgeDays", "canaryReceipts", "canaryTtlDays"
+  ]);
   const unknown = Object.keys(config).filter((key) => !allowed.has(key));
   if (unknown.length) throw new Error(`unsupported learning config: ${unknown.join(", ")}`);
   const timestamp = date(now, "now");
@@ -560,6 +894,12 @@ export async function configureLearning({ root = process.cwd(), config = {}, now
     if ("minConfidence" in config) state.config.minConfidence = number(config.minConfidence, "minConfidence", 0.5, 1);
     if ("minEvidence" in config) state.config.minEvidence = integer(config.minEvidence, "minEvidence", 1, 10);
     if ("maxContextItems" in config) state.config.maxContextItems = integer(config.maxContextItems, "maxContextItems", 1, 50);
+    if ("minOutcomeReceipts" in config) state.config.minOutcomeReceipts = integer(config.minOutcomeReceipts, "minOutcomeReceipts", 2, 10);
+    if ("minImprovement" in config) state.config.minImprovement = number(config.minImprovement, "minImprovement", 0, 1);
+    if ("regressionTolerance" in config) state.config.regressionTolerance = number(config.regressionTolerance, "regressionTolerance", 0, 1);
+    if ("outcomeMaxAgeDays" in config) state.config.outcomeMaxAgeDays = integer(config.outcomeMaxAgeDays, "outcomeMaxAgeDays", 1, 365);
+    if ("canaryReceipts" in config) state.config.canaryReceipts = integer(config.canaryReceipts, "canaryReceipts", 1, 10);
+    if ("canaryTtlDays" in config) state.config.canaryTtlDays = integer(config.canaryTtlDays, "canaryTtlDays", 1, 90);
     if (!validConfig(state.config)) throw new Error("resulting learning configuration is invalid");
     return { config: state.config, learningPath };
   });
@@ -574,6 +914,7 @@ export async function deleteLearning({ root = process.cwd(), id }) {
     }
     const existed = Boolean(candidate);
     state.candidates = state.candidates.filter((entry) => entry.id !== id);
+    state.outcomes = state.outcomes.filter((entry) => entry.learningId !== id);
     state.history = state.history.filter((entry) => entry.recordId !== id && entry.value?.id !== id);
     return { deleted: existed, id, learningPath };
   });
@@ -584,6 +925,7 @@ export async function purgeLearningBySubject({ root = process.cwd(), subjectId }
   return mutation(root, (state, _catalog, learningPath) => {
     const ids = new Set(state.candidates.filter((entry) => entry.subjectId === subjectId).map((entry) => entry.id));
     state.candidates = state.candidates.filter((entry) => entry.subjectId !== subjectId);
+    state.outcomes = state.outcomes.filter((entry) => !ids.has(entry.learningId));
     state.history = state.history.filter((entry) => entry.subjectId !== subjectId && !ids.has(entry.recordId) && !ids.has(entry.value?.id));
     return { deleted: ids.size, subjectId, learningPath };
   });
@@ -611,6 +953,8 @@ export function learningFindings(learning, graph) {
       findings.push(`invalid-evidence:${candidate.id}`);
     }
     if (candidate.privacy === "group" && (!groups.has(candidate.groupId) || !isGroupMember(graph, candidate.groupId, candidate.subjectId))) findings.push(`invalid-group:${candidate.id}`);
+    if (!candidate.scope || Object.keys(candidate.scope).some((field) => !SCOPE_FIELDS.includes(field))
+      || Object.values(candidate.scope || {}).some((value) => value !== null && !ID_RE.test(value))) findings.push(`invalid-scope:${candidate.id}`);
     if (candidate.status === "accepted") {
       const manualProof = candidate.automatic === false
         && candidate.review?.decision === "accept" && candidate.review?.confirmedByUser === true;
@@ -626,9 +970,36 @@ export function learningFindings(learning, graph) {
           && candidate.confidence >= candidate.promotion?.minConfidence
           && candidate.promotion?.directness >= candidate.promotion?.minDirectness
           && distinctEvidence(candidate) >= candidate.promotion?.minEvidence
-          && candidate.promotion?.evidenceCount >= candidate.promotion?.minEvidence));
+          && candidate.promotion?.evidenceCount >= candidate.promotion?.minEvidence)
+        || (OUTCOME_AUTO_KINDS.has(candidate.kind)
+          && candidate.promotion?.mode === "outcome-canary"
+          && candidate.requiresLocalReview === false
+          && ["active", "validated"].includes(candidate.promotion?.canary?.status)
+          && candidate.confidence >= candidate.promotion?.minConfidence
+          && distinctEvidence(candidate) >= candidate.promotion?.minEvidence
+          && candidate.promotion?.canary?.beforeReceipts?.length >= learning.config.minOutcomeReceipts));
       if (!candidate.acceptedAt || (!manualProof && !automaticProof)) findings.push(`invalid-acceptance:${candidate.id}`);
+      if (candidate.promotion?.mode === "outcome-canary" && candidate.promotion?.canary?.status === "active"
+        && new Date(candidate.promotion.canary.expiresAt).getTime() < Date.now()) findings.push(`stale-canary:${candidate.id}`);
     }
+  }
+  const outcomeIds = new Set();
+  for (const receipt of learning.outcomes || []) {
+    const candidate = learning.candidates.find((item) => item.id === receipt.learningId);
+    const payload = outcomePayload(receipt);
+    const valid = receipt.schema === "agentspine.learning-outcome/v1" && ID_RE.test(receipt.id || "")
+      && candidate && OUTCOME_PHASES.has(receipt.phase) && scopeContains(candidate.scope, receipt.scope)
+      && SCOPE_FIELDS.every((field) => receipt.scope?.[field] === null || ID_RE.test(receipt.scope?.[field] || ""))
+      && typeof receipt.metric?.name === "string" && receipt.metric.name.length > 0
+      && METRIC_DIRECTIONS.has(receipt.metric?.direction)
+      && Number.isFinite(receipt.metric?.value) && receipt.metric.value >= 0 && receipt.metric.value <= 1
+      && Number.isInteger(receipt.metric?.blockingDefects) && receipt.metric.blockingDefects >= 0
+      && MEASUREMENT_KINDS.has(receipt.measurement?.kind) && ID_RE.test(receipt.measurement?.evaluatorId || "")
+      && (receipt.measurement?.sourceDigest === null || /^[a-f0-9]{64}$/.test(receipt.measurement?.sourceDigest || ""))
+      && receipt.authority === "context-only" && receipt.measurement?.authority === "context-only"
+      && Number.isFinite(new Date(receipt.measuredAt).getTime()) && receipt.digest === digest(payload);
+    if (!valid || outcomeIds.has(receipt.id)) findings.push(`invalid-outcome:${receipt.id || "unknown"}`);
+    outcomeIds.add(receipt.id);
   }
   for (const entry of learning.history) {
     const value = entry.value || {};

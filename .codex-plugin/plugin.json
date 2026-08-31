@@ -1,6 +1,6 @@
 {
   "name": "agent-spine",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "A non-destructive identity and memory spine for Codex agents.",
   "author": {
     "name": "Mayk Biletti",
@@ -11,7 +11,6 @@
   "license": "Apache-2.0",
   "keywords": ["identity", "memory", "mcp", "agents"],
   "skills": "./skills/",
-  "hooks": "./hooks/codex.json",
   "mcpServers": {
     "agent-spine": {
       "command": "node",

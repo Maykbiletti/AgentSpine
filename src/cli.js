@@ -9,7 +9,8 @@ import {
 } from "./lib/attention.js";
 import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
-  learningContext, loadLearning, proposeLearning, reviewLearning, rollbackLearning
+  learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
+  recordLearningOutcome, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 import { configureContinuity, loadContinuity, purgeContinuity } from "./lib/continuity.js";
 import {
@@ -93,6 +94,21 @@ function booleanFlag(value, fallback = false) {
   throw new Error(`expected boolean flag, received: ${value}`);
 }
 
+function learningScope(flags) {
+  return {
+    personaId: flags.persona || null,
+    userId: flags.user || null,
+    tenantId: flags.tenant || null,
+    projectId: flags.project || null,
+    groupId: flags.group || null,
+    taskId: flags.task || null
+  };
+}
+
+function hasLearningScope(flags) {
+  return ["persona", "user", "tenant", "project", "group", "task"].some((name) => flags[name] !== undefined);
+}
+
 function help() {
   return `AgentSpine ${VERSION}
 
@@ -116,14 +132,16 @@ Usage:
   agentspine attention-event-delete <event-id>
   agentspine attention-purge <entity-id>
   agentspine attention-config [root] [--enabled true|false] [--quiet-start 22 --quiet-end 7 --utc-offset 120]
-  agentspine learn-propose [id] --kind preference --claim text --evidence text
+  agentspine learn-propose [id] --kind preference|behavior --claim text --evidence text [--persona id --user id --tenant id --project id --group id --task id]
   agentspine learn-evidence <id> --summary text [--type interaction] [--source path.md]
   agentspine learn-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine learn-context [root] [--group id] [--include-private] [--kind preference,goal]
   agentspine learn-evaluate [root]
+  agentspine learn-outcome <id> --phase before|after --metric name --direction higher|lower --value 0..1 --evaluator id --measurement objective|user-feedback|model-suggestion [--blocking-defects n]
+  agentspine learn-status [root] [--persona id --user id --tenant id --project id --group id --task id]
   agentspine learn-rollback <id> --reason text
   agentspine learn-delete <id>
-  agentspine learn-config [root] [--auto-promote true|false] [--min-confidence 0.85]
+  agentspine learn-config [root] [--auto-promote true|false] [--min-confidence 0.85] [--min-outcomes 2 --min-improvement 0.05 --canary-receipts 2 --canary-ttl-days 14]
   agentspine continuity-config [root] [--enabled true|false] [--entity id] [--project id] [--confirm-local-opt-in]
   agentspine continuity-status [root]
   agentspine continuity-purge <entity-id> [--root path] --confirm-local-purge
@@ -240,6 +258,7 @@ export async function run(argv = process.argv.slice(2)) {
     return output(await sessionBriefing({
       root, cwd: flags.cwd || root, host: flags.host || "generic",
       entityId: flags.entity || null, groupId: flags.group || null,
+      userId: flags.user || null, tenantId: flags.tenant || null,
       projectId: flags.project || null, currentTaskId: flags["current-task"] || null,
       includePrivate: booleanFlag(flags["include-private"]),
       focusActive: !booleanFlag(flags["allow-attention"]),
@@ -391,6 +410,7 @@ export async function run(argv = process.argv.slice(2)) {
       root: flags.root || process.cwd(), id: positional[0], kind: flags.kind,
       claim: flags.claim, subjectId: flags.subject || null, privacy: flags.privacy || "private",
       groupId: flags.group || null, supersedesId: flags.supersedes || null,
+      scope: hasLearningScope(flags) ? learningScope(flags) : null,
       evidence: {
         id: flags["evidence-id"], type: flags["evidence-type"] || "user-statement",
         summary: flags.evidence, sourceDocument: flags.source || null,
@@ -420,6 +440,7 @@ export async function run(argv = process.argv.slice(2)) {
     return output(await learningContext({
       root: positional[0] || process.cwd(), includePrivate: booleanFlag(flags["include-private"]),
       groupId: flags.group || null,
+      scope: hasLearningScope(flags) ? learningScope(flags) : null,
       kinds: flags.kind ? String(flags.kind).split(",").filter(Boolean) : null,
       subjectIds: flags.subject ? String(flags.subject).split(",").filter(Boolean) : null,
       maxItems: flags["max-items"] === undefined ? null : Number(flags["max-items"])
@@ -428,6 +449,28 @@ export async function run(argv = process.argv.slice(2)) {
 
   if (command === "learn-evaluate") {
     return output(await evaluateLearning({ root: positional[0] || process.cwd() }), json);
+  }
+
+  if (command === "learn-outcome") {
+    return output(await recordLearningOutcome({
+      root: flags.root || process.cwd(), learningId: positional[0], id: flags.id,
+      phase: flags.phase, scope: learningScope(flags),
+      metric: {
+        name: flags.metric, direction: flags.direction, value: Number(flags.value),
+        blockingDefects: Number(flags["blocking-defects"] ?? 0)
+      },
+      measurement: {
+        kind: flags.measurement || "objective", evaluatorId: flags.evaluator,
+        sourceDigest: flags["source-digest"] || null
+      },
+      measuredAt: flags.at
+    }), json);
+  }
+
+  if (command === "learn-status") {
+    return output(await learningOutcomeStatus({
+      root: positional[0] || process.cwd(), scope: hasLearningScope(flags) ? learningScope(flags) : null
+    }), json);
   }
 
   if (command === "learn-rollback") {
@@ -447,6 +490,12 @@ export async function run(argv = process.argv.slice(2)) {
     if (flags["min-confidence"] !== undefined) config.minConfidence = Number(flags["min-confidence"]);
     if (flags["min-evidence"] !== undefined) config.minEvidence = Number(flags["min-evidence"]);
     if (flags["max-items"] !== undefined) config.maxContextItems = Number(flags["max-items"]);
+    if (flags["min-outcomes"] !== undefined) config.minOutcomeReceipts = Number(flags["min-outcomes"]);
+    if (flags["min-improvement"] !== undefined) config.minImprovement = Number(flags["min-improvement"]);
+    if (flags["regression-tolerance"] !== undefined) config.regressionTolerance = Number(flags["regression-tolerance"]);
+    if (flags["outcome-max-age-days"] !== undefined) config.outcomeMaxAgeDays = Number(flags["outcome-max-age-days"]);
+    if (flags["canary-receipts"] !== undefined) config.canaryReceipts = Number(flags["canary-receipts"]);
+    if (flags["canary-ttl-days"] !== undefined) config.canaryTtlDays = Number(flags["canary-ttl-days"]);
     if (!Object.keys(config).length) return output((await loadLearning(root)).learning.config, json);
     return output(await configureLearning({ root, config }), json);
   }
@@ -953,9 +1002,23 @@ export async function run(argv = process.argv.slice(2)) {
     let preflight;
     try { preflight = await preflightStatus(); }
     catch (error) { preflight = { status: "failed-closed", error: error.message }; }
+    let learningOutcomes;
+    try {
+      const status = await learningOutcomeStatus({ root: positional[0] || process.cwd() });
+      learningOutcomes = {
+        status: status.records.some((item) => item.canaryStatus === "stale") ? "degraded" : "healthy",
+        candidates: status.records.length,
+        activeCanaries: status.records.filter((item) => item.canaryStatus === "active").length,
+        validatedCanaries: status.records.filter((item) => item.canaryStatus === "validated").length,
+        staleCanaries: status.records.filter((item) => item.canaryStatus === "stale").length,
+        contradictions: status.records.filter((item) => item.conflictsWith.length > 0).length,
+        authority: "context-only"
+      };
+    } catch (error) { learningOutcomes = { status: "failed-closed", error: error.message, authority: "context-only" }; }
     const result = {
       ok: Number(process.versions.node.split(".")[0]) >= 20 && hostIntegration.ok
-        && (!sourceResolution || sourceResolution.status === "loaded"),
+        && (!sourceResolution || sourceResolution.status === "loaded")
+        && learningOutcomes.status !== "failed-closed",
       version: VERSION,
       node: process.versions.node,
       platform: process.platform,
@@ -964,7 +1027,8 @@ export async function run(argv = process.argv.slice(2)) {
       hostIntegration,
       sourceResolution,
       orphanScan,
-      preflight
+      preflight,
+      learningOutcomes
     };
     output(result, json);
     if (!result.ok) process.exitCode = 1;

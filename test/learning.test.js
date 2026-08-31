@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
-  learningContext, loadLearning, proposeLearning, reviewLearning, rollbackLearning
+  learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
+  recordLearningOutcome, reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
 import { runHook } from "../src/hook.js";
@@ -29,6 +30,26 @@ function hash(value) {
 
 function evidence(id, confidence = 0.9) {
   return { id, type: "user-statement", summary: `Synthetic evidence ${id}`, confidence };
+}
+
+const scopedTurn = {
+  personaId: "agent:synthetic", userId: "user:synthetic", tenantId: "tenant:synthetic",
+  projectId: "project:synthetic", groupId: null, taskId: "task:synthetic"
+};
+
+function outcome(id, phase, value, evaluatorId, extra = {}) {
+  return {
+    id, phase, scope: extra.scope || scopedTurn,
+    metric: {
+      name: "fixed-task-success", direction: "higher", value,
+      blockingDefects: extra.blockingDefects || 0
+    },
+    measurement: {
+      kind: extra.kind || "objective", evaluatorId,
+      sourceDigest: extra.sourceDigest || null
+    },
+    measuredAt: extra.measuredAt
+  };
 }
 
 function runCli(args, state) {
@@ -154,6 +175,165 @@ test("automatic promotion is opt-in, evidence-gated, and limited to low-risk kin
   assert.deepEqual((await learningContext({ root })).items.map((item) => item.id), ["learning:auto"]);
 });
 
+test("outcome-bound behavior learning completes before, canary, after, and validation with objective evidence", async (t) => {
+  const { root } = await fixture(t);
+  const beforeBytes = await readFile(join(root, "AGENTS.md"));
+  await proposeLearning({
+    root, id: "learning:measured", kind: "behavior", claim: "Check the fixed synthetic invariant before answering.",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:measured-one", 0.96)
+  });
+  await addLearningEvidence({ root, id: "learning:measured", evidence: evidence("evidence:measured-two", 0.94) });
+  await configureLearning({
+    root, config: {
+      autoPromote: true, minConfidence: 0.9, minEvidence: 2, minOutcomeReceipts: 2,
+      canaryReceipts: 2, minImprovement: 0.1
+    }
+  });
+  await recordLearningOutcome({ root, learningId: "learning:measured", ...outcome("outcome:before-a", "before", 0.4, "evaluator:test-a") });
+  await recordLearningOutcome({
+    root, learningId: "learning:measured",
+    ...outcome("outcome:before-b", "before", 0.5, "evaluator:user-b", { kind: "user-feedback" })
+  });
+  const promoted = await evaluateLearning({ root });
+  assert.equal(promoted.accepted[0].promotion.mode, "outcome-canary");
+  assert.equal(promoted.accepted[0].promotion.canary.status, "active");
+  assert.equal((await learningContext({ root, scope: scopedTurn })).items[0].outcomeStatus, "active");
+  assert.equal((await learningContext({ root, scope: { ...scopedTurn, tenantId: "tenant:other" } })).items.length, 0);
+
+  const first = await recordLearningOutcome({
+    root, learningId: "learning:measured", ...outcome("outcome:after-a", "after", 0.7, "evaluator:test-a")
+  });
+  assert.equal(first.decision, "active");
+  const second = await recordLearningOutcome({
+    root, learningId: "learning:measured", ...outcome("outcome:after-b", "after", 0.8, "evaluator:test-b")
+  });
+  assert.equal(second.decision, "validated");
+  const status = await learningOutcomeStatus({ root, scope: scopedTurn });
+  assert.equal(status.records[0].canaryStatus, "validated");
+  assert.equal(status.records[0].beforeReceipts, 2);
+  assert.equal(status.records[0].afterReceipts, 2);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), beforeBytes);
+});
+
+test("model suggestions cannot self-promote and contradictory behavior candidates remain blocked", async (t) => {
+  const { root } = await fixture(t);
+  await proposeLearning({
+    root, id: "learning:model-only", kind: "behavior", claim: "Use synthetic strategy alpha.",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:model-one", 0.97)
+  });
+  await addLearningEvidence({ root, id: "learning:model-only", evidence: evidence("evidence:model-two", 0.97) });
+  await proposeLearning({
+    root, id: "learning:contradiction", kind: "behavior", claim: "Use synthetic strategy beta.",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:contradiction-one", 0.97)
+  });
+  await addLearningEvidence({ root, id: "learning:contradiction", evidence: evidence("evidence:contradiction-two", 0.97) });
+  await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
+  for (const learningId of ["learning:model-only", "learning:contradiction"]) {
+    await recordLearningOutcome({
+      root, learningId, ...outcome(`outcome:${learningId}:a`, "before", 0.4, "evaluator:model-a", { kind: "model-suggestion" })
+    });
+    await recordLearningOutcome({
+      root, learningId, ...outcome(`outcome:${learningId}:b`, "before", 0.5, "evaluator:model-b", { kind: "model-suggestion" })
+    });
+  }
+  const protectedScope = { ...scopedTurn, taskId: "task:protected" };
+  await proposeLearning({
+    root, id: "learning:protected", kind: "behavior", claim: "Change the synthetic security policy.",
+    privacy: "shared", scope: protectedScope, evidence: evidence("evidence:protected-one", 0.97)
+  });
+  await addLearningEvidence({ root, id: "learning:protected", evidence: evidence("evidence:protected-two", 0.97) });
+  await recordLearningOutcome({
+    root, learningId: "learning:protected",
+    ...outcome("outcome:protected-a", "before", 0.4, "evaluator:test-a", { scope: protectedScope })
+  });
+  await recordLearningOutcome({
+    root, learningId: "learning:protected",
+    ...outcome("outcome:protected-b", "before", 0.5, "evaluator:test-b", { scope: protectedScope })
+  });
+  assert.equal((await evaluateLearning({ root })).accepted.length, 0);
+  const status = await learningOutcomeStatus({ root });
+  assert.deepEqual(status.records.find((item) => item.id === "learning:model-only").conflictsWith, ["learning:contradiction"]);
+});
+
+test("a blocking canary defect rolls back automatically and restores the superseded lesson", async (t) => {
+  const { root } = await fixture(t);
+  await proposeLearning({
+    root, id: "learning:prior-behavior", kind: "behavior", claim: "Use the stable synthetic path.",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:prior")
+  });
+  await reviewLearning({ root, id: "learning:prior-behavior", decision: "accept", reason: "Confirmed locally.", confirmedByUser: true });
+  await proposeLearning({
+    root, id: "learning:new-behavior", kind: "behavior", claim: "Use the candidate synthetic path.",
+    privacy: "shared", scope: scopedTurn, supersedesId: "learning:prior-behavior",
+    evidence: evidence("evidence:new-one", 0.98)
+  });
+  await addLearningEvidence({ root, id: "learning:new-behavior", evidence: evidence("evidence:new-two", 0.98) });
+  await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
+  await recordLearningOutcome({ root, learningId: "learning:new-behavior", ...outcome("outcome:new-before-a", "before", 0.4, "evaluator:test-a") });
+  await recordLearningOutcome({ root, learningId: "learning:new-behavior", ...outcome("outcome:new-before-b", "before", 0.5, "evaluator:test-b") });
+  await evaluateLearning({ root });
+  const regressed = await recordLearningOutcome({
+    root, learningId: "learning:new-behavior",
+    ...outcome("outcome:new-after-blocking", "after", 0.9, "evaluator:test-c", { blockingDefects: 1 })
+  });
+  assert.equal(regressed.decision, "rolled-back");
+  assert.deepEqual(regressed.restored, ["learning:prior-behavior"]);
+  assert.deepEqual((await learningContext({ root, scope: scopedTurn })).items.map((item) => item.id), ["learning:prior-behavior"]);
+});
+
+test("stale canaries degrade context and evaluation rolls them back", async (t) => {
+  const { root } = await fixture(t);
+  const start = new Date("2026-01-01T00:00:00.000Z");
+  await proposeLearning({
+    root, id: "learning:stale", kind: "behavior", claim: "Use the temporary synthetic strategy.",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:stale-one", 0.96), now: start
+  });
+  await addLearningEvidence({ root, id: "learning:stale", evidence: evidence("evidence:stale-two", 0.96), now: start });
+  await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2, canaryTtlDays: 1 }, now: start });
+  await recordLearningOutcome({ root, learningId: "learning:stale", ...outcome("outcome:stale-a", "before", 0.4, "evaluator:test-a", { measuredAt: start }), now: start });
+  await recordLearningOutcome({ root, learningId: "learning:stale", ...outcome("outcome:stale-b", "before", 0.5, "evaluator:test-b", { measuredAt: start }), now: start });
+  await evaluateLearning({ root, now: start });
+  const later = new Date("2026-01-03T00:00:00.000Z");
+  const context = await learningContext({ root, scope: scopedTurn, now: later });
+  assert.equal(context.items.length, 0);
+  assert.equal(context.degraded, true);
+  assert.deepEqual((await evaluateLearning({ root, now: later })).reconciled, [{ id: "learning:stale", decision: "rolled-back" }]);
+});
+
+test("parallel duplicate outcome receipts are idempotent and remain one immutable measurement", async (t) => {
+  const { root } = await fixture(t);
+  await proposeLearning({
+    root, id: "learning:outcome-race", kind: "behavior", claim: "Use one synthetic race-safe action.",
+    scope: scopedTurn, evidence: evidence("evidence:race")
+  });
+  const input = { root, learningId: "learning:outcome-race", ...outcome("outcome:race", "before", 0.4, "evaluator:test-race") };
+  const results = await Promise.all(Array.from({ length: 6 }, () => recordLearningOutcome(input)));
+  assert.equal(results.filter((item) => item.unchanged === false).length, 1);
+  assert.equal((await loadLearning(root)).learning.outcomes.length, 1);
+});
+
+test("0.10 learning state upgrades in place and corrupt outcome receipts fail closed", async (t) => {
+  const { root } = await fixture(t);
+  const { learningPath } = await loadLearning(root);
+  const legacy = {
+    schema: "agentspine.learning/v1", root,
+    config: { autoPromote: false, minConfidence: 0.85, minEvidence: 2, maxContextItems: 12 },
+    candidates: [], history: []
+  };
+  await writeFile(learningPath, `${JSON.stringify(legacy)}\n`, "utf8");
+  const upgraded = (await loadLearning(root)).learning;
+  assert.deepEqual(upgraded.outcomes, []);
+  assert.equal(upgraded.config.minOutcomeReceipts, 2);
+  await configureLearning({ root, config: { canaryTtlDays: 7 } });
+  assert.equal((await loadLearning(root)).learning.config.canaryTtlDays, 7);
+
+  const corrupt = (await loadLearning(root)).learning;
+  corrupt.outcomes.push({ schema: "agentspine.learning-outcome/v1", id: "outcome:bad" });
+  await writeFile(learningPath, `${JSON.stringify(corrupt)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /learning outcome state is invalid/);
+  await assert.rejects(configureLearning({ root, config: { canaryTtlDays: 8 } }), /learning outcome state is invalid/);
+});
+
 test("concurrent evidence appends serialize without losing observations", async (t) => {
   const { root } = await fixture(t);
   await proposeLearning({
@@ -214,4 +394,27 @@ test("CLI learning workflow proposes, confirms, reads, rolls back, and deletes a
   runCli(["learn-rollback", "learning:cli", "--root", root, "--reason", "No longer current.", "--json"], state);
   assert.equal(runCli(["learn-context", root, "--json"], state).items.length, 0);
   assert.equal(runCli(["learn-delete", "learning:cli", "--root", root, "--json"], state).deleted, true);
+});
+
+test("CLI records content-free outcome receipts and reports scoped canary diagnostics", async (t) => {
+  const { root, state } = await fixture(t);
+  runCli([
+    "learn-propose", "learning:cli-outcome", "--root", root, "--kind", "behavior",
+    "--claim", "Check the synthetic invariant.", "--evidence", "A fixed task missed the invariant.",
+    "--privacy", "shared", "--persona", "agent:synthetic", "--user", "user:synthetic",
+    "--tenant", "tenant:synthetic", "--project", "project:synthetic", "--task", "task:synthetic", "--json"
+  ], state);
+  runCli([
+    "learn-outcome", "learning:cli-outcome", "--root", root, "--id", "outcome:cli-before",
+    "--phase", "before", "--metric", "fixed-task-success", "--direction", "higher", "--value", "0.4",
+    "--measurement", "objective", "--evaluator", "evaluator:cli", "--persona", "agent:synthetic",
+    "--user", "user:synthetic", "--tenant", "tenant:synthetic", "--project", "project:synthetic",
+    "--task", "task:synthetic", "--json"
+  ], state);
+  const status = runCli([
+    "learn-status", root, "--persona", "agent:synthetic", "--user", "user:synthetic",
+    "--tenant", "tenant:synthetic", "--project", "project:synthetic", "--task", "task:synthetic", "--json"
+  ], state);
+  assert.equal(status.records[0].beforeReceipts, 1);
+  assert.equal(status.records[0].canaryStatus, "not-applicable");
 });

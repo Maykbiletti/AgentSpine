@@ -38,7 +38,7 @@ The packet contains:
 - the current task first, followed by other visible scoped work;
 - the requested entity and its visible relationship neighborhood;
 - a voice brief containing only visible persona descriptors, allowed voice fields, accepted preferences, corrections, no-gos, the current task, and active promise or blocker signals;
-- accepted local learning relevant to the entity or project;
+- accepted local learning relevant to the exact persona, user, tenant, project, group, and task scope; outcome-gated behavior is included only while its canary is active and unexpired or after measured validation;
 - locally reviewed shared memory, deduplicated against equivalent local learning;
 - due attention suggestions only when focus mode is explicitly disabled.
 

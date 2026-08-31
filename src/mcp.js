@@ -10,7 +10,7 @@ import {
 } from "./lib/attention.js";
 import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
-  learningContext, proposeLearning, reviewLearning, rollbackLearning
+  learningContext, learningOutcomeStatus, proposeLearning, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 import { checkDelegation, createTask, taskContext, updateTask } from "./lib/coordination.js";
 import { sharedContext } from "./lib/sharing.js";
@@ -46,6 +46,8 @@ const tools = [
         root: { type: "string" }, cwd: { type: "string" },
         host: { type: "string", enum: ["codex", "claude", "generic"] },
         entityId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        userId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        tenantId: { anyOf: [{ type: "string" }, { type: "null" }] },
         groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
         projectId: { anyOf: [{ type: "string" }, { type: "null" }] },
         currentTaskId: { anyOf: [{ type: "string" }, { type: "null" }] },
@@ -240,10 +242,18 @@ const tools = [
       type: "object", required: ["kind", "claim", "evidence"],
       properties: {
         root: { type: "string" }, id: { type: "string" },
-        kind: { type: "string", enum: ["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference"] },
+        kind: { type: "string", enum: ["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference", "behavior"] },
         claim: { type: "string", maxLength: 1000 }, subjectId: { anyOf: [{ type: "string" }, { type: "null" }] },
         privacy: { type: "string", enum: ["private", "shared", "group"] },
         groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
+        scope: {
+          type: "object", additionalProperties: false,
+          properties: {
+            personaId: { anyOf: [{ type: "string" }, { type: "null" }] }, userId: { anyOf: [{ type: "string" }, { type: "null" }] },
+            tenantId: { anyOf: [{ type: "string" }, { type: "null" }] }, projectId: { anyOf: [{ type: "string" }, { type: "null" }] },
+            groupId: { anyOf: [{ type: "string" }, { type: "null" }] }, taskId: { anyOf: [{ type: "string" }, { type: "null" }] }
+          }
+        },
         supersedesId: { anyOf: [{ type: "string" }, { type: "null" }] },
         evidence: { "$ref": "#/$defs/evidence" }
       },
@@ -297,8 +307,37 @@ const tools = [
       properties: {
         root: { type: "string" }, includePrivate: { type: "boolean" },
         groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
-        kinds: { type: "array", items: { type: "string", enum: ["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference"] } },
+        scope: {
+          type: "object", additionalProperties: false,
+          properties: {
+            personaId: { anyOf: [{ type: "string" }, { type: "null" }] }, userId: { anyOf: [{ type: "string" }, { type: "null" }] },
+            tenantId: { anyOf: [{ type: "string" }, { type: "null" }] }, projectId: { anyOf: [{ type: "string" }, { type: "null" }] },
+            groupId: { anyOf: [{ type: "string" }, { type: "null" }] }, taskId: { anyOf: [{ type: "string" }, { type: "null" }] }
+          }
+        },
+        kinds: { type: "array", items: { type: "string", enum: ["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference", "behavior"] } },
         subjectIds: { type: "array", items: { type: "string" } }, maxItems: { type: "integer", minimum: 0, maximum: 50 }
+      }
+    }
+  },
+  {
+    name: "learning_outcome_status",
+    description: "Read outcome receipt counts, contradiction state, and canary health for learned context. This read-only view is context-only and cannot record evidence, promote learning, or grant authority.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: { type: "string" },
+        scope: {
+          type: "object", additionalProperties: false,
+          properties: {
+            personaId: { anyOf: [{ type: "string" }, { type: "null" }] },
+            userId: { anyOf: [{ type: "string" }, { type: "null" }] },
+            tenantId: { anyOf: [{ type: "string" }, { type: "null" }] },
+            projectId: { anyOf: [{ type: "string" }, { type: "null" }] },
+            groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
+            taskId: { anyOf: [{ type: "string" }, { type: "null" }] }
+          }
+        }
       }
     }
   },
@@ -326,7 +365,13 @@ const tools = [
           type: "object", additionalProperties: false,
           properties: {
             autoPromote: { type: "boolean" }, minConfidence: { type: "number", minimum: 0.5, maximum: 1 },
-            minEvidence: { type: "integer", minimum: 1, maximum: 10 }, maxContextItems: { type: "integer", minimum: 1, maximum: 50 }
+            minEvidence: { type: "integer", minimum: 1, maximum: 10 }, maxContextItems: { type: "integer", minimum: 1, maximum: 50 },
+            minOutcomeReceipts: { type: "integer", minimum: 2, maximum: 10 },
+            minImprovement: { type: "number", minimum: 0, maximum: 1 },
+            regressionTolerance: { type: "number", minimum: 0, maximum: 1 },
+            outcomeMaxAgeDays: { type: "integer", minimum: 1, maximum: 365 },
+            canaryReceipts: { type: "integer", minimum: 1, maximum: 10 },
+            canaryTtlDays: { type: "integer", minimum: 1, maximum: 90 }
           }
         }
       }
@@ -459,6 +504,7 @@ async function callTool(name, args = {}) {
   if (name === "add_learning_evidence") return textResult(await addLearningEvidence({ ...args, root }));
   if (name === "review_learning") return textResult(await reviewLearning({ ...args, root }));
   if (name === "learning_context") return textResult(await learningContext({ ...args, root }));
+  if (name === "learning_outcome_status") return textResult(await learningOutcomeStatus({ ...args, root }));
   if (name === "evaluate_learning") return textResult(await evaluateLearning({ ...args, root }));
   if (name === "rollback_learning") return textResult(await rollbackLearning({ ...args, root }));
   if (name === "configure_learning") return textResult(await configureLearning({ ...args, root }));

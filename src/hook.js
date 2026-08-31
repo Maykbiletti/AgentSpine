@@ -110,6 +110,8 @@ async function runtimeScope(input, root, userStateRoot = null) {
   const gateway = gatewayEnvironmentContext();
   return {
     entityId: boundedId(supplied.entity_id ?? supplied.entityId ?? gateway?.entityId ?? continuity.config.defaultEntityId, "entityId"),
+    userId: boundedId(supplied.user_id ?? supplied.userId ?? process.env.AGENTSPINE_USER_ID, "userId"),
+    tenantId: boundedId(supplied.tenant_id ?? supplied.tenantId ?? process.env.AGENTSPINE_TENANT_ID, "tenantId"),
     groupId: boundedId(supplied.group_id ?? supplied.groupId ?? gateway?.groupId, "groupId"),
     projectId: boundedId(supplied.project_id ?? supplied.projectId ?? gateway?.projectId ?? continuity.config.defaultProjectId, "projectId"),
     currentTaskId: boundedId(supplied.task_id ?? supplied.currentTaskId ?? gateway?.taskId, "currentTaskId"),
@@ -676,7 +678,7 @@ export async function runHook(payload = null) {
       }
       const briefing = await sessionBriefing({
         root, cwd, host: scope.host, entityId: scope.entityId, groupId: scope.groupId,
-        projectId: scope.projectId, currentTaskId: scope.currentTaskId,
+        userId: scope.userId, tenantId: scope.tenantId, projectId: scope.projectId, currentTaskId: scope.currentTaskId,
         includePrivate: Boolean(scope.entityId && !scope.groupId),
         focusActive: true, includeSourceContent: event === "UserPromptSubmit" ? false : !scope.groupId,
         maxBytes: event === "UserPromptSubmit" ? 4096 : scope.config.maxBriefingBytes,

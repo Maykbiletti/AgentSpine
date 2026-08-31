@@ -16,7 +16,7 @@ agentspine audit /path/to/project --json
 | 5 | Markdown link integrity | An indexed local `.md` link has no target |
 | 6 | Conflict visibility | Precedence and competing candidates are surfaced for review |
 | 7 | Authority boundary | Context or shared state claims authority; a delegation, execution, channel, persona, or goal policy lacks explicit local provenance; or a task/job/channel/gateway snapshot has no valid policy binding |
-| 8 | Context privacy | Graph, attention, learning, coordination, self-starter, channel, persona, gateway queue/lane/checkpoint/delivery, sharing, signer, trust, signature, group binding, local-review proof, or safety boundary is invalid |
+| 8 | Context privacy | Graph, attention, learning candidate, outcome receipt, canary scope, coordination, self-starter, channel, persona, gateway queue/lane/checkpoint/delivery, sharing, signer, trust, signature, group binding, local-review proof, or safety boundary is invalid |
 | 9 | Context budget | Resolved source bytes or the complete compact session briefing exceed the requested ceiling |
 | 10 | Byte preservation | A source hash changed during the audit or differs from the saved scan |
 

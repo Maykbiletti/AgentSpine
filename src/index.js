@@ -13,7 +13,8 @@ export {
 } from "./lib/attention.js";
 export {
   acceptContinuityLearning, addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
-  learningContext, loadLearning, proposeLearning, purgeLearningBySubject, reviewLearning, rollbackLearning
+  learningContext, learningOutcomeStatus, loadLearning, proposeLearning, purgeLearningBySubject,
+  recordLearningOutcome, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 export {
   captureContinuityPrompt, configureContinuity, continuityFindings,

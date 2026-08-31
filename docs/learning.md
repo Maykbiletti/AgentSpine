@@ -1,6 +1,6 @@
 # Safe learning
 
-AgentSpine separates an observation from a fact that may enter future context. An agent can propose a candidate and append evidence, but the candidate remains invisible to `learning_context` until it passes an explicit review or the narrowly scoped, default-off automatic policy.
+AgentSpine separates an observation from a fact that may enter future context. An agent can propose a candidate and append evidence, but the candidate remains invisible to `learning_context` until it passes an explicit review or the narrowly scoped, default-off automatic policy. Version 0.11 adds an outcome-bound path for low-risk behavior: a lesson is useful only when fixed, externally measured tasks improve after a limited canary application.
 
 ```mermaid
 flowchart LR
@@ -9,7 +9,12 @@ flowchart LR
     E --> R{"Review gate"}
     R -->|"explicit user confirmation"| A["Accepted context"]
     R -->|"reject"| X["Rejected history"]
-    R -->|"opt-in low-risk policy"| A
+    R -->|"opt-in fact policy"| A
+    E --> M["Independent before receipts"]
+    M --> K["Scoped canary"]
+    K --> N["Independent after receipts"]
+    N -->|"measured improvement"| A
+    N -->|"regression or blocking defect"| B["Automatic rollback"]
     A --> S["Supersede without erasing"]
     S --> B["Rollback restores prior fact"]
 ```
@@ -25,6 +30,7 @@ flowchart LR
 | `personal-fact` | Explicit confirmation | Never |
 | `project-fact` | Explicit confirmation | Opt-in, evidence-gated |
 | `reference` | Explicit confirmation | Opt-in, evidence-gated |
+| `behavior` | Explicit confirmation | Opt-in, outcome-gated canary |
 
 Every candidate and evidence record carries `authority: context-only`. Accepted learning can improve relevance and consistency, but it cannot grant permissions, delegation, production access, spending rights, policy exceptions, or instructions to act.
 
@@ -71,6 +77,35 @@ agentspine learn-evaluate . --json
 The accepted record stores the policy thresholds, evidence count, and evaluation time used for that decision. The audit rejects an accepted record with no valid manual-review proof or automatic-promotion snapshot. Personal facts, preferences, goals, corrections, and no-gos are never automatically promoted by this general evaluator.
 
 This evaluator is separate from [automatic continuity](automatic-continuity.md). After its own local privacy opt-in, the lifecycle adapter may accept only direct, high-confidence style preferences, no-gos, corrections, project facts, and references with a recorded threshold proof. Personal facts, group conversation content, identity claims, secrets, authority, access, and operational permissions are never eligible. The continuity path is not exposed through MCP.
+
+## Measured behavior loop
+
+`behavior` candidates use `agentspine.learning-outcome/v1` receipts. A receipt stores no prompt, answer, transcript, credential, or source content. It binds a normalized metric to one exact persona, user, tenant, project, group, task, evaluator, phase, and time. Metric values are normalized to `0..1`; the direction states whether higher or lower is better. Objective measurements, explicit user feedback, and model suggestions remain separate. Model suggestions are retained for diagnosis but never count toward automatic promotion or validation.
+
+Before promotion, the candidate needs the configured number of independent, fresh, non-model receipts for the same metric and exact scope, including at least one objective evaluator. It also needs the normal distinct-evidence and confidence thresholds. A conflicting active candidate blocks automatic promotion. Security, safety, identity, authentication, authorization, credential, policy, production, deployment, payment, and access lessons are marked for local review and can never enter this automatic path. Successful evaluation creates a time-limited canary rather than a final unmeasured claim. Only that exact scope receives the canary in its next briefing.
+
+```bash
+agentspine learn-propose learning:check-invariant \
+  --kind behavior \
+  --claim "Check the fixed invariant before answering." \
+  --evidence "Two fixture runs missed the invariant." \
+  --privacy shared \
+  --persona agent:synthetic --user user:synthetic --tenant tenant:synthetic \
+  --project project:synthetic --task task:synthetic
+
+agentspine learn-outcome learning:check-invariant \
+  --phase before --metric fixed-task-success --direction higher --value 0.40 \
+  --measurement objective --evaluator evaluator:test-a \
+  --persona agent:synthetic --user user:synthetic --tenant tenant:synthetic \
+  --project project:synthetic --task task:synthetic
+
+agentspine learn-evaluate . --json
+agentspine learn-status . --json
+```
+
+After canary use, the host records `after` receipts for the same metric and scope. Independent receipts meeting `minImprovement` validate the lesson. Any blocking defect rolls it back immediately; a regression beyond `regressionTolerance`, insufficient measured improvement, or expiry before validation also rolls it back. A superseded lesson is restored atomically. No average score can override a blocking defect.
+
+Outcome recording and policy changes are local CLI/runtime operations. MCP exposes only the read-only `learning_outcome_status` view for this loop; model-side MCP cannot manufacture outcome evidence. `learning_context` returns only active, unexpired or validated, exact-scope behavior lessons and reports stale canaries as degraded instead of silently projecting them.
 
 ## Supersession and rollback
 

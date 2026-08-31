@@ -35,7 +35,7 @@ test("host registrations launch the same provider-neutral MCP implementation", a
   ]);
   assert.equal(claude.mcpServers, "./.mcp.json");
   assert.equal(claude.hooks, undefined);
-  assert.equal(codex.hooks, "./hooks/codex.json");
+  assert.equal(codex.hooks, undefined);
   assert.deepEqual(claudeMcp.mcpServers["agent-spine"].args, ["${CLAUDE_PLUGIN_ROOT}/src/mcp.js"]);
   assert.deepEqual(blun.mcpServers["agent-spine"].args, ["./src/mcp.js"]);
   assert.deepEqual(codex.mcpServers["agent-spine"].args, ["${PLUGIN_ROOT}/src/mcp.js"]);
@@ -55,10 +55,10 @@ test("BLUN, Claude, and Codex registrations complete a real MCP initialize hands
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
-  assert.equal(result.version, "0.10.1");
+  assert.equal(result.version, "0.11.0");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
   assert.deepEqual(result.hookDiscovery, {
-    blun: "plugin-manifest", claude: "default-hooks-directory", codex: "plugin-manifest",
+    blun: "plugin-manifest", claude: "default-hooks-directory", codex: "bundled-host-adapter",
     trust: "host-user-required", liveTrustVerified: false
   });
   assert.equal(result.hooks.blun.events.includes("PreToolUse"), true);
