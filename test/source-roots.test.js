@@ -67,12 +67,13 @@ test("installed lifecycle resolves host-native user, project, and memory roots w
     if (process.platform !== "win32" || !["EPERM", "EACCES"].includes(error.code)) throw error;
   }
 
-  const previous = Object.fromEntries(["AGENTSPINE_STATE_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "AGENTSPINE_ROOT", "HOME"]
+  const previous = Object.fromEntries(["AGENTSPINE_STATE_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "AGENTSPINE_ROOT", "HOME", "USERPROFILE"]
     .map((key) => [key, process.env[key]]));
   process.env.AGENTSPINE_STATE_DIR = state;
   process.env.CLAUDE_CONFIG_DIR = claudeHome;
   process.env.CODEX_HOME = codexHome;
   process.env.HOME = home;
+  process.env.USERPROFILE = home;
   delete process.env.AGENTSPINE_ROOT;
   t.after(async () => {
     for (const [key, value] of Object.entries(previous)) {
