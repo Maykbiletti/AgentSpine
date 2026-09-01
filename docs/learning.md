@@ -12,8 +12,9 @@ flowchart LR
     R -->|"opt-in fact policy"| A
     E --> M["Independent before receipts"]
     M --> K["Scoped canary"]
-    K --> P["Consumed-turn application receipts"]
-    P --> N["Independent bound after receipts"]
+    K --> P["Consumed-turn projection receipts"]
+    P --> D["Stop-bound delivery receipts"]
+    D --> N["Independent bound after receipts"]
     N -->|"measured improvement"| A
     N -->|"regression or blocking defect"| B["Automatic rollback"]
     A --> S["Supersede without erasing"]
@@ -81,9 +82,11 @@ This evaluator is separate from [automatic continuity](automatic-continuity.md).
 
 ## Measured behavior loop
 
-`behavior` candidates use content-free `agentspine.learning-outcome/v3` receipts while existing v1/v2 history remains readable. Before any new baseline is recorded, a local operator must register one immutable `agentspine.learning-evaluation/v1` contract. The contract fixes SHA-256 digests for the task, dataset and evaluator protocol, the exact persona/user/tenant/project/group/task scope, the metric and direction, eligible evaluator IDs, minimum case count, expiry, and the current promotion and regression thresholds. It stores no task, dataset, prompt, answer, transcript, credential, or source content. Metric values are normalized to `0..1`; objective measurements, explicit user feedback, and model suggestions remain separate. Model suggestions are retained for diagnosis but never count toward automatic promotion or validation.
+`behavior` candidates use content-free `agentspine.learning-outcome/v4` receipts while existing v1/v2/v3 history remains readable. Before any new baseline is recorded, a local operator must register one immutable `agentspine.learning-evaluation/v1` contract. The contract fixes SHA-256 digests for the task, dataset and evaluator protocol, the exact persona/user/tenant/project/group/task scope, the metric and direction, eligible evaluator IDs, minimum case count, expiry, and the current promotion and regression thresholds. It stores no task, dataset, prompt, answer, transcript, credential, or source content. Metric values are normalized to `0..1`; objective measurements, explicit user feedback, and model suggestions remain separate. Model suggestions are retained for diagnosis but never count toward automatic promotion or validation.
 
-Before promotion, the candidate needs the contract's number of independent, fresh, non-model receipts, including at least one objective evaluator. All receipts must bind to the same unexpired evaluation contract; changing the metric, scope, evaluator set, benchmark digest or thresholds requires a new candidate and contract. It also needs the normal distinct-evidence and confidence thresholds. A conflicting active candidate blocks automatic promotion. Security, safety, identity, authentication, authorization, credential, policy, production, deployment, payment, and access lessons are marked for local review and cannot receive an automatic evaluation contract. Successful evaluation creates a time-limited canary rather than a final unmeasured claim. Only that exact scope receives the canary in its next briefing. After the hard preflight receipt has been consumed, the installed hook records one `agentspine.learning-application/v1` receipt for each Canary it actually projected. The application binds the learning ID and exact scope to the signed preflight receipt, prompt digest and briefing digests. It contains no prompt or briefing content. A failed application write removes that Canary from the delivered learning packet and reports a degraded application status.
+Before promotion, the candidate needs the contract's number of independent, fresh, non-model receipts, including at least one objective evaluator. All receipts must bind to the same unexpired evaluation contract; changing the metric, scope, evaluator set, benchmark digest or thresholds requires a new candidate and contract. It also needs the normal distinct-evidence and confidence thresholds. A conflicting active candidate blocks automatic promotion. Security, safety, identity, authentication, authorization, credential, policy, production, deployment, payment, and access lessons are marked for local review and cannot receive an automatic evaluation contract. Successful evaluation creates a time-limited canary rather than a final unmeasured claim. Only that exact scope receives the canary in its next briefing.
+
+After the hard preflight receipt has been consumed, `UserPromptSubmit` records one `agentspine.learning-application/v2` projection receipt for each Canary. It binds the learning ID, exact scope, host session, signed preflight, prompt digest and briefing digests without storing their content. Projection alone is not proof that a model response happened. Only a matching native `Stop` or `SubagentStop` in the same session and scope may append an `agentspine.learning-delivery/v1` receipt. An after-outcome must bind both IDs. A crash between projection and model completion therefore remains pending and cannot improve or validate a lesson. The completion window is five minutes; stale projections are visible in `learn-status`, Doctor and audit, and `learn-delivery-purge --confirm-local-purge` removes only those expired, content-free projections. A failed or ambiguous delivery write degrades learning evidence but never blocks the normal response path.
 
 ```bash
 agentspine learn-propose learning:check-invariant \
@@ -116,21 +119,22 @@ agentspine learn-evaluate . --json
 agentspine learn-status . --json
 ```
 
-After canary use, `agentspine learn-status` reports `latestApplicationId`. The local outcome evaluator must bind its `after` receipt to that actual application:
+After canary use and the matching model-stop event, `agentspine learn-status` reports application and delivery counts. The local outcome evaluator must bind its `after` receipt to both immutable receipts:
 
 ```bash
 agentspine learn-outcome learning:check-invariant \
   --evaluation evaluation:check-invariant-v1 \
   --phase after --application application:synthetic-turn-receipt \
+  --delivery delivery:synthetic-stop-receipt \
   --metric fixed-task-success --direction higher --value 0.75 \
   --measurement objective --evaluator evaluator:test-b \
   --persona agent:synthetic --user user:synthetic --tenant tenant:synthetic \
   --project project:synthetic --task task:synthetic
 ```
 
-An unplanned, stale, cross-scope, metric-drifted or evaluator-drifted outcome is rejected, as is an unbound or forged application ID. Independent receipts meeting the frozen contract threshold validate the lesson only when they also reference distinct applied turns; two evaluators of one turn cannot simulate two applications. Later configuration changes cannot weaken an already registered experiment. Any blocking defect rolls it back immediately; a regression beyond the frozen tolerance, insufficient measured improvement, or contract/Canary expiry before validation also rolls it back. A superseded lesson is restored atomically. No average score can override a blocking defect.
+An unplanned, stale, cross-scope, metric-drifted or evaluator-drifted outcome is rejected, as is an unbound or forged application or delivery ID. Independent receipts meeting the frozen contract threshold validate the lesson only when they also reference distinct completed turns; two evaluators of one turn cannot simulate two applications. Later configuration changes cannot weaken an already registered experiment. Any blocking defect rolls it back immediately; a regression beyond the frozen tolerance, insufficient measured improvement, or contract/Canary expiry before validation also rolls it back. A superseded lesson is restored atomically. No average score can override a blocking defect.
 
-Evaluation registration, outcome recording and policy changes are local CLI/runtime operations. MCP exposes only the read-only `learning_outcome_status` view for this loop; model-side MCP cannot manufacture contracts, applications or outcome evidence. Doctor distinguishes planned and legacy-unplanned measurements, awaiting applications, bound after-measurements and stale canaries. The audit replays evaluation, application and outcome digests, exact scopes, authority boundaries and v3 bindings. `learning_context` returns only active, unexpired or validated, exact-scope behavior lessons and reports stale canaries as degraded instead of silently projecting them.
+Evaluation registration, outcome recording and policy changes are local CLI/runtime operations. MCP exposes only the read-only `learning_outcome_status` view for this loop; model-side MCP cannot manufacture contracts, applications, deliveries or outcome evidence. Doctor distinguishes planned and legacy-unplanned measurements, pending and stale projections, completed deliveries, bound after-measurements and stale canaries. The audit replays evaluation, application, delivery and outcome digests, exact scopes, authority boundaries and v4 bindings. `learning_context` returns only active, unexpired or validated, exact-scope behavior lessons and reports stale canaries as degraded instead of silently projecting them.
 
 ## Supersession and rollback
 

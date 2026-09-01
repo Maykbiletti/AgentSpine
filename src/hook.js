@@ -8,7 +8,7 @@ import { canonicalPath } from "./lib/paths.js";
 import { resolveHostSourceCatalog } from "./lib/source-roots.js";
 import { sessionBriefing } from "./lib/briefing.js";
 import { captureContinuityPrompt, loadContinuity } from "./lib/continuity.js";
-import { recordLearningApplications } from "./lib/learning.js";
+import { recordLearningApplications, recordLearningDeliveries } from "./lib/learning.js";
 import {
   authorizeJobEffect, checkpointJobEffect, closeJobLease, resolveSessionJob, startOrResumeJob
 } from "./lib/selfstarter.js";
@@ -562,6 +562,7 @@ export async function runHook(payload = null) {
   let scope = null;
   let selfstarter = null;
   let channelEvent = null;
+  let learningDelivery = null;
 
   if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
     const { graph } = await loadGraph(root, catalog);
@@ -639,6 +640,19 @@ export async function runHook(payload = null) {
   if (["Stop", "SubagentStop"].includes(event)) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     const exact = await selfstarterScope(input, scope, root, "resume");
+    if (exact && !scope.currentTaskId) scope.currentTaskId = exact.taskId;
+    try {
+      learningDelivery = await recordLearningDeliveries({
+        root, sessionId: sessionId(input), hookEvent: event,
+        scope: {
+          personaId: scope.entityId, userId: scope.userId, tenantId: scope.tenantId,
+          projectId: scope.projectId, groupId: scope.groupId, taskId: scope.currentTaskId
+        },
+        completedAt: input.timestamp || new Date()
+      });
+    } catch (error) {
+      learningDelivery = { status: "degraded", receipts: [], reason: error.message, authority: "context-only" };
+    }
     const requested = selfstarterInput(input);
     if (exact) {
       selfstarter = await closeJobLease({
@@ -769,7 +783,7 @@ export async function runHook(payload = null) {
     }
   }
 
-  if (payload) return { blocked: false, attentionEvent, selfstarter };
+  if (payload) return { blocked: false, attentionEvent, selfstarter, learningDelivery };
   process.stdout.write("{}\n");
 }
 

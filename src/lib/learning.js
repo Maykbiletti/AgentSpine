@@ -47,6 +47,7 @@ function emptyLearning(root) {
     candidates: [],
     outcomes: [],
     applications: [],
+    deliveries: [],
     evaluations: [],
     history: []
   };
@@ -59,6 +60,7 @@ function normalizeState(value, root) {
     || !Array.isArray(value.candidates) || !value.candidates.every((item) => item && typeof item === "object" && Array.isArray(item.evidence))
     || (value.outcomes !== undefined && (!Array.isArray(value.outcomes) || !value.outcomes.every((item) => item && typeof item === "object")))
     || (value.applications !== undefined && (!Array.isArray(value.applications) || !value.applications.every((item) => item && typeof item === "object")))
+    || (value.deliveries !== undefined && (!Array.isArray(value.deliveries) || !value.deliveries.every((item) => item && typeof item === "object")))
     || (value.evaluations !== undefined && (!Array.isArray(value.evaluations) || !value.evaluations.every((item) => item && typeof item === "object")))
     || !Array.isArray(value.history) || !value.history.every((item) => item && typeof item === "object")) {
     throw new Error("learning state structure is invalid; run the audit before learning");
@@ -73,6 +75,7 @@ function normalizeState(value, root) {
     })),
     outcomes: value.outcomes || [],
     applications: value.applications || [],
+    deliveries: value.deliveries || [],
     evaluations: value.evaluations || []
   };
   if (normalized.outcomes.some((receipt) => !storedOutcomeStructure(receipt))) {
@@ -80,6 +83,9 @@ function normalizeState(value, root) {
   }
   if (normalized.applications.some((receipt) => !storedApplicationStructure(receipt))) {
     throw new Error("learning application state is invalid; run the audit before learning");
+  }
+  if (normalized.deliveries.some((receipt) => !storedDeliveryStructure(receipt))) {
+    throw new Error("learning delivery state is invalid; run the audit before learning");
   }
   if (normalized.evaluations.some((contract) => !storedEvaluationStructure(contract))) {
     throw new Error("learning evaluation state is invalid; run the audit before learning");
@@ -92,18 +98,27 @@ function normalizeState(value, root) {
     const candidate = normalized.candidates.find((item) => item.id === receipt.learningId);
     return !candidate || !scopeContains(candidate.scope, receipt.scope);
   })) throw new Error("learning application scope is invalid; run the audit before learning");
+  if (normalized.deliveries.some((receipt) => {
+    const application = normalized.applications.find((item) => item.id === receipt.applicationId);
+    return !application || application.learningId !== receipt.learningId
+      || application.schema !== "agentspine.learning-application/v2"
+      || application.sessionId !== receipt.sessionId || application.preflightReceiptId !== receipt.preflightReceiptId
+      || !exactScope(application.scope, receipt.scope)
+      || new Date(receipt.completedAt).getTime() < new Date(application.projectedAt).getTime()
+      || new Date(receipt.completedAt).getTime() > new Date(application.deliveryExpiresAt).getTime();
+  })) throw new Error("learning delivery binding is invalid; run the audit before learning");
   if (normalized.evaluations.some((contract) => {
     const candidate = normalized.candidates.find((item) => item.id === contract.learningId);
     return !candidate || !scopeContains(candidate.scope, contract.scope);
   })) throw new Error("learning evaluation scope is invalid; run the audit before learning");
-  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3"].includes(receipt.schema)
+  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(receipt.schema)
     && receipt.phase === "after" && !normalized.applications.some((application) => application.id === receipt.applicationId
       && application.learningId === receipt.learningId && exactScope(application.scope, receipt.scope)
       && new Date(receipt.measuredAt).getTime() >= new Date(application.projectedAt).getTime()
       && new Date(receipt.measuredAt).getTime() <= new Date(application.expiresAt).getTime()))) {
     throw new Error("learning outcome application binding is invalid; run the audit before learning");
   }
-  if (normalized.outcomes.some((receipt) => receipt.schema === "agentspine.learning-outcome/v3"
+  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(receipt.schema)
     && !normalized.evaluations.some((contract) => contract.id === receipt.evaluationId
       && contract.learningId === receipt.learningId && exactScope(contract.scope, receipt.scope)
       && contract.metric.name === receipt.metric.name && contract.metric.direction === receipt.metric.direction
@@ -111,6 +126,13 @@ function normalizeState(value, root) {
       && new Date(receipt.measuredAt).getTime() >= new Date(contract.registeredAt).getTime()
       && new Date(receipt.measuredAt).getTime() <= new Date(contract.expiresAt).getTime()))) {
     throw new Error("learning outcome evaluation binding is invalid; run the audit before learning");
+  }
+  if (normalized.outcomes.some((receipt) => receipt.schema === "agentspine.learning-outcome/v4"
+    && (receipt.phase === "after" ? !normalized.deliveries.some((delivery) => delivery.id === receipt.deliveryId
+      && delivery.applicationId === receipt.applicationId && delivery.learningId === receipt.learningId
+      && exactScope(delivery.scope, receipt.scope)
+      && new Date(receipt.measuredAt).getTime() >= new Date(delivery.completedAt).getTime()) : receipt.deliveryId !== null))) {
+    throw new Error("learning outcome delivery binding is invalid; run the audit before learning");
   }
   if (normalized.candidates.some((candidate) => candidate.status === "accepted"
     && candidate.promotion?.mode === "outcome-canary" && candidate.promotion.canary?.evaluationId
@@ -173,7 +195,8 @@ function storedOutcomeStructure(receipt) {
   const legacy = receipt.schema === "agentspine.learning-outcome/v1";
   const bound = receipt.schema === "agentspine.learning-outcome/v2";
   const planned = receipt.schema === "agentspine.learning-outcome/v3";
-  return (legacy || bound || planned) && ID_RE.test(receipt.id || "")
+  const delivered = receipt.schema === "agentspine.learning-outcome/v4";
+  return (legacy || bound || planned || delivered) && ID_RE.test(receipt.id || "")
     && ID_RE.test(receipt.learningId || "") && OUTCOME_PHASES.has(receipt.phase)
     && SCOPE_FIELDS.every((field) => receipt.scope?.[field] === null || ID_RE.test(receipt.scope?.[field] || ""))
     && typeof receipt.metric?.name === "string" && receipt.metric.name.length > 0
@@ -184,7 +207,8 @@ function storedOutcomeStructure(receipt) {
     && (receipt.measurement?.sourceDigest === null || DIGEST_RE.test(receipt.measurement?.sourceDigest || ""))
     && (legacy ? receipt.applicationId === undefined : (receipt.phase === "before"
       ? receipt.applicationId === null : ID_RE.test(receipt.applicationId || "")))
-    && (!planned || ID_RE.test(receipt.evaluationId || ""))
+    && (!(planned || delivered) || ID_RE.test(receipt.evaluationId || ""))
+    && (!delivered || (receipt.phase === "before" ? receipt.deliveryId === null : ID_RE.test(receipt.deliveryId || "")))
     && receipt.authority === "context-only" && receipt.measurement?.authority === "context-only"
     && Number.isFinite(new Date(receipt.measuredAt).getTime()) && receipt.digest === digest(payload);
 }
@@ -224,10 +248,12 @@ function storedEvaluationStructure(contract) {
 }
 
 function applicationPayload({ id, learningId, scope, preflightReceiptId, promptDigest,
-  preflightBriefingDigest, sessionBriefingDigest, projectedAt, expiresAt }) {
+  preflightBriefingDigest, sessionBriefingDigest, sessionId, projectedAt, deliveryExpiresAt, expiresAt,
+  schema = "agentspine.learning-application/v1" }) {
   return {
-    schema: "agentspine.learning-application/v1", id, learningId, scope,
+    schema, id, learningId, scope,
     preflightReceiptId, promptDigest, preflightBriefingDigest, sessionBriefingDigest,
+    ...(schema === "agentspine.learning-application/v2" ? { sessionId, deliveryExpiresAt } : {}),
     projectedAt, expiresAt, authority: "context-only"
   };
 }
@@ -235,7 +261,9 @@ function applicationPayload({ id, learningId, scope, preflightReceiptId, promptD
 function storedApplicationStructure(receipt) {
   if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
   const payload = applicationPayload(receipt);
-  return receipt.schema === "agentspine.learning-application/v1" && ID_RE.test(receipt.id || "")
+  const legacy = receipt.schema === "agentspine.learning-application/v1";
+  const delivered = receipt.schema === "agentspine.learning-application/v2";
+  return (legacy || delivered) && ID_RE.test(receipt.id || "")
     && ID_RE.test(receipt.learningId || "") && ID_RE.test(receipt.preflightReceiptId || "")
     && SCOPE_FIELDS.every((field) => receipt.scope?.[field] === null || ID_RE.test(receipt.scope?.[field] || ""))
     && [receipt.promptDigest, receipt.preflightBriefingDigest, receipt.sessionBriefingDigest]
@@ -243,6 +271,30 @@ function storedApplicationStructure(receipt) {
     && Number.isFinite(new Date(receipt.projectedAt).getTime())
     && Number.isFinite(new Date(receipt.expiresAt).getTime())
     && new Date(receipt.expiresAt).getTime() >= new Date(receipt.projectedAt).getTime()
+    && (!delivered || (ID_RE.test(receipt.sessionId || "")
+      && Number.isFinite(new Date(receipt.deliveryExpiresAt).getTime())
+      && new Date(receipt.deliveryExpiresAt).getTime() >= new Date(receipt.projectedAt).getTime()
+      && new Date(receipt.deliveryExpiresAt).getTime() <= new Date(receipt.expiresAt).getTime()))
+    && receipt.authority === "context-only" && receipt.digest === digest(payload);
+}
+
+function deliveryPayload({ id, applicationId, learningId, scope, sessionId, preflightReceiptId,
+  hookEvent, completedAt }) {
+  return {
+    schema: "agentspine.learning-delivery/v1", id, applicationId, learningId, scope,
+    sessionId, preflightReceiptId, hookEvent, completedAt, authority: "context-only"
+  };
+}
+
+function storedDeliveryStructure(receipt) {
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
+  const payload = deliveryPayload(receipt);
+  return receipt.schema === "agentspine.learning-delivery/v1" && ID_RE.test(receipt.id || "")
+    && ID_RE.test(receipt.applicationId || "") && ID_RE.test(receipt.learningId || "")
+    && ID_RE.test(receipt.sessionId || "") && ID_RE.test(receipt.preflightReceiptId || "")
+    && SCOPE_FIELDS.every((field) => receipt.scope?.[field] === null || ID_RE.test(receipt.scope?.[field] || ""))
+    && ["Stop", "SubagentStop"].includes(receipt.hookEvent)
+    && Number.isFinite(new Date(receipt.completedAt).getTime())
     && receipt.authority === "context-only" && receipt.digest === digest(payload);
 }
 
@@ -663,7 +715,7 @@ export async function registerLearningEvaluation({
 }
 
 function outcomePayload({ schema = "agentspine.learning-outcome/v1", id, learningId, phase, scope, metric, measurement,
-  applicationId, evaluationId, measuredAt }) {
+  applicationId, deliveryId, evaluationId, measuredAt }) {
   return {
     schema,
     id,
@@ -672,14 +724,15 @@ function outcomePayload({ schema = "agentspine.learning-outcome/v1", id, learnin
     scope,
     metric,
     measurement,
-    ...(["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3"].includes(schema) ? { applicationId } : {}),
-    ...(schema === "agentspine.learning-outcome/v3" ? { evaluationId } : {}),
+    ...(["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(schema) ? { applicationId } : {}),
+    ...(["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(schema) ? { evaluationId } : {}),
+    ...(schema === "agentspine.learning-outcome/v4" ? { deliveryId } : {}),
     measuredAt,
     authority: "context-only"
   };
 }
 
-function normalizeOutcome(input, candidate, timestamp, application = null, evaluation = null) {
+function normalizeOutcome(input, candidate, timestamp, application = null, delivery = null, evaluation = null) {
   const id = input.id || `outcome:${randomUUID()}`;
   if (!ID_RE.test(id)) throw new Error("outcome.id must be a stable, whitespace-free identifier");
   const phase = input.phase;
@@ -717,6 +770,7 @@ function normalizeOutcome(input, candidate, timestamp, application = null, evalu
     throw new Error("outcome is outside its evaluation contract window");
   }
   const applicationId = phase === "after" ? input.applicationId : null;
+  const deliveryId = phase === "after" ? input.deliveryId : null;
   if (phase === "after") {
     if (!ID_RE.test(applicationId || "") || !application) throw new Error("after outcomes require a recorded learning application receipt");
     if (application.learningId !== candidate.id || !exactScope(application.scope, scope)) {
@@ -726,9 +780,16 @@ function normalizeOutcome(input, candidate, timestamp, application = null, evalu
       || new Date(measuredAt).getTime() > new Date(application.expiresAt).getTime()) {
       throw new Error("after outcome is outside its learning application window");
     }
+    if (!ID_RE.test(deliveryId || "") || !delivery || delivery.applicationId !== application.id
+      || delivery.learningId !== candidate.id || !exactScope(delivery.scope, scope)) {
+      throw new Error("after outcomes require the matching completed model-turn delivery receipt");
+    }
+    if (new Date(measuredAt).getTime() < new Date(delivery.completedAt).getTime()) {
+      throw new Error("after outcome predates the completed model-turn delivery");
+    }
   }
-  const payload = outcomePayload({ schema: "agentspine.learning-outcome/v3", id, learningId: candidate.id,
-    phase, scope, metric, measurement, applicationId, evaluationId: evaluation.id, measuredAt });
+  const payload = outcomePayload({ schema: "agentspine.learning-outcome/v4", id, learningId: candidate.id,
+    phase, scope, metric, measurement, applicationId, deliveryId, evaluationId: evaluation.id, measuredAt });
   return { ...payload, digest: digest(payload) };
 }
 
@@ -740,6 +801,7 @@ export async function recordLearningApplications({
     || preflightReceipt.status !== "ready" || !ID_RE.test(preflightReceipt.id || "")
     || !/^[a-f0-9]{64}$/.test(preflightReceipt.promptDigest || "")
     || !/^[a-f0-9]{64}$/.test(preflightReceipt.briefingDigest || "")
+    || !ID_RE.test(preflightReceipt.sessionId || "")
     || !/^[a-f0-9]{64}$/.test(sessionBriefingDigest || "")) {
     throw new Error("learning applications require one valid consumed preflight binding");
   }
@@ -757,6 +819,14 @@ export async function recordLearningApplications({
     throw new Error("learning application preflight scope does not match the projected turn");
   }
   return mutation(root, (state, _catalog, learningPath) => {
+    const pending = state.applications.filter((application) => application.schema === "agentspine.learning-application/v2"
+      && application.sessionId === preflightReceipt.sessionId
+      && application.preflightReceiptId !== preflightReceipt.id
+      && new Date(application.deliveryExpiresAt).getTime() >= new Date(timestamp).getTime()
+      && !state.deliveries.some((delivery) => delivery.applicationId === application.id));
+    if (pending.length) {
+      throw new Error("this session already has an unconfirmed learning application; await Stop or its bounded expiry");
+    }
     const receipts = [];
     for (const item of items.filter((entry) => entry?.outcomeStatus === "active")) {
       const candidate = state.candidates.find((entry) => entry.id === item.id);
@@ -766,12 +836,14 @@ export async function recordLearningApplications({
         throw new Error(`active learning application no longer matches its exact scope: ${item.id || "unknown"}`);
       }
       const expiresAt = canary.expiresAt;
+      const deliveryExpiresAt = new Date(Math.min(new Date(expiresAt).getTime(),
+        new Date(timestamp).getTime() + 5 * 60_000)).toISOString();
       const material = `${candidate.id}\0${preflightReceipt.id}\0${sessionBriefingDigest}`;
       const id = `application:${createHash("sha256").update(material).digest("hex").slice(0, 32)}`;
-      const payload = applicationPayload({ id, learningId: candidate.id, scope: runtimeScope,
+      const payload = applicationPayload({ schema: "agentspine.learning-application/v2", id, learningId: candidate.id, scope: runtimeScope,
         preflightReceiptId: preflightReceipt.id, promptDigest: preflightReceipt.promptDigest,
         preflightBriefingDigest: preflightReceipt.briefingDigest, sessionBriefingDigest,
-        projectedAt: timestamp, expiresAt });
+        sessionId: preflightReceipt.sessionId, projectedAt: timestamp, deliveryExpiresAt, expiresAt });
       const receipt = { ...payload, digest: digest(payload) };
       const existing = state.applications.find((entry) => entry.id === id);
       if (existing) {
@@ -791,8 +863,52 @@ export async function recordLearningApplications({
       receipts.push(receipt);
     }
     state.applications.sort((a, b) => a.id.localeCompare(b.id));
-    return { schema: "agentspine.learning-application-batch/v1", receipts, learningPath,
+    return { schema: "agentspine.learning-application-batch/v2", receipts, learningPath,
       authority: "context-only" };
+  });
+}
+
+export async function recordLearningDeliveries({
+  root = process.cwd(), sessionId, scope, hookEvent, completedAt = new Date()
+}) {
+  if (!ID_RE.test(sessionId || "")) throw new Error("learning delivery sessionId is required");
+  if (!["Stop", "SubagentStop"].includes(hookEvent)) throw new Error("learning delivery requires Stop or SubagentStop");
+  const runtimeScope = normalizeScope(scope);
+  const timestamp = date(completedAt, "completedAt");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const candidates = state.applications.filter((application) => application.schema === "agentspine.learning-application/v2"
+      && application.sessionId === sessionId && exactScope(application.scope, runtimeScope));
+    if (!candidates.length) return { schema: "agentspine.learning-delivery-batch/v1", status: "not-applicable",
+      receipts: [], learningPath, authority: "context-only" };
+    const latest = [...candidates].sort((a, b) => b.projectedAt.localeCompare(a.projectedAt))[0];
+    const batch = candidates.filter((application) => application.preflightReceiptId === latest.preflightReceiptId);
+    if (new Date(timestamp).getTime() > new Date(latest.deliveryExpiresAt).getTime()) {
+      return { schema: "agentspine.learning-delivery-batch/v1", status: "stale", receipts: [], learningPath,
+        authority: "context-only" };
+    }
+    const receipts = [];
+    for (const application of batch) {
+      const existingForApplication = state.deliveries.find((entry) => entry.applicationId === application.id);
+      if (existingForApplication) {
+        if (existingForApplication.sessionId !== sessionId || existingForApplication.hookEvent !== hookEvent
+          || !exactScope(existingForApplication.scope, runtimeScope)) {
+          throw new Error("one learning application cannot have conflicting delivery receipts");
+        }
+        receipts.push(existingForApplication);
+        continue;
+      }
+      const id = `delivery:${createHash("sha256").update(`${application.id}\0${hookEvent}`).digest("hex").slice(0, 32)}`;
+      const payload = deliveryPayload({ id, applicationId: application.id, learningId: application.learningId,
+        scope: runtimeScope, sessionId, preflightReceiptId: application.preflightReceiptId, hookEvent,
+        completedAt: timestamp });
+      const receipt = { ...payload, digest: digest(payload) };
+      if (state.deliveries.some((entry) => entry.id === id)) throw new Error("learning delivery receipt IDs are immutable");
+      state.deliveries.push(receipt);
+      receipts.push(receipt);
+    }
+    state.deliveries.sort((a, b) => a.id.localeCompare(b.id));
+    return { schema: "agentspine.learning-delivery-batch/v1", status: receipts.length ? "completed" : "not-applicable",
+      receipts, learningPath, authority: "context-only" };
   });
 }
 
@@ -805,7 +921,7 @@ function promotableReceipts(state, candidate, timestamp) {
     && new Date(contract.expiresAt).getTime() >= new Date(timestamp).getTime());
   const groups = contracts.map((contract) => ({
     contract,
-    receipts: state.outcomes.filter((item) => item.schema === "agentspine.learning-outcome/v3"
+    receipts: state.outcomes.filter((item) => ["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(item.schema)
       && item.learningId === candidate.id && item.evaluationId === contract.id && item.phase === "before"
       && exactScope(item.scope, contract.scope) && outcomeFresh(item, state.config, timestamp)
       && item.measurement.kind !== "model-suggestion")
@@ -861,8 +977,9 @@ function reconcileCanary(state, candidate, timestamp) {
     return { ...result, decision: "rolled-back" };
   }
   const planned = Boolean(evaluation);
-  const receipts = state.outcomes.filter((item) => item.schema === (planned
-    ? "agentspine.learning-outcome/v3" : "agentspine.learning-outcome/v2")
+  const receipts = state.outcomes.filter((item) => (planned
+    ? ["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(item.schema)
+    : item.schema === "agentspine.learning-outcome/v2")
     && item.learningId === candidate.id && item.phase === "after"
     && (!planned || item.evaluationId === evaluation.id)
     && exactScope(item.scope, canary.scope) && item.metric.name === canary.metric.name
@@ -910,7 +1027,7 @@ function reconcileCanary(state, candidate, timestamp) {
 }
 
 export async function recordLearningOutcome({ root = process.cwd(), id, learningId, phase, scope, metric, measurement,
-  applicationId = null, evaluationId, measuredAt, now = new Date() }) {
+  applicationId = null, deliveryId = null, evaluationId, measuredAt, now = new Date() }) {
   if (!ID_RE.test(learningId || "")) throw new Error("learningId is required");
   const timestamp = date(now, "now");
   return mutation(root, (state, _catalog, learningPath) => {
@@ -919,10 +1036,11 @@ export async function recordLearningOutcome({ root = process.cwd(), id, learning
     if (!ID_RE.test(evaluationId || "")) throw new Error("evaluationId is required");
     const evaluation = state.evaluations.find((item) => item.id === evaluationId);
     const application = applicationId === null ? null : state.applications.find((item) => item.id === applicationId);
+    const delivery = deliveryId === null ? null : state.deliveries.find((item) => item.id === deliveryId);
     const existing = id ? state.outcomes.find((item) => item.id === id) : null;
     if (existing) {
-      const retry = normalizeOutcome({ id, phase, scope, metric, measurement, applicationId, evaluationId,
-        measuredAt: measuredAt ?? existing.measuredAt }, candidate, timestamp, application, evaluation);
+      const retry = normalizeOutcome({ id, phase, scope, metric, measurement, applicationId, deliveryId, evaluationId,
+        measuredAt: measuredAt ?? existing.measuredAt }, candidate, timestamp, application, delivery, evaluation);
       if (existing.digest === retry.digest) {
         return { receipt: existing, candidate, decision: "unchanged", learningPath, unchanged: true };
       }
@@ -933,8 +1051,8 @@ export async function recordLearningOutcome({ root = process.cwd(), id, learning
       || candidate.promotion?.canary?.status !== "active")) {
       throw new Error("after outcomes require an active outcome canary");
     }
-    const receipt = normalizeOutcome({ id, phase, scope, metric, measurement, applicationId, evaluationId,
-      measuredAt }, candidate, timestamp, application, evaluation);
+    const receipt = normalizeOutcome({ id, phase, scope, metric, measurement, applicationId, deliveryId, evaluationId,
+      measuredAt }, candidate, timestamp, application, delivery, evaluation);
     const duplicate = state.outcomes.find((item) => item.digest === receipt.digest);
     if (duplicate) return { receipt: duplicate, candidate, decision: "unchanged", learningPath, unchanged: true };
     state.outcomes.push(receipt);
@@ -999,6 +1117,21 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
       }
     }
     return { enabled: state.config.autoPromote, accepted, reconciled, learningPath, authority: "context-only" };
+  });
+}
+
+export async function purgeStaleLearningApplications({ root = process.cwd(), confirmation, now = new Date() } = {}) {
+  if (confirmation !== "local-user-purge-confirmed") {
+    throw new Error("purging stale learning applications requires explicit local confirmation");
+  }
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const ids = new Set(state.applications.filter((application) => application.schema === "agentspine.learning-application/v2"
+      && new Date(application.deliveryExpiresAt).getTime() < new Date(timestamp).getTime()
+      && !state.deliveries.some((delivery) => delivery.applicationId === application.id)).map((application) => application.id));
+    state.applications = state.applications.filter((application) => !ids.has(application.id));
+    return { schema: "agentspine.learning-delivery-purge/v1", purged: ids.size, applicationIds: [...ids].sort(),
+      learningPath, authority: "context-only" };
   });
 }
 
@@ -1149,6 +1282,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
     .map((candidate) => {
       const outcomes = learning.outcomes.filter((item) => item.learningId === candidate.id);
       const applications = learning.applications.filter((item) => item.learningId === candidate.id);
+      const deliveries = learning.deliveries.filter((item) => item.learningId === candidate.id);
       const evaluations = learning.evaluations.filter((item) => item.learningId === candidate.id);
       const canary = candidate.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
       const stale = canary?.status === "active" && new Date(canary.expiresAt).getTime() < new Date(timestamp).getTime();
@@ -1161,13 +1295,22 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
         afterReceipts: outcomes.filter((item) => item.phase === "after").length,
         boundAfterReceipts: outcomes.filter((item) => item.phase === "after" && item.applicationId
           && applications.some((application) => application.id === item.applicationId)).length,
-        plannedOutcomeReceipts: outcomes.filter((item) => item.schema === "agentspine.learning-outcome/v3"
+        deliveredAfterReceipts: outcomes.filter((item) => item.phase === "after" && item.deliveryId
+          && deliveries.some((delivery) => delivery.id === item.deliveryId)).length,
+        plannedOutcomeReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(item.schema)
           && evaluations.some((contract) => contract.id === item.evaluationId)).length,
         evaluationContracts: evaluations.length,
         activeEvaluationId: canary?.evaluationId || [...evaluations]
           .filter((contract) => new Date(contract.expiresAt).getTime() >= new Date(timestamp).getTime())
           .sort((a, b) => b.registeredAt.localeCompare(a.registeredAt))[0]?.id || null,
         applicationReceipts: applications.length,
+        deliveryReceipts: deliveries.length,
+        pendingApplications: applications.filter((application) => application.schema === "agentspine.learning-application/v2"
+          && new Date(application.deliveryExpiresAt).getTime() >= new Date(timestamp).getTime()
+          && !deliveries.some((delivery) => delivery.applicationId === application.id)).length,
+        stalePendingApplications: applications.filter((application) => application.schema === "agentspine.learning-application/v2"
+          && new Date(application.deliveryExpiresAt).getTime() < new Date(timestamp).getTime()
+          && !deliveries.some((delivery) => delivery.applicationId === application.id)).length,
         latestApplicationId: [...applications].sort((a, b) => b.projectedAt.localeCompare(a.projectedAt))[0]?.id || null,
         canaryStatus: stale ? "stale" : (canary?.status || "not-applicable"),
         expiresAt: canary?.expiresAt || null,
@@ -1226,6 +1369,7 @@ export async function deleteLearning({ root = process.cwd(), id }) {
     state.candidates = state.candidates.filter((entry) => entry.id !== id);
     state.outcomes = state.outcomes.filter((entry) => entry.learningId !== id);
     state.applications = state.applications.filter((entry) => entry.learningId !== id);
+    state.deliveries = state.deliveries.filter((entry) => entry.learningId !== id);
     state.evaluations = state.evaluations.filter((entry) => entry.learningId !== id);
     state.history = state.history.filter((entry) => entry.recordId !== id && entry.value?.id !== id);
     return { deleted: existed, id, learningPath };
@@ -1239,6 +1383,7 @@ export async function purgeLearningBySubject({ root = process.cwd(), subjectId }
     state.candidates = state.candidates.filter((entry) => entry.subjectId !== subjectId);
     state.outcomes = state.outcomes.filter((entry) => !ids.has(entry.learningId));
     state.applications = state.applications.filter((entry) => !ids.has(entry.learningId));
+    state.deliveries = state.deliveries.filter((entry) => !ids.has(entry.learningId));
     state.evaluations = state.evaluations.filter((entry) => !ids.has(entry.learningId));
     state.history = state.history.filter((entry) => entry.subjectId !== subjectId && !ids.has(entry.recordId) && !ids.has(entry.value?.id));
     return { deleted: ids.size, subjectId, learningPath };
@@ -1322,14 +1467,31 @@ export function learningFindings(learning, graph) {
     const candidate = learning.candidates.find((item) => item.id === receipt.learningId);
     const valid = storedApplicationStructure(receipt) && candidate && scopeContains(candidate.scope, receipt.scope);
     if (!valid || applicationIds.has(receipt.id)) findings.push(`invalid-application:${receipt.id || "unknown"}`);
+    if (receipt.schema === "agentspine.learning-application/v2"
+      && new Date(receipt.deliveryExpiresAt).getTime() < Date.now()
+      && !(learning.deliveries || []).some((delivery) => delivery.applicationId === receipt.id)) {
+      findings.push(`stale-undelivered-application:${receipt.id}`);
+    }
     applicationIds.add(receipt.id);
   }
+  const deliveryIds = new Set();
+  for (const receipt of learning.deliveries || []) {
+    const candidate = learning.candidates.find((item) => item.id === receipt.learningId);
+    const application = learning.applications.find((item) => item.id === receipt.applicationId);
+    const valid = storedDeliveryStructure(receipt) && candidate && application
+      && application.learningId === receipt.learningId && application.sessionId === receipt.sessionId
+      && exactScope(application.scope, receipt.scope) && scopeContains(candidate.scope, receipt.scope);
+    if (!valid || deliveryIds.has(receipt.id)) findings.push(`invalid-delivery:${receipt.id || "unknown"}`);
+    deliveryIds.add(receipt.id);
+  }
   for (const receipt of learning.outcomes || []) {
-    if (["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3"].includes(receipt.schema) && receipt.phase === "after"
+    if (["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(receipt.schema) && receipt.phase === "after"
       && !applicationIds.has(receipt.applicationId)) findings.push(`unbound-outcome:${receipt.id}`);
-    if (receipt.schema === "agentspine.learning-outcome/v3" && !evaluationIds.has(receipt.evaluationId)) {
+    if (["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(receipt.schema) && !evaluationIds.has(receipt.evaluationId)) {
       findings.push(`unplanned-outcome:${receipt.id}`);
     }
+    if (receipt.schema === "agentspine.learning-outcome/v4" && receipt.phase === "after"
+      && !deliveryIds.has(receipt.deliveryId)) findings.push(`undelivered-outcome:${receipt.id}`);
   }
   for (const entry of learning.history) {
     const value = entry.value || {};

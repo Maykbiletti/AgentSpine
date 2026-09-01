@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
-  recordLearningApplications, recordLearningOutcome, registerLearningEvaluation,
+  purgeStaleLearningApplications, recordLearningApplications, recordLearningDeliveries, recordLearningOutcome, registerLearningEvaluation,
   reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
@@ -81,6 +81,7 @@ async function application(root, learningId, turnId, now = new Date()) {
     root, items: [{ id: learningId, outcomeStatus: "active" }], scope: scopedTurn,
     preflightReceipt: {
       schema: "agentspine.preflight/v2", id: `preflight:${turnId}`, status: "ready",
+      sessionId: `session:${turnId}`,
       promptDigest: hash(`prompt:${turnId}`), briefingDigest: hash(`preflight:${turnId}`),
       agentId: scopedTurn.personaId, userId: scopedTurn.userId, tenantId: scopedTurn.tenantId,
       projectId: scopedTurn.projectId, groupId: scopedTurn.groupId, taskId: scopedTurn.taskId,
@@ -88,7 +89,11 @@ async function application(root, learningId, turnId, now = new Date()) {
     },
     sessionBriefingDigest: hash(`briefing:${turnId}`), projectedAt
   });
-  return result.receipts[0];
+  const application = result.receipts[0];
+  const delivered = await recordLearningDeliveries({
+    root, sessionId: `session:${turnId}`, scope: scopedTurn, hookEvent: "Stop", completedAt: projectedAt
+  });
+  return { ...application, deliveryId: delivered.receipts[0].id };
 }
 
 function runCli(args, state) {
@@ -262,10 +267,10 @@ test("immutable evaluation contracts prevent benchmark drift and freeze promotio
   await assert.rejects(loadLearning(root), /evaluation binding is invalid/);
   await writeFile(learningPath, `${preservedState}\n`, "utf8");
   const applicationA = await application(root, "learning:planned", "planned-a");
-  await recordLearningOutcome({ root, learningId: "learning:planned", applicationId: applicationA.id,
+  await recordLearningOutcome({ root, learningId: "learning:planned", applicationId: applicationA.id, deliveryId: applicationA.deliveryId,
     ...outcome("outcome:planned-after-a", "after", 0.55, "evaluator:test-a", { evaluationId: "evaluation:planned" }) });
   const applicationB = await application(root, "learning:planned", "planned-b");
-  const result = await recordLearningOutcome({ root, learningId: "learning:planned", applicationId: applicationB.id,
+  const result = await recordLearningOutcome({ root, learningId: "learning:planned", applicationId: applicationB.id, deliveryId: applicationB.deliveryId,
     ...outcome("outcome:planned-after-b", "after", 0.56, "evaluator:test-b", { evaluationId: "evaluation:planned" }) });
   assert.equal(result.decision, "rolled-back", "later config changes must not weaken the registered threshold");
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
@@ -299,18 +304,18 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
 
   const applicationA = await application(root, "learning:measured", "measured-a");
   const first = await recordLearningOutcome({
-    root, learningId: "learning:measured", applicationId: applicationA.id,
+    root, learningId: "learning:measured", applicationId: applicationA.id, deliveryId: applicationA.deliveryId,
     ...outcome("outcome:after-a", "after", 0.7, "evaluator:test-a")
   });
   assert.equal(first.decision, "active");
   const applicationB = await application(root, "learning:measured", "measured-b");
   const second = await recordLearningOutcome({
-    root, learningId: "learning:measured", applicationId: applicationB.id,
+    root, learningId: "learning:measured", applicationId: applicationB.id, deliveryId: applicationB.deliveryId,
     ...outcome("outcome:after-b", "after", 0.8, "evaluator:test-b")
   });
   assert.equal(second.decision, "validated");
   const retryAfterValidation = await recordLearningOutcome({
-    root, learningId: "learning:measured", applicationId: applicationB.id,
+    root, learningId: "learning:measured", applicationId: applicationB.id, deliveryId: applicationB.deliveryId,
     ...outcome("outcome:after-b", "after", 0.8, "evaluator:test-b")
   });
   assert.equal(retryAfterValidation.unchanged, true);
@@ -320,6 +325,9 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
   assert.equal(status.records[0].afterReceipts, 2);
   assert.equal(status.records[0].boundAfterReceipts, 2);
   assert.equal(status.records[0].applicationReceipts, 2);
+  assert.equal(status.records[0].deliveryReceipts, 2);
+  assert.equal(status.records[0].deliveredAfterReceipts, 2);
+  assert.equal(status.records[0].pendingApplications, 0);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), beforeBytes);
 });
 
@@ -358,6 +366,7 @@ test("after outcomes require distinct exact-turn application receipts", async (t
     root, items: [{ id: "learning:application-bound", outcomeStatus: "active" }], scope: crossTenantScope,
     preflightReceipt: {
       schema: "agentspine.preflight/v2", id: "preflight:cross-tenant", status: "ready",
+      sessionId: "session:cross-tenant",
       promptDigest: hash("prompt:cross-tenant"), briefingDigest: hash("preflight:cross-tenant"),
       agentId: crossTenantScope.personaId, userId: crossTenantScope.userId, tenantId: crossTenantScope.tenantId,
       projectId: crossTenantScope.projectId, groupId: crossTenantScope.groupId, taskId: crossTenantScope.taskId,
@@ -366,17 +375,17 @@ test("after outcomes require distinct exact-turn application receipts", async (t
     sessionBriefingDigest: hash("briefing:cross-tenant"), projectedAt: now
   }), /exact scope/);
   assert.equal((await recordLearningOutcome({
-    root, learningId: "learning:application-bound", applicationId: firstApplication.id,
+    root, learningId: "learning:application-bound", applicationId: firstApplication.id, deliveryId: firstApplication.deliveryId,
     ...outcome("outcome:application-after-a", "after", 0.8, "evaluator:after-a")
   })).decision, "active");
   assert.equal((await recordLearningOutcome({
-    root, learningId: "learning:application-bound", applicationId: firstApplication.id,
+    root, learningId: "learning:application-bound", applicationId: firstApplication.id, deliveryId: firstApplication.deliveryId,
     ...outcome("outcome:application-after-b", "after", 0.8, "evaluator:after-b")
   })).decision, "active", "two evaluators of one turn must not simulate two applications");
 
   const secondApplication = await application(root, "learning:application-bound", "application-b");
   assert.equal((await recordLearningOutcome({
-    root, learningId: "learning:application-bound", applicationId: secondApplication.id,
+    root, learningId: "learning:application-bound", applicationId: secondApplication.id, deliveryId: secondApplication.deliveryId,
     ...outcome("outcome:application-after-c", "after", 0.8, "evaluator:after-c")
   })).decision, "validated");
 });
@@ -422,7 +431,51 @@ test("UserPromptSubmit records the canary application only after the hard prefli
   const persisted = (await loadLearning(root)).learning.applications;
   assert.equal(persisted.length, 1);
   assert.equal(persisted[0].preflightReceiptId, injected.preflight.receiptId);
+  assert.equal(persisted[0].sessionId, "session:learning-application");
   assert.equal(JSON.stringify(persisted).includes("Run the synthetic task"), false);
+  await assert.rejects(recordLearningOutcome({
+    root, learningId: "learning:hook-application", applicationId: persisted[0].id,
+    ...outcome("outcome:hook-undelivered", "after", 0.8, "evaluator:test-a", { scope: hookScope })
+  }), /completed model-turn delivery/);
+  const crossSessionStop = await runHook({
+    hook_event_name: "Stop", host: "claude", cwd: root, session_id: "session:other",
+    entity_id: scopedTurn.personaId, user_id: scopedTurn.userId, tenant_id: scopedTurn.tenantId,
+    project_id: scopedTurn.projectId
+  });
+  assert.equal(crossSessionStop.learningDelivery.status, "not-applicable");
+  const stopped = await runHook({
+    hook_event_name: "Stop", host: "claude", cwd: root, session_id: "session:learning-application",
+    entity_id: scopedTurn.personaId, user_id: scopedTurn.userId, tenant_id: scopedTurn.tenantId,
+    project_id: scopedTurn.projectId
+  });
+  assert.equal(stopped.learningDelivery.status, "completed");
+  const delivery = stopped.learningDelivery.receipts[0];
+  assert.equal(delivery.applicationId, persisted[0].id);
+  assert.equal(JSON.stringify(delivery).includes("Run the synthetic task"), false);
+  assert.equal((await recordLearningOutcome({
+    root, learningId: "learning:hook-application", applicationId: persisted[0].id, deliveryId: delivery.id,
+    ...outcome("outcome:hook-delivered", "after", 0.8, "evaluator:test-a", { scope: hookScope })
+  })).decision, "active");
+  const pendingAt = new Date();
+  await recordLearningApplications({
+    root, items: [{ id: "learning:hook-application", outcomeStatus: "active" }], scope: hookScope,
+    preflightReceipt: {
+      schema: "agentspine.preflight/v2", id: "preflight:crash-pending", status: "ready",
+      sessionId: "session:crash-pending", promptDigest: hash("prompt:crash-pending"),
+      briefingDigest: hash("briefing:crash-pending"), agentId: hookScope.personaId,
+      userId: hookScope.userId, tenantId: hookScope.tenantId, projectId: hookScope.projectId,
+      groupId: hookScope.groupId, taskId: hookScope.taskId,
+      createdAt: new Date(pendingAt.getTime() - 1000).toISOString(),
+      expiresAt: new Date(pendingAt.getTime() + 60_000).toISOString()
+    },
+    sessionBriefingDigest: hash("session-briefing:crash-pending"), projectedAt: pendingAt
+  });
+  assert.equal((await learningOutcomeStatus({ root })).records[0].pendingApplications, 1);
+  await assert.rejects(purgeStaleLearningApplications({ root, now: new Date(pendingAt.getTime() + 6 * 60_000) }),
+    /explicit local confirmation/);
+  const purged = await purgeStaleLearningApplications({ root, confirmation: "local-user-purge-confirmed",
+    now: new Date(pendingAt.getTime() + 6 * 60_000) });
+  assert.equal(purged.purged, 1);
 });
 
 test("model suggestions cannot self-promote and contradictory behavior candidates remain blocked", async (t) => {
@@ -483,7 +536,7 @@ test("a blocking canary defect rolls back automatically and restores the superse
   await evaluateLearning({ root });
   const applied = await application(root, "learning:new-behavior", "blocking");
   const regressed = await recordLearningOutcome({
-    root, learningId: "learning:new-behavior", applicationId: applied.id,
+    root, learningId: "learning:new-behavior", applicationId: applied.id, deliveryId: applied.deliveryId,
     ...outcome("outcome:new-after-blocking", "after", 0.9, "evaluator:test-c", { blockingDefects: 1 })
   });
   assert.equal(regressed.decision, "rolled-back");
@@ -536,6 +589,7 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   const upgraded = (await loadLearning(root)).learning;
   assert.deepEqual(upgraded.outcomes, []);
   assert.deepEqual(upgraded.applications, []);
+  assert.deepEqual(upgraded.deliveries, []);
   assert.deepEqual(upgraded.evaluations, []);
   assert.equal(upgraded.config.minOutcomeReceipts, 2);
   await configureLearning({ root, config: { canaryTtlDays: 7 } });
@@ -545,6 +599,12 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   corruptApplication.applications.push({ schema: "agentspine.learning-application/v1", id: "application:bad" });
   await writeFile(learningPath, `${JSON.stringify(corruptApplication)}\n`, "utf8");
   await assert.rejects(loadLearning(root), /learning application state is invalid/);
+
+  await writeFile(learningPath, `${JSON.stringify(legacy)}\n`, "utf8");
+  const corruptDelivery = (await loadLearning(root)).learning;
+  corruptDelivery.deliveries.push({ schema: "agentspine.learning-delivery/v1", id: "delivery:bad" });
+  await writeFile(learningPath, `${JSON.stringify(corruptDelivery)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /learning delivery state is invalid/);
 
   await writeFile(learningPath, `${JSON.stringify(legacy)}\n`, "utf8");
   const corruptEvaluation = (await loadLearning(root)).learning;

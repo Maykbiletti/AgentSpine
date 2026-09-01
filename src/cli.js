@@ -10,7 +10,7 @@ import {
 import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
-  recordLearningOutcome, registerLearningEvaluation, reviewLearning, rollbackLearning
+  purgeStaleLearningApplications, recordLearningOutcome, registerLearningEvaluation, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 import { configureContinuity, loadContinuity, purgeContinuity } from "./lib/continuity.js";
 import {
@@ -138,8 +138,9 @@ Usage:
   agentspine learn-context [root] [--group id] [--include-private] [--kind preference,goal]
   agentspine learn-evaluate [root]
   agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id [--expires-at date] --confirm-local-evaluation
-  agentspine learn-outcome <id> --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --evaluator id --measurement objective|user-feedback|model-suggestion [--application id] [--blocking-defects n]
+  agentspine learn-outcome <id> --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --evaluator id --measurement objective|user-feedback|model-suggestion [--application id --delivery id] [--blocking-defects n]
   agentspine learn-status [root] [--persona id --user id --tenant id --project id --group id --task id]
+  agentspine learn-delivery-purge [root] --confirm-local-purge
   agentspine learn-rollback <id> --reason text
   agentspine learn-delete <id>
   agentspine learn-config [root] [--auto-promote true|false] [--min-confidence 0.85] [--min-outcomes 2 --min-improvement 0.05 --canary-receipts 2 --canary-ttl-days 14]
@@ -480,6 +481,7 @@ export async function run(argv = process.argv.slice(2)) {
       },
       evaluationId: flags.evaluation,
       applicationId: flags.application || null,
+      deliveryId: flags.delivery || null,
       measuredAt: flags.at
     }), json);
   }
@@ -487,6 +489,13 @@ export async function run(argv = process.argv.slice(2)) {
   if (command === "learn-status") {
     return output(await learningOutcomeStatus({
       root: positional[0] || process.cwd(), scope: hasLearningScope(flags) ? learningScope(flags) : null
+    }), json);
+  }
+
+  if (command === "learn-delivery-purge") {
+    return output(await purgeStaleLearningApplications({
+      root: positional[0] || process.cwd(),
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
     }), json);
   }
 
@@ -1023,23 +1032,31 @@ export async function run(argv = process.argv.slice(2)) {
     try {
       const status = await learningOutcomeStatus({ root: positional[0] || process.cwd() });
       const unboundAfterReceipts = status.records.reduce((sum, item) => sum + item.afterReceipts - item.boundAfterReceipts, 0);
+      const undeliveredAfterReceipts = status.records.reduce((sum, item) => sum + item.afterReceipts - item.deliveredAfterReceipts, 0);
+      const stalePendingApplications = status.records.reduce((sum, item) => sum + item.stalePendingApplications, 0);
       const totalOutcomeReceipts = status.records.reduce((sum, item) => sum + item.beforeReceipts + item.afterReceipts, 0);
       const plannedOutcomeReceipts = status.records.reduce((sum, item) => sum + item.plannedOutcomeReceipts, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
         status: status.records.some((item) => item.canaryStatus === "stale")
-          || unboundAfterReceipts > 0 || unplannedOutcomeReceipts > 0 ? "degraded" : "healthy",
+          || unboundAfterReceipts > 0 || undeliveredAfterReceipts > 0 || unplannedOutcomeReceipts > 0
+          || stalePendingApplications > 0 ? "degraded" : "healthy",
         candidates: status.records.length,
         activeCanaries: status.records.filter((item) => item.canaryStatus === "active").length,
         validatedCanaries: status.records.filter((item) => item.canaryStatus === "validated").length,
         staleCanaries: status.records.filter((item) => item.canaryStatus === "stale").length,
         awaitingApplication: status.records.filter((item) => item.canaryStatus === "active" && item.applicationReceipts === 0).length,
         applicationReceipts: status.records.reduce((sum, item) => sum + item.applicationReceipts, 0),
+        deliveryReceipts: status.records.reduce((sum, item) => sum + item.deliveryReceipts, 0),
+        pendingApplications: status.records.reduce((sum, item) => sum + item.pendingApplications, 0),
+        stalePendingApplications,
         evaluationContracts: status.records.reduce((sum, item) => sum + item.evaluationContracts, 0),
         plannedOutcomeReceipts,
         unplannedOutcomeReceipts,
         boundAfterReceipts: status.records.reduce((sum, item) => sum + item.boundAfterReceipts, 0),
         unboundAfterReceipts,
+        deliveredAfterReceipts: status.records.reduce((sum, item) => sum + item.deliveredAfterReceipts, 0),
+        undeliveredAfterReceipts,
         contradictions: status.records.filter((item) => item.conflictsWith.length > 0).length,
         authority: "context-only"
       };

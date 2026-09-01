@@ -4,6 +4,23 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-01
+
+### Added
+
+- Content-free `agentspine.learning-delivery/v1` receipts prove that a preflight-bound Canary projection reached a matching native `Stop` or `SubagentStop` in the exact host session and scope.
+- `agentspine.learning-outcome/v4` binds every new after-measurement to both the projection and completed-turn delivery receipts; CLI, Doctor, audit and read-only status expose pending, stale, completed and delivered evidence separately.
+- Locally confirmed `learn-delivery-purge` removes expired, unconfirmed projections after crash recovery without touching user sources, completed receipts or lessons.
+
+### Changed
+
+- New `agentspine.learning-application/v2` projections bind the host session and a five-minute completion deadline. A concurrent second projection in the same session degrades safely until the first completes or expires.
+- Canary validation counts only completed model turns for new v4 outcomes. Projection alone can no longer manufacture a successful learning application.
+
+### Security
+
+- Delivery receipts store no prompt, answer, transcript, credential or authority. Cross-session, cross-scope, stale, duplicate-conflicting and forged completion attempts are rejected or ignored without blocking the normal answer path.
+
 ## [0.13.0] - 2026-09-01
 
 ### Added
@@ -422,7 +439,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.4...v0.12.0
 [0.11.4]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.3...v0.11.4
