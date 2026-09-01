@@ -114,7 +114,7 @@ async function evaluation(root, learningId, extra = {}) {
   });
 }
 
-async function application(root, learningId, turnId, now = new Date(), outcomeStatus = "active") {
+async function projectedApplication(root, learningId, turnId, now = new Date(), outcomeStatus = "active") {
   const projectedAt = new Date(now);
   const createdAt = new Date(projectedAt.getTime() - 1000).toISOString();
   const expiresAt = new Date(projectedAt.getTime() + 60_000).toISOString();
@@ -133,6 +133,12 @@ async function application(root, learningId, turnId, now = new Date(), outcomeSt
   const application = result.receipts[0];
   assert.ok(application, JSON.stringify(result));
   assert.ok(new Date(projectedAt).getTime() <= new Date(application.deliveryExpiresAt).getTime(), JSON.stringify(application));
+  return application;
+}
+
+async function application(root, learningId, turnId, now = new Date(), outcomeStatus = "active") {
+  const projectedAt = new Date(now);
+  const application = await projectedApplication(root, learningId, turnId, projectedAt, outcomeStatus);
   const delivered = await recordLearningDeliveries({
     root, sessionId: `session:${turnId}`, scope: scopedTurn, hookEvent: "Stop", completedAt: projectedAt
   });
@@ -753,8 +759,8 @@ test("validated learning renews only from fresh independent delivered-turn evide
   const renewalStarted = new Date("2032-04-20T00:00:00.000Z");
   const window = await beginLearningRevalidation({ root, learningId: "learning:renewed",
     confirmLocalValidation: true, now: renewalStarted });
-  assert.equal(window.revalidation.schema, "agentspine.learning-revalidation-window/v2");
-  assert.equal(window.revalidation.selection.mode, "first-completed-turns");
+  assert.equal(window.revalidation.schema, "agentspine.learning-revalidation-window/v3");
+  assert.equal(window.revalidation.selection.mode, "first-admitted-turns");
   assert.equal(window.revalidation.selection.requiredDeliveries, 2);
   assert.equal(window.revalidation.selection.evaluatorRoots.length, 2);
   assert.match(window.revalidation.digest, /^[a-f0-9]{64}$/);
@@ -782,8 +788,9 @@ test("validated learning renews only from fresh independent delivered-turn evide
   }
   const collectingStatus = await learningOutcomeStatus({ root, scope: scopedTurn,
     now: new Date("2032-04-20T00:00:03.000Z") });
-  assert.equal(collectingStatus.records[0].revalidationSelectionMode, "first-completed-turns");
+  assert.equal(collectingStatus.records[0].revalidationSelectionMode, "first-admitted-turns");
   assert.equal(collectingStatus.records[0].revalidationRequiredDeliveries, 2);
+  assert.equal(collectingStatus.records[0].revalidationAdmittedApplications, 2);
   assert.equal(collectingStatus.records[0].revalidationCompletedDeliveries, 2);
   const attempts = await Promise.allSettled(Array.from({ length: 5 }, () => renewLearningValidation({
     root, learningId: "learning:renewed", evidence: evidenceBindings,
@@ -793,26 +800,67 @@ test("validated learning renews only from fresh independent delivered-turn evide
     "parallel renewal must replace evidence exactly once");
   const renewedResult = attempts.find((item) => item.status === "fulfilled").value;
   assert.equal(renewedResult.decision, "renewed");
-  assert.equal(renewedResult.lease.schema, "agentspine.learning-validation/v3");
+  assert.equal(renewedResult.lease.schema, "agentspine.learning-validation/v4");
   assert.equal(renewedResult.lease.predecessorValidation.digest, original.digest);
   assert.equal(renewedResult.lease.renewalEvidence.length, 2);
   assert.ok(new Date(renewedResult.lease.expiresAt) > new Date(original.expiresAt));
   assert.equal(JSON.stringify(renewedResult.lease).includes("Use validated synthetic strategy"), false);
   const stored = await loadLearning(root);
   assert.equal(stored.learning.validationLeases.length, 1);
-  assert.equal(stored.learning.validationLeases[0].schema, "agentspine.learning-validation/v3");
+  assert.equal(stored.learning.validationLeases[0].schema, "agentspine.learning-validation/v4");
   assert.equal(stored.learning.history.filter((item) => item.kind === "learning-validation"
     && item.value?.id === original.id).length, 1);
   const status = await learningOutcomeStatus({ root, scope: scopedTurn,
     now: new Date("2032-04-20T00:00:05.000Z") });
-  assert.equal(status.records[0].validationLeaseSchema, "agentspine.learning-validation/v3");
+  assert.equal(status.records[0].validationLeaseSchema, "agentspine.learning-validation/v4");
   assert.equal(status.records[0].consumedMeasurementReceipts, 6,
     "original outcomes and renewal measurements remain independently accounted");
   assert.equal(status.records[0].revalidationStatus, "not-applicable");
   const doctor = runCli(["doctor", root, "--json"], state);
   assert.equal(doctor.learningOutcomes.fixedCohortValidationLeases, 1);
+  assert.equal(doctor.learningOutcomes.admissionBoundValidationLeases, 1);
   assert.equal(doctor.learningOutcomes.fixedCohortRevalidations, 0);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+  const modernState = JSON.stringify(stored.learning);
+  const legacy023 = structuredClone(stored.learning);
+  const historicalCandidate = legacy023.history.find((entry) => entry.kind === "learning-candidate"
+    && entry.value?.promotion?.canary?.revalidation)?.value;
+  const historicalWindow = historicalCandidate.promotion.canary.revalidation;
+  historicalWindow.schema = "agentspine.learning-revalidation-window/v2";
+  historicalWindow.selection.mode = "first-completed-turns";
+  const { digest: _windowDigest, ...windowPayload } = historicalWindow;
+  historicalWindow.digest = hash(JSON.stringify(windowPayload));
+  const legacyLease = legacy023.validationLeases[0];
+  for (const applicationReceipt of legacy023.applications.filter((item) =>
+    item.schema === "agentspine.learning-application/v3")) {
+    applicationReceipt.schema = "agentspine.learning-application/v2";
+    delete applicationReceipt.revalidationAdmission;
+    const { digest: _applicationDigest, ...applicationPayload } = applicationReceipt;
+    applicationReceipt.digest = hash(JSON.stringify(applicationPayload));
+    const evidence = legacyLease.renewalEvidence.find((item) => item.applicationId === applicationReceipt.id);
+    if (evidence) evidence.applicationDigest = applicationReceipt.digest;
+  }
+  legacyLease.schema = "agentspine.learning-validation/v3";
+  legacyLease.selectionProof = {
+    revalidationWindowId: historicalWindow.id,
+    revalidationWindowDigest: historicalWindow.digest,
+    mode: "first-completed-turns",
+    requiredDeliveries: legacyLease.selectionProof.requiredDeliveries,
+    deliveries: legacyLease.selectionProof.applications.map((item) => ({
+      slot: item.slot, deliveryId: item.deliveryId, deliveryDigest: item.deliveryDigest,
+      evaluatorRootDigest: item.evaluatorRootDigest, authority: "context-only"
+    })),
+    authority: "context-only"
+  };
+  const { digest: _leaseDigest, ...leasePayload } = legacyLease;
+  legacyLease.digest = hash(JSON.stringify(leasePayload));
+  legacy023.candidates.find((item) => item.id === "learning:renewed")
+    .promotion.canary.validationLeaseDigest = legacyLease.digest;
+  await writeFile(stored.learningPath, `${JSON.stringify(legacy023)}\n`, "utf8");
+  const compatible = await loadLearning(root);
+  assert.equal(compatible.learning.validationLeases[0].schema, "agentspine.learning-validation/v3",
+    "0.23 fixed-completion leases remain readable after upgrade");
+  await writeFile(stored.learningPath, `${modernState}\n`, "utf8");
   const tampered = await loadLearning(root);
   tampered.learning.validationLeases[0].renewalEvidence[0].measurementDigest = hash("tampered-renewal");
   await writeFile(tampered.learningPath, `${JSON.stringify(tampered.learning)}\n`, "utf8");
@@ -872,7 +920,7 @@ test("revalidation cannot cherry-pick later turns or swap evaluator roots across
       { measurementId: measurements.get("wrong-second-a").id, applicationId: delivered[1].id,
         deliveryId: delivered[1].deliveryId }
     ], now: new Date(renewalStarted.getTime() + 5000)
-  }), /precommitted turn slot/, "evaluator roots must not be reassigned after seeing turn results");
+  }), /precommitted admission slot/, "evaluator roots must not be reassigned after seeing turn results");
   const renewed = await renewLearningValidation({
     root, learningId: "learning:fixed-cohort", confirmLocalValidation: true,
     evidence: [
@@ -882,17 +930,83 @@ test("revalidation cannot cherry-pick later turns or swap evaluator roots across
         deliveryId: delivered[1].deliveryId }
     ], now: new Date(renewalStarted.getTime() + 5000)
   });
-  assert.equal(renewed.lease.schema, "agentspine.learning-validation/v3");
+  assert.equal(renewed.lease.schema, "agentspine.learning-validation/v4");
   assert.equal(renewed.lease.selectionProof.revalidationWindowDigest, started.revalidation.digest);
-  assert.deepEqual(renewed.lease.selectionProof.deliveries.map((entry) => entry.deliveryId),
+  assert.deepEqual(renewed.lease.selectionProof.applications.map((entry) => entry.deliveryId),
     delivered.slice(0, 2).map((entry) => entry.deliveryId));
-  assert.equal(renewed.lease.selectionProof.deliveries.some((entry) =>
+  assert.equal(renewed.lease.selectionProof.applications.some((entry) =>
     entry.deliveryId === delivered[2].deliveryId), false);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
   const tampered = await loadLearning(root);
-  tampered.learning.validationLeases[0].selectionProof.deliveries[0].deliveryDigest = hash("tampered-selection");
+  tampered.learning.validationLeases[0].selectionProof.applications[0].deliveryDigest = hash("tampered-selection");
   await writeFile(tampered.learningPath, `${JSON.stringify(tampered.learning)}\n`, "utf8");
   await assert.rejects(loadLearning(root), /validation lease state is invalid|validation lease binding is invalid/);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("an admitted turn that never completes cannot be hidden behind later successful turns", async (t) => {
+  const { root } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2032-06-01T00:00:00.000Z");
+  await establishValidatedLearning(root, {
+    learningId: "learning:admission-cohort", evaluationId: "evaluation:admission-cohort", start,
+    expiresAt: "2032-08-01T00:00:00.000Z"
+  });
+  const renewalStarted = new Date("2032-06-20T00:00:00.000Z");
+  await beginLearningRevalidation({ root, learningId: "learning:admission-cohort",
+    confirmLocalValidation: true, now: renewalStarted });
+  const abandoned = await projectedApplication(root, "learning:admission-cohort", "admission-abandoned",
+    new Date(renewalStarted.getTime() + 1000), "revalidating");
+  const second = await application(root, "learning:admission-cohort", "admission-second",
+    new Date(renewalStarted.getTime() + 2000), "revalidating");
+  const later = await application(root, "learning:admission-cohort", "admission-later",
+    new Date(renewalStarted.getTime() + 3000), "revalidating");
+  assert.equal(abandoned.schema, "agentspine.learning-application/v3");
+  assert.equal(abandoned.revalidationAdmission.slot, 1);
+  assert.equal(second.schema, "agentspine.learning-application/v3");
+  assert.equal(second.revalidationAdmission.slot, 2);
+  assert.equal(later.schema, "agentspine.learning-application/v2",
+    "turns after the bounded admission cohort remain normal evidence but cannot replace a slot");
+
+  const measurements = [];
+  for (const [suffix, evaluatorId, value] of [
+    ["second", "evaluator:test-b", 0.9], ["later", "evaluator:test-a", 0.99]
+  ]) {
+    measurements.push((await recordLearningMeasurement({
+      root, id: `measurement:admission-${suffix}`, learningId: "learning:admission-cohort",
+      evaluationId: "evaluation:admission-cohort", phase: "after", scope: scopedTurn,
+      metric: { name: "fixed-task-success", direction: "higher", value, blockingDefects: 0 },
+      measurement: { kind: "objective", evaluatorId, runId: `run:admission-${suffix}`,
+        sourceDigest: hash(`source:admission-${suffix}`) },
+      coverage: { datasetDigest: syntheticDatasetDigest, caseCount: 12 },
+      measuredAt: new Date(renewalStarted.getTime() + 4000), confirmLocalMeasurement: true,
+      now: new Date(renewalStarted.getTime() + 4000)
+    })).receipt);
+  }
+  await assert.rejects(renewLearningValidation({
+    root, learningId: "learning:admission-cohort", confirmLocalValidation: true,
+    evidence: [
+      { measurementId: measurements[0].id, applicationId: second.id, deliveryId: second.deliveryId },
+      { measurementId: measurements[1].id, applicationId: later.id, deliveryId: later.deliveryId }
+    ], now: new Date(renewalStarted.getTime() + 5000)
+  }), /cannot omit or replace a precommitted admitted turn/);
+  const purge = await purgeStaleLearningApplications({ root, confirmation: "local-user-purge-confirmed",
+    now: new Date(renewalStarted.getTime() + 10 * 60_000) });
+  assert.equal(purge.purged, 0, "an incomplete admitted slot is durable evidence and cannot be purged away");
+  const status = await learningOutcomeStatus({ root, scope: scopedTurn,
+    now: new Date(renewalStarted.getTime() + 10 * 60_000) });
+  assert.equal(status.records[0].revalidationAdmittedApplications, 2);
+  assert.equal(status.records[0].revalidationCompletedDeliveries, 1);
+  assert.equal(status.records[0].stalePendingApplications, 1);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+
+  const tampered = await loadLearning(root);
+  const admitted = tampered.learning.applications.find((item) => item.id === abandoned.id);
+  admitted.revalidationAdmission.evaluatorRootDigest = hash("swapped-admission-root");
+  const { digest: _discarded, ...payload } = admitted;
+  admitted.digest = hash(JSON.stringify(payload));
+  await writeFile(tampered.learningPath, `${JSON.stringify(tampered.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /revalidation admission state is invalid/);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 

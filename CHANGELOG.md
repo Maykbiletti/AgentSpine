@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-01
+
+### Added
+
+- Immutable `agentspine.learning-application/v3` receipts atomically admit the first exact-scope revalidation projections into frozen evaluator-root slots before model completion is known.
+- Content-free `agentspine.learning-validation/v4` leases bind every admitted application and its matching completed-turn delivery to the renewed evidence proof.
+
+### Changed
+
+- New `agentspine.learning-revalidation-window/v3` windows select `first-admitted-turns`; later projections remain normal context evidence but cannot replace an admitted cohort slot.
+- Doctor and learning status distinguish admitted applications from completed deliveries. Revalidation-window v1/v2, application v1/v2 and validation-lease v1-v3 history remains readable.
+
+### Security
+
+- Withholding `Stop`, crashing, delaying or purging a bad admitted turn cannot remove it from renewal. An incomplete admitted slot remains visible and blocks evidence extension; admission-order, slot, root, application and delivery tampering fails closed.
+
 ## [0.23.0] - 2026-09-01
 
 ### Added
@@ -583,7 +599,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.20.0...v0.21.0

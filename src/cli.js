@@ -1137,17 +1137,26 @@ export async function run(argv = process.argv.slice(2)) {
       const unprovenValidatedLessons = status.records.filter((item) => item.validationLeaseStatus === "unproven-validated").length;
       const revokedValidatedLessons = status.records.filter((item) => item.validationLeaseStatus === "revoked-validated").length;
       const renewedValidationLeases = status.records.filter((item) =>
-        ["agentspine.learning-validation/v2", "agentspine.learning-validation/v3"].includes(item.validationLeaseSchema)).length;
+        ["agentspine.learning-validation/v2", "agentspine.learning-validation/v3",
+          "agentspine.learning-validation/v4"].includes(item.validationLeaseSchema)).length;
       const fixedCohortValidationLeases = status.records.filter((item) =>
-        item.validationLeaseSchema === "agentspine.learning-validation/v3").length;
+        ["agentspine.learning-validation/v3", "agentspine.learning-validation/v4"]
+          .includes(item.validationLeaseSchema)).length;
+      const admissionBoundValidationLeases = status.records.filter((item) =>
+        item.validationLeaseSchema === "agentspine.learning-validation/v4").length;
       const activeRevalidations = status.records.filter((item) => item.revalidationStatus === "active").length;
       const staleRevalidations = status.records.filter((item) => item.revalidationStatus === "stale").length;
       const fixedCohortRevalidations = status.records.filter((item) =>
-        item.revalidationStatus === "active" && item.revalidationSelectionMode === "first-completed-turns").length;
+        item.revalidationStatus === "active"
+          && ["first-completed-turns", "first-admitted-turns"].includes(item.revalidationSelectionMode)).length;
+      const admissionBoundRevalidations = status.records.filter((item) =>
+        item.revalidationStatus === "active" && item.revalidationSelectionMode === "first-admitted-turns").length;
       const requiredRevalidationDeliveries = status.records.reduce((sum, item) =>
         sum + item.revalidationRequiredDeliveries, 0);
       const completedRevalidationDeliveries = status.records.reduce((sum, item) =>
         sum + item.revalidationCompletedDeliveries, 0);
+      const admittedRevalidationApplications = status.records.reduce((sum, item) =>
+        sum + item.revalidationAdmittedApplications, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
         status: status.records.some((item) => ["stale", "revoked", "unproven"].includes(item.canaryStatus))
@@ -1184,10 +1193,13 @@ export async function run(argv = process.argv.slice(2)) {
         validationLeases: status.evaluatorRegistry.validationLeases,
         renewedValidationLeases,
         fixedCohortValidationLeases,
+        admissionBoundValidationLeases,
         activeRevalidations,
         staleRevalidations,
         fixedCohortRevalidations,
+        admissionBoundRevalidations,
         requiredRevalidationDeliveries,
+        admittedRevalidationApplications,
         completedRevalidationDeliveries,
         currentValidatedLessons,
         staleValidatedLessons,
