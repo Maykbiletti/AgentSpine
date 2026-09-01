@@ -11,7 +11,8 @@ import {
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
   purgeLearningBySubject, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
-  registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, revokeLearningEvidence, reviewLearning, rollbackLearning
+  registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, revokeLearningEvidence,
+  revokeLearningMeasurement, reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
 import { runHook } from "../src/hook.js";
@@ -400,6 +401,133 @@ test("evidence revocation is immutable, immediately withheld, group-isolated, an
   });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /learn-evidence-revoke/);
+});
+
+test("measurement revocation is immutable, immediately withheld, group-isolated, and rollback-safe", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2037-01-01T00:00:00.000Z");
+  const alphaScope = { ...scopedTurn, groupId: "group:measurement-alpha" };
+  await upsertEntity({ root, id: "group:measurement-alpha", kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: "group:measurement-beta", kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: "person:measurement-member", kind: "person", privacy: "group" });
+  await linkEntities({ root, from: "person:measurement-member", to: "group:measurement-alpha",
+    relation: "member-of", privacy: "group" });
+  await proposeLearning({
+    root, id: "learning:measurement-old", kind: "behavior", claim: "Use the stable synthetic measured procedure.",
+    subjectId: "person:measurement-member", privacy: "group", groupId: "group:measurement-alpha",
+    scope: alphaScope, evidence: evidence("evidence:measurement-old", 0.97), now: start
+  });
+  await reviewLearning({ root, id: "learning:measurement-old", decision: "accept",
+    reason: "Synthetic local review.", confirmedByUser: true, now: start });
+  await proposeLearning({
+    root, id: "learning:measurement-new", kind: "behavior", claim: "Use the improved synthetic measured procedure.",
+    subjectId: "person:measurement-member", privacy: "group", groupId: "group:measurement-alpha",
+    scope: alphaScope, supersedesId: "learning:measurement-old",
+    evidence: evidence("evidence:measurement-new-one", 0.97), now: start
+  });
+  await addLearningEvidence({ root, id: "learning:measurement-new",
+    evidence: evidence("evidence:measurement-new-two", 0.97), now: start });
+  await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2,
+    minOutcomeReceipts: 2, canaryReceipts: 2 }, now: start });
+  await evaluation(root, "learning:measurement-new", {
+    id: "evaluation:measurement-new", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    scope: alphaScope, now: start, expiresAt: "2037-02-01T00:00:00.000Z"
+  });
+  await recordLearningOutcome({ root, learningId: "learning:measurement-new",
+    ...outcome("outcome:measurement-before-a", "before", 0.4, "evaluator:test-a", {
+      evaluationId: "evaluation:measurement-new", scope: alphaScope, measuredAt: start
+    }), now: start });
+  await recordLearningOutcome({ root, learningId: "learning:measurement-new",
+    ...outcome("outcome:measurement-before-b", "before", 0.5, "evaluator:test-b", {
+      evaluationId: "evaluation:measurement-new", scope: alphaScope, measuredAt: start
+    }), now: start });
+  await evaluateLearning({ root, now: new Date(start.getTime() + 1000) });
+  assert.deepEqual((await learningContext({ root, groupId: "group:measurement-alpha", scope: alphaScope,
+    now: new Date(start.getTime() + 2000) })).items.map((item) => item.id), ["learning:measurement-new"]);
+
+  await assert.rejects(revokeLearningMeasurement({ root, measurementId: "measurement:outcome:measurement-before-a",
+    reasonCode: "evaluator-invalid", reason: "Synthetic evaluator invalidated." }), /explicit local confirmation/);
+  const revocationInput = {
+    root, measurementId: "measurement:outcome:measurement-before-a", reasonCode: "evaluator-invalid",
+    reason: "Synthetic evaluator invalidated.", confirmation: "local-measurement-revocation-confirmed", now: start
+  };
+  const retries = await Promise.all(Array.from({ length: 6 }, () => revokeLearningMeasurement(revocationInput)));
+  assert.equal(retries.filter((result) => result.unchanged === false).length, 1);
+  assert.equal((await revokeLearningMeasurement({ ...revocationInput,
+    now: new Date(start.getTime() + 3000) })).unchanged, true);
+  const stored = await loadLearning(root);
+  assert.equal(stored.learning.measurementRevocations.length, 1);
+  assert.equal(JSON.stringify(stored.learning.measurementRevocations).includes("Synthetic evaluator invalidated"), false);
+  const receipt = stored.learning.measurementRevocations[0];
+  assert.equal(receipt.measurementDigest, stored.learning.measurements
+    .find((item) => item.id === receipt.measurementId).digest);
+  assert.equal(receipt.outcomeDigest, stored.learning.outcomes.find((item) => item.id === receipt.outcomeId).digest);
+  const withheld = await learningContext({ root, groupId: "group:measurement-alpha", scope: alphaScope,
+    now: new Date(start.getTime() + 4000) });
+  assert.deepEqual(withheld.items, []);
+  assert.deepEqual(withheld.diagnostics, ["revoked-learning-measurement:learning:measurement-new"]);
+  const foreign = await learningContext({ root, groupId: "group:measurement-beta",
+    scope: { ...scopedTurn, groupId: "group:measurement-beta" }, now: new Date(start.getTime() + 4000) });
+  assert.deepEqual(foreign.items, []);
+  assert.deepEqual(foreign.diagnostics, []);
+  const status = await learningOutcomeStatus({ root, scope: alphaScope, now: new Date(start.getTime() + 4000) });
+  assert.equal(status.measurementRevocations, 1);
+  assert.equal(status.records.find((item) => item.id === "learning:measurement-new").canaryStatus,
+    "revoked-measurement");
+  const cliReceipt = runCli(["learn-measurement-revoke", "measurement:outcome:measurement-before-a", "--root", root,
+    "--reason-code", "evaluator-invalid", "--reason", "Synthetic evaluator invalidated.",
+    "--confirm-local-measurement-revocation", "--json"], state);
+  assert.equal(cliReceipt.receipt.schema, "agentspine.learning-measurement-revocation/v1");
+  const doctor = runCli(["doctor", root, "--json"], state);
+  assert.equal(doctor.learningOutcomes.status, "degraded");
+  assert.equal(doctor.learningOutcomes.measurementRevocationReceipts, 1);
+
+  const originalState = JSON.stringify(stored.learning);
+  stored.learning.measurementRevocations[0].measurementDigest = hash("redirected measurement");
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /measurement revocation state is invalid/);
+  await writeFile(stored.learningPath, `${originalState}\n`, "utf8");
+
+  const reconciled = await evaluateLearning({ root, now: new Date(start.getTime() + 5000) });
+  assert.deepEqual(reconciled.reconciled, [{ id: "learning:measurement-new", decision: "rolled-back" }]);
+  assert.equal((await loadLearning(root)).learning.candidates.find((item) => item.id === "learning:measurement-new")
+    .rollback.mode, "automatic-measurement-revocation");
+  assert.deepEqual((await learningContext({ root, groupId: "group:measurement-alpha", scope: alphaScope,
+    now: new Date(start.getTime() + 6000) })).items.map((item) => item.id), ["learning:measurement-old"]);
+  await assert.rejects(commitLearningOutcome({ root, id: "outcome:measurement-replay",
+    learningId: "learning:measurement-new", evaluationId: "evaluation:measurement-new",
+    measurementReceiptId: "measurement:outcome:measurement-before-a", now: new Date(start.getTime() + 6000) }),
+  /explicitly revoked/);
+  await deleteLearning({ root, id: "learning:measurement-new" });
+  assert.equal((await loadLearning(root)).learning.measurementRevocations.length, 0);
+  assert.equal((await purgeLearningBySubject({ root, subjectId: "person:measurement-member" })).deleted, 1);
+
+  await proposeLearning({ root, id: "learning:measurement-unconsumed", kind: "behavior",
+    claim: "Use the synthetic unconsumed measurement procedure.", privacy: "shared", scope: scopedTurn,
+    evidence: evidence("evidence:measurement-unconsumed", 0.97), now: start });
+  const unconsumedContract = (await evaluation(root, "learning:measurement-unconsumed", {
+    id: "evaluation:measurement-unconsumed", evaluatorIds: ["evaluator:test-c", "evaluator:user-b"],
+    now: start, expiresAt: "2037-02-01T00:00:00.000Z"
+  })).contract;
+  await recordLearningMeasurement({ root, id: "measurement:unconsumed", learningId: "learning:measurement-unconsumed",
+    evaluationId: unconsumedContract.id, phase: "before", scope: scopedTurn,
+    metric: { name: "fixed-task-success", direction: "higher", value: 0.4, blockingDefects: 0 },
+    measurement: { kind: "objective", evaluatorId: "evaluator:test-c",
+      runId: unconsumedContract.initialTrials.before[0].runId, sourceDigest: hash("unconsumed-source") },
+    coverage: { datasetDigest: syntheticDatasetDigest, caseCount: 12 }, measuredAt: start,
+    confirmLocalMeasurement: true, now: start });
+  await revokeLearningMeasurement({ root, measurementId: "measurement:unconsumed", reasonCode: "source-invalid",
+    reason: "Synthetic source invalidation.", confirmation: "local-measurement-revocation-confirmed", now: start });
+  const purge = await purgeStaleLearningMeasurements({ root, confirmation: "local-user-purge-confirmed",
+    now: new Date("2038-01-01T00:00:00.000Z") });
+  assert.equal(purge.purged, 0);
+  assert.equal((await loadLearning(root)).learning.measurements.some((item) => item.id === "measurement:unconsumed"), true);
+  await assert.rejects(reviewLearning({ root, id: "learning:measurement-unconsumed", decision: "accept",
+    reason: "Synthetic local review.", confirmedByUser: true }), /measurement was revoked/);
+  await deleteLearning({ root, id: "learning:measurement-unconsumed" });
+  assert.equal((await loadLearning(root)).learning.measurementRevocations.length, 0);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
 test("immutable evaluation contracts prevent benchmark drift and freeze promotion thresholds", async (t) => {
@@ -2003,6 +2131,7 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   assert.deepEqual(upgraded.measurementLineage, []);
   assert.deepEqual(upgraded.trialFailures, []);
   assert.deepEqual(upgraded.evidenceRevocations, []);
+  assert.deepEqual(upgraded.measurementRevocations, []);
   assert.equal(upgraded.config.minOutcomeReceipts, 2);
   assert.equal(upgraded.config.initialTrialOutcomeTimeoutMinutes, 1440);
   await configureLearning({ root, config: { canaryTtlDays: 7 } });

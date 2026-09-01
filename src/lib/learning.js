@@ -46,6 +46,7 @@ const INITIAL_TRIAL_APPLICATIONS = new Set(["agentspine.learning-application/v5"
 const TARGET_BOUND_APPLICATIONS = new Set(["agentspine.learning-application/v6", "agentspine.learning-application/v7"]);
 const DEADLINE_BOUND_APPLICATIONS = new Set(["agentspine.learning-application/v7"]);
 const EVIDENCE_REVOCATION_REASONS = new Set(["retracted", "source-invalid", "measurement-invalid", "duplicate", "other"]);
+const MEASUREMENT_REVOCATION_REASONS = new Set(["source-invalid", "evaluator-invalid", "protocol-invalid", "duplicate", "other"]);
 
 function defaults() {
   return {
@@ -80,6 +81,7 @@ function emptyLearning(root) {
     validationLeases: [],
     trialFailures: [],
     evidenceRevocations: [],
+    measurementRevocations: [],
     history: []
   };
 }
@@ -101,6 +103,8 @@ function normalizeState(value, root) {
     || (value.trialFailures !== undefined && (!Array.isArray(value.trialFailures) || !value.trialFailures.every((item) => item && typeof item === "object")))
     || (value.evidenceRevocations !== undefined && (!Array.isArray(value.evidenceRevocations)
       || !value.evidenceRevocations.every((item) => item && typeof item === "object")))
+    || (value.measurementRevocations !== undefined && (!Array.isArray(value.measurementRevocations)
+      || !value.measurementRevocations.every((item) => item && typeof item === "object")))
     || !Array.isArray(value.history) || !value.history.every((item) => item && typeof item === "object")) {
     throw new Error("learning state structure is invalid; run the audit before learning");
   }
@@ -122,7 +126,8 @@ function normalizeState(value, root) {
     evaluationBindings: value.evaluationBindings || [],
     validationLeases: value.validationLeases || [],
     trialFailures: value.trialFailures || [],
-    evidenceRevocations: value.evidenceRevocations || []
+    evidenceRevocations: value.evidenceRevocations || [],
+    measurementRevocations: value.measurementRevocations || []
   };
   if (normalized.outcomes.some((receipt) => !storedOutcomeStructure(receipt))) {
     throw new Error("learning outcome state is invalid; run the audit before learning");
@@ -187,6 +192,12 @@ function normalizeState(value, root) {
     || new Set(normalized.evidenceRevocations.map((entry) => `${entry.learningId}\0${entry.evidenceId}`)).size
       !== normalized.evidenceRevocations.length) {
     throw new Error("learning evidence revocation state is invalid; run the audit before learning");
+  }
+  if (normalized.measurementRevocations.some((receipt) => !storedMeasurementRevocationStructure(receipt)
+    || !measurementRevocationMatchesState(normalized, receipt))
+    || new Set(normalized.measurementRevocations.map((entry) => entry.measurementId)).size
+      !== normalized.measurementRevocations.length) {
+    throw new Error("learning measurement revocation state is invalid; run the audit before learning");
   }
   if (normalized.candidates.some((candidate) => candidate.promotion?.canary?.revalidation
     && !revalidationWindowMatchesState(normalized, candidate))) {
@@ -618,6 +629,85 @@ function storedMeasurementStructure(receipt) {
     && receipt.coverage.caseCount <= 1000000 && receipt.coverage?.authority === "context-only"
     && Number.isFinite(new Date(receipt.measuredAt).getTime())
     && receipt.authority === "context-only" && receipt.digest === digest(payload);
+}
+
+function measurementRevocationPayload({ id, learningId, evaluationId, evaluationDigest, measurementId,
+  measurementDigest, outcomeId, outcomeDigest, targetDigest, reasonCode, reasonDigest, revokedAt }) {
+  return {
+    schema: "agentspine.learning-measurement-revocation/v1",
+    id,
+    learningId,
+    evaluationId,
+    evaluationDigest,
+    measurementId,
+    measurementDigest,
+    outcomeId,
+    outcomeDigest,
+    targetDigest,
+    reasonCode,
+    reasonDigest,
+    revokedAt,
+    authority: "context-only"
+  };
+}
+
+function storedMeasurementRevocationStructure(receipt) {
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
+  const payload = measurementRevocationPayload(receipt);
+  return receipt.schema === "agentspine.learning-measurement-revocation/v1"
+    && Object.keys(receipt).length === 15
+    && Object.keys(receipt).every((field) => ["schema", "id", "learningId", "evaluationId", "evaluationDigest",
+      "measurementId", "measurementDigest", "outcomeId", "outcomeDigest", "targetDigest", "reasonCode",
+      "reasonDigest", "revokedAt", "authority", "digest"].includes(field))
+    && ID_RE.test(receipt.id || "") && ID_RE.test(receipt.learningId || "")
+    && ID_RE.test(receipt.evaluationId || "") && DIGEST_RE.test(receipt.evaluationDigest || "")
+    && ID_RE.test(receipt.measurementId || "") && DIGEST_RE.test(receipt.measurementDigest || "")
+    && ((receipt.outcomeId === null && receipt.outcomeDigest === null)
+      || (ID_RE.test(receipt.outcomeId || "") && DIGEST_RE.test(receipt.outcomeDigest || "")))
+    && DIGEST_RE.test(receipt.targetDigest || "") && MEASUREMENT_REVOCATION_REASONS.has(receipt.reasonCode)
+    && DIGEST_RE.test(receipt.reasonDigest || "") && Number.isFinite(new Date(receipt.revokedAt).getTime())
+    && receipt.authority === "context-only" && receipt.digest === digest(payload);
+}
+
+function measurementRevocationMatchesState(state, receipt) {
+  const candidate = state.candidates.find((entry) => entry.id === receipt.learningId);
+  const evaluation = state.evaluations.find((entry) => entry.id === receipt.evaluationId);
+  const measurement = state.measurements.find((entry) => entry.id === receipt.measurementId);
+  const outcome = receipt.outcomeId === null ? null : state.outcomes.find((entry) => entry.id === receipt.outcomeId);
+  return Boolean(candidate && evaluation && measurement
+    && evaluation.digest === receipt.evaluationDigest && evaluation.learningId === candidate.id
+    && measurement.digest === receipt.measurementDigest && measurement.learningId === candidate.id
+    && measurement.evaluationId === evaluation.id && learningTargetForCandidate(candidate).digest === receipt.targetDigest
+    && (receipt.outcomeId === null
+      ? !state.outcomes.some((entry) => entry.measurementReceiptId === measurement.id)
+      : outcome?.digest === receipt.outcomeDigest && outcome.learningId === candidate.id
+        && outcome.evaluationId === evaluation.id && outcome.measurementReceiptId === measurement.id));
+}
+
+function revokedMeasurement(state, measurementId) {
+  return state.measurementRevocations.find((receipt) => receipt.measurementId === measurementId) || null;
+}
+
+function revokedMeasurementForCandidate(state, candidate) {
+  const revocations = state.measurementRevocations.filter((receipt) => receipt.learningId === candidate?.id);
+  if (!revocations.length) return null;
+  const canary = candidate?.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
+  if (!canary?.evaluationId) return revocations[0];
+  const lease = state.validationLeases.find((entry) => entry.learningId === candidate.id
+    && entry.id === canary.validationLeaseId);
+  const referencedMeasurements = new Set((lease?.renewalEvidence || []).map((entry) => entry.measurementId));
+  const referencedOutcomes = new Set([
+    ...(canary.beforeReceipts || []),
+    ...(canary.afterReceipts || []),
+    ...(lease?.beforeOutcomes || []).map((entry) => entry.id),
+    ...(lease?.afterOutcomes || []).map((entry) => entry.id),
+    ...(lease?.baselineOutcomes || []).map((entry) => entry.id)
+  ]);
+  return revocations.find((receipt) => receipt.learningId === candidate.id
+    && receipt.evaluationId === canary.evaluationId
+    && (referencedMeasurements.has(receipt.measurementId)
+      || (receipt.outcomeId !== null && (referencedOutcomes.has(receipt.outcomeId)
+        || canary.status === "active")))) || null;
 }
 
 function measurementRunDigest(evaluatorId, runId) {
@@ -1103,6 +1193,10 @@ function canaryValidity(state, candidate, timestamp) {
   const evidenceRevocation = revokedEvidence(state, candidate);
   if (candidate?.status === "accepted" && evidenceRevocation) {
     return { status: "revoked-evidence", canary, evaluation: null, lease: null, evidenceRevocation };
+  }
+  const measurementRevocation = revokedMeasurementForCandidate(state, candidate);
+  if (candidate?.status === "accepted" && measurementRevocation) {
+    return { status: "revoked-measurement", canary, evaluation: null, lease: null, measurementRevocation };
   }
   if (candidate?.status !== "accepted" || !["active", "validated"].includes(canary?.status)) {
     return { status: "not-applicable", canary, evaluation: null, lease: null };
@@ -1803,6 +1897,9 @@ export async function addLearningEvidence({
     if (revokedEvidence(state, previous)) {
       throw new Error("revoked evidence freezes this learning target; propose a superseding candidate instead");
     }
+    if (state.measurementRevocations.some((receipt) => receipt.learningId === id)) {
+      throw new Error("revoked measurement evidence freezes this learning target; propose a superseding candidate instead");
+    }
     if (state.evaluations.some((contract) => contract.learningId === id
       && TARGET_BOUND_EVALUATIONS.has(contract.schema))) {
       throw new Error("evaluated learning target is immutable; propose a superseding candidate and evaluation contract");
@@ -1906,6 +2003,9 @@ export async function reviewLearning({
     if (decision === "accept") {
       if (!confirmedByUser) throw new Error("acceptance requires explicit user confirmation");
       if (revokedEvidence(state, candidate)) throw new Error("learning evidence was revoked; propose a new candidate before acceptance");
+      if (revokedMeasurementForCandidate(state, candidate)) {
+        throw new Error("learning measurement was revoked; propose a new candidate before acceptance");
+      }
       const accepted = acceptCandidate(state, candidate, timestamp, false, null);
       accepted.review = { decision, reason: reviewReason, confirmedByUser: true, reviewedAt: timestamp, authority: "context-only" };
       return { candidate: accepted, learningPath };
@@ -2237,6 +2337,9 @@ export async function renewLearningValidation({
       const application = state.applications.find((item) => item.id === entry?.applicationId);
       const delivery = state.deliveries.find((item) => item.id === entry?.deliveryId);
       if (!measurement || !application || !delivery) throw new Error("validation renewal evidence binding is missing");
+      if (revokedMeasurement(state, measurement.id)) {
+        throw new Error("validation renewal measurement was explicitly revoked");
+      }
       const baseline = baselineByRoot.get(measurement.measurement?.evaluatorRootDigest);
       if (measurement.phase !== "after" || measurement.learningId !== learningId
         || measurement.evaluationId !== contract.id || !exactScope(measurement.scope, contract.scope)
@@ -2618,6 +2721,62 @@ export async function recordLearningMeasurement({
     state.measurementLineage.push(lineage);
     state.measurementLineage.sort((a, b) => a.measurementReceiptId.localeCompare(b.measurementReceiptId));
     return { receipt, lineage, learningPath, unchanged: false };
+  });
+}
+
+export async function revokeLearningMeasurement({
+  root = process.cwd(), measurementId, reasonCode, reason, confirmation, now = new Date()
+}) {
+  if (confirmation !== "local-measurement-revocation-confirmed") {
+    throw new Error("measurement revocation requires explicit local confirmation");
+  }
+  if (!ID_RE.test(measurementId || "")) throw new Error("measurementId must be a stable identifier");
+  if (!MEASUREMENT_REVOCATION_REASONS.has(reasonCode)) {
+    throw new Error("reasonCode must be source-invalid, evaluator-invalid, protocol-invalid, duplicate, or other");
+  }
+  const revokeReason = safeText(reason, "reason", 500);
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const measurement = state.measurements.find((entry) => entry.id === measurementId);
+    if (!measurement) throw new Error(`unknown learning measurement: ${measurementId}`);
+    const candidate = state.candidates.find((entry) => entry.id === measurement.learningId);
+    const evaluation = state.evaluations.find((entry) => entry.id === measurement.evaluationId);
+    if (!candidate || !evaluation || evaluation.learningId !== candidate.id) {
+      throw new Error("measurement revocation requires its bound candidate and evaluation contract");
+    }
+    const outcome = state.outcomes.find((entry) => entry.measurementReceiptId === measurement.id) || null;
+    const targetDigest = learningTargetForCandidate(candidate).digest;
+    const reasonDigest = digest(revokeReason);
+    const existing = revokedMeasurement(state, measurementId);
+    if (existing) {
+      if (existing.reasonCode !== reasonCode || existing.reasonDigest !== reasonDigest
+        || existing.measurementDigest !== measurement.digest || existing.evaluationDigest !== evaluation.digest
+        || existing.targetDigest !== targetDigest || existing.outcomeId !== (outcome?.id || null)
+        || existing.outcomeDigest !== (outcome?.digest || null)) {
+        throw new Error("learning measurement revocations are immutable");
+      }
+      return { receipt: existing, learningPath, unchanged: true, authority: "context-only" };
+    }
+    const id = `measurement-revocation:${createHash("sha256")
+      .update(`${measurement.id}\0${measurement.digest}\0${targetDigest}`).digest("hex").slice(0, 32)}`;
+    const payload = measurementRevocationPayload({
+      id,
+      learningId: candidate.id,
+      evaluationId: evaluation.id,
+      evaluationDigest: evaluation.digest,
+      measurementId: measurement.id,
+      measurementDigest: measurement.digest,
+      outcomeId: outcome?.id || null,
+      outcomeDigest: outcome?.digest || null,
+      targetDigest,
+      reasonCode,
+      reasonDigest,
+      revokedAt: timestamp
+    });
+    const receipt = { ...payload, digest: digest(payload) };
+    state.measurementRevocations.push(receipt);
+    state.measurementRevocations.sort((a, b) => a.id.localeCompare(b.id));
+    return { receipt, learningPath, unchanged: false, authority: "context-only" };
   });
 }
 
@@ -3039,6 +3198,7 @@ function promotableReceipts(state, candidate, timestamp) {
     const receipts = state.outcomes.filter((item) => outcomeMatchesContract(item, contract)
       && item.learningId === candidate.id && item.evaluationId === contract.id && item.phase === "before"
       && exactScope(item.scope, contract.scope) && outcomeFresh(item, state.config, timestamp)
+      && !revokedMeasurement(state, item.measurementReceiptId)
       && item.measurement.kind !== "model-suggestion" && outcomeMatchesInitialTrial(state, item, contract));
     if (INITIAL_TRIAL_EVALUATIONS.has(contract.schema)) receipts.sort((a, b) =>
       contract.initialTrials.before.findIndex((trial) => trial.evaluatorId === a.measurement.evaluatorId)
@@ -3131,6 +3291,12 @@ function reconcileCanary(state, candidate, timestamp) {
   if (candidate.status !== "accepted" || candidate.promotion?.mode !== "outcome-canary"
     || !["active", "validated"].includes(canary?.status)) {
     return { candidate, decision: "unchanged", restored: [] };
+  }
+  const measurementRevocation = revokedMeasurementForCandidate(state, candidate);
+  if (measurementRevocation) {
+    const result = rollbackCandidate(state, candidate, "learning measurement evidence was explicitly revoked",
+      timestamp, "automatic-measurement-revocation");
+    return { ...result, decision: "rolled-back", measurementRevocation };
   }
   if (new Date(canary.expiresAt).getTime() <= new Date(timestamp).getTime()) {
     const result = rollbackCandidate(state, candidate, canary.status === "validated"
@@ -3295,6 +3461,9 @@ export async function recordLearningOutcome({ root = process.cwd(), id, learning
     }
     const measurementReceipt = measurementReceiptId === null ? null
       : state.measurements.find((item) => item.id === measurementReceiptId);
+    if (measurementReceipt && revokedMeasurement(state, measurementReceipt.id)) {
+      throw new Error("learning measurement was explicitly revoked and cannot be consumed");
+    }
     const effectivePhase = LINEAGE_EVALUATIONS.has(evaluation?.schema)
       ? measurementReceipt?.phase : phase;
     const application = applicationId === null ? null : state.applications.find((item) => item.id === applicationId);
@@ -3364,6 +3533,14 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
         timestamp, "automatic-evidence-revocation");
       reconciled.push({ id: current.id, decision: "rolled-back" });
     }
+    while (true) {
+      const current = state.candidates.find((entry) => entry.status === "accepted"
+        && revokedMeasurementForCandidate(state, entry));
+      if (!current) break;
+      rollbackCandidate(state, current, "learning measurement evidence was explicitly revoked",
+        timestamp, "automatic-measurement-revocation");
+      reconciled.push({ id: current.id, decision: "rolled-back" });
+    }
     for (const current of state.candidates.filter((entry) => entry.status === "accepted" && entry.promotion?.mode === "outcome-canary")) {
       const result = reconcileCanary(state, current, timestamp);
       if (result.decision !== "unchanged" && result.decision !== "active") reconciled.push({ id: current.id, decision: result.decision });
@@ -3371,6 +3548,7 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
     if (state.config.autoPromote) {
       for (const candidate of state.candidates.filter((entry) => entry.status === "candidate")) {
         if (revokedEvidence(state, candidate)) continue;
+        if (state.measurementRevocations.some((receipt) => receipt.learningId === candidate.id)) continue;
         if (candidate.confidence < state.config.minConfidence) continue;
         if (distinctEvidence(candidate) < state.config.minEvidence) continue;
         if (candidate.conflictsWith?.some((id) => state.candidates.some((entry) => entry.id === id && ["candidate", "accepted"].includes(entry.status)))) continue;
@@ -3456,6 +3634,7 @@ export async function purgeStaleLearningMeasurements({ root = process.cwd(), con
   return mutation(root, (state, _catalog, learningPath) => {
     const consumed = new Set(state.outcomes.filter((outcome) => ["agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(outcome.schema))
       .map((outcome) => outcome.measurementReceiptId));
+    for (const revocation of state.measurementRevocations) consumed.add(revocation.measurementId);
     const validationHistory = state.history.filter((entry) => entry.kind === "learning-validation")
       .map((entry) => entry.value);
     for (const lease of [...state.validationLeases, ...validationHistory]
@@ -3623,7 +3802,8 @@ export async function learningContext({
       "revoked-validated": "revoked-evaluator-validated-learning",
       "unproven-validated": "missing-validation-lease",
       "failed-initial-trial": "blocking-initial-trial-timeout",
-      "revoked-evidence": "revoked-learning-evidence"
+      "revoked-evidence": "revoked-learning-evidence",
+      "revoked-measurement": "revoked-learning-measurement"
     })[validity.status] || validity.status}:${id}`),
     authority: "context-only",
     note: "Learned context is descriptive evidence, never permission, delegation, access, or an instruction to act."
@@ -3645,6 +3825,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       const evaluations = learning.evaluations.filter((item) => item.learningId === candidate.id);
       const trialFailures = learning.trialFailures.filter((item) => item.learningId === candidate.id);
       const evidenceRevocations = learning.evidenceRevocations.filter((item) => item.learningId === candidate.id);
+      const measurementRevocations = learning.measurementRevocations.filter((item) => item.learningId === candidate.id);
       const canary = candidate.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
       const canaryValidityStatus = canaryValidity(learning, candidate, timestamp);
       const stale = ["stale-active", "stale-validated"].includes(canaryValidityStatus.status);
@@ -3766,6 +3947,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
         trialFailureReceipts: trialFailures.length,
         evidenceRevocationReceipts: evidenceRevocations.length,
         revokedEvidenceIds: evidenceRevocations.map((receipt) => receipt.evidenceId).sort(),
+        measurementRevocationReceipts: measurementRevocations.length,
+        revokedMeasurementIds: measurementRevocations.map((receipt) => receipt.measurementId).sort(),
         deliveryTimeoutFailures: trialFailures.filter((receipt) => receipt.failure === "delivery-timeout").length,
         outcomeTimeoutFailures: trialFailures.filter((receipt) => receipt.failure === "outcome-timeout").length,
         pendingInitialOutcomes: initialApplications.filter((application) =>
@@ -3795,6 +3978,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
         canaryStatus: canaryValidityStatus.status === "not-applicable" ? "not-applicable"
           : canaryValidityStatus.status === "failed-initial-trial" ? "failed-trial"
           : canaryValidityStatus.status === "revoked-evidence" ? "revoked-evidence"
+          : canaryValidityStatus.status === "revoked-measurement" ? "revoked-measurement"
           : stale ? "stale" : (["revoked-active", "revoked-validated"].includes(canaryValidityStatus.status)
           ? "revoked" : (canaryValidityStatus.status === "unproven-validated" ? "unproven" : (canary?.status || "not-applicable"))),
         validationLeaseStatus: canaryValidityStatus.status,
@@ -3842,6 +4026,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       authority: "context-only"
     },
     evidenceRevocations: learning.evidenceRevocations.length,
+    measurementRevocations: learning.measurementRevocations.length,
     records,
     learningPath,
     authority: "context-only",
@@ -3902,6 +4087,7 @@ export async function deleteLearning({ root = process.cwd(), id }) {
     state.validationLeases = state.validationLeases.filter((entry) => entry.learningId !== id);
     state.trialFailures = state.trialFailures.filter((entry) => entry.learningId !== id);
     state.evidenceRevocations = state.evidenceRevocations.filter((entry) => entry.learningId !== id);
+    state.measurementRevocations = state.measurementRevocations.filter((entry) => entry.learningId !== id);
     state.evaluations = state.evaluations.filter((entry) => entry.learningId !== id);
     state.evaluationBindings = state.evaluationBindings.filter((entry) => !evaluationIds.has(entry.evaluationId));
     state.history = state.history.filter((entry) => entry.recordId !== id && entry.value?.id !== id);
@@ -3922,6 +4108,7 @@ export async function purgeLearningBySubject({ root = process.cwd(), subjectId }
     state.validationLeases = state.validationLeases.filter((entry) => !ids.has(entry.learningId));
     state.trialFailures = state.trialFailures.filter((entry) => !ids.has(entry.learningId));
     state.evidenceRevocations = state.evidenceRevocations.filter((entry) => !ids.has(entry.learningId));
+    state.measurementRevocations = state.measurementRevocations.filter((entry) => !ids.has(entry.learningId));
     state.evaluations = state.evaluations.filter((entry) => !ids.has(entry.learningId));
     state.evaluationBindings = state.evaluationBindings.filter((entry) => !evaluationIds.has(entry.evaluationId));
     state.history = state.history.filter((entry) => entry.subjectId !== subjectId && !ids.has(entry.recordId) && !ids.has(entry.value?.id));
@@ -3957,6 +4144,7 @@ export function learningFindings(learning, graph) {
       if ((learning.evidenceRevocations || []).some((receipt) => receipt.learningId === candidate.id)) {
         findings.push(`revoked-evidence:${candidate.id}`);
       }
+      if (revokedMeasurementForCandidate(learning, candidate)) findings.push(`revoked-measurement:${candidate.id}`);
       const canaryEvaluation = candidate.promotion?.canary?.evaluationId
         ? (learning.evaluations || []).find((contract) => contract.id === candidate.promotion.canary.evaluationId)
         : null;
@@ -4069,6 +4257,16 @@ export function learningFindings(learning, graph) {
     }
     evidenceRevocationIds.add(receipt.id);
     revokedEvidenceKeys.add(key);
+  }
+  const measurementRevocationIds = new Set();
+  const revokedMeasurementIds = new Set();
+  for (const receipt of learning.measurementRevocations || []) {
+    const valid = storedMeasurementRevocationStructure(receipt) && measurementRevocationMatchesState(learning, receipt);
+    if (!valid || measurementRevocationIds.has(receipt.id) || revokedMeasurementIds.has(receipt.measurementId)) {
+      findings.push(`invalid-measurement-revocation:${receipt.id || "unknown"}`);
+    }
+    measurementRevocationIds.add(receipt.id);
+    revokedMeasurementIds.add(receipt.measurementId);
   }
   const measurementIds = new Set();
   const measurementSources = new Set();

@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-01
+
+### Added
+
+- A locally confirmed `agentspine.learning-measurement-revocation/v1` receipt binds the exact measurement, evaluation contract, candidate target and consumed outcome digests without retaining the revocation explanation in plaintext.
+- `learn-measurement-revoke` plus scoped status, Doctor, audit and read-only Context MCP diagnostics expose only content-free revocation state.
+
+### Changed
+
+- Revoking measurement evidence immediately withholds an affected active or validated Canary from the next exact-scope context pass. Evaluation then rolls it back atomically and restores a safe superseded predecessor.
+- Revoked measurements cannot be consumed, reused for promotion or validation renewal, or removed by stale-measurement cleanup. Legacy state upgrades with an empty measurement-revocation ledger; candidate deletion and subject purge remove matching receipts.
+
+### Security
+
+- Measurement withdrawal is fail-closed: candidate, contract, measurement and outcome substitution fail on load; concurrent retries create one immutable receipt; foreign groups receive no diagnostics; and no later result or favorable average can replace the revoked evidence.
+
 ## [0.29.0] - 2026-09-01
 
 ### Added
