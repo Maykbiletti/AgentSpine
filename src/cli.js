@@ -12,7 +12,7 @@ import {
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
   purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningMeasurement,
   recordLearningOutcome, registerLearningEvaluation, registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator,
-  reviewLearning, revokeLearningEvidence, revokeLearningMeasurement, rollbackLearning
+  reviewLearning, revokeLearningDelivery, revokeLearningEvidence, revokeLearningMeasurement, rollbackLearning
 } from "./lib/learning.js";
 import { configureContinuity, loadContinuity, purgeContinuity } from "./lib/continuity.js";
 import {
@@ -155,6 +155,7 @@ Usage:
   agentspine learn-revalidate <learning-id> --measurements id,id --applications id,id --deliveries id,id --confirm-local-validation
   agentspine learn-measurement <id> --learning id --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --measurement objective|user-feedback|model-suggestion --evaluator id --run id --source-digest sha256 --dataset-digest sha256 --case-count n --confirm-local-measurement
   agentspine learn-measurement-revoke <measurement-id> --reason-code source-invalid|evaluator-invalid|protocol-invalid|duplicate|other --reason text --confirm-local-measurement-revocation
+  agentspine learn-delivery-revoke <delivery-id> --reason-code host-invalid|session-invalid|hook-invalid|duplicate|other --reason text --confirm-local-delivery-revocation
   agentspine learn-outcome <learning-id> --id id --evaluation id --measurement-receipt id [--application id --delivery id]
   agentspine learn-status [root] [--persona id --user id --tenant id --project id --group id --task id]
   agentspine learn-delivery-purge [root] --confirm-local-purge
@@ -555,6 +556,15 @@ export async function run(argv = process.argv.slice(2)) {
       reason: flags.reason,
       confirmation: booleanFlag(flags["confirm-local-measurement-revocation"])
         ? "local-measurement-revocation-confirmed" : null
+    }), json);
+  }
+
+  if (command === "learn-delivery-revoke") {
+    return output(await revokeLearningDelivery({
+      root: flags.root || process.cwd(), deliveryId: positional[0], reasonCode: flags["reason-code"],
+      reason: flags.reason,
+      confirmation: booleanFlag(flags["confirm-local-delivery-revocation"])
+        ? "local-delivery-revocation-confirmed" : null
     }), json);
   }
 
@@ -1207,13 +1217,14 @@ export async function run(argv = process.argv.slice(2)) {
       const trialFailureReceipts = status.records.reduce((sum, item) => sum + item.trialFailureReceipts, 0);
       const evidenceRevocationReceipts = status.records.reduce((sum, item) => sum + item.evidenceRevocationReceipts, 0);
       const measurementRevocationReceipts = status.records.reduce((sum, item) => sum + item.measurementRevocationReceipts, 0);
+      const deliveryRevocationReceipts = status.records.reduce((sum, item) => sum + item.deliveryRevocationReceipts, 0);
       const deliveryTimeoutFailures = status.records.reduce((sum, item) => sum + item.deliveryTimeoutFailures, 0);
       const outcomeTimeoutFailures = status.records.reduce((sum, item) => sum + item.outcomeTimeoutFailures, 0);
       const pendingInitialOutcomes = status.records.reduce((sum, item) => sum + item.pendingInitialOutcomes, 0);
       const staleInitialOutcomes = status.records.reduce((sum, item) => sum + item.staleInitialOutcomes, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
-        status: status.records.some((item) => ["stale", "revoked", "revoked-evidence", "revoked-measurement", "unproven", "failed-trial"].includes(item.canaryStatus))
+        status: status.records.some((item) => ["stale", "revoked", "revoked-evidence", "revoked-measurement", "revoked-delivery", "unproven", "failed-trial"].includes(item.canaryStatus))
           || unboundAfterReceipts > 0 || undeliveredAfterReceipts > 0 || unplannedOutcomeReceipts > 0
           || stalePendingApplications > 0 || staleUnconsumedMeasurements > 0
           || inactiveEvaluatorRegistryContracts > 0 || staleRevalidations > 0
@@ -1235,6 +1246,7 @@ export async function run(argv = process.argv.slice(2)) {
         trialFailureReceipts,
         evidenceRevocationReceipts,
         measurementRevocationReceipts,
+        deliveryRevocationReceipts,
         deliveryTimeoutFailures,
         outcomeTimeoutFailures,
         pendingInitialOutcomes,

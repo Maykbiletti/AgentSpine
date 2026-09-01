@@ -12,7 +12,7 @@ import {
   purgeLearningBySubject, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
   registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, revokeLearningEvidence,
-  revokeLearningMeasurement, reviewLearning, rollbackLearning
+  revokeLearningDelivery, revokeLearningMeasurement, reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
 import { runHook } from "../src/hook.js";
@@ -121,18 +121,18 @@ async function evaluation(root, learningId, extra = {}) {
   });
 }
 
-async function projectedApplication(root, learningId, turnId, now = new Date(), outcomeStatus = "active") {
+async function projectedApplication(root, learningId, turnId, now = new Date(), outcomeStatus = "active", scope = scopedTurn) {
   const projectedAt = new Date(now);
   const createdAt = new Date(projectedAt.getTime() - 1000).toISOString();
   const expiresAt = new Date(projectedAt.getTime() + 60_000).toISOString();
   const result = await recordLearningApplications({
-    root, items: [{ id: learningId, outcomeStatus }], scope: scopedTurn,
+    root, items: [{ id: learningId, outcomeStatus }], scope,
     preflightReceipt: {
       schema: "agentspine.preflight/v2", id: `preflight:${turnId}`, status: "ready",
       sessionId: `session:${turnId}`,
       promptDigest: hash(`prompt:${turnId}`), briefingDigest: hash(`preflight:${turnId}`),
-      agentId: scopedTurn.personaId, userId: scopedTurn.userId, tenantId: scopedTurn.tenantId,
-      projectId: scopedTurn.projectId, groupId: scopedTurn.groupId, taskId: scopedTurn.taskId,
+      agentId: scope.personaId, userId: scope.userId, tenantId: scope.tenantId,
+      projectId: scope.projectId, groupId: scope.groupId, taskId: scope.taskId,
       createdAt, expiresAt
     },
     sessionBriefingDigest: hash(`briefing:${turnId}`), projectedAt
@@ -143,11 +143,11 @@ async function projectedApplication(root, learningId, turnId, now = new Date(), 
   return application;
 }
 
-async function application(root, learningId, turnId, now = new Date(), outcomeStatus = "active") {
+async function application(root, learningId, turnId, now = new Date(), outcomeStatus = "active", scope = scopedTurn) {
   const projectedAt = new Date(now);
-  const application = await projectedApplication(root, learningId, turnId, projectedAt, outcomeStatus);
+  const application = await projectedApplication(root, learningId, turnId, projectedAt, outcomeStatus, scope);
   const delivered = await recordLearningDeliveries({
-    root, sessionId: `session:${turnId}`, scope: scopedTurn, hookEvent: "Stop", completedAt: projectedAt
+    root, sessionId: `session:${turnId}`, scope, hookEvent: "Stop", completedAt: projectedAt
   });
   assert.ok(delivered.receipts[0], JSON.stringify(delivered));
   return { ...application, deliveryId: delivered.receipts[0].id };
@@ -527,6 +527,151 @@ test("measurement revocation is immutable, immediately withheld, group-isolated,
     reason: "Synthetic local review.", confirmedByUser: true }), /measurement was revoked/);
   await deleteLearning({ root, id: "learning:measurement-unconsumed" });
   assert.equal((await loadLearning(root)).learning.measurementRevocations.length, 0);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("delivery revocation invalidates turn proof, withholds context, and rolls back atomically", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2038-01-01T00:00:00.000Z");
+  const alphaScope = { ...scopedTurn, groupId: "group:delivery-alpha" };
+  await upsertEntity({ root, id: "group:delivery-alpha", kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: "group:delivery-beta", kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: "person:delivery-member", kind: "person", privacy: "group" });
+  await linkEntities({ root, from: "person:delivery-member", to: "group:delivery-alpha",
+    relation: "member-of", privacy: "group" });
+  await proposeLearning({
+    root, id: "learning:delivery-old", kind: "behavior", claim: "Use the stable synthetic delivered procedure.",
+    subjectId: "person:delivery-member", privacy: "group", groupId: "group:delivery-alpha",
+    scope: alphaScope, evidence: evidence("evidence:delivery-old", 0.97), now: start
+  });
+  await reviewLearning({ root, id: "learning:delivery-old", decision: "accept",
+    reason: "Synthetic local review.", confirmedByUser: true, now: start });
+  await proposeLearning({
+    root, id: "learning:delivery-new", kind: "behavior", claim: "Use the improved synthetic delivered procedure.",
+    subjectId: "person:delivery-member", privacy: "group", groupId: "group:delivery-alpha",
+    scope: alphaScope, supersedesId: "learning:delivery-old",
+    evidence: evidence("evidence:delivery-new-one", 0.97), now: start
+  });
+  await addLearningEvidence({ root, id: "learning:delivery-new",
+    evidence: evidence("evidence:delivery-new-two", 0.97), now: start });
+  await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2,
+    minOutcomeReceipts: 2, canaryReceipts: 2 }, now: start });
+  await evaluation(root, "learning:delivery-new", {
+    id: "evaluation:delivery-new", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    scope: alphaScope, now: start, expiresAt: "2038-02-01T00:00:00.000Z"
+  });
+  await recordLearningOutcome({ root, learningId: "learning:delivery-new",
+    ...outcome("outcome:delivery-before-a", "before", 0.4, "evaluator:test-a", {
+      evaluationId: "evaluation:delivery-new", scope: alphaScope, measuredAt: start
+    }), now: start });
+  await recordLearningOutcome({ root, learningId: "learning:delivery-new",
+    ...outcome("outcome:delivery-before-b", "before", 0.5, "evaluator:test-b", {
+      evaluationId: "evaluation:delivery-new", scope: alphaScope, measuredAt: start
+    }), now: start });
+  await evaluateLearning({ root, now: new Date(start.getTime() + 1000) });
+  const applied = await application(root, "learning:delivery-new", "delivery-a",
+    new Date(start.getTime() + 2000), "active", alphaScope);
+  await recordLearningOutcome({ root, learningId: "learning:delivery-new", applicationId: applied.id,
+    deliveryId: applied.deliveryId,
+    ...outcome("outcome:delivery-after-a", "after", 0.8, "evaluator:test-a", {
+      evaluationId: "evaluation:delivery-new", scope: alphaScope,
+      measuredAt: new Date(start.getTime() + 2000)
+    }), now: new Date(start.getTime() + 2000) });
+
+  await assert.rejects(revokeLearningDelivery({ root, deliveryId: applied.deliveryId,
+    reasonCode: "hook-invalid", reason: "Synthetic hook evidence invalidated." }), /explicit local confirmation/);
+  const revocationInput = {
+    root, deliveryId: applied.deliveryId, reasonCode: "hook-invalid",
+    reason: "Synthetic hook evidence invalidated.", confirmation: "local-delivery-revocation-confirmed", now: start
+  };
+  const retries = await Promise.all(Array.from({ length: 6 }, () => revokeLearningDelivery(revocationInput)));
+  assert.equal(retries.filter((result) => result.unchanged === false).length, 1);
+  assert.equal((await revokeLearningDelivery({ ...revocationInput,
+    now: new Date(start.getTime() + 3000) })).unchanged, true);
+  const stored = await loadLearning(root);
+  assert.equal(stored.learning.deliveryRevocations.length, 1);
+  assert.equal(JSON.stringify(stored.learning.deliveryRevocations).includes("Synthetic hook evidence invalidated"), false);
+  const receipt = stored.learning.deliveryRevocations[0];
+  assert.equal(receipt.deliveryDigest, stored.learning.deliveries.find((item) => item.id === receipt.deliveryId).digest);
+  assert.equal(receipt.applicationDigest,
+    stored.learning.applications.find((item) => item.id === receipt.applicationId).digest);
+  assert.equal(receipt.outcomeDigest, stored.learning.outcomes.find((item) => item.id === receipt.outcomeId).digest);
+  const withheld = await learningContext({ root, groupId: "group:delivery-alpha", scope: alphaScope,
+    now: new Date(start.getTime() + 4000) });
+  assert.deepEqual(withheld.items, []);
+  assert.deepEqual(withheld.diagnostics, ["revoked-learning-delivery:learning:delivery-new"]);
+  const foreign = await learningContext({ root, groupId: "group:delivery-beta",
+    scope: { ...scopedTurn, groupId: "group:delivery-beta" }, now: new Date(start.getTime() + 4000) });
+  assert.deepEqual(foreign.items, []);
+  assert.deepEqual(foreign.diagnostics, []);
+  const status = await learningOutcomeStatus({ root, scope: alphaScope, now: new Date(start.getTime() + 4000) });
+  assert.equal(status.deliveryRevocations, 1);
+  assert.equal(status.records.find((item) => item.id === "learning:delivery-new").canaryStatus,
+    "revoked-delivery");
+  const cliReceipt = runCli(["learn-delivery-revoke", applied.deliveryId, "--root", root,
+    "--reason-code", "hook-invalid", "--reason", "Synthetic hook evidence invalidated.",
+    "--confirm-local-delivery-revocation", "--json"], state);
+  assert.equal(cliReceipt.receipt.schema, "agentspine.learning-delivery-revocation/v1");
+  const doctor = runCli(["doctor", root, "--json"], state);
+  assert.equal(doctor.learningOutcomes.status, "degraded");
+  assert.equal(doctor.learningOutcomes.deliveryRevocationReceipts, 1);
+
+  await assert.rejects(commitLearningOutcome({ root, id: "outcome:delivery-replay",
+    learningId: "learning:delivery-new", evaluationId: "evaluation:delivery-new",
+    measurementReceiptId: "measurement:outcome:delivery-after-a", applicationId: applied.id,
+    deliveryId: applied.deliveryId, now: new Date(start.getTime() + 4000) }), /delivery was explicitly revoked/);
+  await assert.rejects(recordLearningMeasurement({
+    root, id: "measurement:delivery-replay", learningId: "learning:delivery-new",
+    evaluationId: "evaluation:delivery-new", phase: "after", scope: alphaScope,
+    metric: { name: "fixed-task-success", direction: "higher", value: 0.81, blockingDefects: 0 },
+    measurement: { kind: "objective", evaluatorId: "evaluator:test-a",
+      runId: stored.learning.evaluations.find((item) => item.id === "evaluation:delivery-new")
+        .initialTrials.after[0].runId, sourceDigest: hash("delivery-replay-source") },
+    coverage: { datasetDigest: syntheticDatasetDigest, caseCount: 12 },
+    measuredAt: new Date(start.getTime() + 4000), confirmLocalMeasurement: true,
+    now: new Date(start.getTime() + 4000)
+  }), /completed delivery/);
+
+  const originalState = JSON.stringify(stored.learning);
+  stored.learning.deliveryRevocations[0].deliveryDigest = hash("redirected delivery");
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /delivery revocation state is invalid/);
+  await writeFile(stored.learningPath, `${originalState}\n`, "utf8");
+
+  const reconciled = await evaluateLearning({ root, now: new Date(start.getTime() + 5000) });
+  assert.deepEqual(reconciled.reconciled, [{ id: "learning:delivery-new", decision: "rolled-back" }]);
+  assert.equal((await loadLearning(root)).learning.candidates.find((item) => item.id === "learning:delivery-new")
+    .rollback.mode, "automatic-delivery-revocation");
+  assert.deepEqual((await learningContext({ root, groupId: "group:delivery-alpha", scope: alphaScope,
+    now: new Date(start.getTime() + 6000) })).items.map((item) => item.id), ["learning:delivery-old"]);
+  await deleteLearning({ root, id: "learning:delivery-new" });
+  assert.equal((await loadLearning(root)).learning.deliveryRevocations.length, 0);
+  assert.equal((await purgeLearningBySubject({ root, subjectId: "person:delivery-member" })).deleted, 1);
+
+  const validatedStart = new Date("2039-01-01T00:00:00.000Z");
+  await establishValidatedLearning(root, {
+    learningId: "learning:delivery-validated", evaluationId: "evaluation:delivery-validated",
+    start: validatedStart, expiresAt: "2039-03-01T00:00:00.000Z"
+  });
+  const validatedState = (await loadLearning(root)).learning;
+  const validatedCandidate = validatedState.candidates.find((item) => item.id === "learning:delivery-validated");
+  const validatedAfter = validatedState.outcomes.find((item) =>
+    item.id === validatedCandidate.promotion.canary.afterReceipts[0]);
+  await revokeLearningDelivery({ root, deliveryId: validatedAfter.deliveryId, reasonCode: "session-invalid",
+    reason: "Synthetic session completion invalidation.", confirmation: "local-delivery-revocation-confirmed",
+    now: new Date(validatedStart.getTime() + 4000) });
+  assert.deepEqual((await learningContext({ root, scope: scopedTurn,
+    now: new Date(validatedStart.getTime() + 5000) })).diagnostics,
+  ["revoked-learning-delivery:learning:delivery-validated"]);
+  const validatedRollback = await evaluateLearning({ root, now: new Date(validatedStart.getTime() + 6000) });
+  assert.deepEqual(validatedRollback.reconciled,
+    [{ id: "learning:delivery-validated", decision: "rolled-back" }]);
+  assert.equal((await loadLearning(root)).learning.candidates
+    .find((item) => item.id === "learning:delivery-validated").rollback.mode,
+  "automatic-delivery-revocation");
+  await deleteLearning({ root, id: "learning:delivery-validated" });
+  assert.equal((await loadLearning(root)).learning.deliveryRevocations.length, 0);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
@@ -2132,6 +2277,7 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   assert.deepEqual(upgraded.trialFailures, []);
   assert.deepEqual(upgraded.evidenceRevocations, []);
   assert.deepEqual(upgraded.measurementRevocations, []);
+  assert.deepEqual(upgraded.deliveryRevocations, []);
   assert.equal(upgraded.config.minOutcomeReceipts, 2);
   assert.equal(upgraded.config.initialTrialOutcomeTimeoutMinutes, 1440);
   await configureLearning({ root, config: { canaryTtlDays: 7 } });

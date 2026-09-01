@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-01
+
+### Added
+
+- A locally confirmed `agentspine.learning-delivery-revocation/v1` receipt binds one exact model-turn delivery to its evaluation contract, candidate target, application and any consumed outcome without retaining the explanation in plaintext.
+- `learn-delivery-revoke` plus scoped status, Doctor, audit and read-only Context MCP diagnostics expose only content-free revocation state.
+
+### Changed
+
+- Revoking an invalid `Stop` or delivery proof immediately withholds any dependent active or validated lesson from the next exact-scope context pass. Evaluation then rolls it back atomically and restores a safe superseded predecessor.
+- Revoked deliveries cannot support a new measurement, outcome, promotion or validation renewal. Legacy state upgrades with an empty delivery-revocation ledger; candidate deletion and subject purge remove matching receipts.
+
+### Security
+
+- Delivery withdrawal is fail-closed: candidate, contract, application, delivery and outcome substitution fail on load; six concurrent retries create one immutable receipt; foreign groups receive no diagnostics; and a later favorable turn cannot replace the revoked proof.
+
 ## [0.30.0] - 2026-09-01
 
 ### Added
