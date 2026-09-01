@@ -68,13 +68,13 @@ Status: sparse local foundation implemented; host-specific notification adapters
 
 ## 5. Safe learning
 
-Status: local evidence, review, immutable fixed-benchmark contracts, a locally confirmed revocable evaluator-root registry, exact registry bindings, globally unique measurement-run lineage, root-paired evaluator cohorts, turn-bound Canary application, single-use outcome comparison, selection-bound renewable validation evidence leases, supersession, and rollback workflow implemented.
+Status: local evidence, review, exact candidate-revision targets, immutable fixed-benchmark contracts, a locally confirmed revocable evaluator-root registry, exact registry bindings, globally unique measurement-run lineage, root-paired evaluator cohorts, turn-bound Canary application, single-use outcome comparison, selection-bound renewable validation evidence leases, supersession, and rollback workflow implemented.
 
 - observation candidates remain outside context until accepted;
 - evidence, source fingerprints, confidence, and every prior candidate version are retained;
 - new information changes relevance through explicit supersession instead of erasure;
 - automatic promotion is default-off, thresholded, and limited to project facts and references;
-- low-risk behavior Canaries require content-free projection, matching model-stop delivery receipts, the exact frozen dataset digest, contracted minimum case coverage, globally unique source, evaluator/run and evaluator-root/run lineage, the same root-bound before/after evaluator cohort, one counted outcome per evaluator root and phase, and distinct consumed-preflight turns before after-results can validate them;
+- low-risk behavior Canaries bind a content-free digest of the exact evidence-backed candidate revision before measurement, then require content-free target-bound projection, matching model-stop delivery receipts, the exact frozen dataset digest, contracted minimum case coverage, globally unique source, evaluator/run and evaluator-root/run lineage, the same root-bound before/after evaluator cohort, one counted outcome per evaluator root and phase, and distinct consumed-preflight turns before after-results can validate them;
 - validated behavior remains in context only while its exact content-free evidence lease and evaluator-root binding are current; expiry or revocation triggers pre-turn suppression and atomic rollback;
 - renewal precommits evaluator roots, provider run IDs, the benchmark digest and exact case coverage, then atomically admits the first exact-scope projections into those trial slots; withheld completion, later substitute turns or runs, timestamps, replayed measurements and model assertions cannot extend evidence;
 - acceptance proof and rollback are audited;

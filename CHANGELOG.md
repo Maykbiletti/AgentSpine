@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-09-01
+
+### Added
+
+- `agentspine.learning-evaluation/v9` freezes a content-free digest of the exact candidate claim, evidence set, confidence, scope, privacy and review boundary that the trial is intended to prove.
+- `agentspine.learning-application/v6` carries that same target digest into each admitted initial Canary turn; status, Doctor and audit expose target-bound contract and application counts without exposing lesson text.
+
+### Changed
+
+- Evidence cannot be appended after an active v9 evaluation exists; changed guidance requires a separately deduplicated superseding candidate and a new contract.
+- Evaluation v1-v8 and application v1-v5 state remains readable, including the precommitted initial cohorts introduced by 0.26.
+
+### Security
+
+- Candidate, contract, Canary and admitted-turn substitution now fail closed on every state load. A result measured for one evidence-backed lesson revision cannot promote or validate altered guidance under the same learning ID.
+
 ## [0.26.0] - 2026-09-01
 
 ### Added
@@ -631,7 +647,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.23.0...v0.24.0

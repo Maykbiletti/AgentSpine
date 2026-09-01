@@ -1171,6 +1171,10 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.initialAdmittedApplications, 0);
       const completedInitialDeliveries = status.records.reduce((sum, item) =>
         sum + item.initialCompletedDeliveries, 0);
+      const targetBoundEvaluationContracts = status.records.reduce((sum, item) =>
+        sum + item.targetBoundEvaluationContracts, 0);
+      const targetBoundApplications = status.records.reduce((sum, item) =>
+        sum + item.targetBoundApplications, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
         status: status.records.some((item) => ["stale", "revoked", "unproven"].includes(item.canaryStatus))
@@ -1187,6 +1191,8 @@ export async function run(argv = process.argv.slice(2)) {
         pendingApplications: status.records.reduce((sum, item) => sum + item.pendingApplications, 0),
         stalePendingApplications,
         evaluationContracts: status.records.reduce((sum, item) => sum + item.evaluationContracts, 0),
+        targetBoundEvaluationContracts,
+        targetBoundApplications,
         plannedOutcomeReceipts,
         coverageBoundReceipts,
         legacyCoverageReceipts,
