@@ -8,6 +8,22 @@ import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.j
 
 export const CATALOG_SCHEMA = "agentspine.catalog/v1";
 
+export function catalogForStateRoot(catalog, root) {
+  if (!catalog || catalog.schema !== CATALOG_SCHEMA || typeof root !== "string" || !root) {
+    throw new Error("a resolved catalog and state root are required");
+  }
+  if (catalog.root === root) return catalog;
+  return {
+    schema: CATALOG_SCHEMA,
+    generatedAt: catalog.generatedAt,
+    root,
+    preservation: "source-files-are-read-only",
+    documents: [],
+    conflicts: [],
+    summary: { total: 0, protected: 0, conflicts: 0, byLayer: {} }
+  };
+}
+
 function catalogConflicts(documents) {
   const byPath = new Map(documents.map((document) => [document.relativePath, document]));
   const conflicts = [];

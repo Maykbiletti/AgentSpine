@@ -109,6 +109,21 @@ function expandHome(value, home) {
   return value;
 }
 
+function samePath(left, right) {
+  const normalize = (value) => resolve(value).replace(/[\\/]+$/, "");
+  const a = normalize(left);
+  const b = normalize(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+async function homeRoots(env) {
+  const candidates = [homedir(), env.HOME, env.USERPROFILE,
+    env.HOMEDRIVE && env.HOMEPATH ? `${env.HOMEDRIVE}${env.HOMEPATH}` : null]
+    .filter((value) => typeof value === "string" && value && isAbsolute(value));
+  return [...new Set(await Promise.all(candidates.map(async (value) =>
+    await existingDirectory(value) || resolve(value))))];
+}
+
 async function readJsonObject(path) {
   const file = await existingRegular(path);
   if (!file) return null;
@@ -415,9 +430,10 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     hostDetails = { memoryRoot: result.memoryRoot, memoryProvenance: result.memoryProvenance,
       memoryDiagnostics: result.memoryDiagnostics };
   }
-  const homeRoot = await existingDirectory(homedir()) || resolve(homedir());
-  const skippedFallbackHomeTree = rootResolution === "cwd-fallback" && relative(homeRoot, projectRoot) === "";
-  if (!skippedFallbackHomeTree) {
+  const knownHomeRoots = await homeRoots(env);
+  const skippedHomeTree = knownHomeRoots.some((root) => samePath(root, projectRoot));
+  const skippedFallbackHomeTree = skippedHomeTree && rootResolution === "cwd-fallback";
+  if (!skippedHomeTree) {
     sources.push(...await boundedMarkdownTree(projectRoot, "agentspine:project", host, "project", 3000, deadline,
       { projectBoundary: true, maxFiles: MAX_PROJECT_FILES, maxDirectoryEntries: MAX_PROJECT_DIRECTORY_ENTRIES }));
   }
@@ -440,7 +456,8 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     scopes: Object.fromEntries(["user", "project", "project-memory"].map((scope) => [scope, documents.filter((item) => item.sourceScope === scope).length])),
     reason: documents.length ? null : "No regular, non-symlink host-native Markdown source exists in the checked scope.",
     personalContinuityLoaded: documents.some((item) => item.sourceScope === "user") || Boolean(activeUserState),
-    broadHomeScan: false, projectTreeScan: skippedFallbackHomeTree ? "skipped-unmarked-home" : "bounded",
+    broadHomeScan: false, projectTreeScan: skippedFallbackHomeTree ? "skipped-unmarked-home"
+      : skippedHomeTree ? "skipped-home-root" : "bounded",
     rootResolution, registryRevision: registry.revision,
     ...(host === "claude" ? {
       memoryBound: Boolean(hostDetails.memoryRoot),

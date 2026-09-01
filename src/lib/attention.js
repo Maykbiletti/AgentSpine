@@ -286,7 +286,7 @@ export async function recordAttentionEvent({
   root = process.cwd(), id = null, kind, summary, status = null,
   entityId = null, groupId = null, projectId = null, taskId = null,
   privacy = "private", dueAt = null, receiptId, host, hookEvent,
-  observedAt = new Date()
+  observedAt = new Date(), catalog: providedCatalog = null
 }) {
   if (!EVENT_KINDS.has(kind)) throw new Error(`unsupported attention event kind: ${kind}`);
   if (!PRIVACY.has(privacy)) throw new Error(`unsupported privacy scope: ${privacy}`);
@@ -356,7 +356,7 @@ export async function recordAttentionEvent({
     state.receipts.push(receipt);
     state.receipts.sort((left, right) => left.at.localeCompare(right.at) || left.id.localeCompare(right.id));
     return { event, duplicate: false, receipt, attentionPath };
-  });
+  }, providedCatalog);
 }
 
 function isGroupMember(graph, groupId, entityId) {
@@ -377,8 +377,8 @@ function validateGroupScope(privacy, groupId, graph, entityId = null) {
   }
 }
 
-async function attentionMutation(root, operation) {
-  const catalog = await buildCatalog(root);
+async function attentionMutation(root, operation, providedCatalog = null) {
+  const catalog = providedCatalog || await buildCatalog(root);
   const { attentionPath } = await loadAttention(catalog.root, catalog);
   return withAttentionLock(attentionPath, { root: catalog.root, run: (state) => operation(state, catalog, attentionPath) });
 }

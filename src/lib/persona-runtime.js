@@ -249,7 +249,7 @@ function sameRuntimeEntity(entity, persona, binding) {
 }
 
 async function reconcilePersonaGraph(paths, policy, runtime) {
-  let { graph } = await loadGraph(paths.catalog.root);
+  let { graph } = await loadGraph(paths.catalog.root, paths.catalog);
   const changes = { groupsCreated: 0, entitiesUpdated: 0, membershipsAdded: 0, membershipsRemoved: 0 };
   const activeGroupIds = [...new Set(runtime.personas
     .filter((item) => item.status === "active" && item.groupId !== null)
@@ -265,9 +265,9 @@ async function reconcilePersonaGraph(paths, policy, runtime) {
     }
     if (!existing) {
       await upsertEntity({ root: paths.catalog.root, id: groupId, kind: "group", privacy: "group",
-        attributes: { identitySource: "authenticated-persona-roster" }, confidence: 1 });
+        attributes: { identitySource: "authenticated-persona-roster" }, confidence: 1, catalog: paths.catalog });
       changes.groupsCreated += 1;
-      graph = (await loadGraph(paths.catalog.root)).graph;
+      graph = (await loadGraph(paths.catalog.root, paths.catalog)).graph;
     }
   }
 
@@ -284,36 +284,40 @@ async function reconcilePersonaGraph(paths, policy, runtime) {
         sourceDocument: existing?.sourceDocument
           && paths.catalog.documents.some((item) => item.relativePath === existing.sourceDocument)
           ? existing.sourceDocument : null,
-        privacy: persona.groupId ? "group" : "shared", confidence: 1 });
+        privacy: persona.groupId ? "group" : "shared", confidence: 1, catalog: paths.catalog });
       changes.entitiesUpdated += 1;
-      graph = (await loadGraph(paths.catalog.root)).graph;
+      graph = (await loadGraph(paths.catalog.root, paths.catalog)).graph;
       existing = graph.entities.find((item) => item.id === persona.personaId);
     }
 
     const memberships = graph.entityEdges.filter((edge) => edge.from === persona.personaId && edge.relation === "member-of");
     for (const edge of memberships.filter((item) => persona.status !== "active" || item.to !== persona.groupId)) {
-      await unlinkEntities({ root: paths.catalog.root, from: edge.from, to: edge.to, relation: edge.relation });
+      await unlinkEntities({ root: paths.catalog.root, from: edge.from, to: edge.to, relation: edge.relation,
+        catalog: paths.catalog });
       changes.membershipsRemoved += 1;
-      graph = (await loadGraph(paths.catalog.root)).graph;
+      graph = (await loadGraph(paths.catalog.root, paths.catalog)).graph;
     }
     if (persona.status === "active" && persona.groupId !== null
       && !graph.entityEdges.some((edge) => edge.from === persona.personaId && edge.to === persona.groupId
         && edge.relation === "member-of" && edge.privacy === "group")) {
       await linkEntities({ root: paths.catalog.root, from: persona.personaId, to: persona.groupId,
-        relation: "member-of", reason: "Authenticated roster membership; context only.", confidence: 1, privacy: "group" });
+        relation: "member-of", reason: "Authenticated roster membership; context only.", confidence: 1, privacy: "group",
+        catalog: paths.catalog });
       changes.membershipsAdded += 1;
-      graph = (await loadGraph(paths.catalog.root)).graph;
+      graph = (await loadGraph(paths.catalog.root, paths.catalog)).graph;
     }
   }
   return changes;
 }
 
-export async function applyPersonaRoster({ root = process.cwd(), bindings, rosterScopes = [], confirmation, now = new Date() }) {
+export async function applyPersonaRoster({
+  root = process.cwd(), bindings, rosterScopes = [], confirmation, now = new Date(), catalog: providedCatalog = null
+}) {
   if (confirmation !== CONFIRMATION) throw new Error("persona roster changes require explicit local owner confirmation");
   if (!Array.isArray(bindings) || bindings.length > 256 || (!bindings.length && !rosterScopes.length)) {
     throw new Error("bindings must contain up to 256 persona bindings or one explicit roster scope");
   }
-  const paths = await pathsFor(root);
+  const paths = await pathsFor(root, providedCatalog);
   return withLock(paths, async () => {
     const [policy, runtime] = await Promise.all([
       readJson(paths.personaPolicyPath, paths.catalog.root, normalizePolicy, emptyPolicy),
@@ -471,11 +475,13 @@ export async function loadPersonaRuntime(root = process.cwd(), providedCatalog =
   return { policy, runtime, ...paths };
 }
 
-export async function syncPersonaRosterFromEnvironment({ root = process.cwd(), env = process.env, now = new Date() } = {}) {
+export async function syncPersonaRosterFromEnvironment({
+  root = process.cwd(), env = process.env, now = new Date(), catalog: providedCatalog = null
+} = {}) {
   const configured = env.AGENTSPINE_PERSONA_ROSTER_FILE;
   if (!configured) return { configured: false, changed: false };
   if (!isAbsolute(configured)) throw new Error("AGENTSPINE_PERSONA_ROSTER_FILE must be an absolute path");
-  const catalog = await buildCatalog(root);
+  const catalog = providedCatalog || await buildCatalog(root);
   const supplied = await lstat(configured);
   if (supplied.isSymbolicLink() || !supplied.isFile()) throw new Error("persona roster must be a regular non-symlink file");
   const canonical = await realpath(configured);
@@ -497,7 +503,7 @@ export async function syncPersonaRosterFromEnvironment({ root = process.cwd(), e
   const rosterScopes = nativeScopes.map((scope) => ({ authenticator: "host-manifest", issuer: scope.issuer,
     tenantId: scope.tenantId, host: scope.host, profileId: scope.profileId }));
   const result = await applyPersonaRoster({ root: catalog.root, bindings, rosterScopes,
-    confirmation: CONFIRMATION, now: value.observedAt || now });
+    confirmation: CONFIRMATION, now: value.observedAt || now, catalog });
   return { configured: true, changed: !result.duplicate || result.graphReconciled,
     rosterChanged: !result.duplicate, graphReconciled: result.graphReconciled, graphChanges: result.graphChanges,
     revision: value.revision,

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import { blunRuntimeContext, blunRuntimeMessage, runHook } from "../src/hook.js"
 
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
 
-async function runInstalledHook({ cwd, state, blunHome, input, blun = true }) {
+async function runInstalledHook({ cwd, state, blunHome, input, blun = true, environment = {} }) {
   return await new Promise((resolve, reject) => {
     const env = { ...process.env, AGENTSPINE_STATE_DIR: state };
     if (blun) {
@@ -23,6 +23,7 @@ async function runInstalledHook({ cwd, state, blunHome, input, blun = true }) {
     }
     delete env.PLUGIN_ROOT;
     delete env.CLAUDE_CONFIG_DIR;
+    Object.assign(env, environment);
     const child = spawn(process.execPath, [join(pluginRoot, "src", "hook.js")], {
       cwd,
       env,
@@ -42,6 +43,50 @@ async function runInstalledHook({ cwd, state, blunHome, input, blun = true }) {
     child.stdin.end(JSON.stringify(input));
   });
 }
+
+test("installed hook never recursively scans a Windows-profile home even when it has a project marker", async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "agentspine-unmarked-hook-"));
+  const root = join(workspace, "synthetic-user-root");
+  const serviceHome = join(workspace, "synthetic-service-home");
+  const claudeHome = join(serviceHome, ".claude");
+  const state = join(workspace, "state");
+  await Promise.all([mkdir(root, { recursive: true }), mkdir(claudeHome, { recursive: true }),
+    mkdir(state, { recursive: true })]);
+  await mkdir(join(root, ".git"));
+  t.after(async () => rm(workspace, { recursive: true, force: true }));
+
+  const rules = "# Synthetic local rules\n\nKeep this exact rule available.\n";
+  await writeFile(join(root, "CLAUDE.md"), rules, "utf8");
+  const decoy = join(root, "large-cloud-shaped-tree");
+  await mkdir(decoy);
+  await Promise.all(Array.from({ length: 256 }, async (_, index) => {
+    const directory = join(decoy, `folder-${String(index).padStart(3, "0")}`);
+    await mkdir(directory);
+    await writeFile(join(directory, "PRIVATE.md"), `# Decoy ${index}\n`, "utf8");
+  }));
+  const before = await readFile(join(root, "CLAUDE.md"));
+
+  const startedAt = Date.now();
+  const output = await runInstalledHook({
+    cwd: root,
+    state,
+    blunHome: claudeHome,
+    blun: false,
+    environment: { HOME: serviceHome, USERPROFILE: root, CLAUDE_CONFIG_DIR: claudeHome },
+    input: { hook_event_name: "UserPromptSubmit", host: "claude", cwd: root,
+      session_id: "session:unmarked", event_id: "turn:unmarked", prompt: "Hallo" }
+  });
+  const elapsedMs = Date.now() - startedAt;
+  assert.equal(output.decision, undefined, JSON.stringify(output));
+  const context = JSON.parse(output.hookSpecificOutput.additionalContext);
+  assert.equal(context.sourceResolution.rootResolution, "project-marker");
+  assert.equal(context.sourceResolution.projectTreeScan, "skipped-home-root");
+  assert.equal(context.sourceResolution.broadHomeScan, false);
+  assert.deepEqual(context.briefing.sources.documents.map((item) => item.path), ["claude:project/CLAUDE.md"]);
+  assert.equal(context.preflight.briefing.instructions[0].content, rules);
+  assert.equal(elapsedMs < 5000, true, `unmarked hook took ${elapsedMs} ms`);
+  assert.deepEqual(await readFile(join(root, "CLAUDE.md")), before);
+});
 
 test("installed BLUN hook keeps the full briefing out of the runtime message", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "agentspine-blun-hook-"));

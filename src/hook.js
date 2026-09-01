@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { recordAttentionEvent } from "./lib/attention.js";
-import { saveCatalog } from "./lib/catalog.js";
+import { catalogForStateRoot, saveCatalog } from "./lib/catalog.js";
 import { loadGraph } from "./lib/graph.js";
 import { canonicalPath } from "./lib/paths.js";
 import { resolveHostSourceCatalog } from "./lib/source-roots.js";
@@ -88,10 +88,12 @@ function gatewayEnvironmentContext(env = process.env) {
   };
 }
 
-async function runtimeScope(input, root, userStateRoot = null) {
-  const { continuity: projectContinuity } = await loadContinuity(root);
+async function runtimeScope(input, root, userStateRoot = null, catalog) {
+  const { continuity: projectContinuity } = await loadContinuity(root, catalog);
+  const userCatalog = userStateRoot && userStateRoot !== root
+    ? catalogForStateRoot(catalog, userStateRoot) : catalog;
   const userContinuity = userStateRoot && userStateRoot !== root
-    ? (await loadContinuity(userStateRoot)).continuity
+    ? (await loadContinuity(userStateRoot, userCatalog)).continuity
     : projectContinuity;
   const continuity = {
     config: {
@@ -235,9 +237,13 @@ function sessionId(input) {
   return boundedId(input.session_id ?? input.sessionId, "sessionId");
 }
 
-async function startSelfstarter(input, event, root, scope) {
+async function startSelfstarter(input, event, root, scope, sourceDiagnostics) {
   if (!SELFSTART_EVENTS.has(event)) return null;
   const requested = selfstarterInput(input);
+  if (["skipped-unmarked-home", "skipped-home-root"].includes(sourceDiagnostics?.projectTreeScan)) {
+    if (requested) throw new Error("self-starter cannot use a user home as its workspace root");
+    return null;
+  }
   const session = sessionId(input);
   if (!scope.entityId || !scope.projectId || !session) {
     if (requested) throw new Error("self-starter start requires an exact actor, project, and host session");
@@ -250,7 +256,7 @@ async function startSelfstarter(input, event, root, scope) {
   });
 }
 
-async function startChannelEvent(input, event, root, scope) {
+async function startChannelEvent(input, event, root, scope, catalog) {
   const requested = channelEventInput(input);
   if (!requested) return null;
   if (event !== "SessionStart") throw new Error("channel event claims are accepted only at SessionStart");
@@ -263,7 +269,7 @@ async function startChannelEvent(input, event, root, scope) {
     root, eventId: boundedId(requested.event_id ?? requested.eventId, "channelEventId"),
     agentId: scope.entityId, projectId: scope.projectId, groupId: scope.groupId,
     provider: boundedId(requested.provider, "channelProvider"), workerId,
-    now: input.timestamp || new Date()
+    now: input.timestamp || new Date(), catalog
   });
   if (!claim.event) throw new Error("the exact channel event is unavailable in this agent lane");
   return claim;
@@ -323,7 +329,7 @@ function minimalAttentionSignal(prompt) {
   return null;
 }
 
-async function captureAttentionLifecycle(input, event, root, scope) {
+async function captureAttentionLifecycle(input, event, root, scope, catalog) {
   if (!ATTENTION_WRITE_EVENTS.has(event)) return null;
   const explicit = input.agent_spine_attention && typeof input.agent_spine_attention === "object"
     && !Array.isArray(input.agent_spine_attention) ? input.agent_spine_attention : null;
@@ -368,7 +374,7 @@ async function captureAttentionLifecycle(input, event, root, scope) {
     receiptId: automaticHeartbeat ? heartbeatReceipt(input, scope) : eventReceipt(input, event, scope, discriminator),
     host: scope.host,
     hookEvent: event,
-    observedAt: input.timestamp || new Date()
+    observedAt: input.timestamp || new Date(), catalog
   });
 }
 
@@ -595,7 +601,7 @@ export async function runHook(payload = null) {
 
   if (event === "PreToolUse") {
     try {
-      scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot);
+      scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
       const exact = await selfstarterScope(input, scope, root, "effect");
       if (exact) {
         selfstarter = await authorizeJobEffect({
@@ -613,12 +619,12 @@ export async function runHook(payload = null) {
 
   let attentionEvent = null;
   if (ATTENTION_WRITE_EVENTS.has(event) && !CONTEXT_EVENTS.has(event)) {
-    scope = await runtimeScope(input, root, resolvedSources.userStateRoot);
-    attentionEvent = await captureAttentionLifecycle(input, event, root, scope);
+    scope = await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
+    attentionEvent = await captureAttentionLifecycle(input, event, root, scope, catalog);
   }
 
   if (event === "PostToolUse") {
-    scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot);
+    scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     const exact = await selfstarterScope(input, scope, root, "effect");
     if (exact) {
       selfstarter = await checkpointJobEffect({
@@ -629,7 +635,7 @@ export async function runHook(payload = null) {
   }
 
   if (["Stop", "SubagentStop"].includes(event)) {
-    scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot);
+    scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     const exact = await selfstarterScope(input, scope, root, "resume");
     const requested = selfstarterInput(input);
     if (exact) {
@@ -643,10 +649,10 @@ export async function runHook(payload = null) {
     let signal = null;
     let preflight = null;
     try {
-      await syncPersonaRosterFromEnvironment({ root, env: process.env, now: input.timestamp || new Date() });
-      scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot);
-      channelEvent = await startChannelEvent(input, event, root, scope);
-      selfstarter = await startSelfstarter(input, event, root, scope);
+      await syncPersonaRosterFromEnvironment({ root, env: process.env, now: input.timestamp || new Date(), catalog });
+      scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
+      channelEvent = await startChannelEvent(input, event, root, scope, catalog);
+      selfstarter = await startSelfstarter(input, event, root, scope, resolvedSources.diagnostics);
       if (selfstarter?.job && !scope.currentTaskId) scope.currentTaskId = selfstarter.job.taskId;
       if (event === "UserPromptSubmit") {
         const prompt = promptFromInput(input);
@@ -660,7 +666,7 @@ export async function runHook(payload = null) {
         })) throw new Error("newly created preflight receipt failed exact turn verification");
         preflight.pendingMustRemember = await captureMustRememberPrompt({ prompt, receipt: preflight.receipt, env: process.env });
         try {
-          attentionEvent = await captureAttentionLifecycle(input, event, root, scope);
+          attentionEvent = await captureAttentionLifecycle(input, event, root, scope, catalog);
         } catch (error) {
           attentionEvent = { event: null, duplicate: false, reason: `rejected:${error.message}` };
         }
@@ -669,7 +675,9 @@ export async function runHook(payload = null) {
             signal = await captureContinuityPrompt({
               root, prompt, entityId: scope.entityId, groupId: scope.groupId,
               projectId: scope.projectId, userStateRoot: resolvedSources.userStateRoot,
-              eventId: boundedId(input.event_id ?? input.hook_event_id, "eventId")
+              eventId: boundedId(input.event_id ?? input.hook_event_id, "eventId"), catalog,
+              userCatalog: resolvedSources.userStateRoot && resolvedSources.userStateRoot !== root
+                ? catalogForStateRoot(catalog, resolvedSources.userStateRoot) : catalog
             });
           } catch (error) {
             signal = { captured: false, accepted: false, reason: `rejected:${error.message}` };

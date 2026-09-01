@@ -4,6 +4,17 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-01
+
+### Fixed
+
+- Installed hooks reuse the already bounded host-source catalog throughout scope, continuity, learning, attention, persona, relationship, and briefing reads instead of recursively rebuilding it from the active working directory.
+- Windows profile homes are recognized through canonical OS, `USERPROFILE`, `HOME`, and `HOMEDRIVE`/`HOMEPATH` identities, including case-insensitive paths and homes that contain a project marker; their recursive project tree is never enumerated.
+
+### Security
+
+- Direct host-native `CLAUDE.md` and `AGENTS.md` chain files remain fully injected and byte-preserved while unrelated home descendants are excluded from context and indexing.
+
 ## [0.11.0] - 2026-08-31
 
 ### Added
@@ -353,7 +364,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/Maykbiletti/AgentSpine/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.9.0...v0.10.0

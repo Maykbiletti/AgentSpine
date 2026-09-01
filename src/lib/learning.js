@@ -287,8 +287,8 @@ async function withLock(path, root, task) {
   }
 }
 
-async function mutation(root, operation) {
-  const catalog = await buildCatalog(root);
+async function mutation(root, operation, providedCatalog = null) {
+  const catalog = providedCatalog || await buildCatalog(root);
   const { learningPath } = await loadLearning(catalog.root, catalog);
   return withLock(learningPath, catalog.root, async (state) => operation(state, catalog, learningPath));
 }
@@ -339,7 +339,8 @@ function evidenceConfidence(evidence) {
 
 export async function proposeLearning({
   root = process.cwd(), id = `learning:${randomUUID()}`, kind, claim, subjectId = null,
-  privacy = "private", groupId = null, scope = null, evidence, supersedesId = null, now = new Date()
+  privacy = "private", groupId = null, scope = null, evidence, supersedesId = null, now = new Date(),
+  catalog: providedCatalog = null
 }) {
   if (!ID_RE.test(id)) throw new Error("id must be a stable, whitespace-free identifier");
   if (!KINDS.has(kind)) throw new Error(`unsupported learning kind: ${kind}`);
@@ -400,10 +401,12 @@ export async function proposeLearning({
     state.candidates.push(candidate);
     state.candidates.sort((a, b) => a.id.localeCompare(b.id));
     return { candidate, learningPath };
-  });
+  }, providedCatalog);
 }
 
-export async function addLearningEvidence({ root = process.cwd(), id, evidence, now = new Date() }) {
+export async function addLearningEvidence({
+  root = process.cwd(), id, evidence, now = new Date(), catalog: providedCatalog = null
+}) {
   if (!ID_RE.test(id || "")) throw new Error("id is required");
   const timestamp = date(now, "now");
   return mutation(root, (state, catalog, learningPath) => {
@@ -422,7 +425,7 @@ export async function addLearningEvidence({ root = process.cwd(), id, evidence, 
     };
     state.candidates = state.candidates.map((entry) => entry.id === id ? candidate : entry);
     return { candidate, learningPath };
-  });
+  }, providedCatalog);
 }
 
 function acceptCandidate(state, candidate, timestamp, automatic, promotion = null) {
@@ -711,7 +714,7 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
  * continuity state machine.
  */
 export async function acceptContinuityLearning({
-  root = process.cwd(), id, proof, now = new Date()
+  root = process.cwd(), id, proof, now = new Date(), catalog: providedCatalog = null
 }) {
   if (!ID_RE.test(id || "")) throw new Error("id is required");
   if (!proof || proof.mode !== "automatic-continuity-low-risk" || proof.localOptIn !== true) {
@@ -744,7 +747,7 @@ export async function acceptContinuityLearning({
       authority: "context-only"
     });
     return { candidate: accepted, learningPath, unchanged: false };
-  });
+  }, providedCatalog);
 }
 
 export async function rollbackLearning({ root = process.cwd(), id, reason, now = new Date() }) {

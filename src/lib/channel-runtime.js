@@ -531,7 +531,7 @@ function activeBinding(policy, event) {
 
 export async function claimChannelEvent({
   root = process.cwd(), agentId, projectId, groupId = null, provider, workerId,
-  eventId = null, leaseSeconds = 120, now = new Date()
+  eventId = null, leaseSeconds = 120, now = new Date(), catalog: providedCatalog = null
 }) {
   agentId = stableId(agentId, "agentId");
   projectId = stableId(projectId, "projectId");
@@ -541,7 +541,7 @@ export async function claimChannelEvent({
   eventId = stableId(eventId, "eventId", { nullable: true });
   const seconds = Number(leaseSeconds);
   if (!Number.isInteger(seconds) || seconds < 15 || seconds > 900) throw new Error("leaseSeconds must be an integer between 15 and 900");
-  const paths = await pathsFor(root);
+  const paths = await pathsFor(root, providedCatalog);
   return withChannelLock(paths, async () => {
     const [policy, runtime, { graph }] = await Promise.all([
       readJson(paths.channelPolicyPath, paths.catalog.root, normalizePolicy, emptyPolicy),

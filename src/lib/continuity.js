@@ -137,8 +137,8 @@ export async function inspectContinuity(root = process.cwd(), providedCatalog = 
   }
 }
 
-async function mutate(root, task) {
-  const catalog = await buildCatalog(root);
+async function mutate(root, task, providedCatalog = null) {
+  const catalog = providedCatalog || await buildCatalog(root);
   const { continuityPath } = await loadContinuity(catalog.root, catalog);
   return withLock(continuityPath, catalog.root, (state) => task(state, catalog, continuityPath));
 }
@@ -209,9 +209,12 @@ function assertSafeSignal(signal, prompt, scope) {
 
 export async function captureContinuityPrompt({
   root = process.cwd(), prompt, entityId = null, groupId = null, projectId = null,
-  eventId = null, now = new Date(), userStateRoot = null
+  eventId = null, now = new Date(), userStateRoot = null, catalog: providedCatalog = null,
+  userCatalog: providedUserCatalog = null
 }) {
-  const { continuity, catalog } = await loadContinuity(userStateRoot || root);
+  const storageCatalog = userStateRoot && userStateRoot !== root
+    ? providedUserCatalog : providedCatalog;
+  const { continuity, catalog } = await loadContinuity(userStateRoot || root, storageCatalog);
   if (!continuity.config.enabled) return { enabled: false, captured: false, reason: "opt-in-disabled", authority: "context-only" };
   if (typeof prompt !== "string" || Buffer.byteLength(prompt) > continuity.config.maxPromptBytes) {
     throw new Error("prompt payload is missing or exceeds the configured byte limit");
@@ -222,8 +225,9 @@ export async function captureContinuityPrompt({
   const subjectId = detected.kind === "project-fact" ? projectId : entityId || projectId;
   if (!subjectId || !ID_RE.test(subjectId)) throw new Error("automatic learning requires an exact known person or project identity");
   if (groupId !== null && !ID_RE.test(groupId)) throw new Error("groupId is invalid");
-  const storageCatalog = storageRoot === catalog.root ? catalog : await buildCatalog(storageRoot);
-  const { graph } = await loadGraph(storageCatalog.root, storageCatalog);
+  const targetCatalog = storageRoot === catalog.root ? catalog
+    : providedCatalog || await buildCatalog(storageRoot);
+  const { graph } = await loadGraph(targetCatalog.root, targetCatalog);
   const subject = graph.entities.find((item) => item.id === subjectId);
   if (!subject) throw new Error(`automatic learning requires a known canonical identity: ${subjectId}`);
   if (subjectId === projectId && subject.kind !== "project") throw new Error("projectId must identify a project");
@@ -248,7 +252,7 @@ export async function captureContinuityPrompt({
     });
     state.history.push({ kind: "signal-observed", eventKey, learningId, subjectId, observedAt: at, authority: "context-only" });
     return { duplicate: false, disabled: false, config: state.config, continuityPath, catalog };
-  });
+  }, targetCatalog);
   if (recorded.disabled) return { enabled: false, captured: false, reason: "opt-in-disabled", authority: "context-only" };
 
   const evidence = {
@@ -258,26 +262,27 @@ export async function captureContinuityPrompt({
     confidence: detected.confidence,
     observedAt: at
   };
-  let existing = (await loadLearning(storageRoot)).learning.candidates.find((item) => item.id === learningId);
+  let existing = (await loadLearning(storageRoot, targetCatalog)).learning.candidates.find((item) => item.id === learningId);
   if (!existing) {
     try {
       await proposeLearning({
         root: storageRoot, id: learningId, kind: detected.kind, claim: detected.claim, subjectId,
-        privacy: subjectId === projectId ? "shared" : "private", groupId: null, evidence, now: at
+        privacy: subjectId === projectId ? "shared" : "private", groupId: null, evidence, now: at,
+        catalog: targetCatalog
       });
     } catch (error) {
       if (!/candidate IDs are immutable/.test(error.message)) throw error;
     }
-    existing = (await loadLearning(storageRoot)).learning.candidates.find((item) => item.id === learningId);
+    existing = (await loadLearning(storageRoot, targetCatalog)).learning.candidates.find((item) => item.id === learningId);
   }
   if (existing?.status === "candidate" && !existing.evidence.some((item) => item.id === evidence.id)) {
     try {
-      await addLearningEvidence({ root: storageRoot, id: learningId, evidence, now: at });
+      await addLearningEvidence({ root: storageRoot, id: learningId, evidence, now: at, catalog: targetCatalog });
     } catch (error) {
       if (!/duplicate evidence id|unreviewed candidate/.test(error.message)) throw error;
     }
   }
-  const refreshed = (await loadLearning(storageRoot)).learning.candidates.find((item) => item.id === learningId);
+  const refreshed = (await loadLearning(storageRoot, targetCatalog)).learning.candidates.find((item) => item.id === learningId);
   let accepted = refreshed?.status === "accepted";
   if (!accepted && refreshed?.status === "candidate") {
     const distinct = new Set(refreshed.evidence.map((item) => item.id)).size;
@@ -286,7 +291,7 @@ export async function captureContinuityPrompt({
       && detected.directness >= recorded.config.minDirectness
       && distinct >= requiredEvidence) {
       await acceptContinuityLearning({
-        root: storageRoot, id: learningId, now: at,
+        root: storageRoot, id: learningId, now: at, catalog: targetCatalog,
         proof: {
           mode: "automatic-continuity-low-risk", localOptIn: true,
           minConfidence: recorded.config.minConfidence,

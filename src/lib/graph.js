@@ -174,13 +174,13 @@ export async function annotateDocument({ root = process.cwd(), path, layer, reas
 
 export async function upsertEntity({
   root = process.cwd(), id, kind, displayName = "", aliases = [],
-  attributes = {}, sourceDocument = null, confidence = 0.5, privacy = "private"
+  attributes = {}, sourceDocument = null, confidence = 0.5, privacy = "private", catalog: providedCatalog = null
 }) {
   if (!id || !/^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/.test(id)) throw new Error("id must be a stable, whitespace-free identifier");
   if (!ENTITY_KINDS.has(kind)) throw new Error(`unsupported entity kind: ${kind}`);
   if (!["private", "shared", "group"].includes(privacy)) throw new Error(`unsupported privacy scope: ${privacy}`);
   if (!attributes || Array.isArray(attributes) || typeof attributes !== "object") throw new Error("attributes must be an object");
-  const { graph, graphPath, catalog } = await loadGraph(root);
+  const { graph, graphPath, catalog } = await loadGraph(root, providedCatalog);
   if (sourceDocument !== null) {
     sourceDocument = normalizeRelativePath(sourceDocument, "sourceDocument");
     if (!catalog.documents.some((document) => document.relativePath === sourceDocument)) {
@@ -207,10 +207,11 @@ export async function upsertEntity({
   return { entity, graphPath };
 }
 
-export async function linkEntities({ root = process.cwd(), from, to, relation = "related", reason = "", confidence = 0.5, privacy = "private" }) {
+export async function linkEntities({ root = process.cwd(), from, to, relation = "related", reason = "", confidence = 0.5,
+  privacy = "private", catalog: providedCatalog = null }) {
   if (!ENTITY_RELATIONS.has(relation)) throw new Error(`unsupported entity relation: ${relation}`);
   if (!["private", "shared", "group"].includes(privacy)) throw new Error(`unsupported privacy scope: ${privacy}`);
-  const { graph, graphPath } = await loadGraph(root);
+  const { graph, graphPath } = await loadGraph(root, providedCatalog);
   const known = new Set(graph.entities.map((entity) => entity.id));
   if (!known.has(from)) throw new Error(`unknown source entity: ${from}`);
   if (!known.has(to)) throw new Error(`unknown target entity: ${to}`);
@@ -233,9 +234,9 @@ export async function linkEntities({ root = process.cwd(), from, to, relation = 
   return { edge, graphPath };
 }
 
-export async function unlinkEntities({ root = process.cwd(), from, to, relation = "related" }) {
+export async function unlinkEntities({ root = process.cwd(), from, to, relation = "related", catalog: providedCatalog = null }) {
   if (!ENTITY_RELATIONS.has(relation)) throw new Error(`unsupported entity relation: ${relation}`);
-  const { graph, graphPath } = await loadGraph(root);
+  const { graph, graphPath } = await loadGraph(root, providedCatalog);
   const previous = graph.entityEdges.find((item) => item.from === from && item.to === to && item.relation === relation);
   if (!previous) return { removed: null, duplicate: true, graphPath };
   preservePrevious(graph, "entity-edge", previous);

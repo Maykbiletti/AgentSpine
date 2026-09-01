@@ -1,4 +1,4 @@
-import { buildCatalog } from "./catalog.js";
+import { buildCatalog, catalogForStateRoot } from "./catalog.js";
 import { resolveContext } from "./context.js";
 import { relationshipContext } from "./graph.js";
 import { learningContext } from "./learning.js";
@@ -123,12 +123,14 @@ export async function sessionBriefing({
     catalog
   });
   const portableRelationship = Boolean(entityId && userStateRoot && userStateRoot !== catalog.root);
+  const userCatalog = userStateRoot && userStateRoot !== catalog.root
+    ? catalogForStateRoot(catalog, userStateRoot) : catalog;
   const learningScope = {
     personaId: entityId, userId, tenantId, projectId, groupId, taskId: currentTaskId
   };
   const relationship = entityId
     ? await relationshipContext(userStateRoot && userStateRoot !== catalog.root
-      ? { root: userStateRoot, entityId, includePrivate, groupId }
+      ? { root: userStateRoot, entityId, includePrivate, groupId, catalog: userCatalog }
       : { root: catalog.root, entityId, includePrivate, groupId, catalog })
     : null;
   const [learned, attention, tasks, shared, userLearned, personas, gateway] = await settleReads([
@@ -140,7 +142,8 @@ export async function sessionBriefing({
     taskContext({ root: catalog.root, includePrivate, groupId, projectId, includeClosed: false, maxItems: 100, catalog }),
     sharedContext({ root: catalog.root, includePrivate, groupId, maxItems: 50, catalog }),
     userStateRoot && userStateRoot !== catalog.root
-      ? learningContext({ root: userStateRoot, includePrivate, groupId, scope: learningScope, maxItems: 50, now })
+      ? learningContext({ root: userStateRoot, includePrivate, groupId, scope: learningScope, maxItems: 50, now,
+        catalog: userCatalog })
       : Promise.resolve({ items: [] }),
     loadPersonaRuntime(catalog.root, catalog),
     loadGatewayRuntime(catalog.root, catalog)
