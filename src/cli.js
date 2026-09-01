@@ -110,6 +110,14 @@ function hasLearningScope(flags) {
   return ["persona", "user", "tenant", "project", "group", "task"].some((name) => flags[name] !== undefined);
 }
 
+function evaluatorRootsFlag(value) {
+  return String(value || "").split(",").filter(Boolean).map((entry) => {
+    const separator = entry.lastIndexOf("=");
+    if (separator <= 0) throw new Error("evaluator roots must use evaluator-id=sha256 entries");
+    return { evaluatorId: entry.slice(0, separator), principalDigest: entry.slice(separator + 1) };
+  });
+}
+
 function help() {
   return `AgentSpine ${VERSION}
 
@@ -138,7 +146,7 @@ Usage:
   agentspine learn-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine learn-context [root] [--group id] [--include-private] [--kind preference,goal]
   agentspine learn-evaluate [root]
-  agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id [--expires-at date] --confirm-local-evaluation
+  agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id --evaluator-roots id=sha256,id=sha256 [--expires-at date] --confirm-local-evaluation
   agentspine learn-measurement <id> --learning id --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --measurement objective|user-feedback|model-suggestion --evaluator id --run id --source-digest sha256 --dataset-digest sha256 --case-count n --confirm-local-measurement
   agentspine learn-outcome <learning-id> --id id --evaluation id --measurement-receipt id [--application id --delivery id]
   agentspine learn-status [root] [--persona id --user id --tenant id --project id --group id --task id]
@@ -465,6 +473,7 @@ export async function run(argv = process.argv.slice(2)) {
         protocolDigest: flags["protocol-digest"], minCases: Number(flags["min-cases"])
       },
       evaluatorIds: String(flags.evaluators || "").split(",").filter(Boolean),
+      evaluatorRoots: evaluatorRootsFlag(flags["evaluator-roots"]),
       expiresAt: flags["expires-at"] || null,
       confirmLocalEvaluation: booleanFlag(flags["confirm-local-evaluation"])
     }), json);
@@ -1078,6 +1087,8 @@ export async function run(argv = process.argv.slice(2)) {
       const lineageBoundReceipts = status.records.reduce((sum, item) => sum + item.lineageBoundReceipts, 0);
       const pairedOutcomeReceipts = status.records.reduce((sum, item) => sum + item.pairedOutcomeReceipts, 0);
       const pairedEvaluatorPairs = status.records.reduce((sum, item) => sum + item.pairedEvaluatorPairs, 0);
+      const evaluatorRootBoundReceipts = status.records.reduce((sum, item) => sum + item.evaluatorRootBoundReceipts, 0);
+      const independentEvaluatorRoots = status.records.reduce((sum, item) => sum + item.independentEvaluatorRoots, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
         status: status.records.some((item) => item.canaryStatus === "stale")
@@ -1105,6 +1116,8 @@ export async function run(argv = process.argv.slice(2)) {
         lineageBoundReceipts,
         pairedOutcomeReceipts,
         pairedEvaluatorPairs,
+        evaluatorRootBoundReceipts,
+        independentEvaluatorRoots,
         unplannedOutcomeReceipts,
         boundAfterReceipts: status.records.reduce((sum, item) => sum + item.boundAfterReceipts, 0),
         unboundAfterReceipts,

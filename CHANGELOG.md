@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-01
+
+### Added
+
+- Immutable `agentspine.learning-evaluation/v6` contracts bind every evaluator ID to one distinct, locally attested SHA-256 principal root. New `agentspine.learning-measurement/v2`, measurement-lineage v2 and outcome v9 receipts carry that root without storing evaluator identity content.
+- CLI evaluation registration requires `--evaluator-roots id=sha256,...`; status, Doctor and audit expose root-bound receipts and independent root counts.
+
+### Changed
+
+- Evaluator independence and before/after pairing now use frozen principal roots. Evaluation v1-v5, measurement and lineage v1, and outcome v1-v8 history remains readable.
+
+### Security
+
+- Two evaluator aliases for the same attested principal can no longer satisfy independence, replay one external run, or create a second paired vote. Duplicate roots, root/run replay, root drift and digest-valid contract/measurement mismatches fail closed.
+
 ## [0.18.0] - 2026-09-01
 
 ### Added
@@ -503,7 +518,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.15.0...v0.16.0
