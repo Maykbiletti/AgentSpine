@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-01
+
+### Added
+
+- Immutable `agentspine.learning-revalidation-window/v2` receipts precommit every renewal to the first completed exact-scope turns and assign the frozen evaluator roots to deterministic turn slots before results exist.
+- Content-free `agentspine.learning-validation/v3` leases retain the window digest, ordered delivery digests and evaluator-root assignments that proved the renewed lesson.
+
+### Changed
+
+- Learning status and Doctor report fixed-cohort selection, required and completed renewal deliveries, and selection-bound validation leases.
+- Existing revalidation-window v1 and validation-lease v1/v2 history remains readable; new renewal windows use the stricter fixed-cohort contract.
+
+### Security
+
+- A later high-scoring turn can no longer replace an earlier completed renewal turn, and evaluator roots cannot be reassigned between turns after their results are visible. Missing, reordered, tampered or selectively omitted cohort evidence fails closed.
+
 ## [0.22.0] - 2026-09-01
 
 ### Added
@@ -567,7 +583,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.19.0...v0.20.0
