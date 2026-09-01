@@ -10,7 +10,8 @@ import {
 import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
-  purgeStaleLearningApplications, recordLearningOutcome, registerLearningEvaluation, reviewLearning, rollbackLearning
+  purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningMeasurement,
+  recordLearningOutcome, registerLearningEvaluation, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 import { configureContinuity, loadContinuity, purgeContinuity } from "./lib/continuity.js";
 import {
@@ -138,9 +139,11 @@ Usage:
   agentspine learn-context [root] [--group id] [--include-private] [--kind preference,goal]
   agentspine learn-evaluate [root]
   agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id [--expires-at date] --confirm-local-evaluation
-  agentspine learn-outcome <id> --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --evaluator id --source-digest sha256 --dataset-digest sha256 --case-count n --measurement objective|user-feedback|model-suggestion [--application id --delivery id] [--blocking-defects n]
+  agentspine learn-measurement <id> --learning id --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --measurement objective|user-feedback|model-suggestion --evaluator id --run id --source-digest sha256 --dataset-digest sha256 --case-count n --confirm-local-measurement
+  agentspine learn-outcome <learning-id> --id id --evaluation id --measurement-receipt id [--application id --delivery id]
   agentspine learn-status [root] [--persona id --user id --tenant id --project id --group id --task id]
   agentspine learn-delivery-purge [root] --confirm-local-purge
+  agentspine learn-measurement-purge [root] --confirm-local-purge
   agentspine learn-rollback <id> --reason text
   agentspine learn-delete <id>
   agentspine learn-config [root] [--auto-promote true|false] [--min-confidence 0.85] [--min-outcomes 2 --min-improvement 0.05 --canary-receipts 2 --canary-ttl-days 14]
@@ -467,11 +470,31 @@ export async function run(argv = process.argv.slice(2)) {
     }), json);
   }
 
+  if (command === "learn-measurement") {
+    return output(await recordLearningMeasurement({
+      root: flags.root || process.cwd(), id: positional[0], learningId: flags.learning,
+      evaluationId: flags.evaluation, phase: flags.phase, scope: learningScope(flags),
+      metric: {
+        name: flags.metric, direction: flags.direction, value: Number(flags.value),
+        blockingDefects: Number(flags["blocking-defects"] ?? 0)
+      },
+      measurement: {
+        kind: flags.measurement || "objective", evaluatorId: flags.evaluator,
+        runId: flags.run, sourceDigest: flags["source-digest"]
+      },
+      coverage: { datasetDigest: flags["dataset-digest"], caseCount: Number(flags["case-count"]) },
+      measuredAt: flags.at,
+      confirmLocalMeasurement: booleanFlag(flags["confirm-local-measurement"])
+    }), json);
+  }
+
   if (command === "learn-outcome") {
+    const lineage = flags["measurement-receipt"] || null;
     return output(await recordLearningOutcome({
       root: flags.root || process.cwd(), learningId: positional[0], id: flags.id,
-      phase: flags.phase, scope: learningScope(flags),
-      metric: {
+      evaluationId: flags.evaluation, measurementReceiptId: lineage,
+      applicationId: flags.application || null, deliveryId: flags.delivery || null,
+      ...(lineage ? {} : { phase: flags.phase, scope: learningScope(flags), metric: {
         name: flags.metric, direction: flags.direction, value: Number(flags.value),
         blockingDefects: Number(flags["blocking-defects"] ?? 0)
       },
@@ -479,14 +502,11 @@ export async function run(argv = process.argv.slice(2)) {
         kind: flags.measurement || "objective", evaluatorId: flags.evaluator,
         sourceDigest: flags["source-digest"] || null
       },
-      evaluationId: flags.evaluation,
-      applicationId: flags.application || null,
-      deliveryId: flags.delivery || null,
       coverage: {
         datasetDigest: flags["dataset-digest"],
         caseCount: Number(flags["case-count"])
       },
-      measuredAt: flags.at
+      measuredAt: flags.at })
     }), json);
   }
 
@@ -498,6 +518,13 @@ export async function run(argv = process.argv.slice(2)) {
 
   if (command === "learn-delivery-purge") {
     return output(await purgeStaleLearningApplications({
+      root: positional[0] || process.cwd(),
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
+    }), json);
+  }
+
+  if (command === "learn-measurement-purge") {
+    return output(await purgeStaleLearningMeasurements({
       root: positional[0] || process.cwd(),
       confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
     }), json);
@@ -1044,11 +1071,16 @@ export async function run(argv = process.argv.slice(2)) {
       const legacyCoverageReceipts = status.records.reduce((sum, item) => sum + item.legacyCoverageReceipts, 0);
       const provenanceBoundReceipts = status.records.reduce((sum, item) => sum + item.provenanceBoundReceipts, 0);
       const legacyProvenanceReceipts = status.records.reduce((sum, item) => sum + item.legacyProvenanceReceipts, 0);
+      const measurementReceipts = status.records.reduce((sum, item) => sum + item.measurementReceipts, 0);
+      const measurementLineageReceipts = status.records.reduce((sum, item) => sum + item.measurementLineageReceipts, 0);
+      const consumedMeasurementReceipts = status.records.reduce((sum, item) => sum + item.consumedMeasurementReceipts, 0);
+      const staleUnconsumedMeasurements = status.records.reduce((sum, item) => sum + item.staleUnconsumedMeasurements, 0);
+      const lineageBoundReceipts = status.records.reduce((sum, item) => sum + item.lineageBoundReceipts, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
         status: status.records.some((item) => item.canaryStatus === "stale")
           || unboundAfterReceipts > 0 || undeliveredAfterReceipts > 0 || unplannedOutcomeReceipts > 0
-          || stalePendingApplications > 0 ? "degraded" : "healthy",
+          || stalePendingApplications > 0 || staleUnconsumedMeasurements > 0 ? "degraded" : "healthy",
         candidates: status.records.length,
         activeCanaries: status.records.filter((item) => item.canaryStatus === "active").length,
         validatedCanaries: status.records.filter((item) => item.canaryStatus === "validated").length,
@@ -1064,6 +1096,11 @@ export async function run(argv = process.argv.slice(2)) {
         legacyCoverageReceipts,
         provenanceBoundReceipts,
         legacyProvenanceReceipts,
+        measurementReceipts,
+        measurementLineageReceipts,
+        consumedMeasurementReceipts,
+        staleUnconsumedMeasurements,
+        lineageBoundReceipts,
         unplannedOutcomeReceipts,
         boundAfterReceipts: status.records.reduce((sum, item) => sum + item.boundAfterReceipts, 0),
         unboundAfterReceipts,

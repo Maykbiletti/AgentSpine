@@ -68,13 +68,13 @@ Status: sparse local foundation implemented; host-specific notification adapters
 
 ## 5. Safe learning
 
-Status: local evidence, review, immutable fixed-benchmark contracts, turn-bound Canary application, contract-bound outcome comparison, supersession, and rollback workflow implemented.
+Status: local evidence, review, immutable fixed-benchmark contracts, globally unique measurement-run lineage, turn-bound Canary application, single-use outcome comparison, supersession, and rollback workflow implemented.
 
 - observation candidates remain outside context until accepted;
 - evidence, source fingerprints, confidence, and every prior candidate version are retained;
 - new information changes relevance through explicit supersession instead of erasure;
 - automatic promotion is default-off, thresholded, and limited to project facts and references;
-- low-risk behavior Canaries require content-free projection, matching model-stop delivery receipts, the exact frozen dataset digest, contracted minimum case coverage, unique evaluator-result provenance and distinct consumed-preflight turns before after-results can validate them;
+- low-risk behavior Canaries require content-free projection, matching model-stop delivery receipts, the exact frozen dataset digest, contracted minimum case coverage, globally unique source and evaluator/run lineage, and distinct consumed-preflight turns before after-results can validate them;
 - acceptance proof and rollback are audited;
 - code, secrets, billing, permissions, and production access remain approval-bound.
 
