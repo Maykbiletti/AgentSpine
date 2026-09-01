@@ -48,7 +48,7 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
     },
     measurement: {
       kind: extra.kind || "objective", evaluatorId,
-      sourceDigest: extra.sourceDigest || null
+      sourceDigest: Object.hasOwn(extra, "sourceDigest") ? extra.sourceDigest : hash(`measurement:${id}`)
     },
     coverage: {
       datasetDigest: extra.datasetDigest || syntheticDatasetDigest,
@@ -291,7 +291,12 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
   await addLearningEvidence({ root, id: "learning:coverage", evidence: evidence("evidence:coverage-two", 0.97) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
   const registered = await evaluation(root, "learning:coverage");
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v2");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v3");
+
+  await assert.rejects(recordLearningOutcome({
+    root, learningId: "learning:coverage",
+    ...outcome("outcome:provenance-missing", "before", 0.4, "evaluator:test-a", { sourceDigest: null })
+  }), /sourceDigest is required/);
 
   await assert.rejects(recordLearningOutcome({
     root, learningId: "learning:coverage",
@@ -308,6 +313,11 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
 
   await recordLearningOutcome({ root, learningId: "learning:coverage",
     ...outcome("outcome:coverage-before-a", "before", 0.4, "evaluator:test-a") });
+  await assert.rejects(recordLearningOutcome({ root, learningId: "learning:coverage",
+    ...outcome("outcome:coverage-replay", "before", 0.5, "evaluator:test-b", {
+      sourceDigest: hash("measurement:outcome:coverage-before-a")
+    })
+  }), /provenance cannot be replayed/);
   await recordLearningOutcome({ root, learningId: "learning:coverage",
     ...outcome("outcome:coverage-before-b", "before", 0.5, "evaluator:test-b") });
   const promoted = await evaluateLearning({ root });
@@ -323,12 +333,19 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
     root, learningId: "learning:coverage", applicationId: applied.id, deliveryId: applied.deliveryId,
     ...outcome("outcome:coverage-after-valid", "after", 0.8, "evaluator:test-a")
   });
-  assert.equal(recorded.receipt.schema, "agentspine.learning-outcome/v5");
+  assert.equal(recorded.receipt.schema, "agentspine.learning-outcome/v6");
   assert.deepEqual(recorded.receipt.coverage, {
     datasetDigest: syntheticDatasetDigest, caseCount: 12, authority: "context-only"
   });
   assert.equal(JSON.stringify(recorded.receipt).includes("fixed synthetic coverage strategy"), false);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+
+  const stored = await loadLearning(root);
+  const original = stored.learning.outcomes.find((item) => item.id === "outcome:coverage-before-a");
+  const { digest: _storedDigest, ...replayedPayload } = { ...original, id: "outcome:coverage-corrupt-replay" };
+  stored.learning.outcomes.push({ ...replayedPayload, digest: hash(JSON.stringify(replayedPayload)) });
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /provenance is missing or replayed/);
 });
 
 test("outcome-bound behavior learning completes before, canary, after, and validation with objective evidence", async (t) => {
@@ -632,7 +649,7 @@ test("parallel duplicate outcome receipts are idempotent and remain one immutabl
   assert.equal((await loadLearning(root)).learning.outcomes.length, 1);
 });
 
-test("0.14 evaluation contracts remain readable while new contracts require case coverage", async (t) => {
+test("0.14 and 0.15 evaluation contracts remain readable while new contracts require provenance", async (t) => {
   const { root } = await fixture(t);
   await proposeLearning({
     root, id: "learning:legacy-contract", kind: "behavior", claim: "Use the legacy synthetic strategy.",
@@ -640,8 +657,8 @@ test("0.14 evaluation contracts remain readable while new contracts require case
   });
   await evaluation(root, "learning:legacy-contract");
   const { learning, learningPath } = await loadLearning(root);
-  const { digest: _digest, ...v2Payload } = learning.evaluations[0];
-  const v1Payload = { ...v2Payload, schema: "agentspine.learning-evaluation/v1" };
+  const { digest: _digest, ...currentPayload } = learning.evaluations[0];
+  const v1Payload = { ...currentPayload, schema: "agentspine.learning-evaluation/v1" };
   learning.evaluations[0] = { ...v1Payload, digest: hash(JSON.stringify(v1Payload)) };
   await writeFile(learningPath, `${JSON.stringify(learning)}\n`, "utf8");
   assert.equal((await loadLearning(root)).learning.evaluations[0].schema, "agentspine.learning-evaluation/v1");
@@ -650,6 +667,26 @@ test("0.14 evaluation contracts remain readable while new contracts require case
     ...outcome("outcome:legacy-contract", "before", 0.4, "evaluator:test-a"), coverage: null
   });
   assert.equal(legacyReceipt.receipt.schema, "agentspine.learning-outcome/v4");
+
+  await proposeLearning({
+    root, id: "learning:coverage-contract", kind: "behavior", claim: "Use the 0.15 synthetic strategy.",
+    scope: scopedTurn, evidence: evidence("evidence:coverage-contract")
+  });
+  await evaluation(root, "learning:coverage-contract", { id: "evaluation:coverage-contract" });
+  const coverageState = await loadLearning(root);
+  const current = coverageState.learning.evaluations.find((item) => item.id === "evaluation:coverage-contract");
+  const { digest: _coverageDigest, ...v3Payload } = current;
+  const v2Payload = { ...v3Payload, schema: "agentspine.learning-evaluation/v2" };
+  coverageState.learning.evaluations = coverageState.learning.evaluations.map((item) => item.id === current.id
+    ? { ...v2Payload, digest: hash(JSON.stringify(v2Payload)) } : item);
+  await writeFile(coverageState.learningPath, `${JSON.stringify(coverageState.learning)}\n`, "utf8");
+  const coverageReceipt = await recordLearningOutcome({
+    root, learningId: "learning:coverage-contract",
+    ...outcome("outcome:coverage-contract", "before", 0.4, "evaluator:test-a", {
+      evaluationId: "evaluation:coverage-contract", sourceDigest: null
+    })
+  });
+  assert.equal(coverageReceipt.receipt.schema, "agentspine.learning-outcome/v5");
 });
 
 test("0.10 learning state upgrades in place and corrupt outcome receipts fail closed", async (t) => {
@@ -776,7 +813,8 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
   runCli([
     "learn-outcome", "learning:cli-outcome", "--root", root, "--id", "outcome:cli-before",
     "--evaluation", "evaluation:cli", "--phase", "before", "--metric", "fixed-task-success", "--direction", "higher", "--value", "0.4",
-    "--measurement", "objective", "--evaluator", "evaluator:cli", "--dataset-digest", hash("cli-dataset"), "--case-count", "8",
+    "--measurement", "objective", "--evaluator", "evaluator:cli", "--source-digest", hash("cli-source"),
+    "--dataset-digest", hash("cli-dataset"), "--case-count", "8",
     "--persona", "agent:synthetic",
     "--user", "user:synthetic", "--tenant", "tenant:synthetic", "--project", "project:synthetic",
     "--task", "task:synthetic", "--json"
@@ -788,5 +826,7 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
   assert.equal(status.records[0].beforeReceipts, 1);
   assert.equal(status.records[0].coverageBoundReceipts, 1);
   assert.equal(status.records[0].legacyCoverageReceipts, 0);
+  assert.equal(status.records[0].provenanceBoundReceipts, 1);
+  assert.equal(status.records[0].legacyProvenanceReceipts, 0);
   assert.equal(status.records[0].canaryStatus, "not-applicable");
 });

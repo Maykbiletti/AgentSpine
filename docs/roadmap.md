@@ -74,7 +74,7 @@ Status: local evidence, review, immutable fixed-benchmark contracts, turn-bound 
 - evidence, source fingerprints, confidence, and every prior candidate version are retained;
 - new information changes relevance through explicit supersession instead of erasure;
 - automatic promotion is default-off, thresholded, and limited to project facts and references;
-- low-risk behavior Canaries require content-free projection, matching model-stop delivery receipts, the exact frozen dataset digest, and the contracted minimum case coverage from distinct consumed-preflight turns before after-results can validate them;
+- low-risk behavior Canaries require content-free projection, matching model-stop delivery receipts, the exact frozen dataset digest, contracted minimum case coverage, unique evaluator-result provenance and distinct consumed-preflight turns before after-results can validate them;
 - acceptance proof and rollback are audited;
 - code, secrets, billing, permissions, and production access remain approval-bound.
 

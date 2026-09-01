@@ -138,7 +138,7 @@ Usage:
   agentspine learn-context [root] [--group id] [--include-private] [--kind preference,goal]
   agentspine learn-evaluate [root]
   agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id [--expires-at date] --confirm-local-evaluation
-  agentspine learn-outcome <id> --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --evaluator id --dataset-digest sha256 --case-count n --measurement objective|user-feedback|model-suggestion [--application id --delivery id] [--blocking-defects n]
+  agentspine learn-outcome <id> --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --evaluator id --source-digest sha256 --dataset-digest sha256 --case-count n --measurement objective|user-feedback|model-suggestion [--application id --delivery id] [--blocking-defects n]
   agentspine learn-status [root] [--persona id --user id --tenant id --project id --group id --task id]
   agentspine learn-delivery-purge [root] --confirm-local-purge
   agentspine learn-rollback <id> --reason text
@@ -1042,6 +1042,8 @@ export async function run(argv = process.argv.slice(2)) {
       const plannedOutcomeReceipts = status.records.reduce((sum, item) => sum + item.plannedOutcomeReceipts, 0);
       const coverageBoundReceipts = status.records.reduce((sum, item) => sum + item.coverageBoundReceipts, 0);
       const legacyCoverageReceipts = status.records.reduce((sum, item) => sum + item.legacyCoverageReceipts, 0);
+      const provenanceBoundReceipts = status.records.reduce((sum, item) => sum + item.provenanceBoundReceipts, 0);
+      const legacyProvenanceReceipts = status.records.reduce((sum, item) => sum + item.legacyProvenanceReceipts, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
         status: status.records.some((item) => item.canaryStatus === "stale")
@@ -1060,6 +1062,8 @@ export async function run(argv = process.argv.slice(2)) {
         plannedOutcomeReceipts,
         coverageBoundReceipts,
         legacyCoverageReceipts,
+        provenanceBoundReceipts,
+        legacyProvenanceReceipts,
         unplannedOutcomeReceipts,
         boundAfterReceipts: status.records.reduce((sum, item) => sum + item.boundAfterReceipts, 0),
         unboundAfterReceipts,

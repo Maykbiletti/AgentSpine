@@ -111,14 +111,14 @@ function normalizeState(value, root) {
     const candidate = normalized.candidates.find((item) => item.id === contract.learningId);
     return !candidate || !scopeContains(candidate.scope, contract.scope);
   })) throw new Error("learning evaluation scope is invalid; run the audit before learning");
-  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(receipt.schema)
+  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(receipt.schema)
     && receipt.phase === "after" && !normalized.applications.some((application) => application.id === receipt.applicationId
       && application.learningId === receipt.learningId && exactScope(application.scope, receipt.scope)
       && new Date(receipt.measuredAt).getTime() >= new Date(application.projectedAt).getTime()
       && new Date(receipt.measuredAt).getTime() <= new Date(application.expiresAt).getTime()))) {
     throw new Error("learning outcome application binding is invalid; run the audit before learning");
   }
-  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(receipt.schema)
+  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(receipt.schema)
     && !normalized.evaluations.some((contract) => contract.id === receipt.evaluationId
       && contract.learningId === receipt.learningId && exactScope(contract.scope, receipt.scope)
       && contract.metric.name === receipt.metric.name && contract.metric.direction === receipt.metric.direction
@@ -127,14 +127,24 @@ function normalizeState(value, root) {
       && new Date(receipt.measuredAt).getTime() <= new Date(contract.expiresAt).getTime()))) {
     throw new Error("learning outcome evaluation binding is invalid; run the audit before learning");
   }
-  if (normalized.outcomes.some((receipt) => receipt.schema === "agentspine.learning-outcome/v5"
+  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(receipt.schema)
     && !normalized.evaluations.some((contract) => contract.id === receipt.evaluationId
-      && contract.schema === "agentspine.learning-evaluation/v2"
+      && ((receipt.schema === "agentspine.learning-outcome/v5" && contract.schema === "agentspine.learning-evaluation/v2")
+        || (receipt.schema === "agentspine.learning-outcome/v6" && contract.schema === "agentspine.learning-evaluation/v3"))
       && receipt.coverage?.datasetDigest === contract.benchmark.datasetDigest
       && receipt.coverage?.caseCount >= contract.benchmark.minCases))) {
     throw new Error("learning outcome coverage binding is invalid; run the audit before learning");
   }
-  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(receipt.schema)
+  const provenanceKeys = new Set();
+  for (const receipt of normalized.outcomes) {
+    if (receipt.schema !== "agentspine.learning-outcome/v6") continue;
+    const key = `${receipt.evaluationId}\0${receipt.measurement?.sourceDigest || ""}`;
+    if (!DIGEST_RE.test(receipt.measurement?.sourceDigest || "") || provenanceKeys.has(key)) {
+      throw new Error("learning outcome provenance is missing or replayed; run the audit before learning");
+    }
+    provenanceKeys.add(key);
+  }
+  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(receipt.schema)
     && (receipt.phase === "after" ? !normalized.deliveries.some((delivery) => delivery.id === receipt.deliveryId
       && delivery.applicationId === receipt.applicationId && delivery.learningId === receipt.learningId
       && exactScope(delivery.scope, receipt.scope)
@@ -204,7 +214,8 @@ function storedOutcomeStructure(receipt) {
   const planned = receipt.schema === "agentspine.learning-outcome/v3";
   const delivered = receipt.schema === "agentspine.learning-outcome/v4";
   const covered = receipt.schema === "agentspine.learning-outcome/v5";
-  return (legacy || bound || planned || delivered || covered) && ID_RE.test(receipt.id || "")
+  const provenanceBound = receipt.schema === "agentspine.learning-outcome/v6";
+  return (legacy || bound || planned || delivered || covered || provenanceBound) && ID_RE.test(receipt.id || "")
     && ID_RE.test(receipt.learningId || "") && OUTCOME_PHASES.has(receipt.phase)
     && SCOPE_FIELDS.every((field) => receipt.scope?.[field] === null || ID_RE.test(receipt.scope?.[field] || ""))
     && typeof receipt.metric?.name === "string" && receipt.metric.name.length > 0
@@ -215,11 +226,12 @@ function storedOutcomeStructure(receipt) {
     && (receipt.measurement?.sourceDigest === null || DIGEST_RE.test(receipt.measurement?.sourceDigest || ""))
     && (legacy ? receipt.applicationId === undefined : (receipt.phase === "before"
       ? receipt.applicationId === null : ID_RE.test(receipt.applicationId || "")))
-    && (!(planned || delivered || covered) || ID_RE.test(receipt.evaluationId || ""))
-    && (!(delivered || covered) || (receipt.phase === "before" ? receipt.deliveryId === null : ID_RE.test(receipt.deliveryId || "")))
-    && (!covered || (DIGEST_RE.test(receipt.coverage?.datasetDigest || "")
+    && (!(planned || delivered || covered || provenanceBound) || ID_RE.test(receipt.evaluationId || ""))
+    && (!(delivered || covered || provenanceBound) || (receipt.phase === "before" ? receipt.deliveryId === null : ID_RE.test(receipt.deliveryId || "")))
+    && (!(covered || provenanceBound) || (DIGEST_RE.test(receipt.coverage?.datasetDigest || "")
       && Number.isInteger(receipt.coverage?.caseCount) && receipt.coverage.caseCount >= 1
       && receipt.coverage.caseCount <= 1000000 && receipt.coverage?.authority === "context-only"))
+    && (!provenanceBound || DIGEST_RE.test(receipt.measurement?.sourceDigest || ""))
     && receipt.authority === "context-only" && receipt.measurement?.authority === "context-only"
     && Number.isFinite(new Date(receipt.measuredAt).getTime()) && receipt.digest === digest(payload);
 }
@@ -235,7 +247,7 @@ function evaluationPayload({ id, learningId, scope, metric, benchmark, evaluator
 function storedEvaluationStructure(contract) {
   if (!contract || typeof contract !== "object" || Array.isArray(contract)) return false;
   const payload = evaluationPayload(contract);
-  return ["agentspine.learning-evaluation/v1", "agentspine.learning-evaluation/v2"].includes(contract.schema)
+  return ["agentspine.learning-evaluation/v1", "agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3"].includes(contract.schema)
     && ID_RE.test(contract.id || "") && ID_RE.test(contract.learningId || "")
     && SCOPE_FIELDS.every((field) => contract.scope?.[field] === null || ID_RE.test(contract.scope?.[field] || ""))
     && typeof contract.metric?.name === "string" && contract.metric.name.length > 0
@@ -698,7 +710,7 @@ export async function registerLearningEvaluation({
       throw new Error("evaluation expiry must be in the future and no more than 365 days away");
     }
     const payload = evaluationPayload({
-      schema: "agentspine.learning-evaluation/v2",
+      schema: "agentspine.learning-evaluation/v3",
       id, learningId, scope: normalizedScope, metric: { name, direction },
       benchmark: { ...digests, minCases: integer(benchmark?.minCases, "evaluation.benchmark.minCases", 1, 1000000) },
       evaluatorIds: normalizedEvaluators,
@@ -736,10 +748,10 @@ function outcomePayload({ schema = "agentspine.learning-outcome/v1", id, learnin
     scope,
     metric,
     measurement,
-    ...(["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(schema) ? { applicationId } : {}),
-    ...(["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(schema) ? { evaluationId } : {}),
-    ...(["agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(schema) ? { deliveryId } : {}),
-    ...(schema === "agentspine.learning-outcome/v5" ? { coverage } : {}),
+    ...(["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(schema) ? { applicationId } : {}),
+    ...(["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(schema) ? { evaluationId } : {}),
+    ...(["agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(schema) ? { deliveryId } : {}),
+    ...(["agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(schema) ? { coverage } : {}),
     measuredAt,
     authority: "context-only"
   };
@@ -777,7 +789,11 @@ function normalizeOutcome(input, candidate, timestamp, application = null, deliv
     throw new Error("outcome.measurement.sourceDigest must be a SHA-256 digest");
   }
   const measurement = { kind, evaluatorId, sourceDigest, authority: "context-only" };
-  const coverageRequired = evaluation.schema === "agentspine.learning-evaluation/v2";
+  const provenanceRequired = evaluation.schema === "agentspine.learning-evaluation/v3";
+  if (provenanceRequired && !DIGEST_RE.test(sourceDigest || "")) {
+    throw new Error("outcome.measurement.sourceDigest is required by the evaluation contract");
+  }
+  const coverageRequired = ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3"].includes(evaluation.schema);
   const coverage = coverageRequired ? {
     datasetDigest: input.coverage?.datasetDigest,
     caseCount: integer(input.coverage?.caseCount, "outcome.coverage.caseCount", 1, 1000000),
@@ -813,7 +829,8 @@ function normalizeOutcome(input, candidate, timestamp, application = null, deliv
       throw new Error("after outcome predates the completed model-turn delivery");
     }
   }
-  const payload = outcomePayload({ schema: coverageRequired ? "agentspine.learning-outcome/v5" : "agentspine.learning-outcome/v4",
+  const payload = outcomePayload({ schema: provenanceRequired ? "agentspine.learning-outcome/v6"
+    : coverageRequired ? "agentspine.learning-outcome/v5" : "agentspine.learning-outcome/v4",
     id, learningId: candidate.id, phase, scope, metric, measurement, applicationId, deliveryId,
     evaluationId: evaluation.id, coverage, measuredAt });
   return { ...payload, digest: digest(payload) };
@@ -943,6 +960,12 @@ function outcomeFresh(receipt, config, now) {
 }
 
 function outcomeMatchesContract(receipt, contract) {
+  if (contract.schema === "agentspine.learning-evaluation/v3") {
+    return receipt.schema === "agentspine.learning-outcome/v6"
+      && DIGEST_RE.test(receipt.measurement?.sourceDigest || "")
+      && receipt.coverage?.datasetDigest === contract.benchmark.datasetDigest
+      && receipt.coverage?.caseCount >= contract.benchmark.minCases;
+  }
   if (contract.schema === "agentspine.learning-evaluation/v2") {
     return receipt.schema === "agentspine.learning-outcome/v5"
       && receipt.coverage?.datasetDigest === contract.benchmark.datasetDigest
@@ -1090,6 +1113,11 @@ export async function recordLearningOutcome({ root = process.cwd(), id, learning
       measuredAt }, candidate, timestamp, application, delivery, evaluation);
     const duplicate = state.outcomes.find((item) => item.digest === receipt.digest);
     if (duplicate) return { receipt: duplicate, candidate, decision: "unchanged", learningPath, unchanged: true };
+    if (receipt.schema === "agentspine.learning-outcome/v6" && state.outcomes.some((item) =>
+      item.schema === "agentspine.learning-outcome/v6" && item.evaluationId === receipt.evaluationId
+      && item.measurement.sourceDigest === receipt.measurement.sourceDigest)) {
+      throw new Error("outcome measurement provenance cannot be replayed within one evaluation contract");
+    }
     state.outcomes.push(receipt);
     state.outcomes.sort((a, b) => a.id.localeCompare(b.id));
     const reconciled = phase === "after" ? reconcileCanary(state, candidate, timestamp) : { candidate, decision: "recorded", restored: [] };
@@ -1130,7 +1158,7 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
               metric: { name: receipts[0].metric.name, direction: receipts[0].metric.direction },
               evaluationId: contract.id,
               evaluationDigest: contract.digest,
-              coverage: contract.schema === "agentspine.learning-evaluation/v2" ? {
+              coverage: ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3"].includes(contract.schema) ? {
                 datasetDigest: contract.benchmark.datasetDigest,
                 minCases: contract.benchmark.minCases,
                 authority: "context-only"
@@ -1337,15 +1365,21 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           && applications.some((application) => application.id === item.applicationId)).length,
         deliveredAfterReceipts: outcomes.filter((item) => item.phase === "after" && item.deliveryId
           && deliveries.some((delivery) => delivery.id === item.deliveryId)).length,
-        plannedOutcomeReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(item.schema)
+        plannedOutcomeReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(item.schema)
           && evaluations.some((contract) => contract.id === item.evaluationId)).length,
-        coverageBoundReceipts: outcomes.filter((item) => item.schema === "agentspine.learning-outcome/v5"
+        coverageBoundReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(item.schema)
           && evaluations.some((contract) => contract.id === item.evaluationId
-            && contract.schema === "agentspine.learning-evaluation/v2"
+            && ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3"].includes(contract.schema)
             && item.coverage?.datasetDigest === contract.benchmark.datasetDigest
             && item.coverage?.caseCount >= contract.benchmark.minCases)).length,
+        provenanceBoundReceipts: outcomes.filter((item) => item.schema === "agentspine.learning-outcome/v6"
+          && DIGEST_RE.test(item.measurement?.sourceDigest || "")
+          && evaluations.some((contract) => contract.id === item.evaluationId
+            && contract.schema === "agentspine.learning-evaluation/v3")).length,
         legacyCoverageReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v1", "agentspine.learning-outcome/v2",
           "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(item.schema)).length,
+        legacyProvenanceReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v1", "agentspine.learning-outcome/v2",
+          "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(item.schema)).length,
         evaluationContracts: evaluations.length,
         activeEvaluationId: canary?.evaluationId || [...evaluations]
           .filter((contract) => new Date(contract.expiresAt).getTime() >= new Date(timestamp).getTime())
@@ -1532,19 +1566,31 @@ export function learningFindings(learning, graph) {
     deliveryIds.add(receipt.id);
   }
   for (const receipt of learning.outcomes || []) {
-    if (["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(receipt.schema) && receipt.phase === "after"
+    if (["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(receipt.schema) && receipt.phase === "after"
       && !applicationIds.has(receipt.applicationId)) findings.push(`unbound-outcome:${receipt.id}`);
-    if (["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(receipt.schema) && !evaluationIds.has(receipt.evaluationId)) {
+    if (["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(receipt.schema) && !evaluationIds.has(receipt.evaluationId)) {
       findings.push(`unplanned-outcome:${receipt.id}`);
     }
-    if (["agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5"].includes(receipt.schema) && receipt.phase === "after"
+    if (["agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(receipt.schema) && receipt.phase === "after"
       && !deliveryIds.has(receipt.deliveryId)) findings.push(`undelivered-outcome:${receipt.id}`);
-    if (receipt.schema === "agentspine.learning-outcome/v5") {
+    if (["agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6"].includes(receipt.schema)) {
       const contract = (learning.evaluations || []).find((item) => item.id === receipt.evaluationId);
-      if (!contract || contract.schema !== "agentspine.learning-evaluation/v2"
+      if (!contract
+        || (receipt.schema === "agentspine.learning-outcome/v5" && contract.schema !== "agentspine.learning-evaluation/v2")
+        || (receipt.schema === "agentspine.learning-outcome/v6" && contract.schema !== "agentspine.learning-evaluation/v3")
         || receipt.coverage?.datasetDigest !== contract.benchmark.datasetDigest
         || receipt.coverage?.caseCount < contract.benchmark.minCases) findings.push(`invalid-coverage:${receipt.id}`);
     }
+    if (receipt.schema === "agentspine.learning-outcome/v6" && !DIGEST_RE.test(receipt.measurement?.sourceDigest || "")) {
+      findings.push(`invalid-provenance:${receipt.id}`);
+    }
+  }
+  const provenanceKeys = new Set();
+  for (const receipt of learning.outcomes || []) {
+    if (receipt.schema !== "agentspine.learning-outcome/v6") continue;
+    const key = `${receipt.evaluationId}\0${receipt.measurement.sourceDigest}`;
+    if (provenanceKeys.has(key)) findings.push(`replayed-provenance:${receipt.id}`);
+    provenanceKeys.add(key);
   }
   for (const entry of learning.history) {
     const value = entry.value || {};
