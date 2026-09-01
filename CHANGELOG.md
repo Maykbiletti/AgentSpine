@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-01
+
+### Added
+
+- `agentspine.learning-revalidation-window/v4` precommits a content-free measurement trial for every renewal slot: evaluator ID, principal root, provider run ID, frozen benchmark digest and exact case count are fixed before projection.
+- `agentspine.learning-application/v4` admissions and `agentspine.learning-validation/v5` leases retain the exact trial, application, delivery and measurement lineage that extended the evidence lease.
+
+### Changed
+
+- New renewal windows select `first-admitted-trials`; status and Doctor distinguish precommitted trials, admitted applications and completed deliveries.
+- Revalidation-window v1-v3, application v1-v3 and validation-lease v1-v4 history remains readable.
+
+### Security
+
+- A failed evaluator run cannot be discarded and repeated under a later high-scoring run ID. Run substitution, evaluator aliasing, case-count drift, trial tampering, omission and replay fail closed while blocking defects still override every aggregate score.
+
 ## [0.24.0] - 2026-09-01
 
 ### Added
@@ -599,7 +615,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.21.0...v0.22.0

@@ -76,7 +76,7 @@ Status: local evidence, review, immutable fixed-benchmark contracts, a locally c
 - automatic promotion is default-off, thresholded, and limited to project facts and references;
 - low-risk behavior Canaries require content-free projection, matching model-stop delivery receipts, the exact frozen dataset digest, contracted minimum case coverage, globally unique source, evaluator/run and evaluator-root/run lineage, the same root-bound before/after evaluator cohort, one counted outcome per evaluator root and phase, and distinct consumed-preflight turns before after-results can validate them;
 - validated behavior remains in context only while its exact content-free evidence lease and evaluator-root binding are current; expiry or revocation triggers pre-turn suppression and atomic rollback;
-- renewal atomically admits the first exact-scope projections into deterministic evaluator-root slots under the unchanged contract; withheld completion, later substitute turns, timestamps, replayed measurements and model assertions cannot extend evidence;
+- renewal precommits evaluator roots, provider run IDs, the benchmark digest and exact case coverage, then atomically admits the first exact-scope projections into those trial slots; withheld completion, later substitute turns or runs, timestamps, replayed measurements and model assertions cannot extend evidence;
 - acceptance proof and rollback are audited;
 - code, secrets, billing, permissions, and production access remain approval-bound.
 
