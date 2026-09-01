@@ -91,7 +91,7 @@ claude --plugin-dir .
 ```
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
-Version `0.11.1` retains the `agentspine.preflight/v2` pre-answer contract, self-healing authenticated persona-to-graph reconciliation, and provider-neutral outcome-bound behavior loop. The installed hook now reuses one bounded source catalog through scope, continuity, learning, attention, persona, relationship, and briefing reads. Canonical Windows home identities are excluded from recursive project enumeration even when the home contains a project marker, while direct host-native rules remain fully injected and byte-preserved. Exact roster groups remain context-only and isolated; model suggestions never count as promotion evidence; blocking defects and regressions still roll back canaries. Claude keeps an 8 KiB instruction standard with one signed, revalidated overflow up to 16 KiB. Claude uses `hooks/hooks.json`; Codex ships the separate validated `hooks/codex.json` adapter. Fresh-install and upgrade checks prove package containment and entrypoint behavior; actual hook discovery and trust remain host-controlled and must be inspected in the live host. See [safe learning](docs/learning.md), [pre-answer recall gate](docs/preflight-recall.md), and [durable gateway worker](docs/gateway-runtime.md).
+Version `0.11.2` retains the `agentspine.preflight/v2` pre-answer contract, self-healing authenticated persona-to-graph reconciliation, and provider-neutral outcome-bound behavior loop. The installed hook reuses one bounded source catalog through scope, continuity, learning, attention, persona, relationship, and briefing reads. Canonical Windows home identities are excluded from recursive project enumeration even when the home contains a project marker. When the working root is exactly the user home, the configured AgentSpine state subtree is an explicit scanner exclusion, so authenticated state remains usable without entering context; state inside an ordinary nested project still fails closed. Direct host-native rules remain fully injected and byte-preserved. Exact roster groups remain context-only and isolated; model suggestions never count as promotion evidence; blocking defects and regressions still roll back canaries. Claude keeps an 8 KiB instruction standard with one signed, revalidated overflow up to 16 KiB. Claude uses `hooks/hooks.json`; Codex ships the separate validated `hooks/codex.json` adapter. Fresh-install and upgrade checks prove package containment and entrypoint behavior; actual hook discovery and trust remain host-controlled and must be inspected in the live host. See [safe learning](docs/learning.md), [pre-answer recall gate](docs/preflight-recall.md), and [durable gateway worker](docs/gateway-runtime.md).
 
 Verify the installed registration from a checkout with:
 
@@ -141,7 +141,7 @@ AgentSpine's first release is intentionally narrow and testable:
 
 - source Markdown is opened read-only;
 - symlinks are not followed during discovery;
-- generated state is stored outside the project;
+- generated state is stored outside ordinary projects; an exact user-home root may contain its explicitly scan-excluded AgentSpine state subtree;
 - every source receives a SHA-256 fingerprint, byte size, path, layer, and provenance;
 - native host precedence is retained rather than flattened;
 - broken links and competing candidates are exposed as findings, never auto-resolved;

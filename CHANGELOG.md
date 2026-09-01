@@ -4,6 +4,17 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-09-01
+
+### Fixed
+
+- Exact user-home working directories may keep authenticated AgentSpine state below the home only when that state root is explicitly excluded from source discovery; the installed hook no longer deadlocks on its own signing identity.
+- Generic catalog discovery now prunes the configured AgentSpine state subtree before opening Markdown, so signing keys, persona rosters, receipts, and generated state cannot become project context.
+
+### Security
+
+- The exception is limited to an exact OS/`HOME`/`USERPROFILE` home root. State inside an ordinary nested project remains fail-closed, symlinks remain untraversed, and user Markdown remains byte-preserved.
+
 ## [0.11.1] - 2026-09-01
 
 ### Fixed
@@ -364,7 +375,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/Maykbiletti/AgentSpine/compare/v0.10.0...v0.10.1

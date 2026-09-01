@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, opendir, readFile, realpath, stat } from "node:fs/promises";
-import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const SKIP_DIRS = new Set([
   ".git", ".hg", ".svn", ".next", ".nuxt", ".turbo", ".venv",
@@ -132,7 +132,12 @@ export function extractMarkdownLinks(text, filePath, root) {
   return [...links].sort();
 }
 
-async function walk(directory, found) {
+function isInside(parent, child) {
+  const value = relative(parent, child);
+  return value === "" || (!isAbsolute(value) && !value.startsWith(`..${sep}`) && value !== "..");
+}
+
+async function walk(directory, found, excludedRoots) {
   const entries = [];
   for await (const entry of await opendir(directory)) entries.push(entry);
   entries.sort((a, b) => a.name.localeCompare(b.name));
@@ -140,16 +145,19 @@ async function walk(directory, found) {
     if (entry.isSymbolicLink()) continue;
     const fullPath = join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name)) await walk(fullPath, found);
+      if (!SKIP_DIRS.has(entry.name) && !excludedRoots.some((root) => isInside(root, fullPath))) {
+        await walk(fullPath, found, excludedRoots);
+      }
     } else if (entry.isFile() && extname(entry.name).toLowerCase() === ".md") {
       found.push(fullPath);
     }
   }
 }
 
-export async function discoverDocuments(root) {
+export async function discoverDocuments(root, { excludeRoots = [] } = {}) {
   const files = [];
-  await walk(root, files);
+  const excludedRoots = excludeRoots.map((path) => resolve(path)).filter((path) => isInside(root, path));
+  await walk(root, files, excludedRoots);
   const documents = new Array(files.length);
   let cursor = 0;
   async function worker() {

@@ -6,6 +6,7 @@ import { ancestorsBetween, canonicalPath, isInside, stateRoot } from "./paths.js
 import { indexExplicitDocuments } from "./documents.js";
 import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { purgeIndexedMemoryCache, resolveIndexedMemory } from "./indexed-memory.js";
+import { catalogScanPolicy } from "./catalog.js";
 
 export const SOURCE_REGISTRY_SCHEMA = "agentspine.source-roots/v1";
 const MAX_REGISTRY_BYTES = 1024 * 1024;
@@ -471,6 +472,7 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   };
   const catalog = {
     schema: "agentspine.catalog/v1", generatedAt: new Date().toISOString(), root: projectRoot,
+    scanPolicy: catalogScanPolicy(projectRoot, env),
     preservation: "source-files-are-read-only", documents, conflicts: [], sourceRegistry: diagnostics,
     summary: { total: documents.length, protected: documents.filter((item) => item.protected).length, conflicts: 0,
       byLayer: Object.fromEntries([...new Set(documents.map((item) => item.layer))].sort().map((layer) => [layer, documents.filter((item) => item.layer === layer).length])) }

@@ -49,7 +49,7 @@ test("installed hook never recursively scans a Windows-profile home even when it
   const root = join(workspace, "synthetic-user-root");
   const serviceHome = join(workspace, "synthetic-service-home");
   const claudeHome = join(serviceHome, ".claude");
-  const state = join(workspace, "state");
+  const state = join(root, ".agentspine");
   await Promise.all([mkdir(root, { recursive: true }), mkdir(claudeHome, { recursive: true }),
     mkdir(state, { recursive: true })]);
   await mkdir(join(root, ".git"));
@@ -57,6 +57,8 @@ test("installed hook never recursively scans a Windows-profile home even when it
 
   const rules = "# Synthetic local rules\n\nKeep this exact rule available.\n";
   await writeFile(join(root, "CLAUDE.md"), rules, "utf8");
+  const privateState = "# Synthetic private state\n\nNever index this file.\n";
+  await writeFile(join(state, "PRIVATE.md"), privateState, "utf8");
   const decoy = join(root, "large-cloud-shaped-tree");
   await mkdir(decoy);
   await Promise.all(Array.from({ length: 256 }, async (_, index) => {
@@ -84,8 +86,10 @@ test("installed hook never recursively scans a Windows-profile home even when it
   assert.equal(context.sourceResolution.broadHomeScan, false);
   assert.deepEqual(context.briefing.sources.documents.map((item) => item.path), ["claude:project/CLAUDE.md"]);
   assert.equal(context.preflight.briefing.instructions[0].content, rules);
+  assert.equal(JSON.stringify(context).includes("Synthetic private state"), false);
   assert.equal(elapsedMs < 5000, true, `unmarked hook took ${elapsedMs} ms`);
   assert.deepEqual(await readFile(join(root, "CLAUDE.md")), before);
+  assert.equal(await readFile(join(state, "PRIVATE.md"), "utf8"), privateState);
 });
 
 test("installed BLUN hook keeps the full briefing out of the runtime message", async (t) => {

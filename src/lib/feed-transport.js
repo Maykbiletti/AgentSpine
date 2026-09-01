@@ -15,7 +15,7 @@ import {
 import {
   httpsObjectUrl, putHttpsSnapshot, validateHttpsObjectBase
 } from "./object-transport.js";
-import { isInside, projectStateDir } from "./paths.js";
+import { projectStateDir, statePathIsScanExcluded } from "./paths.js";
 
 const SCHEMA = "agentspine.feed/v1";
 const STATE_SCHEMA = "agentspine.feed-state/v1";
@@ -358,7 +358,9 @@ function validateState(state, root) {
 async function feedStatePaths(root) {
   const catalog = await buildCatalog(root);
   const directory = await projectStateDir(catalog.root);
-  if (isInside(catalog.root, directory)) throw new Error("HTTPS feed state must remain outside the scanned project");
+  if (!statePathIsScanExcluded(catalog, directory)) {
+    throw new Error("HTTPS feed state must remain outside the scanned project or in an excluded home-state root");
+  }
   return { root: catalog.root, path: join(directory, "feed-state.json") };
 }
 

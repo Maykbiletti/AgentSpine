@@ -49,6 +49,29 @@ export function stateRoot(env = process.env) {
   return join(env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "agentspine");
 }
 
+function samePath(left, right) {
+  const normalize = (value) => resolve(value).replace(/[\\/]+$/, "");
+  const a = normalize(left);
+  const b = normalize(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+export function isUserHomeRoot(root, env = process.env) {
+  const candidates = [homedir(), env.HOME, env.USERPROFILE,
+    env.HOMEDRIVE && env.HOMEPATH ? `${env.HOMEDRIVE}${env.HOMEPATH}` : null]
+    .filter((value) => typeof value === "string" && value && isAbsolute(value));
+  return candidates.some((candidate) => samePath(root, candidate));
+}
+
+export function statePathIsScanExcluded(catalog, path, env = process.env) {
+  if (!catalog || catalog.schema !== "agentspine.catalog/v1" || typeof path !== "string") return false;
+  if (!isInside(catalog.root, path)) return true;
+  const localStateRoot = stateRoot(env);
+  return catalog.scanPolicy?.stateRoot === "excluded"
+    && isUserHomeRoot(catalog.root, env)
+    && isInside(localStateRoot, path);
+}
+
 export function projectId(root) {
   return createHash("sha256").update(root).digest("hex").slice(0, 20);
 }

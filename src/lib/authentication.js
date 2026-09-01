@@ -8,7 +8,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { buildCatalog } from "./catalog.js";
 import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
-import { isInside, projectId, projectStateDir, stateRoot } from "./paths.js";
+import { projectId, projectStateDir, statePathIsScanExcluded, stateRoot } from "./paths.js";
 
 const AUTH_CONFIRMATION = "local-share-confirmed";
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
@@ -163,7 +163,9 @@ async function authPaths(root, providedCatalog = null, { allowInside = false, cr
   const catalog = providedCatalog || await buildCatalog(root);
   const globalRoot = resolve(stateRoot());
   const signerDirectory = join(globalRoot, "signers");
-  if (!allowInside && isInside(catalog.root, signerDirectory)) throw new Error("signing identity state must remain outside the scanned project");
+  if (!allowInside && !statePathIsScanExcluded(catalog, signerDirectory)) {
+    throw new Error("signing identity state must remain outside the scanned project or in an excluded home-state root");
+  }
   if (create) await mkdir(join(signerDirectory, "private"), { recursive: true, mode: 0o700 });
   const projectDirectory = create
     ? await projectStateDir(catalog.root)

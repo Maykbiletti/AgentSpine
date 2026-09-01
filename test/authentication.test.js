@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { lstat, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import {
   generateSigningIdentity, listSigningIdentities, loadTrust, revokeTrustedSigner,
   trustedSignerContext, trustSigner
 } from "../src/lib/authentication.js";
+import { buildCatalog } from "../src/lib/catalog.js";
 import { runAudit } from "../src/lib/audit.js";
 import { proposeLearning, reviewLearning } from "../src/lib/learning.js";
 import { runHook } from "../src/hook.js";
@@ -61,6 +62,41 @@ function runCli(args, state) {
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
+
+test("authenticated state inside an exact home root is excluded from scanning without weakening project isolation", async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "agentspine-auth-home-"));
+  const state = join(home, ".agentspine");
+  const project = join(home, "project");
+  const previous = { state: process.env.AGENTSPINE_STATE_DIR, home: process.env.HOME, profile: process.env.USERPROFILE };
+  process.env.AGENTSPINE_STATE_DIR = state;
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  await Promise.all([mkdir(state, { recursive: true }), mkdir(project, { recursive: true })]);
+  t.after(async () => {
+    if (previous.state === undefined) delete process.env.AGENTSPINE_STATE_DIR; else process.env.AGENTSPINE_STATE_DIR = previous.state;
+    if (previous.home === undefined) delete process.env.HOME; else process.env.HOME = previous.home;
+    if (previous.profile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = previous.profile;
+    await rm(home, { recursive: true, force: true });
+  });
+  const privateState = "# Private signer state\n\nThis must never become context.\n";
+  await writeFile(join(home, "CLAUDE.md"), "# Home rules\n", "utf8");
+  await writeFile(join(state, "PRIVATE.md"), privateState, "utf8");
+
+  const catalog = await buildCatalog(home);
+  assert.deepEqual(catalog.documents.map((item) => item.relativePath), ["CLAUDE.md"]);
+  assert.equal(catalog.scanPolicy.stateRoot, "excluded");
+  await generateSigningIdentity({ root: home, signerId: "signer:home", confirmation: "local-share-confirmed" });
+  assert.deepEqual((await listSigningIdentities({ root: home })).signers.map((item) => item.signerId), ["signer:home"]);
+  const audit = await runAudit(home);
+  assert.equal(audit.gates.find((item) => item.name === "State isolation").ok, true);
+  assert.equal(await readFile(join(state, "PRIVATE.md"), "utf8"), privateState);
+
+  process.env.AGENTSPINE_STATE_DIR = join(project, ".agentspine");
+  await assert.rejects(
+    generateSigningIdentity({ root: project, signerId: "signer:project", confirmation: "local-share-confirmed" }),
+    /outside the scanned project or in an excluded home-state root/
+  );
+});
 
 test("signed sharing authenticates origin but still requires local content review", async (t) => {
   const { rootA, rootB, state, adapter } = await fixture(t);

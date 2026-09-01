@@ -1,4 +1,4 @@
-import { canonicalPath, isInside } from "./paths.js";
+import { canonicalPath, statePathIsScanExcluded } from "./paths.js";
 import { buildCatalog, saveCatalog, verifyCatalog } from "./catalog.js";
 import { loadGraph } from "./graph.js";
 import { attentionFindings, inspectAttention } from "./attention.js";
@@ -272,7 +272,14 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
       ? `${catalog.documents.length} project documents; host-native source resolution failed closed: ${sourceResolutionError}`
       : sourceResolution ? `${sourceResolution.scopes.user} user, ${sourceResolution.scopes.project} project, and ${sourceResolution.scopes["project-memory"]} memory sources; broad home scan disabled`
         : `${catalog.documents.length} Markdown documents indexed`),
-    gate(3, "External state", !isInside(catalog.root, catalogPath) && !isInside(catalog.root, graphPath) && !isInside(catalog.root, attentionPath) && !isInside(catalog.root, learningPath) && !isInside(catalog.root, continuityPath) && !isInside(catalog.root, policyPath) && !isInside(catalog.root, coordinationPath) && !isInside(catalog.root, executionPolicyPath) && !isInside(catalog.root, selfstarterPath) && !isInside(catalog.root, channelPolicyPath) && !isInside(catalog.root, channelRuntimePath) && !isInside(catalog.root, personaPolicyPath) && !isInside(catalog.root, personaRuntimePath) && !isInside(catalog.root, gatewayPolicyPath) && !isInside(catalog.root, gatewayRuntimePath) && !isInside(catalog.root, sharingPath) && !isInside(catalog.root, trustPath) && !isInside(catalog.root, registryPath) && !isInside(catalog.root, signerDirectory) && !isInside(catalog.root, feedStatePath), `State remains outside ${catalog.root}`),
+    gate(3, "State isolation", [catalogPath, graphPath, attentionPath, learningPath, continuityPath,
+      policyPath, coordinationPath, executionPolicyPath, selfstarterPath, channelPolicyPath,
+      channelRuntimePath, personaPolicyPath, personaRuntimePath, gatewayPolicyPath, gatewayRuntimePath,
+      sharingPath, trustPath, registryPath, signerDirectory, feedStatePath]
+      .every((path) => statePathIsScanExcluded(catalog, path)),
+    catalog.scanPolicy?.stateRoot === "excluded"
+      ? `Authenticated state is excluded from the home-root source scan for ${catalog.root}`
+      : `State remains outside ${catalog.root}`),
     gate(4, "Native hierarchy", nativeMapped.every((document) => document.hosts.length > 0), `${nativeMapped.length} host-native documents mapped`),
     gate(5, "Link integrity", brokenLinks.length === 0, brokenLinks.length ? `${brokenLinks.length} broken Markdown links` : "All indexed Markdown links resolve"),
     gate(6, "Conflict visibility", Array.isArray(catalog.conflicts), `${reviewConflicts.length} precedence or classification findings exposed`, "warning"),

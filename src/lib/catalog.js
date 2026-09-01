@@ -2,11 +2,18 @@ import { randomUUID } from "node:crypto";
 import { open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { canonicalPath, projectStateDir } from "./paths.js";
+import { canonicalPath, isInside, projectStateDir, stateRoot } from "./paths.js";
 import { discoverDocuments } from "./documents.js";
 import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 
 export const CATALOG_SCHEMA = "agentspine.catalog/v1";
+
+export function catalogScanPolicy(root, env = process.env) {
+  return {
+    stateRoot: isInside(root, stateRoot(env)) ? "excluded" : "outside",
+    authority: "scanner-boundary-only"
+  };
+}
 
 export function catalogForStateRoot(catalog, root) {
   if (!catalog || catalog.schema !== CATALOG_SCHEMA || typeof root !== "string" || !root) {
@@ -17,6 +24,7 @@ export function catalogForStateRoot(catalog, root) {
     schema: CATALOG_SCHEMA,
     generatedAt: catalog.generatedAt,
     root,
+    scanPolicy: catalogScanPolicy(root),
     preservation: "source-files-are-read-only",
     documents: [],
     conflicts: [],
@@ -57,9 +65,9 @@ function catalogConflicts(documents) {
   return conflicts.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
 
-export async function buildCatalog(inputRoot = process.cwd()) {
+export async function buildCatalog(inputRoot = process.cwd(), { env = process.env } = {}) {
   const root = await canonicalPath(inputRoot);
-  const documents = await discoverDocuments(root);
+  const documents = await discoverDocuments(root, { excludeRoots: [stateRoot(env)] });
   const conflicts = catalogConflicts(documents);
   const byLayer = Object.fromEntries(
     [...new Set(documents.map((document) => document.layer))]
@@ -70,6 +78,7 @@ export async function buildCatalog(inputRoot = process.cwd()) {
     schema: CATALOG_SCHEMA,
     generatedAt: new Date().toISOString(),
     root,
+    scanPolicy: catalogScanPolicy(root, env),
     preservation: "source-files-are-read-only",
     documents,
     conflicts,
