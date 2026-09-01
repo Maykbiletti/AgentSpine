@@ -8,6 +8,7 @@ import { canonicalPath } from "./lib/paths.js";
 import { resolveHostSourceCatalog } from "./lib/source-roots.js";
 import { sessionBriefing } from "./lib/briefing.js";
 import { captureContinuityPrompt, loadContinuity } from "./lib/continuity.js";
+import { recordLearningApplications } from "./lib/learning.js";
 import {
   authorizeJobEffect, checkpointJobEffect, closeJobLease, resolveSessionJob, startOrResumeJob
 } from "./lib/selfstarter.js";
@@ -196,6 +197,7 @@ function renderContext(event, catalog, briefing, signal = null, attentionEvent =
       createdAt: preflight.receipt.createdAt,
       expiresAt: preflight.receipt.expiresAt,
       policy: preflight.policy,
+      learningApplications: preflight.learningApplications || null,
       pendingMustRemember: preflight.pendingMustRemember ? {
         id: preflight.pendingMustRemember.candidate?.id || null,
         status: preflight.pendingMustRemember.candidate?.status || (preflight.pendingMustRemember.rejected ? "rejected" : null),
@@ -694,7 +696,7 @@ export async function runHook(payload = null) {
         catalog, userStateRoot: resolvedSources.userStateRoot, sourceDiagnostics: resolvedSources.diagnostics,
         prompt: event === "UserPromptSubmit" ? promptFromInput(input) : null
       });
-      const context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, resolvedSources.diagnostics, preflight);
+      let context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, resolvedSources.diagnostics, preflight);
       if (event === "UserPromptSubmit" && Buffer.byteLength(context) > hostContextLimit(preflight)) {
         throw new Error("mandatory preflight context exceeds the host hook injection limit");
       }
@@ -702,6 +704,45 @@ export async function runHook(payload = null) {
         receipt: preflight.receipt, input, scope, resolvedSources, prompt: promptFromInput(input),
         now: input.timestamp || new Date(), env: process.env, consume: true
       })) throw new Error("preflight receipt could not be consumed atomically for this exact turn");
+      if (event === "UserPromptSubmit") {
+        const activeCanaries = briefing.learning.filter((item) => item.outcomeStatus === "active");
+        if (!activeCanaries.length) {
+          preflight.learningApplications = {
+            status: "not-applicable", receipts: [], authority: "context-only"
+          };
+        } else try {
+          const application = await recordLearningApplications({
+            root, items: briefing.learning,
+            scope: {
+              personaId: scope.entityId, userId: scope.userId, tenantId: scope.tenantId,
+              projectId: scope.projectId, groupId: scope.groupId, taskId: scope.currentTaskId
+            },
+            preflightReceipt: preflight.receipt,
+            sessionBriefingDigest: createHash("sha256").update(JSON.stringify(briefing)).digest("hex"),
+            projectedAt: input.timestamp || new Date()
+          });
+          preflight.learningApplications = {
+            status: application.receipts.length ? "recorded" : "not-applicable",
+            receipts: application.receipts.map((item) => ({
+              id: item.id, learningId: item.learningId, projectedAt: item.projectedAt, expiresAt: item.expiresAt
+            })),
+            authority: "context-only"
+          };
+        } catch (error) {
+          briefing.learning = briefing.learning.filter((item) => item.outcomeStatus !== "active");
+          preflight.learningApplications = {
+            status: "degraded", receipts: [], reason: error.message, authority: "context-only"
+          };
+        }
+        const enriched = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent,
+          resolvedSources.diagnostics, preflight);
+        if (Buffer.byteLength(enriched) <= hostContextLimit(preflight)) context = enriched;
+        else if (preflight.learningApplications.status === "degraded") {
+          preflight.learningApplications = null;
+          context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent,
+            resolvedSources.diagnostics, preflight);
+        }
+      }
       if (payload) return { blocked: false, context, briefing, preflight, signal, attentionEvent, channelEvent, catalogPath };
       process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
       return;

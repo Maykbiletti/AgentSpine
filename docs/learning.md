@@ -12,7 +12,8 @@ flowchart LR
     R -->|"opt-in fact policy"| A
     E --> M["Independent before receipts"]
     M --> K["Scoped canary"]
-    K --> N["Independent after receipts"]
+    K --> P["Consumed-turn application receipts"]
+    P --> N["Independent bound after receipts"]
     N -->|"measured improvement"| A
     N -->|"regression or blocking defect"| B["Automatic rollback"]
     A --> S["Supersede without erasing"]
@@ -80,9 +81,9 @@ This evaluator is separate from [automatic continuity](automatic-continuity.md).
 
 ## Measured behavior loop
 
-`behavior` candidates use `agentspine.learning-outcome/v1` receipts. A receipt stores no prompt, answer, transcript, credential, or source content. It binds a normalized metric to one exact persona, user, tenant, project, group, task, evaluator, phase, and time. Metric values are normalized to `0..1`; the direction states whether higher or lower is better. Objective measurements, explicit user feedback, and model suggestions remain separate. Model suggestions are retained for diagnosis but never count toward automatic promotion or validation.
+`behavior` candidates use content-free `agentspine.learning-outcome/v2` receipts while existing v1 history remains readable. A receipt stores no prompt, answer, transcript, credential, or source content. It binds a normalized metric to one exact persona, user, tenant, project, group, task, evaluator, phase, and time. Metric values are normalized to `0..1`; the direction states whether higher or lower is better. Objective measurements, explicit user feedback, and model suggestions remain separate. Model suggestions are retained for diagnosis but never count toward automatic promotion or validation.
 
-Before promotion, the candidate needs the configured number of independent, fresh, non-model receipts for the same metric and exact scope, including at least one objective evaluator. It also needs the normal distinct-evidence and confidence thresholds. A conflicting active candidate blocks automatic promotion. Security, safety, identity, authentication, authorization, credential, policy, production, deployment, payment, and access lessons are marked for local review and can never enter this automatic path. Successful evaluation creates a time-limited canary rather than a final unmeasured claim. Only that exact scope receives the canary in its next briefing.
+Before promotion, the candidate needs the configured number of independent, fresh, non-model receipts for the same metric and exact scope, including at least one objective evaluator. It also needs the normal distinct-evidence and confidence thresholds. A conflicting active candidate blocks automatic promotion. Security, safety, identity, authentication, authorization, credential, policy, production, deployment, payment, and access lessons are marked for local review and can never enter this automatic path. Successful evaluation creates a time-limited canary rather than a final unmeasured claim. Only that exact scope receives the canary in its next briefing. After the hard preflight receipt has been consumed, the installed hook records one `agentspine.learning-application/v1` receipt for each Canary it actually projected. The application binds the learning ID and exact scope to the signed preflight receipt, prompt digest and briefing digests. It contains no prompt or briefing content. A failed application write removes that Canary from the delivered learning packet and reports a degraded application status.
 
 ```bash
 agentspine learn-propose learning:check-invariant \
@@ -103,9 +104,20 @@ agentspine learn-evaluate . --json
 agentspine learn-status . --json
 ```
 
-After canary use, the host records `after` receipts for the same metric and scope. Independent receipts meeting `minImprovement` validate the lesson. Any blocking defect rolls it back immediately; a regression beyond `regressionTolerance`, insufficient measured improvement, or expiry before validation also rolls it back. A superseded lesson is restored atomically. No average score can override a blocking defect.
+After canary use, `agentspine learn-status` reports `latestApplicationId`. The local outcome evaluator must bind its `after` receipt to that actual application:
 
-Outcome recording and policy changes are local CLI/runtime operations. MCP exposes only the read-only `learning_outcome_status` view for this loop; model-side MCP cannot manufacture outcome evidence. `learning_context` returns only active, unexpired or validated, exact-scope behavior lessons and reports stale canaries as degraded instead of silently projecting them.
+```bash
+agentspine learn-outcome learning:check-invariant \
+  --phase after --application application:synthetic-turn-receipt \
+  --metric fixed-task-success --direction higher --value 0.75 \
+  --measurement objective --evaluator evaluator:test-b \
+  --persona agent:synthetic --user user:synthetic --tenant tenant:synthetic \
+  --project project:synthetic --task task:synthetic
+```
+
+An unbound, stale, cross-scope or forged application ID is rejected. Independent receipts meeting `minImprovement` validate the lesson only when they also reference distinct applied turns; two evaluators of one turn cannot simulate two applications. Any blocking defect rolls it back immediately; a regression beyond `regressionTolerance`, insufficient measured improvement, or expiry before validation also rolls it back. A superseded lesson is restored atomically. No average score can override a blocking defect.
+
+Outcome recording and policy changes are local CLI/runtime operations. MCP exposes only the read-only `learning_outcome_status` view for this loop; model-side MCP cannot manufacture application or outcome evidence. Doctor distinguishes awaiting applications, bound measurements, legacy unbound measurements and stale canaries. The audit replays application digests, exact scopes, authority boundaries and v2 outcome bindings. `learning_context` returns only active, unexpired or validated, exact-scope behavior lessons and reports stale canaries as degraded instead of silently projecting them.
 
 ## Supersession and rollback
 
@@ -130,4 +142,4 @@ Private learning requires an explicit `includePrivate` read. Group learning requ
 
 ## Storage and concurrency
 
-`learning.json` lives in the same external per-project state directory as the catalog, graph, and attention state. Mutations use a per-project lock and atomic replacement, so concurrent agents cannot silently discard evidence. State is capped at 5 MiB and original Markdown remains byte-for-byte unchanged.
+`learning.json` lives in the same external per-project state directory as the catalog, graph, and attention state. Mutations use a per-project lock and atomic replacement, so concurrent agents cannot silently discard evidence. Application IDs are deterministic per learning/preflight/briefing binding, making crash retries idempotent; conflicting reuse fails closed. State is capped at 5 MiB and original Markdown remains byte-for-byte unchanged.

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
-  recordLearningOutcome, reviewLearning, rollbackLearning
+  recordLearningApplications, recordLearningOutcome, reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
 import { runHook } from "../src/hook.js";
@@ -50,6 +50,24 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
     },
     measuredAt: extra.measuredAt
   };
+}
+
+async function application(root, learningId, turnId, now = new Date()) {
+  const projectedAt = new Date(now);
+  const createdAt = new Date(projectedAt.getTime() - 1000).toISOString();
+  const expiresAt = new Date(projectedAt.getTime() + 60_000).toISOString();
+  const result = await recordLearningApplications({
+    root, items: [{ id: learningId, outcomeStatus: "active" }], scope: scopedTurn,
+    preflightReceipt: {
+      schema: "agentspine.preflight/v2", id: `preflight:${turnId}`, status: "ready",
+      promptDigest: hash(`prompt:${turnId}`), briefingDigest: hash(`preflight:${turnId}`),
+      agentId: scopedTurn.personaId, userId: scopedTurn.userId, tenantId: scopedTurn.tenantId,
+      projectId: scopedTurn.projectId, groupId: scopedTurn.groupId, taskId: scopedTurn.taskId,
+      createdAt, expiresAt
+    },
+    sessionBriefingDigest: hash(`briefing:${turnId}`), projectedAt
+  });
+  return result.receipts[0];
 }
 
 function runCli(args, state) {
@@ -200,19 +218,130 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
   assert.equal((await learningContext({ root, scope: scopedTurn })).items[0].outcomeStatus, "active");
   assert.equal((await learningContext({ root, scope: { ...scopedTurn, tenantId: "tenant:other" } })).items.length, 0);
 
+  const applicationA = await application(root, "learning:measured", "measured-a");
   const first = await recordLearningOutcome({
-    root, learningId: "learning:measured", ...outcome("outcome:after-a", "after", 0.7, "evaluator:test-a")
+    root, learningId: "learning:measured", applicationId: applicationA.id,
+    ...outcome("outcome:after-a", "after", 0.7, "evaluator:test-a")
   });
   assert.equal(first.decision, "active");
+  const applicationB = await application(root, "learning:measured", "measured-b");
   const second = await recordLearningOutcome({
-    root, learningId: "learning:measured", ...outcome("outcome:after-b", "after", 0.8, "evaluator:test-b")
+    root, learningId: "learning:measured", applicationId: applicationB.id,
+    ...outcome("outcome:after-b", "after", 0.8, "evaluator:test-b")
   });
   assert.equal(second.decision, "validated");
+  const retryAfterValidation = await recordLearningOutcome({
+    root, learningId: "learning:measured", applicationId: applicationB.id,
+    ...outcome("outcome:after-b", "after", 0.8, "evaluator:test-b")
+  });
+  assert.equal(retryAfterValidation.unchanged, true);
   const status = await learningOutcomeStatus({ root, scope: scopedTurn });
   assert.equal(status.records[0].canaryStatus, "validated");
   assert.equal(status.records[0].beforeReceipts, 2);
   assert.equal(status.records[0].afterReceipts, 2);
+  assert.equal(status.records[0].boundAfterReceipts, 2);
+  assert.equal(status.records[0].applicationReceipts, 2);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), beforeBytes);
+});
+
+test("after outcomes require distinct exact-turn application receipts", async (t) => {
+  const { root } = await fixture(t);
+  await proposeLearning({
+    root, id: "learning:application-bound", kind: "behavior", claim: "Apply the fixed synthetic check.",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:application-one", 0.97)
+  });
+  await addLearningEvidence({ root, id: "learning:application-bound", evidence: evidence("evidence:application-two", 0.97) });
+  await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
+  await recordLearningOutcome({
+    root, learningId: "learning:application-bound",
+    ...outcome("outcome:application-before-a", "before", 0.4, "evaluator:baseline-a")
+  });
+  await recordLearningOutcome({
+    root, learningId: "learning:application-bound",
+    ...outcome("outcome:application-before-b", "before", 0.5, "evaluator:baseline-b")
+  });
+  await evaluateLearning({ root });
+  await assert.rejects(recordLearningOutcome({
+    root, learningId: "learning:application-bound",
+    ...outcome("outcome:unbound-after", "after", 0.9, "evaluator:after-a")
+  }), /recorded learning application receipt/);
+
+  const firstApplication = await application(root, "learning:application-bound", "application-a");
+  const retryApplications = await Promise.all(Array.from({ length: 6 }, () =>
+    application(root, "learning:application-bound", "application-a")));
+  assert.equal(retryApplications.every((item) => item.id === firstApplication.id), true,
+    "parallel crash retries must reuse the immutable application receipt");
+  assert.equal((await loadLearning(root)).learning.applications.length, 1);
+  const crossTenantScope = { ...scopedTurn, tenantId: "tenant:other" };
+  const now = new Date();
+  await assert.rejects(recordLearningApplications({
+    root, items: [{ id: "learning:application-bound", outcomeStatus: "active" }], scope: crossTenantScope,
+    preflightReceipt: {
+      schema: "agentspine.preflight/v2", id: "preflight:cross-tenant", status: "ready",
+      promptDigest: hash("prompt:cross-tenant"), briefingDigest: hash("preflight:cross-tenant"),
+      agentId: crossTenantScope.personaId, userId: crossTenantScope.userId, tenantId: crossTenantScope.tenantId,
+      projectId: crossTenantScope.projectId, groupId: crossTenantScope.groupId, taskId: crossTenantScope.taskId,
+      createdAt: new Date(now.getTime() - 1000).toISOString(), expiresAt: new Date(now.getTime() + 60_000).toISOString()
+    },
+    sessionBriefingDigest: hash("briefing:cross-tenant"), projectedAt: now
+  }), /exact scope/);
+  assert.equal((await recordLearningOutcome({
+    root, learningId: "learning:application-bound", applicationId: firstApplication.id,
+    ...outcome("outcome:application-after-a", "after", 0.8, "evaluator:after-a")
+  })).decision, "active");
+  assert.equal((await recordLearningOutcome({
+    root, learningId: "learning:application-bound", applicationId: firstApplication.id,
+    ...outcome("outcome:application-after-b", "after", 0.8, "evaluator:after-b")
+  })).decision, "active", "two evaluators of one turn must not simulate two applications");
+
+  const secondApplication = await application(root, "learning:application-bound", "application-b");
+  assert.equal((await recordLearningOutcome({
+    root, learningId: "learning:application-bound", applicationId: secondApplication.id,
+    ...outcome("outcome:application-after-c", "after", 0.8, "evaluator:after-c")
+  })).decision, "validated");
+});
+
+test("UserPromptSubmit records the canary application only after the hard preflight is consumed", async (t) => {
+  const { root, state } = await fixture(t);
+  const hookScope = { ...scopedTurn, taskId: null };
+  await writeFile(join(root, "CLAUDE.md"), "# Synthetic host rules\n\nKeep the fixed invariant.\n", "utf8");
+  await upsertEntity({ root, id: scopedTurn.personaId, kind: "agent", displayName: "Synthetic Agent", privacy: "shared" });
+  await proposeLearning({
+    root, id: "learning:hook-application", kind: "behavior", claim: "Run the fixed invariant check.",
+    privacy: "shared", scope: hookScope, evidence: evidence("evidence:hook-application-one", 0.98)
+  });
+  await addLearningEvidence({ root, id: "learning:hook-application", evidence: evidence("evidence:hook-application-two", 0.98) });
+  await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
+  await recordLearningOutcome({
+    root, learningId: "learning:hook-application",
+    ...outcome("outcome:hook-before-a", "before", 0.4, "evaluator:hook-before-a", { scope: hookScope })
+  });
+  await recordLearningOutcome({
+    root, learningId: "learning:hook-application",
+    ...outcome("outcome:hook-before-b", "before", 0.5, "evaluator:hook-before-b", { scope: hookScope })
+  });
+  await evaluateLearning({ root });
+  const previousClaudeHome = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = state;
+  t.after(() => {
+    if (previousClaudeHome === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousClaudeHome;
+  });
+  const hook = await runHook({
+    hook_event_name: "UserPromptSubmit", host: "claude", cwd: root,
+    session_id: "session:learning-application", event_id: "turn:learning-application",
+    entity_id: scopedTurn.personaId, user_id: scopedTurn.userId, tenant_id: scopedTurn.tenantId,
+    project_id: scopedTurn.projectId, prompt: "Run the synthetic task."
+  });
+  assert.equal(hook.blocked, false, hook.reason);
+  const injected = JSON.parse(hook.context);
+  assert.equal(injected.preflight.learningApplications.status, "recorded");
+  assert.equal(injected.preflight.learningApplications.receipts[0].learningId, "learning:hook-application");
+  assert.equal(injected.briefing.learning[0].id, "learning:hook-application");
+  const persisted = (await loadLearning(root)).learning.applications;
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0].preflightReceiptId, injected.preflight.receiptId);
+  assert.equal(JSON.stringify(persisted).includes("Run the synthetic task"), false);
 });
 
 test("model suggestions cannot self-promote and contradictory behavior candidates remain blocked", async (t) => {
@@ -272,8 +401,9 @@ test("a blocking canary defect rolls back automatically and restores the superse
   await recordLearningOutcome({ root, learningId: "learning:new-behavior", ...outcome("outcome:new-before-a", "before", 0.4, "evaluator:test-a") });
   await recordLearningOutcome({ root, learningId: "learning:new-behavior", ...outcome("outcome:new-before-b", "before", 0.5, "evaluator:test-b") });
   await evaluateLearning({ root });
+  const applied = await application(root, "learning:new-behavior", "blocking");
   const regressed = await recordLearningOutcome({
-    root, learningId: "learning:new-behavior",
+    root, learningId: "learning:new-behavior", applicationId: applied.id,
     ...outcome("outcome:new-after-blocking", "after", 0.9, "evaluator:test-c", { blockingDefects: 1 })
   });
   assert.equal(regressed.decision, "rolled-back");
@@ -323,10 +453,17 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   await writeFile(learningPath, `${JSON.stringify(legacy)}\n`, "utf8");
   const upgraded = (await loadLearning(root)).learning;
   assert.deepEqual(upgraded.outcomes, []);
+  assert.deepEqual(upgraded.applications, []);
   assert.equal(upgraded.config.minOutcomeReceipts, 2);
   await configureLearning({ root, config: { canaryTtlDays: 7 } });
   assert.equal((await loadLearning(root)).learning.config.canaryTtlDays, 7);
 
+  const corruptApplication = (await loadLearning(root)).learning;
+  corruptApplication.applications.push({ schema: "agentspine.learning-application/v1", id: "application:bad" });
+  await writeFile(learningPath, `${JSON.stringify(corruptApplication)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /learning application state is invalid/);
+
+  await writeFile(learningPath, `${JSON.stringify(legacy)}\n`, "utf8");
   const corrupt = (await loadLearning(root)).learning;
   corrupt.outcomes.push({ schema: "agentspine.learning-outcome/v1", id: "outcome:bad" });
   await writeFile(learningPath, `${JSON.stringify(corrupt)}\n`, "utf8");

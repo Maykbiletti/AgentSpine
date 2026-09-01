@@ -4,6 +4,24 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-01
+
+### Added
+
+- Content-free `agentspine.learning-application/v1` receipts prove that an active behavior Canary was actually projected after one exact hard preflight was consumed.
+- `agentspine.learning-outcome/v2` binds every new after-measurement to one exact application while retaining v1 baseline and historical compatibility.
+- CLI, Doctor, audit and read-only MCP status expose application counts, bound after-receipts, awaiting applications and ignored legacy-unbound evidence.
+
+### Changed
+
+- Canary validation now requires both independent evaluators and distinct applied turns; multiple evaluators of one turn cannot satisfy the application threshold.
+- Hook application recording is idempotent across retries, exact-scope bound, and omitted entirely for turns without an active Canary.
+
+### Security
+
+- Unbound, stale, cross-persona, cross-user, cross-tenant, cross-project, cross-group and cross-task after-results are rejected before they can affect validation or rollback.
+- Application receipts store only IDs, digests, scope and timestamps; prompts, briefings, answers, transcripts, credentials and authority remain absent.
+
 ## [0.11.4] - 2026-09-01
 
 ### Fixed
@@ -387,7 +405,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.4...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.4...v0.12.0
 [0.11.4]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.1...v0.11.2

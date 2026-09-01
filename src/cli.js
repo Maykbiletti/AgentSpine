@@ -137,7 +137,7 @@ Usage:
   agentspine learn-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine learn-context [root] [--group id] [--include-private] [--kind preference,goal]
   agentspine learn-evaluate [root]
-  agentspine learn-outcome <id> --phase before|after --metric name --direction higher|lower --value 0..1 --evaluator id --measurement objective|user-feedback|model-suggestion [--blocking-defects n]
+  agentspine learn-outcome <id> --phase before|after --metric name --direction higher|lower --value 0..1 --evaluator id --measurement objective|user-feedback|model-suggestion [--application id] [--blocking-defects n]
   agentspine learn-status [root] [--persona id --user id --tenant id --project id --group id --task id]
   agentspine learn-rollback <id> --reason text
   agentspine learn-delete <id>
@@ -463,6 +463,7 @@ export async function run(argv = process.argv.slice(2)) {
         kind: flags.measurement || "objective", evaluatorId: flags.evaluator,
         sourceDigest: flags["source-digest"] || null
       },
+      applicationId: flags.application || null,
       measuredAt: flags.at
     }), json);
   }
@@ -1005,12 +1006,17 @@ export async function run(argv = process.argv.slice(2)) {
     let learningOutcomes;
     try {
       const status = await learningOutcomeStatus({ root: positional[0] || process.cwd() });
+      const unboundAfterReceipts = status.records.reduce((sum, item) => sum + item.afterReceipts - item.boundAfterReceipts, 0);
       learningOutcomes = {
-        status: status.records.some((item) => item.canaryStatus === "stale") ? "degraded" : "healthy",
+        status: status.records.some((item) => item.canaryStatus === "stale") || unboundAfterReceipts > 0 ? "degraded" : "healthy",
         candidates: status.records.length,
         activeCanaries: status.records.filter((item) => item.canaryStatus === "active").length,
         validatedCanaries: status.records.filter((item) => item.canaryStatus === "validated").length,
         staleCanaries: status.records.filter((item) => item.canaryStatus === "stale").length,
+        awaitingApplication: status.records.filter((item) => item.canaryStatus === "active" && item.applicationReceipts === 0).length,
+        applicationReceipts: status.records.reduce((sum, item) => sum + item.applicationReceipts, 0),
+        boundAfterReceipts: status.records.reduce((sum, item) => sum + item.boundAfterReceipts, 0),
+        unboundAfterReceipts,
         contradictions: status.records.filter((item) => item.conflictsWith.length > 0).length,
         authority: "context-only"
       };

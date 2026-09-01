@@ -1,5 +1,5 @@
 {
   "schema": "agentspine.hook-bundle/v1",
-  "version": "0.11.4",
+  "version": "0.12.0",
   "contract": "agentspine.preflight/v2"
 }
