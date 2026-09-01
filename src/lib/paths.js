@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { lstat, mkdir, realpath } from "node:fs/promises";
@@ -49,8 +50,16 @@ export function stateRoot(env = process.env) {
   return join(env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "agentspine");
 }
 
+export function comparablePath(value) {
+  let canonical;
+  try { canonical = realpathSync.native(resolve(value)); } catch {
+    canonical = resolve(value);
+  }
+  return canonical.replace(/[\\/]+$/, "");
+}
+
 function samePath(left, right) {
-  const normalize = (value) => resolve(value).replace(/[\\/]+$/, "");
+  const normalize = comparablePath;
   const a = normalize(left);
   const b = normalize(right);
   return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -65,11 +74,16 @@ export function isUserHomeRoot(root, env = process.env) {
 
 export function statePathIsScanExcluded(catalog, path, env = process.env) {
   if (!catalog || catalog.schema !== "agentspine.catalog/v1" || typeof path !== "string") return false;
-  if (!isInside(catalog.root, path)) return true;
   const localStateRoot = stateRoot(env);
+  const pathBelongsToState = isInside(localStateRoot, path);
+  const canonicalRoot = comparablePath(catalog.root);
+  const canonicalStateRoot = comparablePath(localStateRoot);
+  if (!pathBelongsToState && !isInside(canonicalRoot, comparablePath(path))) return true;
+  if (pathBelongsToState && !isInside(canonicalRoot, canonicalStateRoot)) return true;
   return catalog.scanPolicy?.stateRoot === "excluded"
-    && isUserHomeRoot(catalog.root, env)
-    && isInside(localStateRoot, path);
+    && isUserHomeRoot(canonicalRoot, env)
+    && isInside(canonicalRoot, canonicalStateRoot)
+    && pathBelongsToState;
 }
 
 export function projectId(root) {

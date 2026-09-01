@@ -156,7 +156,17 @@ async function walk(directory, found, excludedRoots) {
 
 export async function discoverDocuments(root, { excludeRoots = [] } = {}) {
   const files = [];
-  const excludedRoots = excludeRoots.map((path) => resolve(path)).filter((path) => isInside(root, path));
+  // Canonicalize existing exclusion roots just like the scanned root. On macOS
+  // temporary directories commonly cross /var -> /private/var, while Windows
+  // may expose the same directory through differently cased/normalized paths.
+  // Comparing only resolved spellings would therefore walk the private state
+  // directory even though it is the configured exclusion boundary.
+  const excludedRoots = (await Promise.all(excludeRoots.map(async (path) => {
+    try { return await realpath(resolve(path)); } catch (error) {
+      if (error.code === "ENOENT") return resolve(path);
+      throw error;
+    }
+  }))).filter((path) => isInside(root, path));
   await walk(root, files, excludedRoots);
   const documents = new Array(files.length);
   let cursor = 0;

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { canonicalPath, isInside, projectStateDir, stateRoot } from "./paths.js";
+import { canonicalPath, comparablePath, isInside, projectStateDir, stateRoot } from "./paths.js";
 import { discoverDocuments } from "./documents.js";
 import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 
@@ -10,7 +10,7 @@ export const CATALOG_SCHEMA = "agentspine.catalog/v1";
 
 export function catalogScanPolicy(root, env = process.env) {
   return {
-    stateRoot: isInside(root, stateRoot(env)) ? "excluded" : "outside",
+    stateRoot: isInside(comparablePath(root), comparablePath(stateRoot(env))) ? "excluded" : "outside",
     authority: "scanner-boundary-only"
   };
 }

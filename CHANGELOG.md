@@ -4,6 +4,12 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-09-01
+
+### Fixed
+
+- Scanner exclusion roots are canonicalized before comparison, so macOS `/var` → `/private/var` aliases and Windows path normalization cannot reintroduce private AgentSpine state into a home-root catalog.
+
 ## [0.11.2] - 2026-09-01
 
 ### Fixed
@@ -375,7 +381,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.3...HEAD
+[0.11.3]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.10.1...v0.11.0
