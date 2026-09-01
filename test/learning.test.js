@@ -62,7 +62,9 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
 async function recordLearningOutcome(input) {
   const { learning } = await loadLearning(input.root);
   const evaluation = learning.evaluations.find((item) => item.id === input.evaluationId);
-  if (evaluation?.schema !== "agentspine.learning-evaluation/v4") return commitLearningOutcome(input);
+  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5"].includes(evaluation?.schema)) {
+    return commitLearningOutcome(input);
+  }
   const measurementId = `measurement:${input.id}`;
   let measurementReceipt = learning.measurements.find((item) => item.id === measurementId);
   if (!measurementReceipt) {
@@ -313,7 +315,11 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
   await addLearningEvidence({ root, id: "learning:coverage", evidence: evidence("evidence:coverage-two", 0.97) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
   const registered = await evaluation(root, "learning:coverage");
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v4");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v5");
+  assert.deepEqual(registered.contract.pairing, {
+    mode: "same-evaluator", maxOutcomesPerEvaluatorPerPhase: 1,
+    matchMeasurementKind: true, matchCaseCount: true, authority: "context-only"
+  });
 
   await assert.rejects(commitLearningOutcome({
     root, id: "outcome:missing-measurement", learningId: "learning:coverage",
@@ -340,6 +346,10 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
 
   await recordLearningOutcome({ root, learningId: "learning:coverage",
     ...outcome("outcome:coverage-before-a", "before", 0.4, "evaluator:test-a") });
+  await assert.rejects(recordLearningOutcome({ root, learningId: "learning:coverage",
+    ...outcome("outcome:coverage-before-a-overweight", "before", 0.1, "evaluator:test-a")
+  }), /exactly one outcome per evaluator and phase/,
+  "one evaluator cannot overweight the baseline with repeated runs");
   await assert.rejects(recordLearningOutcome({ root, learningId: "learning:coverage",
     ...outcome("outcome:coverage-replay", "before", 0.5, "evaluator:test-b", {
       sourceDigest: hash("measurement:outcome:coverage-before-a")
@@ -377,7 +387,7 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
     root, learningId: "learning:coverage", applicationId: applied.id, deliveryId: applied.deliveryId,
     ...outcome("outcome:coverage-after-valid", "after", 0.8, "evaluator:test-a")
   });
-  assert.equal(recorded.receipt.schema, "agentspine.learning-outcome/v7");
+  assert.equal(recorded.receipt.schema, "agentspine.learning-outcome/v8");
   assert.deepEqual(recorded.receipt.coverage, {
     datasetDigest: syntheticDatasetDigest, caseCount: 12, authority: "context-only"
   });
@@ -389,7 +399,7 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
   const { digest: _storedDigest, ...replayedPayload } = { ...original, id: "outcome:coverage-corrupt-replay" };
   stored.learning.outcomes.push({ ...replayedPayload, digest: hash(JSON.stringify(replayedPayload)) });
   await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
-  await assert.rejects(loadLearning(root), /outcome measurement binding is invalid or replayed/);
+  await assert.rejects(loadLearning(root), /(paired evaluator outcome is duplicated|outcome measurement binding is invalid or replayed)/);
 });
 
 test("measurement lineage blocks cross-contract reuse and purges only stale unconsumed runs", async (t) => {
@@ -497,6 +507,14 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
   assert.equal((await learningContext({ root, scope: { ...scopedTurn, tenantId: "tenant:other" } })).items.length, 0);
 
   const applicationA = await application(root, "learning:measured", "measured-a");
+  await assert.rejects(recordLearningOutcome({
+    root, learningId: "learning:measured", applicationId: applicationA.id, deliveryId: applicationA.deliveryId,
+    ...outcome("outcome:after-drifted-evaluator", "after", 0.9, "evaluator:test-b")
+  }), /same evaluator as a frozen before measurement/);
+  await assert.rejects(recordLearningOutcome({
+    root, learningId: "learning:measured", applicationId: applicationA.id, deliveryId: applicationA.deliveryId,
+    ...outcome("outcome:after-drifted-kind", "after", 0.9, "evaluator:user-b")
+  }), /measurement kind and case count/);
   const first = await recordLearningOutcome({
     root, learningId: "learning:measured", applicationId: applicationA.id, deliveryId: applicationA.deliveryId,
     ...outcome("outcome:after-a", "after", 0.7, "evaluator:test-a")
@@ -505,12 +523,14 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
   const applicationB = await application(root, "learning:measured", "measured-b");
   const second = await recordLearningOutcome({
     root, learningId: "learning:measured", applicationId: applicationB.id, deliveryId: applicationB.deliveryId,
-    ...outcome("outcome:after-b", "after", 0.8, "evaluator:test-b")
+    ...outcome("outcome:after-b", "after", 0.8, "evaluator:user-b", { kind: "user-feedback" })
   });
   assert.equal(second.decision, "validated");
+  assert.ok(Math.abs(second.candidate.promotion.canary.improvement - 0.3) < 1e-12,
+    "paired deltas, not a driftable aggregate cohort, prove improvement");
   const retryAfterValidation = await recordLearningOutcome({
     root, learningId: "learning:measured", applicationId: applicationB.id, deliveryId: applicationB.deliveryId,
-    ...outcome("outcome:after-b", "after", 0.8, "evaluator:test-b")
+    ...outcome("outcome:after-b", "after", 0.8, "evaluator:user-b", { kind: "user-feedback" })
   });
   assert.equal(retryAfterValidation.unchanged, true);
   const status = await learningOutcomeStatus({ root, scope: scopedTurn });
@@ -521,6 +541,8 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
   assert.equal(status.records[0].applicationReceipts, 2);
   assert.equal(status.records[0].deliveryReceipts, 2);
   assert.equal(status.records[0].deliveredAfterReceipts, 2);
+  assert.equal(status.records[0].pairedOutcomeReceipts, 4);
+  assert.equal(status.records[0].pairedEvaluatorPairs, 2);
   assert.equal(status.records[0].pendingApplications, 0);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), beforeBytes);
 });
@@ -545,7 +567,7 @@ test("after outcomes require distinct exact-turn application receipts", async (t
   await evaluateLearning({ root });
   await assert.rejects(recordLearningOutcome({
     root, learningId: "learning:application-bound",
-    ...outcome("outcome:unbound-after", "after", 0.9, "evaluator:after-a")
+    ...outcome("outcome:unbound-after", "after", 0.9, "evaluator:baseline-a")
   }), /recorded learning application receipt/);
 
   const firstApplication = await application(root, "learning:application-bound", "application-a");
@@ -570,17 +592,17 @@ test("after outcomes require distinct exact-turn application receipts", async (t
   }), /exact scope/);
   assert.equal((await recordLearningOutcome({
     root, learningId: "learning:application-bound", applicationId: firstApplication.id, deliveryId: firstApplication.deliveryId,
-    ...outcome("outcome:application-after-a", "after", 0.8, "evaluator:after-a")
+    ...outcome("outcome:application-after-a", "after", 0.8, "evaluator:baseline-a")
   })).decision, "active");
-  assert.equal((await recordLearningOutcome({
+  await assert.rejects(recordLearningOutcome({
     root, learningId: "learning:application-bound", applicationId: firstApplication.id, deliveryId: firstApplication.deliveryId,
-    ...outcome("outcome:application-after-b", "after", 0.8, "evaluator:after-b")
-  })).decision, "active", "two evaluators of one turn must not simulate two applications");
+    ...outcome("outcome:application-after-b-same-turn", "after", 0.8, "evaluator:baseline-b")
+  }), /distinct completed turn/, "two evaluators of one turn must not simulate two applications");
 
   const secondApplication = await application(root, "learning:application-bound", "application-b");
   assert.equal((await recordLearningOutcome({
     root, learningId: "learning:application-bound", applicationId: secondApplication.id, deliveryId: secondApplication.deliveryId,
-    ...outcome("outcome:application-after-c", "after", 0.8, "evaluator:after-c")
+    ...outcome("outcome:application-after-b", "after", 0.8, "evaluator:baseline-b")
   })).decision, "validated");
 });
 
@@ -629,7 +651,7 @@ test("UserPromptSubmit records the canary application only after the hard prefli
   assert.equal(JSON.stringify(persisted).includes("Run the synthetic task"), false);
   await assert.rejects(recordLearningOutcome({
     root, learningId: "learning:hook-application", applicationId: persisted[0].id,
-    ...outcome("outcome:hook-undelivered", "after", 0.8, "evaluator:test-a", { scope: hookScope })
+    ...outcome("outcome:hook-undelivered", "after", 0.8, "evaluator:hook-before-a", { scope: hookScope })
   }), /completed model-turn delivery/);
   const crossSessionStop = await runHook({
     hook_event_name: "Stop", host: "claude", cwd: root, session_id: "session:other",
@@ -648,7 +670,7 @@ test("UserPromptSubmit records the canary application only after the hard prefli
   assert.equal(JSON.stringify(delivery).includes("Run the synthetic task"), false);
   assert.equal((await recordLearningOutcome({
     root, learningId: "learning:hook-application", applicationId: persisted[0].id, deliveryId: delivery.id,
-    ...outcome("outcome:hook-delivered", "after", 0.8, "evaluator:test-a", { scope: hookScope })
+    ...outcome("outcome:hook-delivered", "after", 0.8, "evaluator:hook-before-a", { scope: hookScope })
   })).decision, "active");
   const pendingAt = new Date();
   await recordLearningApplications({
@@ -731,7 +753,7 @@ test("a blocking canary defect rolls back automatically and restores the superse
   const applied = await application(root, "learning:new-behavior", "blocking");
   const regressed = await recordLearningOutcome({
     root, learningId: "learning:new-behavior", applicationId: applied.id, deliveryId: applied.deliveryId,
-    ...outcome("outcome:new-after-blocking", "after", 0.9, "evaluator:test-c", { blockingDefects: 1 })
+    ...outcome("outcome:new-after-blocking", "after", 0.9, "evaluator:test-a", { blockingDefects: 1 })
   });
   assert.equal(regressed.decision, "rolled-back");
   assert.deepEqual(regressed.restored, ["learning:prior-behavior"]);
@@ -771,7 +793,7 @@ test("parallel duplicate outcome receipts are idempotent and remain one immutabl
   assert.equal((await loadLearning(root)).learning.outcomes.length, 1);
 });
 
-test("0.14 through 0.16 evaluation contracts remain readable while new contracts require measurement lineage", async (t) => {
+test("0.14 through 0.17 evaluation contracts remain readable while new contracts require paired lineage", async (t) => {
   const { root } = await fixture(t);
   await proposeLearning({
     root, id: "learning:legacy-contract", kind: "behavior", claim: "Use the legacy synthetic strategy.",
@@ -779,7 +801,7 @@ test("0.14 through 0.16 evaluation contracts remain readable while new contracts
   });
   await evaluation(root, "learning:legacy-contract");
   const { learning, learningPath } = await loadLearning(root);
-  const { digest: _digest, ...currentPayload } = learning.evaluations[0];
+  const { digest: _digest, pairing: _pairing, ...currentPayload } = learning.evaluations[0];
   const v1Payload = { ...currentPayload, schema: "agentspine.learning-evaluation/v1" };
   learning.evaluations[0] = { ...v1Payload, digest: hash(JSON.stringify(v1Payload)) };
   await writeFile(learningPath, `${JSON.stringify(learning)}\n`, "utf8");
@@ -797,7 +819,7 @@ test("0.14 through 0.16 evaluation contracts remain readable while new contracts
   await evaluation(root, "learning:coverage-contract", { id: "evaluation:coverage-contract" });
   const coverageState = await loadLearning(root);
   const current = coverageState.learning.evaluations.find((item) => item.id === "evaluation:coverage-contract");
-  const { digest: _coverageDigest, ...v3Payload } = current;
+  const { digest: _coverageDigest, pairing: _coveragePairing, ...v3Payload } = current;
   const v2Payload = { ...v3Payload, schema: "agentspine.learning-evaluation/v2" };
   coverageState.learning.evaluations = coverageState.learning.evaluations.map((item) => item.id === current.id
     ? { ...v2Payload, digest: hash(JSON.stringify(v2Payload)) } : item);
@@ -817,7 +839,7 @@ test("0.14 through 0.16 evaluation contracts remain readable while new contracts
   await evaluation(root, "learning:provenance-contract", { id: "evaluation:provenance-contract" });
   const provenanceState = await loadLearning(root);
   const lineageContract = provenanceState.learning.evaluations.find((item) => item.id === "evaluation:provenance-contract");
-  const { digest: _lineageDigest, ...v4Payload } = lineageContract;
+  const { digest: _lineageDigest, pairing: _lineagePairing, ...v4Payload } = lineageContract;
   const v3ContractPayload = { ...v4Payload, schema: "agentspine.learning-evaluation/v3" };
   provenanceState.learning.evaluations = provenanceState.learning.evaluations.map((item) => item.id === lineageContract.id
     ? { ...v3ContractPayload, digest: hash(JSON.stringify(v3ContractPayload)) } : item);
@@ -829,6 +851,26 @@ test("0.14 through 0.16 evaluation contracts remain readable while new contracts
     })
   });
   assert.equal(provenanceReceipt.receipt.schema, "agentspine.learning-outcome/v6");
+
+  await proposeLearning({
+    root, id: "learning:lineage-contract", kind: "behavior", claim: "Use the 0.17 synthetic strategy.",
+    scope: scopedTurn, evidence: evidence("evidence:lineage-contract")
+  });
+  await evaluation(root, "learning:lineage-contract", { id: "evaluation:lineage-contract" });
+  const pairedState = await loadLearning(root);
+  const pairedContract = pairedState.learning.evaluations.find((item) => item.id === "evaluation:lineage-contract");
+  const { digest: _pairedDigest, pairing: _pairedConfig, ...v4ContractPayload } = pairedContract;
+  const compatibleV4Payload = { ...v4ContractPayload, schema: "agentspine.learning-evaluation/v4" };
+  pairedState.learning.evaluations = pairedState.learning.evaluations.map((item) => item.id === pairedContract.id
+    ? { ...compatibleV4Payload, digest: hash(JSON.stringify(compatibleV4Payload)) } : item);
+  await writeFile(pairedState.learningPath, `${JSON.stringify(pairedState.learning)}\n`, "utf8");
+  const lineageReceipt = await recordLearningOutcome({
+    root, learningId: "learning:lineage-contract",
+    ...outcome("outcome:lineage-contract", "before", 0.4, "evaluator:test-a", {
+      evaluationId: "evaluation:lineage-contract"
+    })
+  });
+  assert.equal(lineageReceipt.receipt.schema, "agentspine.learning-outcome/v7");
 });
 
 test("0.10 learning state upgrades in place and corrupt outcome receipts fail closed", async (t) => {
@@ -977,8 +1019,13 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
   assert.equal(status.records[0].provenanceBoundReceipts, 1);
   assert.equal(status.records[0].legacyProvenanceReceipts, 0);
   assert.equal(status.records[0].lineageBoundReceipts, 1);
+  assert.equal(status.records[0].pairedOutcomeReceipts, 1);
+  assert.equal(status.records[0].pairedEvaluatorPairs, 0);
   assert.equal(status.records[0].measurementReceipts, 1);
   assert.equal(status.records[0].measurementLineageReceipts, 1);
   assert.equal(status.records[0].consumedMeasurementReceipts, 1);
   assert.equal(status.records[0].canaryStatus, "not-applicable");
+  const doctor = runCli(["doctor", root, "--json"], state);
+  assert.equal(doctor.learningOutcomes.pairedOutcomeReceipts, 1);
+  assert.equal(doctor.learningOutcomes.pairedEvaluatorPairs, 0);
 });

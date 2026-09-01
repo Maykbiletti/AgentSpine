@@ -1076,6 +1076,8 @@ export async function run(argv = process.argv.slice(2)) {
       const consumedMeasurementReceipts = status.records.reduce((sum, item) => sum + item.consumedMeasurementReceipts, 0);
       const staleUnconsumedMeasurements = status.records.reduce((sum, item) => sum + item.staleUnconsumedMeasurements, 0);
       const lineageBoundReceipts = status.records.reduce((sum, item) => sum + item.lineageBoundReceipts, 0);
+      const pairedOutcomeReceipts = status.records.reduce((sum, item) => sum + item.pairedOutcomeReceipts, 0);
+      const pairedEvaluatorPairs = status.records.reduce((sum, item) => sum + item.pairedEvaluatorPairs, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
         status: status.records.some((item) => item.canaryStatus === "stale")
@@ -1101,6 +1103,8 @@ export async function run(argv = process.argv.slice(2)) {
         consumedMeasurementReceipts,
         staleUnconsumedMeasurements,
         lineageBoundReceipts,
+        pairedOutcomeReceipts,
+        pairedEvaluatorPairs,
         unplannedOutcomeReceipts,
         boundAfterReceipts: status.records.reduce((sum, item) => sum + item.boundAfterReceipts, 0),
         unboundAfterReceipts,

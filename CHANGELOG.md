@@ -4,6 +4,23 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-01
+
+### Added
+
+- Immutable `agentspine.learning-evaluation/v5` contracts freeze same-evaluator pairing and one counted outcome per evaluator and phase; `agentspine.learning-outcome/v8` receipts prove the paired cohort.
+- Doctor, status and audit report paired-evaluator receipts and completed before/after pairs.
+
+### Changed
+
+- Canary improvement is now the mean of per-evaluator before/after deltas. Different evaluator cohorts cannot validate a lesson, repeated evaluator runs cannot overweight the score, and every counted after-result requires a distinct completed model turn.
+- Concurrent identical measurement retries accept the already committed timestamp instead of misclassifying lock-order inversion as future-dated evidence; genuinely new future measurements still fail closed.
+- Evaluation v1-v4 and outcome v1-v7 history remains readable; only new v5/v8 experiments require paired cohorts.
+
+### Security
+
+- Evaluator drift, duplicate weighting, same-turn double counting and digest-valid injected duplicate pairs fail closed. Pairing remains content-free and context-only and cannot grant identity, rights, credentials, tools or policy exceptions.
+
 ## [0.17.0] - 2026-09-01
 
 ### Added
@@ -486,7 +503,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.14.0...v0.15.0
