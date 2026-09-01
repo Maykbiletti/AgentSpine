@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 import {
   addLearningEvidence, beginLearningRevalidation, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
-  purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
+  purgeLearningBySubject, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
-  registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, reviewLearning, rollbackLearning
+  registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, revokeLearningEvidence, reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
 import { runHook } from "../src/hook.js";
@@ -312,6 +312,94 @@ test("automatic promotion is opt-in, evidence-gated, and limited to low-risk kin
   assert.deepEqual(evaluated.accepted.map((item) => item.id), ["learning:auto"]);
   assert.equal(evaluated.accepted[0].automatic, true);
   assert.deepEqual((await learningContext({ root })).items.map((item) => item.id), ["learning:auto"]);
+});
+
+test("evidence revocation is immutable, immediately withheld, group-isolated, and rollback-safe", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  await upsertEntity({ root, id: "group:revocation-alpha", kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: "group:revocation-beta", kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: "person:revocation-member", kind: "person", privacy: "group" });
+  await linkEntities({ root, from: "person:revocation-member", to: "group:revocation-alpha",
+    relation: "member-of", privacy: "group" });
+  await proposeLearning({
+    root, id: "learning:revocation-old", kind: "project-fact", claim: "The synthetic group uses the stable procedure.",
+    subjectId: "person:revocation-member", privacy: "group", groupId: "group:revocation-alpha",
+    scope: { ...scopedTurn, groupId: "group:revocation-alpha" }, evidence: evidence("evidence:revocation-old", 0.96)
+  });
+  await reviewLearning({ root, id: "learning:revocation-old", decision: "accept", reason: "Synthetic local review.",
+    confirmedByUser: true });
+  await proposeLearning({
+    root, id: "learning:revocation-new", kind: "project-fact", claim: "The synthetic group uses the measured procedure.",
+    subjectId: "person:revocation-member", privacy: "group", groupId: "group:revocation-alpha",
+    scope: { ...scopedTurn, groupId: "group:revocation-alpha" }, evidence: evidence("evidence:revocation-new", 0.97),
+    supersedesId: "learning:revocation-old"
+  });
+  await reviewLearning({ root, id: "learning:revocation-new", decision: "accept", reason: "Synthetic local review.",
+    confirmedByUser: true });
+  const alphaScope = { ...scopedTurn, groupId: "group:revocation-alpha" };
+  assert.deepEqual((await learningContext({ root, groupId: "group:revocation-alpha", scope: alphaScope })).items
+    .map((item) => item.id), ["learning:revocation-new"]);
+
+  await assert.rejects(revokeLearningEvidence({ root, learningId: "learning:revocation-new",
+    evidenceId: "evidence:revocation-new", reasonCode: "source-invalid", reason: "Synthetic source retracted." }),
+  /explicit local confirmation/);
+  const revokedAt = new Date("2036-01-01T00:00:00.000Z");
+  const retries = await Promise.all(Array.from({ length: 6 }, () => revokeLearningEvidence({
+    root, learningId: "learning:revocation-new", evidenceId: "evidence:revocation-new",
+    reasonCode: "source-invalid", reason: "Synthetic source retracted.",
+    confirmation: "local-evidence-revocation-confirmed", now: revokedAt
+  })));
+  assert.equal(retries.filter((result) => result.unchanged === false).length, 1);
+  assert.equal((await revokeLearningEvidence({ root, learningId: "learning:revocation-new",
+    evidenceId: "evidence:revocation-new", reasonCode: "source-invalid", reason: "Synthetic source retracted.",
+    confirmation: "local-evidence-revocation-confirmed", now: new Date("2036-01-02T00:00:00.000Z") })).unchanged, true);
+  const stored = await loadLearning(root);
+  assert.equal(stored.learning.evidenceRevocations.length, 1);
+  assert.equal(JSON.stringify(stored.learning.evidenceRevocations).includes("Synthetic source retracted"), false);
+  const withheld = await learningContext({ root, groupId: "group:revocation-alpha", scope: alphaScope });
+  assert.deepEqual(withheld.items, []);
+  assert.deepEqual(withheld.diagnostics, ["revoked-learning-evidence:learning:revocation-new"]);
+  const foreign = await learningContext({ root, groupId: "group:revocation-beta",
+    scope: { ...scopedTurn, groupId: "group:revocation-beta" } });
+  assert.deepEqual(foreign.items, []);
+  assert.deepEqual(foreign.diagnostics, []);
+  const status = await learningOutcomeStatus({ root, scope: alphaScope });
+  assert.equal(status.evidenceRevocations, 1);
+  assert.equal(status.records.find((item) => item.id === "learning:revocation-new").canaryStatus, "revoked-evidence");
+
+  const originalState = JSON.stringify(stored.learning);
+  stored.learning.evidenceRevocations[0].evidenceDigest = hash("redirected evidence");
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /evidence revocation state is invalid/);
+  await writeFile(stored.learningPath, `${originalState}\n`, "utf8");
+
+  const reconciled = await evaluateLearning({ root, now: new Date("2036-01-01T00:00:01.000Z") });
+  assert.deepEqual(reconciled.reconciled, [{ id: "learning:revocation-new", decision: "rolled-back" }]);
+  assert.deepEqual((await learningContext({ root, groupId: "group:revocation-alpha", scope: alphaScope })).items
+    .map((item) => item.id), ["learning:revocation-old"]);
+  assert.equal((await loadLearning(root)).learning.candidates.find((item) => item.id === "learning:revocation-new")
+    .rollback.mode, "automatic-evidence-revocation");
+
+  await deleteLearning({ root, id: "learning:revocation-new" });
+  assert.equal((await loadLearning(root)).learning.evidenceRevocations.length, 0);
+  assert.equal((await purgeLearningBySubject({ root, subjectId: "person:revocation-member" })).deleted, 1);
+  await proposeLearning({ root, id: "learning:revocation-cli", kind: "project-fact",
+    claim: "The synthetic CLI evidence remains local.", privacy: "shared",
+    evidence: evidence("evidence:revocation-cli", 0.95) });
+  const cliRevocation = runCli(["learn-evidence-revoke", "learning:revocation-cli", "--root", root,
+    "--evidence-id", "evidence:revocation-cli", "--reason-code", "retracted", "--reason",
+    "Synthetic CLI retraction.", "--confirm-local-evidence", "--json"], state);
+  assert.equal(cliRevocation.receipt.schema, "agentspine.learning-evidence-revocation/v1");
+  await assert.rejects(reviewLearning({ root, id: "learning:revocation-cli", decision: "accept",
+    reason: "Synthetic review.", confirmedByUser: true }), /evidence was revoked/);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
+  const help = spawnSync(process.execPath, [cli, "help"], {
+    encoding: "utf8", env: { ...process.env, AGENTSPINE_STATE_DIR: state }
+  });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /learn-evidence-revoke/);
 });
 
 test("immutable evaluation contracts prevent benchmark drift and freeze promotion thresholds", async (t) => {
@@ -1914,6 +2002,7 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   assert.deepEqual(upgraded.measurements, []);
   assert.deepEqual(upgraded.measurementLineage, []);
   assert.deepEqual(upgraded.trialFailures, []);
+  assert.deepEqual(upgraded.evidenceRevocations, []);
   assert.equal(upgraded.config.minOutcomeReceipts, 2);
   assert.equal(upgraded.config.initialTrialOutcomeTimeoutMinutes, 1440);
   await configureLearning({ root, config: { canaryTtlDays: 7 } });

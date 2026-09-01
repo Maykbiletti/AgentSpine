@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-09-01
+
+### Added
+
+- A locally confirmed `agentspine.learning-evidence-revocation/v1` receipt binds an exact evidence item, its SHA-256 digest and the frozen candidate target without retaining the revocation explanation in plaintext.
+- `learn-evidence-revoke` provides a local-only CLI path; scoped status, Doctor and read-only Context MCP diagnostics report revocation counts and withheld lessons.
+
+### Changed
+
+- Revoked evidence immediately removes an accepted lesson from the next matching context pass. Evaluation then rolls it back atomically, restores a safe superseded predecessor and prevents the frozen candidate from being reviewed or promoted again.
+- Legacy learning state upgrades with an empty revocation ledger. Candidate deletion and subject purge remove matching receipts, while diagnostics remain isolated from foreign groups.
+
+### Security
+
+- Evidence withdrawal is fail-closed: IDs cannot be redirected to another evidence item or candidate revision, concurrent retries create one receipt, state tampering fails on load, and no later average or replacement observation can rehabilitate the revoked target.
+
 ## [0.28.0] - 2026-09-01
 
 ### Added
@@ -663,7 +679,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.25.0...v0.26.0

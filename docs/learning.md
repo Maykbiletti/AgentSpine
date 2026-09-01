@@ -202,6 +202,20 @@ An unplanned, stale, cross-scope, metric-drifted, evaluator-drifted, evaluator-r
 
 Evaluator registration and revocation, evaluation and measurement registration, outcome consumption and policy changes are local CLI/runtime operations. MCP exposes only the read-only `learning_outcome_status` view for this loop; model-side MCP cannot manufacture or reactivate registry records, contracts, evaluator roots, measurements, applications, deliveries or outcome evidence. Doctor distinguishes active and revoked roots, exact registry bindings, registered, consumed and stale-unconsumed measurements, full lineage, root-bound receipts, independent roots, pending and stale projections, completed deliveries, bound after-measurements and stale canaries. `learn-measurement-purge . --confirm-local-purge` removes only expired unconsumed measurement receipts; it never removes consumed evidence or sources. A content-free tombstone retains only the source digest and hashes of evaluator/run and evaluator-root/run identity, so purging a receipt or candidate cannot make its external evidence reusable. The audit replays registry records and bindings plus evaluation, measurement, application, delivery, coverage, provenance and outcome digests, global source/run/root-run uniqueness, exact scopes, authority boundaries and v9 bindings. `learning_context` returns only active, unexpired or validated, exact-scope behavior lessons and reports stale or evaluator-revoked Canaries as degraded instead of silently projecting them.
 
+## Evidence revocation
+
+When a source is retracted, duplicated or later shown invalid, a local operator can revoke the exact evidence item without editing the candidate or its source:
+
+```bash
+agentspine learn-evidence-revoke learning:check-invariant \
+  --evidence-id evidence:check-invariant-a \
+  --reason-code source-invalid \
+  --reason "Synthetic benchmark source was withdrawn." \
+  --confirm-local-evidence
+```
+
+The immutable receipt stores the learning ID, evidence ID, exact evidence and candidate-target digests, reason classification, reason digest and timestamp; it does not store the explanation, claim, evidence summary or source content. Repeating the same operation is idempotent, while a different reason or redirected ID is rejected. The next matching context pass withholds the lesson before reconciliation. `learn-evaluate` then performs an automatic evidence-revocation rollback and restores a superseded predecessor when present. Revoked candidates cannot accept new evidence, pass manual review or enter automatic or continuity promotion; changed guidance requires a new candidate and evidence chain. Status, Doctor and read-only Context MCP expose content-free counts and scoped degradation only. Foreign groups receive no revocation diagnostic. Deletion and subject purge remove the receipt with its candidate, and older state loads with an empty revocation ledger.
+
 ## Supersession and rollback
 
 New information does not overwrite an accepted fact. Propose a new candidate with `--supersedes` and the same kind, subject, and privacy scope. Acceptance marks the prior record `superseded` and retains both versions. Rollback deactivates the replacement and restores the prior accepted record atomically.

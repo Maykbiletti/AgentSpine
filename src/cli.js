@@ -12,7 +12,7 @@ import {
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
   purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningMeasurement,
   recordLearningOutcome, registerLearningEvaluation, registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator,
-  reviewLearning, rollbackLearning
+  reviewLearning, revokeLearningEvidence, rollbackLearning
 } from "./lib/learning.js";
 import { configureContinuity, loadContinuity, purgeContinuity } from "./lib/continuity.js";
 import {
@@ -144,6 +144,7 @@ Usage:
   agentspine attention-config [root] [--enabled true|false] [--quiet-start 22 --quiet-end 7 --utc-offset 120]
   agentspine learn-propose [id] --kind preference|behavior --claim text --evidence text [--persona id --user id --tenant id --project id --group id --task id]
   agentspine learn-evidence <id> --summary text [--type interaction] [--source path.md]
+  agentspine learn-evidence-revoke <learning-id> --evidence-id id --reason-code retracted|source-invalid|measurement-invalid|duplicate|other --reason text --confirm-local-evidence
   agentspine learn-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine learn-context [root] [--group id] [--include-private] [--kind preference,goal]
   agentspine learn-evaluate [root]
@@ -444,6 +445,15 @@ export async function run(argv = process.argv.slice(2)) {
         id: flags["evidence-id"], type: flags.type || "interaction", summary: flags.summary,
         sourceDocument: flags.source || null, confidence: Number(flags.confidence ?? 0.5), observedAt: flags.at
       }
+    }), json);
+  }
+
+  if (command === "learn-evidence-revoke") {
+    return output(await revokeLearningEvidence({
+      root: flags.root || process.cwd(), learningId: positional[0], evidenceId: flags["evidence-id"],
+      reasonCode: flags["reason-code"], reason: flags.reason,
+      confirmation: booleanFlag(flags["confirm-local-evidence"])
+        ? "local-evidence-revocation-confirmed" : null
     }), json);
   }
 
@@ -1185,13 +1195,14 @@ export async function run(argv = process.argv.slice(2)) {
       const deadlineBoundApplications = status.records.reduce((sum, item) =>
         sum + item.deadlineBoundApplications, 0);
       const trialFailureReceipts = status.records.reduce((sum, item) => sum + item.trialFailureReceipts, 0);
+      const evidenceRevocationReceipts = status.records.reduce((sum, item) => sum + item.evidenceRevocationReceipts, 0);
       const deliveryTimeoutFailures = status.records.reduce((sum, item) => sum + item.deliveryTimeoutFailures, 0);
       const outcomeTimeoutFailures = status.records.reduce((sum, item) => sum + item.outcomeTimeoutFailures, 0);
       const pendingInitialOutcomes = status.records.reduce((sum, item) => sum + item.pendingInitialOutcomes, 0);
       const staleInitialOutcomes = status.records.reduce((sum, item) => sum + item.staleInitialOutcomes, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
-        status: status.records.some((item) => ["stale", "revoked", "unproven", "failed-trial"].includes(item.canaryStatus))
+        status: status.records.some((item) => ["stale", "revoked", "revoked-evidence", "unproven", "failed-trial"].includes(item.canaryStatus))
           || unboundAfterReceipts > 0 || undeliveredAfterReceipts > 0 || unplannedOutcomeReceipts > 0
           || stalePendingApplications > 0 || staleUnconsumedMeasurements > 0
           || inactiveEvaluatorRegistryContracts > 0 || staleRevalidations > 0
@@ -1211,6 +1222,7 @@ export async function run(argv = process.argv.slice(2)) {
         deadlineBoundEvaluationContracts,
         deadlineBoundApplications,
         trialFailureReceipts,
+        evidenceRevocationReceipts,
         deliveryTimeoutFailures,
         outcomeTimeoutFailures,
         pendingInitialOutcomes,
