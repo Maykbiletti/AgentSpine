@@ -1108,9 +1108,13 @@ export async function run(argv = process.argv.slice(2)) {
       const independentEvaluatorRoots = status.records.reduce((sum, item) => sum + item.independentEvaluatorRoots, 0);
       const evaluatorRegistryContracts = status.records.reduce((sum, item) => sum + item.evaluatorRegistryContracts, 0);
       const inactiveEvaluatorRegistryContracts = status.records.reduce((sum, item) => sum + item.inactiveEvaluatorRegistryContracts, 0);
+      const currentValidatedLessons = status.records.filter((item) => item.validationLeaseStatus === "current-validated").length;
+      const staleValidatedLessons = status.records.filter((item) => item.validationLeaseStatus === "stale-validated").length;
+      const unprovenValidatedLessons = status.records.filter((item) => item.validationLeaseStatus === "unproven-validated").length;
+      const revokedValidatedLessons = status.records.filter((item) => item.validationLeaseStatus === "revoked-validated").length;
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
-        status: status.records.some((item) => item.canaryStatus === "stale")
+        status: status.records.some((item) => ["stale", "revoked", "unproven"].includes(item.canaryStatus))
           || unboundAfterReceipts > 0 || undeliveredAfterReceipts > 0 || unplannedOutcomeReceipts > 0
           || stalePendingApplications > 0 || staleUnconsumedMeasurements > 0
           || inactiveEvaluatorRegistryContracts > 0 ? "degraded" : "healthy",
@@ -1141,6 +1145,11 @@ export async function run(argv = process.argv.slice(2)) {
         activeEvaluatorRoots: status.evaluatorRegistry.active,
         revokedEvaluatorRoots: status.evaluatorRegistry.revoked,
         evaluatorRegistryBindings: status.evaluatorRegistry.bindings,
+        validationLeases: status.evaluatorRegistry.validationLeases,
+        currentValidatedLessons,
+        staleValidatedLessons,
+        unprovenValidatedLessons,
+        revokedValidatedLessons,
         evaluatorRegistryContracts,
         inactiveEvaluatorRegistryContracts,
         unplannedOutcomeReceipts,

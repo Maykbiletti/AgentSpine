@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-01
+
+### Added
+
+- Immutable, content-free `agentspine.learning-validation/v1` leases bind each validated behavior lesson to the exact evaluation, evaluator-registry binding, scope, metric, before/after outcome digests, measured improvement and evidence expiry.
+- Status, Doctor and audit diagnostics distinguish current, stale, revoked and unproven validated lessons.
+
+### Changed
+
+- Evaluation expiry and evaluator-root revocation now remove affected validated lessons from preflight context before the next model turn, not only active Canaries. Reconciliation rolls them back atomically and restores any superseded lesson.
+- Evaluation v1-v6 history remains readable; new v7 validations require a current evidence lease.
+
+### Security
+
+- A forged `validated` status, missing or altered lease, stale evidence, changed registry binding or revoked evaluator root fails closed. Validation leases contain only stable IDs, digests, scope, metric and timestamps; no prompt, answer, dataset, evaluator or user content.
+
 ## [0.20.0] - 2026-09-01
 
 ### Added
@@ -534,7 +550,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.17.0...v0.18.0

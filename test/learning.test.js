@@ -137,6 +137,45 @@ async function application(root, learningId, turnId, now = new Date()) {
   return { ...application, deliveryId: delivered.receipts[0].id };
 }
 
+async function establishValidatedLearning(root, {
+  learningId, evaluationId, start, expiresAt, supersedesId = null
+}) {
+  const suffix = learningId.split(":").at(-1);
+  await proposeLearning({
+    root, id: learningId, kind: "behavior", claim: `Use validated synthetic strategy ${suffix}.`,
+    privacy: "shared", scope: scopedTurn, supersedesId,
+    evidence: evidence(`evidence:${suffix}-one`, 0.97), now: start
+  });
+  await addLearningEvidence({ root, id: learningId,
+    evidence: evidence(`evidence:${suffix}-two`, 0.97), now: start });
+  await configureLearning({ root, config: {
+    autoPromote: true, minConfidence: 0.9, minEvidence: 2, minOutcomeReceipts: 2,
+    canaryReceipts: 2, minImprovement: 0.1, canaryTtlDays: 30
+  }, now: start });
+  await evaluation(root, learningId, {
+    id: evaluationId, evaluatorIds: ["evaluator:test-a", "evaluator:test-b"], now: start, expiresAt
+  });
+  await recordLearningOutcome({ root, learningId,
+    ...outcome(`outcome:${suffix}-before-a`, "before", 0.4, "evaluator:test-a", { evaluationId, measuredAt: start }),
+    now: start });
+  await recordLearningOutcome({ root, learningId,
+    ...outcome(`outcome:${suffix}-before-b`, "before", 0.5, "evaluator:test-b", { evaluationId, measuredAt: start }),
+    now: start });
+  await evaluateLearning({ root, now: new Date(start.getTime() + 1000) });
+  const firstApplication = await application(root, learningId, `${suffix}-a`, new Date(start.getTime() + 2000));
+  await recordLearningOutcome({ root, learningId, applicationId: firstApplication.id,
+    deliveryId: firstApplication.deliveryId,
+    ...outcome(`outcome:${suffix}-after-a`, "after", 0.8, "evaluator:test-a", {
+      evaluationId, measuredAt: new Date(start.getTime() + 2000)
+    }), now: new Date(start.getTime() + 2000) });
+  const secondApplication = await application(root, learningId, `${suffix}-b`, new Date(start.getTime() + 3000));
+  return recordLearningOutcome({ root, learningId, applicationId: secondApplication.id,
+    deliveryId: secondApplication.deliveryId,
+    ...outcome(`outcome:${suffix}-after-b`, "after", 0.9, "evaluator:test-b", {
+      evaluationId, measuredAt: new Date(start.getTime() + 3000)
+    }), now: new Date(start.getTime() + 3000) });
+}
+
 function runCli(args, state) {
   const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
   const result = spawnSync(process.execPath, [cli, ...args], {
@@ -612,7 +651,9 @@ test("local evaluator revocation removes canary context and forces automatic rol
   const reconciled = await evaluateLearning({ root, now: new Date("2032-01-01T00:00:03.000Z") });
   assert.deepEqual(reconciled.reconciled, [{ id: "learning:revoked-evaluator", decision: "rolled-back" }]);
   const status = await learningOutcomeStatus({ root });
-  assert.deepEqual(status.evaluatorRegistry, { active: 1, revoked: 1, bindings: 1, authority: "context-only" });
+  assert.deepEqual(status.evaluatorRegistry, {
+    active: 1, revoked: 1, bindings: 1, validationLeases: 0, authority: "context-only"
+  });
   assert.equal(status.records[0].inactiveEvaluatorRegistryContracts, 1);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
@@ -665,6 +706,17 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
   assert.equal(second.decision, "validated");
   assert.ok(Math.abs(second.candidate.promotion.canary.improvement - 0.3) < 1e-12,
     "paired deltas, not a driftable aggregate cohort, prove improvement");
+  assert.match(second.candidate.promotion.canary.validationLeaseId, /^validation:/);
+  const validatedState = await loadLearning(root);
+  const validationLease = validatedState.learning.validationLeases[0];
+  assert.equal(validationLease.schema, "agentspine.learning-validation/v1");
+  assert.equal(validationLease.learningId, "learning:measured");
+  assert.equal(validationLease.evaluatorRegistryBindingDigest,
+    validatedState.learning.evaluationBindings.find((item) => item.evaluationId === "evaluation:fixed").digest);
+  assert.deepEqual(validationLease.beforeOutcomes.map((item) => item.id), ["outcome:before-a", "outcome:before-b"]);
+  assert.deepEqual(validationLease.afterOutcomes.map((item) => item.id), ["outcome:after-a", "outcome:after-b"]);
+  assert.equal(JSON.stringify(validationLease).includes("Check the fixed synthetic invariant"), false,
+    "validation proof must remain content-free");
   const retryAfterValidation = await recordLearningOutcome({
     root, learningId: "learning:measured", applicationId: applicationB.id, deliveryId: applicationB.deliveryId,
     ...outcome("outcome:after-b", "after", 0.8, "evaluator:user-b", { kind: "user-feedback" })
@@ -672,6 +724,8 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
   assert.equal(retryAfterValidation.unchanged, true);
   const status = await learningOutcomeStatus({ root, scope: scopedTurn });
   assert.equal(status.records[0].canaryStatus, "validated");
+  assert.equal(status.records[0].validationLeaseStatus, "current-validated");
+  assert.equal(status.evaluatorRegistry.validationLeases, 1);
   assert.equal(status.records[0].beforeReceipts, 2);
   assert.equal(status.records[0].afterReceipts, 2);
   assert.equal(status.records[0].boundAfterReceipts, 2);
@@ -682,6 +736,81 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
   assert.equal(status.records[0].pairedEvaluatorPairs, 2);
   assert.equal(status.records[0].pendingApplications, 0);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), beforeBytes);
+});
+
+test("validated evidence leases expire before context and roll back atomically under parallel reconciliation", async (t) => {
+  const { root } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2033-01-01T00:00:00.000Z");
+  await proposeLearning({
+    root, id: "learning:lease-prior", kind: "behavior", claim: "Use stable synthetic strategy prior.",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:lease-prior"), now: start
+  });
+  await reviewLearning({ root, id: "learning:lease-prior", decision: "accept",
+    reason: "Synthetic local confirmation.", confirmedByUser: true, now: start });
+  const validated = await establishValidatedLearning(root, {
+    learningId: "learning:lease-expiry", evaluationId: "evaluation:lease-expiry", start,
+    expiresAt: "2033-01-10T00:00:00.000Z", supersedesId: "learning:lease-prior"
+  });
+  assert.equal(validated.decision, "validated");
+  const currentContext = await learningContext({ root, scope: scopedTurn,
+    now: new Date("2033-01-02T00:00:00.000Z") });
+  assert.deepEqual(currentContext.items.map((item) => item.id), ["learning:lease-expiry"], JSON.stringify(currentContext));
+
+  const expiredAt = new Date("2033-01-10T00:00:00.000Z");
+  const staleContext = await learningContext({ root, scope: scopedTurn, now: expiredAt });
+  assert.equal(staleContext.degraded, true);
+  assert.equal(staleContext.items.length, 0, "expired validated evidence must be absent before the next model turn");
+  assert.deepEqual(staleContext.diagnostics, ["stale-validated-learning:learning:lease-expiry"]);
+  const reconciliations = await Promise.all(Array.from({ length: 6 }, () => evaluateLearning({ root, now: expiredAt })));
+  assert.equal(reconciliations.flatMap((item) => item.reconciled)
+    .filter((item) => item.id === "learning:lease-expiry" && item.decision === "rolled-back").length, 1);
+  assert.deepEqual((await learningContext({ root, scope: scopedTurn,
+    now: new Date("2033-01-10T00:00:01.000Z") })).items.map((item) => item.id), ["learning:lease-prior"]);
+  const stored = await loadLearning(root);
+  assert.equal(stored.learning.validationLeases.length, 0);
+  assert.equal(stored.learning.history.filter((item) => item.kind === "learning-validation").length, 1,
+    "expired proof remains immutable rollback history, not active context state");
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("validated learning is removed when its evaluator root is revoked", async (t) => {
+  const { root } = await fixture(t);
+  const start = new Date("2034-01-01T00:00:00.000Z");
+  const validated = await establishValidatedLearning(root, {
+    learningId: "learning:lease-revoked", evaluationId: "evaluation:lease-revoked", start,
+    expiresAt: "2034-02-01T00:00:00.000Z"
+  });
+  assert.equal(validated.decision, "validated");
+  await revokeLearningEvaluator({ root, id: "evaluator:test-a", reason: "Synthetic evaluator retired.",
+    confirmLocalEvaluator: true, now: new Date("2034-01-01T00:00:04.000Z") });
+  const context = await learningContext({ root, scope: scopedTurn, now: new Date("2034-01-01T00:00:05.000Z") });
+  assert.equal(context.items.length, 0);
+  assert.deepEqual(context.diagnostics, ["revoked-evaluator-validated-learning:learning:lease-revoked"]);
+  const reconciled = await evaluateLearning({ root, now: new Date("2034-01-01T00:00:05.000Z") });
+  assert.deepEqual(reconciled.reconciled, [{ id: "learning:lease-revoked", decision: "rolled-back" }]);
+  assert.equal((await learningOutcomeStatus({ root })).records[0].status, "rolled-back");
+});
+
+test("a forged validated state without its immutable lease is withheld and rolled back", async (t) => {
+  const { root } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2035-01-01T00:00:00.000Z");
+  await establishValidatedLearning(root, {
+    learningId: "learning:lease-missing", evaluationId: "evaluation:lease-missing", start,
+    expiresAt: "2035-02-01T00:00:00.000Z"
+  });
+  const stored = await loadLearning(root);
+  stored.learning.validationLeases = [];
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  const context = await learningContext({ root, scope: scopedTurn, now: new Date("2035-01-01T00:00:05.000Z") });
+  assert.equal(context.items.length, 0);
+  assert.deepEqual(context.diagnostics, ["missing-validation-lease:learning:lease-missing"]);
+  const status = await learningOutcomeStatus({ root, now: new Date("2035-01-01T00:00:05.000Z") });
+  assert.equal(status.records[0].canaryStatus, "unproven");
+  const reconciled = await evaluateLearning({ root, now: new Date("2035-01-01T00:00:05.000Z") });
+  assert.deepEqual(reconciled.reconciled, [{ id: "learning:lease-missing", decision: "rolled-back" }]);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
 test("after outcomes require distinct exact-turn application receipts", async (t) => {
@@ -1224,7 +1353,9 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
   assert.equal(status.records[0].independentEvaluatorRoots, 1);
   assert.equal(status.records[0].evaluatorRegistryContracts, 1);
   assert.equal(status.records[0].inactiveEvaluatorRegistryContracts, 0);
-  assert.deepEqual(status.evaluatorRegistry, { active: 2, revoked: 0, bindings: 1, authority: "context-only" });
+  assert.deepEqual(status.evaluatorRegistry, {
+    active: 2, revoked: 0, bindings: 1, validationLeases: 0, authority: "context-only"
+  });
   assert.equal(status.records[0].measurementReceipts, 1);
   assert.equal(status.records[0].measurementLineageReceipts, 1);
   assert.equal(status.records[0].consumedMeasurementReceipts, 1);

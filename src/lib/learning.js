@@ -53,6 +53,7 @@ function emptyLearning(root) {
     evaluations: [],
     evaluatorRegistry: [],
     evaluationBindings: [],
+    validationLeases: [],
     history: []
   };
 }
@@ -70,6 +71,7 @@ function normalizeState(value, root) {
     || (value.evaluations !== undefined && (!Array.isArray(value.evaluations) || !value.evaluations.every((item) => item && typeof item === "object")))
     || (value.evaluatorRegistry !== undefined && (!Array.isArray(value.evaluatorRegistry) || !value.evaluatorRegistry.every((item) => item && typeof item === "object")))
     || (value.evaluationBindings !== undefined && (!Array.isArray(value.evaluationBindings) || !value.evaluationBindings.every((item) => item && typeof item === "object")))
+    || (value.validationLeases !== undefined && (!Array.isArray(value.validationLeases) || !value.validationLeases.every((item) => item && typeof item === "object")))
     || !Array.isArray(value.history) || !value.history.every((item) => item && typeof item === "object")) {
     throw new Error("learning state structure is invalid; run the audit before learning");
   }
@@ -88,7 +90,8 @@ function normalizeState(value, root) {
     deliveries: value.deliveries || [],
     evaluations: value.evaluations || [],
     evaluatorRegistry: value.evaluatorRegistry || [],
-    evaluationBindings: value.evaluationBindings || []
+    evaluationBindings: value.evaluationBindings || [],
+    validationLeases: value.validationLeases || []
   };
   if (normalized.outcomes.some((receipt) => !storedOutcomeStructure(receipt))) {
     throw new Error("learning outcome state is invalid; run the audit before learning");
@@ -130,6 +133,13 @@ function normalizeState(value, root) {
     && !normalized.evaluationBindings.some((binding) => binding.evaluationId === contract.id
       && binding.evaluationDigest === contract.digest))) {
     throw new Error("learning evaluator binding is missing; run the audit before learning");
+  }
+  if (normalized.validationLeases.some((lease) => !storedValidationLeaseStructure(lease))) {
+    throw new Error("learning validation lease state is invalid; run the audit before learning");
+  }
+  if (new Set(normalized.validationLeases.map((lease) => lease.id)).size !== normalized.validationLeases.length
+    || new Set(normalized.validationLeases.map((lease) => lease.learningId)).size !== normalized.validationLeases.length) {
+    throw new Error("learning validation lease is duplicated; run the audit before learning");
   }
   if (normalized.outcomes.some((receipt) => {
     const candidate = normalized.candidates.find((item) => item.id === receipt.learningId);
@@ -294,6 +304,9 @@ function normalizeState(value, root) {
       && contract.learningId === candidate.id && contract.digest === candidate.promotion.canary.evaluationDigest
       && exactScope(contract.scope, candidate.promotion.canary.scope)))) {
     throw new Error("learning canary evaluation binding is invalid; run the audit before learning");
+  }
+  if (normalized.validationLeases.some((lease) => !validationLeaseMatchesState(normalized, lease))) {
+    throw new Error("learning validation lease binding is invalid; run the audit before learning");
   }
   return normalized;
 }
@@ -484,6 +497,134 @@ function activeEvaluationBinding(state, contract) {
     const record = activeEvaluatorRecord(state, entry.evaluatorId, entry.principalDigest);
     return record?.digest === entry.registryDigest;
   }) ? binding : null;
+}
+
+function validationOutcomeReferences(receipts) {
+  return receipts.map((receipt) => ({ id: receipt.id, digest: receipt.digest, authority: "context-only" }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function validationLeasePayload({
+  id, learningId, evaluationId, evaluationDigest, evaluatorRegistryBindingDigest,
+  scope, metric, beforeOutcomes, afterOutcomes, improvement, validatedAt, expiresAt
+}) {
+  return {
+    schema: "agentspine.learning-validation/v1",
+    id,
+    learningId,
+    evaluationId,
+    evaluationDigest,
+    evaluatorRegistryBindingDigest,
+    scope,
+    metric,
+    beforeOutcomes,
+    afterOutcomes,
+    improvement,
+    validatedAt,
+    expiresAt,
+    authority: "context-only"
+  };
+}
+
+function storedValidationLeaseStructure(lease) {
+  if (!lease || typeof lease !== "object" || Array.isArray(lease)) return false;
+  const payload = validationLeasePayload(lease);
+  const validReferences = (items) => Array.isArray(items) && items.length >= 2
+    && items.every((entry) => ID_RE.test(entry?.id || "") && DIGEST_RE.test(entry?.digest || "")
+      && entry?.authority === "context-only")
+    && new Set(items.map((entry) => entry.id)).size === items.length;
+  return lease.schema === "agentspine.learning-validation/v1" && ID_RE.test(lease.id || "")
+    && ID_RE.test(lease.learningId || "") && ID_RE.test(lease.evaluationId || "")
+    && DIGEST_RE.test(lease.evaluationDigest || "") && DIGEST_RE.test(lease.evaluatorRegistryBindingDigest || "")
+    && lease.scope && SCOPE_FIELDS.every((field) => Object.hasOwn(lease.scope, field))
+    && Object.keys(lease.scope).every((field) => SCOPE_FIELDS.includes(field))
+    && Object.values(lease.scope).every((value) => value === null || ID_RE.test(value))
+    && typeof lease.metric?.name === "string" && lease.metric.name.length > 0
+    && METRIC_DIRECTIONS.has(lease.metric?.direction)
+    && validReferences(lease.beforeOutcomes) && validReferences(lease.afterOutcomes)
+    && Number.isFinite(lease.improvement) && lease.improvement >= -1 && lease.improvement <= 1
+    && Number.isFinite(new Date(lease.validatedAt).getTime()) && Number.isFinite(new Date(lease.expiresAt).getTime())
+    && new Date(lease.expiresAt).getTime() > new Date(lease.validatedAt).getTime()
+    && lease.authority === "context-only" && lease.digest === digest(payload);
+}
+
+function validationLeaseMatchesState(state, lease) {
+  const candidate = state.candidates.find((item) => item.id === lease.learningId);
+  const canary = candidate?.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
+  const contract = state.evaluations.find((item) => item.id === lease.evaluationId);
+  const binding = state.evaluationBindings.find((item) => item.evaluationId === lease.evaluationId);
+  const referencesMatch = (references, phase) => references.every((reference) => state.outcomes.some((outcome) =>
+    outcome.id === reference.id && outcome.digest === reference.digest && outcome.learningId === lease.learningId
+    && outcome.evaluationId === lease.evaluationId && outcome.phase === phase && exactScope(outcome.scope, lease.scope)));
+  return Boolean(candidate && canary && canary.status === "validated"
+    && canary.validationLeaseId === lease.id && canary.validationLeaseDigest === lease.digest
+    && canary.validatedAt === lease.validatedAt && canary.expiresAt === lease.expiresAt
+    && Math.abs(canary.improvement - lease.improvement) <= 1e-12
+    && contract?.schema === "agentspine.learning-evaluation/v7" && contract.digest === lease.evaluationDigest
+    && binding?.digest === lease.evaluatorRegistryBindingDigest
+    && exactScope(contract.scope, lease.scope) && digest(contract.metric) === digest(lease.metric)
+    && lease.beforeOutcomes.length >= contract.thresholds.beforeReceipts
+    && lease.afterOutcomes.length >= contract.thresholds.afterReceipts
+    && referencesMatch(lease.beforeOutcomes, "before") && referencesMatch(lease.afterOutcomes, "after")
+    && canary.beforeReceipts.length === lease.beforeOutcomes.length
+    && lease.beforeOutcomes.every((reference) => canary.beforeReceipts.includes(reference.id))
+    && canary.afterReceipts.length === lease.afterOutcomes.length
+    && lease.afterOutcomes.every((reference) => canary.afterReceipts.includes(reference.id)));
+}
+
+function validationLeaseState(state, candidate, timestamp) {
+  const canary = candidate?.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
+  if (candidate?.status !== "accepted" || canary?.status !== "validated") {
+    return { status: "not-applicable", lease: null, evaluation: null };
+  }
+  const evaluation = state.evaluations.find((entry) => entry.id === canary.evaluationId
+    && entry.learningId === candidate.id && entry.digest === canary.evaluationDigest) || null;
+  if (!evaluation) return { status: "missing-evaluation", lease: null, evaluation: null };
+  if (evaluation.schema !== "agentspine.learning-evaluation/v7") {
+    return new Date(canary.expiresAt).getTime() < new Date(timestamp).getTime()
+      ? { status: "expired", lease: null, evaluation }
+      : { status: "legacy", lease: null, evaluation };
+  }
+  const lease = state.validationLeases.find((entry) => entry.id === canary.validationLeaseId
+    && entry.digest === canary.validationLeaseDigest && entry.learningId === candidate.id
+    && entry.evaluationId === evaluation.id && entry.evaluationDigest === evaluation.digest) || null;
+  if (!lease) return { status: "missing", lease: null, evaluation };
+  const binding = activeEvaluationBinding(state, evaluation);
+  if (!binding || binding.digest !== lease.evaluatorRegistryBindingDigest) {
+    return { status: "revoked", lease, evaluation };
+  }
+  if (new Date(lease.expiresAt).getTime() <= new Date(timestamp).getTime()
+    || lease.expiresAt !== canary.expiresAt) return { status: "expired", lease, evaluation };
+  return { status: "active", lease, evaluation };
+}
+
+function canaryValidity(state, candidate, timestamp) {
+  const canary = candidate?.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
+  if (candidate?.status !== "accepted" || !["active", "validated"].includes(canary?.status)) {
+    return { status: "not-applicable", canary, evaluation: null, lease: null };
+  }
+  if (new Date(canary.expiresAt).getTime() <= new Date(timestamp).getTime()) {
+    return { status: canary.status === "validated" ? "stale-validated" : "stale-active",
+      canary, evaluation: null, lease: null };
+  }
+  const evaluation = state.evaluations.find((entry) => entry.id === canary.evaluationId
+    && entry.learningId === candidate.id && entry.digest === canary.evaluationDigest) || null;
+  if (!evaluation || new Date(evaluation.expiresAt).getTime() <= new Date(timestamp).getTime()) {
+    return { status: canary.status === "validated" ? "stale-validated" : "stale-active",
+      canary, evaluation, lease: null };
+  }
+  if (evaluation.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(state, evaluation)) {
+    return { status: canary.status === "validated" ? "revoked-validated" : "revoked-active",
+      canary, evaluation, lease: null };
+  }
+  if (canary.status === "validated" && evaluation.schema === "agentspine.learning-evaluation/v7") {
+    const validation = validationLeaseState(state, candidate, timestamp);
+    if (validation.status !== "active") return { ...validation, status: validation.status === "missing"
+      ? "unproven-validated" : `${validation.status}-validated`, canary };
+    return { status: "current-validated", canary, evaluation, lease: validation.lease };
+  }
+  return { status: canary.status === "validated" ? "legacy-validated" : "current-active",
+    canary, evaluation, lease: null };
 }
 
 function measurementLineagePayload({ measurementReceiptId, learningId, evaluationId, sourceDigest, runDigest,
@@ -1560,6 +1701,13 @@ function improvement(direction, baseline, value) {
 
 function rollbackCandidate(state, candidate, reason, timestamp, mode = "manual") {
   preserve(state, "learning-candidate", candidate, timestamp);
+  const validationLeaseId = candidate.promotion?.mode === "outcome-canary"
+    ? candidate.promotion.canary?.validationLeaseId : null;
+  if (validationLeaseId) {
+    const validationLease = state.validationLeases.find((entry) => entry.id === validationLeaseId);
+    preserve(state, "learning-validation", validationLease, timestamp);
+    state.validationLeases = state.validationLeases.filter((entry) => entry.id !== validationLeaseId);
+  }
   const restored = [];
   for (const previousId of candidate.supersededIds || []) {
     const previous = state.candidates.find((entry) => entry.id === previousId);
@@ -1584,24 +1732,38 @@ function rollbackCandidate(state, candidate, reason, timestamp, mode = "manual")
 
 function reconcileCanary(state, candidate, timestamp) {
   const canary = candidate.promotion?.canary;
-  if (candidate.status !== "accepted" || candidate.promotion?.mode !== "outcome-canary" || canary?.status !== "active") {
+  if (candidate.status !== "accepted" || candidate.promotion?.mode !== "outcome-canary"
+    || !["active", "validated"].includes(canary?.status)) {
     return { candidate, decision: "unchanged", restored: [] };
   }
-  if (new Date(canary.expiresAt).getTime() < new Date(timestamp).getTime()) {
-    const result = rollbackCandidate(state, candidate, "outcome canary expired before validation", timestamp, "automatic-stale");
+  if (new Date(canary.expiresAt).getTime() <= new Date(timestamp).getTime()) {
+    const result = rollbackCandidate(state, candidate, canary.status === "validated"
+      ? "validated learning evidence lease expired" : "outcome canary expired before validation", timestamp,
+    canary.status === "validated" ? "automatic-validation-stale" : "automatic-stale");
     return { ...result, decision: "rolled-back" };
   }
   const evaluation = canary.evaluationId
     ? state.evaluations.find((contract) => contract.id === canary.evaluationId && contract.learningId === candidate.id)
     : null;
   if (canary.evaluationId && (!evaluation || evaluation.digest !== canary.evaluationDigest
-    || new Date(evaluation.expiresAt).getTime() < new Date(timestamp).getTime())) {
+    || new Date(evaluation.expiresAt).getTime() <= new Date(timestamp).getTime())) {
     const result = rollbackCandidate(state, candidate, "outcome evaluation contract is missing, changed, or stale", timestamp, "automatic-stale");
     return { ...result, decision: "rolled-back" };
   }
   if (evaluation?.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(state, evaluation)) {
     const result = rollbackCandidate(state, candidate, "outcome evaluator registry binding was revoked or changed", timestamp, "automatic-evaluator-revocation");
     return { ...result, decision: "rolled-back" };
+  }
+  if (canary.status === "validated") {
+    const validation = validationLeaseState(state, candidate, timestamp);
+    if (evaluation?.schema === "agentspine.learning-evaluation/v7" && validation.status !== "active") {
+      const result = rollbackCandidate(state, candidate,
+        validation.status === "missing" ? "validated learning is missing its immutable evidence lease"
+          : "validated learning evidence lease is no longer current",
+        timestamp, validation.status === "missing" ? "automatic-validation-unproven" : "automatic-validation-stale");
+      return { ...result, decision: "rolled-back" };
+    }
+    return { candidate, decision: "unchanged", restored: [] };
   }
   const planned = Boolean(evaluation);
   const receipts = state.outcomes.filter((item) => (planned
@@ -1650,11 +1812,53 @@ function reconcileCanary(state, candidate, timestamp) {
     return { ...result, decision: "rolled-back" };
   }
   preserve(state, "learning-candidate", candidate, timestamp);
+  let validationLease = null;
+  if (evaluation?.schema === "agentspine.learning-evaluation/v7") {
+    const binding = activeEvaluationBinding(state, evaluation);
+    if (!binding) {
+      const result = rollbackCandidate(state, candidate, "outcome evaluator registry binding was revoked or changed",
+        timestamp, "automatic-evaluator-revocation");
+      return { ...result, decision: "rolled-back" };
+    }
+    const beforeOutcomes = (canary.beforeReceipts || []).map((id) => state.outcomes.find((item) => item.id === id));
+    if (beforeOutcomes.some((item) => !item)) {
+      const result = rollbackCandidate(state, candidate, "validated learning baseline evidence is missing",
+        timestamp, "automatic-validation-unproven");
+      return { ...result, decision: "rolled-back" };
+    }
+    const payload = validationLeasePayload({
+      id: `validation:${randomUUID()}`,
+      learningId: candidate.id,
+      evaluationId: evaluation.id,
+      evaluationDigest: evaluation.digest,
+      evaluatorRegistryBindingDigest: binding.digest,
+      scope: canary.scope,
+      metric: canary.metric,
+      beforeOutcomes: validationOutcomeReferences(beforeOutcomes),
+      afterOutcomes: validationOutcomeReferences(eligible),
+      improvement: average,
+      validatedAt: timestamp,
+      expiresAt: canary.expiresAt
+    });
+    validationLease = { ...payload, digest: digest(payload) };
+    state.validationLeases.push(validationLease);
+    state.validationLeases.sort((a, b) => a.id.localeCompare(b.id));
+  }
   const validated = {
     ...candidate,
     promotion: {
       ...candidate.promotion,
-      canary: { ...canary, status: "validated", validatedAt: timestamp, afterReceipts: eligible.map((item) => item.id), improvement: average }
+      canary: {
+        ...canary,
+        status: "validated",
+        validatedAt: timestamp,
+        afterReceipts: eligible.map((item) => item.id),
+        improvement: average,
+        ...(validationLease ? {
+          validationLeaseId: validationLease.id,
+          validationLeaseDigest: validationLease.digest
+        } : {})
+      }
     },
     updatedAt: timestamp,
     authority: "context-only"
@@ -1931,19 +2135,13 @@ export async function learningContext({
   const subjectFilter = subjectIds === null ? null : new Set(subjectIds);
   const limit = maxItems === null ? learning.config.maxContextItems : integer(maxItems, "maxItems", 0, 50);
   const timestamp = date(now, "now");
-  const stale = learning.candidates.filter((candidate) => candidate.status === "accepted"
-    && candidate.promotion?.mode === "outcome-canary" && candidate.promotion.canary?.status === "active"
-    && new Date(candidate.promotion.canary.expiresAt).getTime() < new Date(timestamp).getTime()).map((candidate) => candidate.id);
-  const revokedEvaluators = learning.candidates.filter((candidate) => candidate.status === "accepted"
-    && candidate.promotion?.mode === "outcome-canary" && candidate.promotion.canary?.status === "active")
-    .filter((candidate) => {
-      const contract = learning.evaluations.find((entry) => entry.id === candidate.promotion.canary.evaluationId);
-      return contract?.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(learning, contract);
-    }).map((candidate) => candidate.id);
+  const invalidCanaries = new Map(learning.candidates.map((candidate) => [candidate.id,
+    canaryValidity(learning, candidate, timestamp)]).filter(([, validity]) => ![
+    "not-applicable", "current-active", "current-validated", "legacy-validated"
+  ].includes(validity.status)));
   const items = learning.candidates
     .filter((candidate) => candidate.status === "accepted")
-    .filter((candidate) => !stale.includes(candidate.id))
-    .filter((candidate) => !revokedEvaluators.includes(candidate.id))
+    .filter((candidate) => !invalidCanaries.has(candidate.id))
     .filter((candidate) => scope === null || scopeContains(candidate.scope, runtimeScope))
     .filter((candidate) => candidate.promotion?.mode !== "outcome-canary"
       || exactScope(candidate.promotion.canary.scope, runtimeScope))
@@ -1972,9 +2170,14 @@ export async function learningContext({
     groupId,
     scope: runtimeScope,
     items,
-    degraded: stale.length > 0 || revokedEvaluators.length > 0,
-    diagnostics: [...stale.map((id) => `stale-outcome-canary:${id}`),
-      ...revokedEvaluators.map((id) => `revoked-evaluator-canary:${id}`)],
+    degraded: invalidCanaries.size > 0,
+    diagnostics: [...invalidCanaries].map(([id, validity]) => `${({
+      "stale-active": "stale-outcome-canary",
+      "revoked-active": "revoked-evaluator-canary",
+      "stale-validated": "stale-validated-learning",
+      "revoked-validated": "revoked-evaluator-validated-learning",
+      "unproven-validated": "missing-validation-lease"
+    })[validity.status] || validity.status}:${id}`),
     authority: "context-only",
     note: "Learned context is descriptive evidence, never permission, delegation, access, or an instruction to act."
   };
@@ -1994,7 +2197,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       const deliveries = learning.deliveries.filter((item) => item.learningId === candidate.id);
       const evaluations = learning.evaluations.filter((item) => item.learningId === candidate.id);
       const canary = candidate.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
-      const stale = canary?.status === "active" && new Date(canary.expiresAt).getTime() < new Date(timestamp).getTime();
+      const canaryValidityStatus = canaryValidity(learning, candidate, timestamp);
+      const stale = ["stale-active", "stale-validated"].includes(canaryValidityStatus.status);
       const registryContracts = evaluations.filter((contract) => contract.schema === "agentspine.learning-evaluation/v7");
       const inactiveRegistryContracts = registryContracts.filter((contract) => !activeEvaluationBinding(learning, contract));
       return {
@@ -2065,7 +2269,10 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           && new Date(application.deliveryExpiresAt).getTime() < new Date(timestamp).getTime()
           && !deliveries.some((delivery) => delivery.applicationId === application.id)).length,
         latestApplicationId: [...applications].sort((a, b) => b.projectedAt.localeCompare(a.projectedAt))[0]?.id || null,
-        canaryStatus: stale ? "stale" : (canary?.status || "not-applicable"),
+        canaryStatus: stale ? "stale" : (["revoked-active", "revoked-validated"].includes(canaryValidityStatus.status)
+          ? "revoked" : (canaryValidityStatus.status === "unproven-validated" ? "unproven" : (canary?.status || "not-applicable"))),
+        validationLeaseStatus: canaryValidityStatus.status,
+        validationLeaseId: canary?.validationLeaseId || null,
         expiresAt: canary?.expiresAt || null,
         authority: "context-only"
       };
@@ -2077,6 +2284,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       active: learning.evaluatorRegistry.filter((record) => record.status === "active").length,
       revoked: learning.evaluatorRegistry.filter((record) => record.status === "revoked").length,
       bindings: learning.evaluationBindings.length,
+      validationLeases: learning.validationLeases.length,
       authority: "context-only"
     },
     records,
@@ -2131,6 +2339,7 @@ export async function deleteLearning({ root = process.cwd(), id }) {
     state.measurements = state.measurements.filter((entry) => entry.learningId !== id);
     state.applications = state.applications.filter((entry) => entry.learningId !== id);
     state.deliveries = state.deliveries.filter((entry) => entry.learningId !== id);
+    state.validationLeases = state.validationLeases.filter((entry) => entry.learningId !== id);
     state.evaluations = state.evaluations.filter((entry) => entry.learningId !== id);
     state.evaluationBindings = state.evaluationBindings.filter((entry) => !evaluationIds.has(entry.evaluationId));
     state.history = state.history.filter((entry) => entry.recordId !== id && entry.value?.id !== id);
@@ -2148,6 +2357,7 @@ export async function purgeLearningBySubject({ root = process.cwd(), subjectId }
     state.measurements = state.measurements.filter((entry) => !ids.has(entry.learningId));
     state.applications = state.applications.filter((entry) => !ids.has(entry.learningId));
     state.deliveries = state.deliveries.filter((entry) => !ids.has(entry.learningId));
+    state.validationLeases = state.validationLeases.filter((entry) => !ids.has(entry.learningId));
     state.evaluations = state.evaluations.filter((entry) => !ids.has(entry.learningId));
     state.evaluationBindings = state.evaluationBindings.filter((entry) => !evaluationIds.has(entry.evaluationId));
     state.history = state.history.filter((entry) => entry.subjectId !== subjectId && !ids.has(entry.recordId) && !ids.has(entry.value?.id));
@@ -2209,11 +2419,18 @@ export function learningFindings(learning, graph) {
           && (!candidate.promotion?.canary?.evaluationId
             || (canaryEvaluation && canaryEvaluation.digest === candidate.promotion.canary.evaluationDigest))));
       if (!candidate.acceptedAt || (!manualProof && !automaticProof)) findings.push(`invalid-acceptance:${candidate.id}`);
-      if (candidate.promotion?.mode === "outcome-canary" && candidate.promotion?.canary?.status === "active"
-        && new Date(candidate.promotion.canary.expiresAt).getTime() < Date.now()) findings.push(`stale-canary:${candidate.id}`);
-      if (candidate.promotion?.mode === "outcome-canary" && candidate.promotion?.canary?.status === "active"
+      if (candidate.promotion?.mode === "outcome-canary" && ["active", "validated"].includes(candidate.promotion?.canary?.status)
+        && new Date(candidate.promotion.canary.expiresAt).getTime() <= Date.now()) findings.push(`stale-canary:${candidate.id}`);
+      if (candidate.promotion?.mode === "outcome-canary" && ["active", "validated"].includes(candidate.promotion?.canary?.status)
         && canaryEvaluation?.schema === "agentspine.learning-evaluation/v7"
         && !activeEvaluationBinding(learning, canaryEvaluation)) findings.push(`inactive-evaluator-canary:${candidate.id}`);
+      if (candidate.promotion?.mode === "outcome-canary" && candidate.promotion?.canary?.status === "validated"
+        && canaryEvaluation?.schema === "agentspine.learning-evaluation/v7"
+        && !(learning.validationLeases || []).some((lease) => lease.id === candidate.promotion.canary.validationLeaseId
+          && lease.digest === candidate.promotion.canary.validationLeaseDigest
+          && storedValidationLeaseStructure(lease) && validationLeaseMatchesState(learning, lease))) {
+        findings.push(`missing-validation-lease:${candidate.id}`);
+      }
     }
   }
   const outcomeIds = new Set();
@@ -2233,6 +2450,16 @@ export function learningFindings(learning, graph) {
       if (!binding || binding.evaluationDigest !== contract.digest) findings.push(`invalid-evaluator-binding:${contract.id}`);
     }
     evaluationIds.add(contract.id);
+  }
+  const validationLeaseIds = new Set();
+  const validatedLearningIds = new Set();
+  for (const lease of learning.validationLeases || []) {
+    const valid = storedValidationLeaseStructure(lease) && validationLeaseMatchesState(learning, lease);
+    if (!valid || validationLeaseIds.has(lease.id) || validatedLearningIds.has(lease.learningId)) {
+      findings.push(`invalid-validation-lease:${lease.id || "unknown"}`);
+    }
+    validationLeaseIds.add(lease.id);
+    validatedLearningIds.add(lease.learningId);
   }
   const measurementIds = new Set();
   const measurementSources = new Set();
