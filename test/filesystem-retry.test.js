@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isFileLockContention, replaceFileWithRetry } from "../src/lib/filesystem-retry.js";
+import {
+  isFileLockContention, isTransientLockMetadataError, replaceFileWithRetry
+} from "../src/lib/filesystem-retry.js";
 
 test("Windows lock contention recognizes access errors without weakening other platforms", () => {
   assert.equal(isFileLockContention({ code: "EEXIST" }, "linux"), true);
@@ -9,6 +11,15 @@ test("Windows lock contention recognizes access errors without weakening other p
   assert.equal(isFileLockContention({ code: "EBUSY" }, "win32"), false);
   assert.equal(isFileLockContention({ code: "EPERM" }, "linux"), false);
   assert.equal(isFileLockContention({ code: "ENOENT" }, "win32"), false);
+});
+
+test("Windows lock metadata races retry transient stat failures", () => {
+  assert.equal(isTransientLockMetadataError({ code: "ENOENT" }, "linux"), true);
+  for (const code of ["EACCES", "EBUSY", "EPERM"]) {
+    assert.equal(isTransientLockMetadataError({ code }, "win32"), true);
+    assert.equal(isTransientLockMetadataError({ code }, "linux"), false);
+  }
+  assert.equal(isTransientLockMetadataError({ code: "EINVAL" }, "win32"), false);
 });
 
 test("Windows atomic replacement retries transient access errors with bounded backoff", async () => {

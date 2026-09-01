@@ -15,6 +15,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 - Evaluation expiry and evaluator-root revocation now remove affected validated lessons from preflight context before the next model turn, not only active Canaries. Reconciliation rolls them back atomically and restores any superseded lesson.
 - Evaluation v1-v6 history remains readable; new v7 validations require a current evidence lease.
+- Windows lock metadata access races are retried with the same bounded policy as lock creation, preventing transient `EPERM`, `EACCES` or `EBUSY` failures during parallel learning turns.
 
 ### Security
 

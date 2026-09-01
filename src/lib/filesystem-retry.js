@@ -8,6 +8,11 @@ export function isFileLockContention(error, platform = process.platform) {
     || (platform === "win32" && ["EACCES", "EPERM"].includes(error?.code));
 }
 
+export function isTransientLockMetadataError(error, platform = process.platform) {
+  return error?.code === "ENOENT"
+    || (platform === "win32" && WINDOWS_TRANSIENT_CODES.has(error?.code));
+}
+
 export async function replaceFileWithRetry(temporary, target, options = {}) {
   const renameFile = options.renameFile || rename;
   const wait = options.wait || delay;
