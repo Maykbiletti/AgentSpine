@@ -603,6 +603,9 @@ export async function run(argv = process.argv.slice(2)) {
     if (flags["outcome-max-age-days"] !== undefined) config.outcomeMaxAgeDays = Number(flags["outcome-max-age-days"]);
     if (flags["canary-receipts"] !== undefined) config.canaryReceipts = Number(flags["canary-receipts"]);
     if (flags["canary-ttl-days"] !== undefined) config.canaryTtlDays = Number(flags["canary-ttl-days"]);
+    if (flags["initial-trial-outcome-timeout-minutes"] !== undefined) {
+      config.initialTrialOutcomeTimeoutMinutes = Number(flags["initial-trial-outcome-timeout-minutes"]);
+    }
     if (!Object.keys(config).length) return output((await loadLearning(root)).learning.config, json);
     return output(await configureLearning({ root, config }), json);
   }
@@ -1171,16 +1174,28 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.initialAdmittedApplications, 0);
       const completedInitialDeliveries = status.records.reduce((sum, item) =>
         sum + item.initialCompletedDeliveries, 0);
+      const incompleteInitialAdmissions = status.records.reduce((sum, item) =>
+        sum + item.incompleteInitialAdmissions, 0);
       const targetBoundEvaluationContracts = status.records.reduce((sum, item) =>
         sum + item.targetBoundEvaluationContracts, 0);
       const targetBoundApplications = status.records.reduce((sum, item) =>
         sum + item.targetBoundApplications, 0);
+      const deadlineBoundEvaluationContracts = status.records.reduce((sum, item) =>
+        sum + item.deadlineBoundEvaluationContracts, 0);
+      const deadlineBoundApplications = status.records.reduce((sum, item) =>
+        sum + item.deadlineBoundApplications, 0);
+      const trialFailureReceipts = status.records.reduce((sum, item) => sum + item.trialFailureReceipts, 0);
+      const deliveryTimeoutFailures = status.records.reduce((sum, item) => sum + item.deliveryTimeoutFailures, 0);
+      const outcomeTimeoutFailures = status.records.reduce((sum, item) => sum + item.outcomeTimeoutFailures, 0);
+      const pendingInitialOutcomes = status.records.reduce((sum, item) => sum + item.pendingInitialOutcomes, 0);
+      const staleInitialOutcomes = status.records.reduce((sum, item) => sum + item.staleInitialOutcomes, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
-        status: status.records.some((item) => ["stale", "revoked", "unproven"].includes(item.canaryStatus))
+        status: status.records.some((item) => ["stale", "revoked", "unproven", "failed-trial"].includes(item.canaryStatus))
           || unboundAfterReceipts > 0 || undeliveredAfterReceipts > 0 || unplannedOutcomeReceipts > 0
           || stalePendingApplications > 0 || staleUnconsumedMeasurements > 0
-          || inactiveEvaluatorRegistryContracts > 0 || staleRevalidations > 0 ? "degraded" : "healthy",
+          || inactiveEvaluatorRegistryContracts > 0 || staleRevalidations > 0
+          || staleInitialOutcomes > 0 ? "degraded" : "healthy",
         candidates: status.records.length,
         activeCanaries: status.records.filter((item) => item.canaryStatus === "active").length,
         validatedCanaries: status.records.filter((item) => item.canaryStatus === "validated").length,
@@ -1193,6 +1208,13 @@ export async function run(argv = process.argv.slice(2)) {
         evaluationContracts: status.records.reduce((sum, item) => sum + item.evaluationContracts, 0),
         targetBoundEvaluationContracts,
         targetBoundApplications,
+        deadlineBoundEvaluationContracts,
+        deadlineBoundApplications,
+        trialFailureReceipts,
+        deliveryTimeoutFailures,
+        outcomeTimeoutFailures,
+        pendingInitialOutcomes,
+        staleInitialOutcomes,
         plannedOutcomeReceipts,
         coverageBoundReceipts,
         legacyCoverageReceipts,
@@ -1219,7 +1241,7 @@ export async function run(argv = process.argv.slice(2)) {
         requiredInitialTrials,
         admittedInitialApplications,
         completedInitialDeliveries,
-        incompleteInitialAdmissions: Math.max(0, admittedInitialApplications - completedInitialDeliveries),
+        incompleteInitialAdmissions,
         activeRevalidations,
         staleRevalidations,
         fixedCohortRevalidations,

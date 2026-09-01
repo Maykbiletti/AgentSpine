@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-09-01
+
+### Added
+
+- `agentspine.learning-evaluation/v10` freezes a content-free completion policy for each initial Before/After experiment, including the delivery and outcome deadlines and the blocking classification of either omission.
+- `agentspine.learning-application/v7` carries the exact policy digest and outcome deadline into every admitted Canary turn; a missed deadline produces one immutable `agentspine.learning-trial-failure/v1` receipt.
+
+### Changed
+
+- A missing model-stop delivery or measured outcome now suppresses the Canary from context immediately and causes one atomic rollback. Late or backdated measurements cannot repair the failed trial, while evaluation v1-v9 and application v1-v6 state remains readable.
+- Status, Doctor and audit distinguish deadline-bound contracts, pending and stale initial outcomes, and delivery- versus outcome-timeout receipts without exposing lesson, prompt, response or evaluator content.
+
+### Security
+
+- Crashes, withheld `Stop` events and deliberately unmeasured first turns can no longer remain pending indefinitely or be replaced by a later favorable result. No aggregate score can override the resulting blocking defect.
+
 ## [0.27.0] - 2026-09-01
 
 ### Added
@@ -647,7 +663,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.24.0...v0.25.0
