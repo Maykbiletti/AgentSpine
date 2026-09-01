@@ -37,6 +37,7 @@ const scopedTurn = {
   personaId: "agent:synthetic", userId: "user:synthetic", tenantId: "tenant:synthetic",
   projectId: "project:synthetic", groupId: null, taskId: "task:synthetic"
 };
+const syntheticDatasetDigest = hash("synthetic fixed benchmark dataset");
 
 function outcome(id, phase, value, evaluatorId, extra = {}) {
   return {
@@ -48,6 +49,10 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
     measurement: {
       kind: extra.kind || "objective", evaluatorId,
       sourceDigest: extra.sourceDigest || null
+    },
+    coverage: {
+      datasetDigest: extra.datasetDigest || syntheticDatasetDigest,
+      caseCount: extra.caseCount ?? 12
     },
     measuredAt: extra.measuredAt
   };
@@ -65,7 +70,7 @@ async function evaluation(root, learningId, extra = {}) {
     root, id: extra.id || "evaluation:fixed", learningId, scope: extra.scope || scopedTurn,
     metric: { name: "fixed-task-success", direction: "higher" },
     benchmark: {
-      taskDigest: hash(`task:${learningId}`), datasetDigest: hash(`dataset:${learningId}`),
+      taskDigest: hash(`task:${learningId}`), datasetDigest: syntheticDatasetDigest,
       protocolDigest: hash(`protocol:${learningId}`), minCases: 12
     },
     evaluatorIds: extra.evaluatorIds || syntheticEvaluators,
@@ -273,6 +278,56 @@ test("immutable evaluation contracts prevent benchmark drift and freeze promotio
   const result = await recordLearningOutcome({ root, learningId: "learning:planned", applicationId: applicationB.id, deliveryId: applicationB.deliveryId,
     ...outcome("outcome:planned-after-b", "after", 0.56, "evaluator:test-b", { evaluationId: "evaluation:planned" }) });
   assert.equal(result.decision, "rolled-back", "later config changes must not weaken the registered threshold");
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("case-bound outcomes reject cherry-picked subsets and dataset drift", async (t) => {
+  const { root } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  await proposeLearning({
+    root, id: "learning:coverage", kind: "behavior", claim: "Use the fixed synthetic coverage strategy.",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:coverage-one", 0.97)
+  });
+  await addLearningEvidence({ root, id: "learning:coverage", evidence: evidence("evidence:coverage-two", 0.97) });
+  await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
+  const registered = await evaluation(root, "learning:coverage");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v2");
+
+  await assert.rejects(recordLearningOutcome({
+    root, learningId: "learning:coverage",
+    ...outcome("outcome:coverage-missing", "before", 0.4, "evaluator:test-a"), coverage: null
+  }), /caseCount/);
+  await assert.rejects(recordLearningOutcome({
+    root, learningId: "learning:coverage",
+    ...outcome("outcome:coverage-small", "before", 0.4, "evaluator:test-a", { caseCount: 11 })
+  }), /at least 12 cases/);
+  await assert.rejects(recordLearningOutcome({
+    root, learningId: "learning:coverage",
+    ...outcome("outcome:coverage-drift", "before", 0.4, "evaluator:test-a", { datasetDigest: hash("other dataset") })
+  }), /dataset does not match/);
+
+  await recordLearningOutcome({ root, learningId: "learning:coverage",
+    ...outcome("outcome:coverage-before-a", "before", 0.4, "evaluator:test-a") });
+  await recordLearningOutcome({ root, learningId: "learning:coverage",
+    ...outcome("outcome:coverage-before-b", "before", 0.5, "evaluator:test-b") });
+  const promoted = await evaluateLearning({ root });
+  assert.equal(promoted.accepted[0].promotion.canary.coverage.minCases, 12);
+  assert.equal(promoted.accepted[0].promotion.canary.coverage.datasetDigest, syntheticDatasetDigest);
+
+  const applied = await application(root, "learning:coverage", "coverage-a");
+  await assert.rejects(recordLearningOutcome({
+    root, learningId: "learning:coverage", applicationId: applied.id, deliveryId: applied.deliveryId,
+    ...outcome("outcome:coverage-after-small", "after", 0.8, "evaluator:test-a", { caseCount: 1 })
+  }), /at least 12 cases/);
+  const recorded = await recordLearningOutcome({
+    root, learningId: "learning:coverage", applicationId: applied.id, deliveryId: applied.deliveryId,
+    ...outcome("outcome:coverage-after-valid", "after", 0.8, "evaluator:test-a")
+  });
+  assert.equal(recorded.receipt.schema, "agentspine.learning-outcome/v5");
+  assert.deepEqual(recorded.receipt.coverage, {
+    datasetDigest: syntheticDatasetDigest, caseCount: 12, authority: "context-only"
+  });
+  assert.equal(JSON.stringify(recorded.receipt).includes("fixed synthetic coverage strategy"), false);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
@@ -577,6 +632,26 @@ test("parallel duplicate outcome receipts are idempotent and remain one immutabl
   assert.equal((await loadLearning(root)).learning.outcomes.length, 1);
 });
 
+test("0.14 evaluation contracts remain readable while new contracts require case coverage", async (t) => {
+  const { root } = await fixture(t);
+  await proposeLearning({
+    root, id: "learning:legacy-contract", kind: "behavior", claim: "Use the legacy synthetic strategy.",
+    scope: scopedTurn, evidence: evidence("evidence:legacy-contract")
+  });
+  await evaluation(root, "learning:legacy-contract");
+  const { learning, learningPath } = await loadLearning(root);
+  const { digest: _digest, ...v2Payload } = learning.evaluations[0];
+  const v1Payload = { ...v2Payload, schema: "agentspine.learning-evaluation/v1" };
+  learning.evaluations[0] = { ...v1Payload, digest: hash(JSON.stringify(v1Payload)) };
+  await writeFile(learningPath, `${JSON.stringify(learning)}\n`, "utf8");
+  assert.equal((await loadLearning(root)).learning.evaluations[0].schema, "agentspine.learning-evaluation/v1");
+  const legacyReceipt = await recordLearningOutcome({
+    root, learningId: "learning:legacy-contract",
+    ...outcome("outcome:legacy-contract", "before", 0.4, "evaluator:test-a"), coverage: null
+  });
+  assert.equal(legacyReceipt.receipt.schema, "agentspine.learning-outcome/v4");
+});
+
 test("0.10 learning state upgrades in place and corrupt outcome receipts fail closed", async (t) => {
   const { root } = await fixture(t);
   const { learningPath, catalog } = await loadLearning(root);
@@ -701,7 +776,8 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
   runCli([
     "learn-outcome", "learning:cli-outcome", "--root", root, "--id", "outcome:cli-before",
     "--evaluation", "evaluation:cli", "--phase", "before", "--metric", "fixed-task-success", "--direction", "higher", "--value", "0.4",
-    "--measurement", "objective", "--evaluator", "evaluator:cli", "--persona", "agent:synthetic",
+    "--measurement", "objective", "--evaluator", "evaluator:cli", "--dataset-digest", hash("cli-dataset"), "--case-count", "8",
+    "--persona", "agent:synthetic",
     "--user", "user:synthetic", "--tenant", "tenant:synthetic", "--project", "project:synthetic",
     "--task", "task:synthetic", "--json"
   ], state);
@@ -710,5 +786,7 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
     "--tenant", "tenant:synthetic", "--project", "project:synthetic", "--task", "task:synthetic", "--json"
   ], state);
   assert.equal(status.records[0].beforeReceipts, 1);
+  assert.equal(status.records[0].coverageBoundReceipts, 1);
+  assert.equal(status.records[0].legacyCoverageReceipts, 0);
   assert.equal(status.records[0].canaryStatus, "not-applicable");
 });

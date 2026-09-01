@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-01
+
+### Added
+
+- Immutable `agentspine.learning-evaluation/v2` contracts and content-free `agentspine.learning-outcome/v5` receipts bind every new measurement to the exact registered dataset digest and its measured case count.
+- CLI, Doctor, audit and read-only outcome status expose coverage-bound and legacy measurements separately.
+
+### Changed
+
+- The registered `minCases` floor is now enforced for every before and after measurement. Legacy v1 evaluation contracts and v1-v4 outcomes remain readable, while new experiments require explicit coverage proof.
+
+### Security
+
+- Missing case counts, cherry-picked subsets, dataset drift, tampered coverage bindings and conflicting retry IDs fail closed before they can promote or validate a Canary. Coverage receipts retain no benchmark cases, prompts, answers, transcripts, credentials or authority.
+
 ## [0.14.0] - 2026-09-01
 
 ### Added
@@ -439,7 +454,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.4...v0.12.0
