@@ -68,7 +68,7 @@ Status: sparse local foundation implemented; host-specific notification adapters
 
 ## 5. Safe learning
 
-Status: local evidence, review, immutable fixed-benchmark contracts, a locally confirmed revocable evaluator-root registry, exact registry bindings, globally unique measurement-run lineage, root-paired evaluator cohorts, turn-bound Canary application, single-use outcome comparison, immutable validation evidence leases, supersession, and rollback workflow implemented.
+Status: local evidence, review, immutable fixed-benchmark contracts, a locally confirmed revocable evaluator-root registry, exact registry bindings, globally unique measurement-run lineage, root-paired evaluator cohorts, turn-bound Canary application, single-use outcome comparison, renewable immutable validation evidence leases, supersession, and rollback workflow implemented.
 
 - observation candidates remain outside context until accepted;
 - evidence, source fingerprints, confidence, and every prior candidate version are retained;
@@ -76,6 +76,7 @@ Status: local evidence, review, immutable fixed-benchmark contracts, a locally c
 - automatic promotion is default-off, thresholded, and limited to project facts and references;
 - low-risk behavior Canaries require content-free projection, matching model-stop delivery receipts, the exact frozen dataset digest, contracted minimum case coverage, globally unique source, evaluator/run and evaluator-root/run lineage, the same root-bound before/after evaluator cohort, one counted outcome per evaluator root and phase, and distinct consumed-preflight turns before after-results can validate them;
 - validated behavior remains in context only while its exact content-free evidence lease and evaluator-root binding are current; expiry or revocation triggers pre-turn suppression and atomic rollback;
+- renewal requires a fresh independent delivered-turn cohort under the unchanged contract; timestamps, replayed measurements and model assertions cannot extend evidence;
 - acceptance proof and rollback are audited;
 - code, secrets, billing, permissions, and production access remain approval-bound.
 

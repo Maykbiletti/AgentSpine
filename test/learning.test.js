@@ -7,11 +7,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
+  addLearningEvidence, beginLearningRevalidation, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
   purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
-  registerLearningEvaluator, revokeLearningEvaluator, reviewLearning, rollbackLearning
+  registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
 import { runHook } from "../src/hook.js";
@@ -114,12 +114,12 @@ async function evaluation(root, learningId, extra = {}) {
   });
 }
 
-async function application(root, learningId, turnId, now = new Date()) {
+async function application(root, learningId, turnId, now = new Date(), outcomeStatus = "active") {
   const projectedAt = new Date(now);
   const createdAt = new Date(projectedAt.getTime() - 1000).toISOString();
   const expiresAt = new Date(projectedAt.getTime() + 60_000).toISOString();
   const result = await recordLearningApplications({
-    root, items: [{ id: learningId, outcomeStatus: "active" }], scope: scopedTurn,
+    root, items: [{ id: learningId, outcomeStatus }], scope: scopedTurn,
     preflightReceipt: {
       schema: "agentspine.preflight/v2", id: `preflight:${turnId}`, status: "ready",
       sessionId: `session:${turnId}`,
@@ -131,9 +131,12 @@ async function application(root, learningId, turnId, now = new Date()) {
     sessionBriefingDigest: hash(`briefing:${turnId}`), projectedAt
   });
   const application = result.receipts[0];
+  assert.ok(application, JSON.stringify(result));
+  assert.ok(new Date(projectedAt).getTime() <= new Date(application.deliveryExpiresAt).getTime(), JSON.stringify(application));
   const delivered = await recordLearningDeliveries({
     root, sessionId: `session:${turnId}`, scope: scopedTurn, hookEvent: "Stop", completedAt: projectedAt
   });
+  assert.ok(delivered.receipts[0], JSON.stringify(delivered));
   return { ...application, deliveryId: delivered.receipts[0].id };
 }
 
@@ -736,6 +739,110 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
   assert.equal(status.records[0].pairedEvaluatorPairs, 2);
   assert.equal(status.records[0].pendingApplications, 0);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), beforeBytes);
+});
+
+test("validated learning renews only from fresh independent delivered-turn evidence", async (t) => {
+  const { root } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2032-04-01T00:00:00.000Z");
+  await establishValidatedLearning(root, {
+    learningId: "learning:renewed", evaluationId: "evaluation:renewed", start,
+    expiresAt: "2032-06-01T00:00:00.000Z"
+  });
+  const original = (await loadLearning(root)).learning.validationLeases[0];
+  const renewalStarted = new Date("2032-04-20T00:00:00.000Z");
+  await beginLearningRevalidation({ root, learningId: "learning:renewed",
+    confirmLocalValidation: true, now: renewalStarted });
+  const projected = await learningContext({ root, scope: scopedTurn, now: renewalStarted });
+  assert.equal(projected.items[0].outcomeStatus, "revalidating");
+
+  const evidenceBindings = [];
+  for (const [suffix, evaluatorId, value, kind] of [
+    ["a", "evaluator:test-a", 0.82, "objective"],
+    ["b", "evaluator:test-b", 0.88, "objective"]
+  ]) {
+    const at = new Date(renewalStarted.getTime() + (suffix === "a" ? 1000 : 2000));
+    const delivered = await application(root, "learning:renewed", `renewed-refresh-${suffix}`, at, "revalidating");
+    const measurement = (await recordLearningMeasurement({
+      root, id: `measurement:renewed-${suffix}`, learningId: "learning:renewed",
+      evaluationId: "evaluation:renewed", phase: "after", scope: scopedTurn,
+      metric: { name: "fixed-task-success", direction: "higher", value, blockingDefects: 0 },
+      measurement: { kind, evaluatorId, runId: `run:renewed-${suffix}`,
+        sourceDigest: hash(`renewed-source-${suffix}`) },
+      coverage: { datasetDigest: syntheticDatasetDigest, caseCount: 12 },
+      measuredAt: new Date(at.getTime() + 1), confirmLocalMeasurement: true, now: new Date(at.getTime() + 1)
+    })).receipt;
+    evidenceBindings.push({ measurementId: measurement.id, applicationId: delivered.id,
+      deliveryId: delivered.deliveryId });
+  }
+  const attempts = await Promise.allSettled(Array.from({ length: 5 }, () => renewLearningValidation({
+    root, learningId: "learning:renewed", evidence: evidenceBindings,
+    confirmLocalValidation: true, now: new Date("2032-04-20T00:00:04.000Z")
+  })));
+  assert.equal(attempts.filter((item) => item.status === "fulfilled").length, 1,
+    "parallel renewal must replace evidence exactly once");
+  const renewedResult = attempts.find((item) => item.status === "fulfilled").value;
+  assert.equal(renewedResult.decision, "renewed");
+  assert.equal(renewedResult.lease.schema, "agentspine.learning-validation/v2");
+  assert.equal(renewedResult.lease.predecessorValidation.digest, original.digest);
+  assert.equal(renewedResult.lease.renewalEvidence.length, 2);
+  assert.ok(new Date(renewedResult.lease.expiresAt) > new Date(original.expiresAt));
+  assert.equal(JSON.stringify(renewedResult.lease).includes("Use validated synthetic strategy"), false);
+  const stored = await loadLearning(root);
+  assert.equal(stored.learning.validationLeases.length, 1);
+  assert.equal(stored.learning.validationLeases[0].schema, "agentspine.learning-validation/v2");
+  assert.equal(stored.learning.history.filter((item) => item.kind === "learning-validation"
+    && item.value?.id === original.id).length, 1);
+  const status = await learningOutcomeStatus({ root, scope: scopedTurn,
+    now: new Date("2032-04-20T00:00:05.000Z") });
+  assert.equal(status.records[0].validationLeaseSchema, "agentspine.learning-validation/v2");
+  assert.equal(status.records[0].consumedMeasurementReceipts, 6,
+    "original outcomes and renewal measurements remain independently accounted");
+  assert.equal(status.records[0].revalidationStatus, "not-applicable");
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+  const tampered = await loadLearning(root);
+  tampered.learning.validationLeases[0].renewalEvidence[0].measurementDigest = hash("tampered-renewal");
+  await writeFile(tampered.learningPath, `${JSON.stringify(tampered.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /validation lease state is invalid|validation lease binding is invalid/);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("one blocking defect defeats positive revalidation averages and restores a superseded lesson", async (t) => {
+  const { root } = await fixture(t);
+  const start = new Date("2032-07-01T00:00:00.000Z");
+  await proposeLearning({ root, id: "learning:renewal-prior", kind: "behavior",
+    claim: "Use the prior synthetic strategy.", privacy: "shared", scope: scopedTurn,
+    evidence: evidence("evidence:renewal-prior"), now: start });
+  await reviewLearning({ root, id: "learning:renewal-prior", decision: "accept",
+    reason: "Synthetic local confirmation.", confirmedByUser: true, now: start });
+  await establishValidatedLearning(root, {
+    learningId: "learning:renewal-block", evaluationId: "evaluation:renewal-block", start,
+    expiresAt: "2032-09-01T00:00:00.000Z", supersedesId: "learning:renewal-prior"
+  });
+  const renewalStarted = new Date("2032-07-20T00:00:00.000Z");
+  await beginLearningRevalidation({ root, learningId: "learning:renewal-block",
+    confirmLocalValidation: true, now: renewalStarted });
+  const evidenceBindings = [];
+  for (const [suffix, evaluatorId, blockingDefects] of [["a", "evaluator:test-a", 0], ["b", "evaluator:test-b", 1]]) {
+    const at = new Date(renewalStarted.getTime() + (suffix === "a" ? 1000 : 2000));
+    const delivered = await application(root, "learning:renewal-block", `renewal-block-refresh-${suffix}`, at, "revalidating");
+    const measurement = (await recordLearningMeasurement({
+      root, id: `measurement:renewal-block-${suffix}`, learningId: "learning:renewal-block",
+      evaluationId: "evaluation:renewal-block", phase: "after", scope: scopedTurn,
+      metric: { name: "fixed-task-success", direction: "higher", value: 1, blockingDefects },
+      measurement: { kind: "objective", evaluatorId, runId: `run:renewal-block-${suffix}`,
+        sourceDigest: hash(`renewal-block-source-${suffix}`) },
+      coverage: { datasetDigest: syntheticDatasetDigest, caseCount: 12 },
+      measuredAt: new Date(at.getTime() + 1), confirmLocalMeasurement: true, now: new Date(at.getTime() + 1)
+    })).receipt;
+    evidenceBindings.push({ measurementId: measurement.id, applicationId: delivered.id, deliveryId: delivered.deliveryId });
+  }
+  const result = await renewLearningValidation({ root, learningId: "learning:renewal-block",
+    evidence: evidenceBindings, confirmLocalValidation: true,
+    now: new Date("2032-07-20T00:00:04.000Z") });
+  assert.equal(result.decision, "rolled-back");
+  assert.deepEqual((await learningContext({ root, scope: scopedTurn,
+    now: new Date("2032-07-20T00:00:05.000Z") })).items.map((item) => item.id), ["learning:renewal-prior"]);
 });
 
 test("validated evidence leases expire before context and roll back atomically under parallel reconciliation", async (t) => {

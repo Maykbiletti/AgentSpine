@@ -91,6 +91,8 @@ Version 0.20 adds a separate local evaluator registry and immutable `agentspine.
 
 Version 0.21 closes the post-validation evidence gap. Successful evaluation v7 validation creates one immutable `agentspine.learning-validation/v1` lease that binds the exact candidate, contract and registry-binding digests, scope, metric, before/after outcome IDs and digests, paired improvement, validation time and evidence expiry. It contains no prompt, response, task, dataset, evaluator or user content. A validated lesson is projected only while this lease and every bound evaluator root remain current. Expiry, revocation, a missing lease or any digest mismatch removes the lesson before the next model turn; the next local evaluation pass records a single atomic rollback and restores a superseded predecessor. Legacy evaluation v1-v6 validations remain readable without retroactive leases.
 
+Version 0.22 adds evidence renewal without allowing a timestamp-only extension. `learn-revalidation-start` opens a bounded local window only for a current v7 validation whose immutable contract can outlive the existing lease. During that window, the native hook records exact-turn applications and deliveries while the lesson remains context-only. Fresh after-measurements must use the frozen evaluator-root cohort, metric, dataset and case coverage. `learn-revalidate` requires distinct completed turns, the original paired baselines, at least one objective result and the frozen thresholds. Success replaces the active lease with an `agentspine.learning-validation/v2` receipt that binds its predecessor and every measurement, application and delivery digest. Parallel retries can renew exactly once. Replayed evidence, stale windows, root drift and altered receipts fail closed; any blocking defect or paired regression rolls the lesson back and restores its superseded predecessor.
+
 Measurement receipts bind the exact contract, phase, scope, metric value, blocking-defect count, measurement kind, evaluator ID, evaluator-root digest, stable provider run ID, source digest, dataset coverage and measurement time. They store no evaluator name, key, certificate, cases, task, dataset, prompt, answer, transcript, credential, or source content. Source digests, evaluator/run pairs and evaluator-root/run pairs remain globally single-use across the project. `learn-outcome` consumes exactly one receipt; copied metric, scope or coverage fields cannot substitute for its immutable digest, and a receipt cannot be consumed twice. Objective measurements, explicit user feedback and model suggestions remain separate. Model suggestions never count toward automatic promotion or validation. Legacy v1-v6 evaluation contracts, measurement and lineage v1, and outcome v1-v8 receipts remain readable; only new v7 contracts prove both root-bound independence and a current local registry binding.
 
 Before promotion, the candidate needs the contract's number of independent, fresh, non-model receipts, including at least one objective evaluator. All receipts must bind to the same unexpired evaluation contract; changing the metric, scope, evaluator set, benchmark digest or thresholds requires a new candidate and contract. It also needs the normal distinct-evidence and confidence thresholds. A conflicting active candidate blocks automatic promotion. Security, safety, identity, authentication, authorization, credential, policy, production, deployment, payment, and access lessons are marked for local review and cannot receive an automatic evaluation contract. Successful evaluation creates a time-limited canary rather than a final unmeasured claim. Only that exact scope receives the canary in its next briefing.
@@ -146,6 +148,20 @@ agentspine learn-outcome learning:check-invariant \
 agentspine learn-evaluate . --json
 agentspine learn-status . --json
 ```
+
+Before a current validation lease expires, a local operator can collect a fresh delivered-turn cohort and renew it without changing the contract:
+
+```bash
+agentspine learn-revalidation-start learning:check-invariant --confirm-local-validation
+
+agentspine learn-revalidate learning:check-invariant \
+  --measurements measurement:renew-a,measurement:renew-b \
+  --applications application:renew-a,application:renew-b \
+  --deliveries delivery:renew-a,delivery:renew-b \
+  --confirm-local-validation
+```
+
+The three lists are positional bindings. Their IDs and digests enter the private external state; prompts, responses, task text, evaluator identities and dataset content do not.
 
 After canary use and the matching model-stop event, `agentspine learn-status` reports application and delivery counts. The local outcome evaluator must bind its `after` receipt to both immutable receipts:
 

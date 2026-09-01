@@ -8,10 +8,10 @@ import {
   recordActivity, resolveAttention, upsertAttention
 } from "./lib/attention.js";
 import {
-  addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
+  addLearningEvidence, beginLearningRevalidation, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
   purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningMeasurement,
-  recordLearningOutcome, registerLearningEvaluation, registerLearningEvaluator, revokeLearningEvaluator,
+  recordLearningOutcome, registerLearningEvaluation, registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator,
   reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 import { configureContinuity, loadContinuity, purgeContinuity } from "./lib/continuity.js";
@@ -150,6 +150,8 @@ Usage:
   agentspine learn-evaluator-register <id> --principal-digest sha256 --confirm-local-evaluator
   agentspine learn-evaluator-revoke <id> --reason text --confirm-local-evaluator
   agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id --evaluator-roots id=sha256,id=sha256 [--expires-at date] --confirm-local-evaluation
+  agentspine learn-revalidation-start <learning-id> --confirm-local-validation
+  agentspine learn-revalidate <learning-id> --measurements id,id --applications id,id --deliveries id,id --confirm-local-validation
   agentspine learn-measurement <id> --learning id --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --measurement objective|user-feedback|model-suggestion --evaluator id --run id --source-digest sha256 --dataset-digest sha256 --case-count n --confirm-local-measurement
   agentspine learn-outcome <learning-id> --id id --evaluation id --measurement-receipt id [--application id --delivery id]
   agentspine learn-status [root] [--persona id --user id --tenant id --project id --group id --task id]
@@ -493,6 +495,28 @@ export async function run(argv = process.argv.slice(2)) {
       evaluatorRoots: evaluatorRootsFlag(flags["evaluator-roots"]),
       expiresAt: flags["expires-at"] || null,
       confirmLocalEvaluation: booleanFlag(flags["confirm-local-evaluation"])
+    }), json);
+  }
+
+  if (command === "learn-revalidation-start") {
+    return output(await beginLearningRevalidation({
+      root: flags.root || process.cwd(), learningId: positional[0],
+      confirmLocalValidation: booleanFlag(flags["confirm-local-validation"])
+    }), json);
+  }
+
+  if (command === "learn-revalidate") {
+    const measurements = String(flags.measurements || "").split(",").filter(Boolean);
+    const applications = String(flags.applications || "").split(",").filter(Boolean);
+    const deliveries = String(flags.deliveries || "").split(",").filter(Boolean);
+    if (!measurements.length || measurements.length !== applications.length || measurements.length !== deliveries.length) {
+      throw new Error("revalidation requires equally sized measurement, application, and delivery lists");
+    }
+    return output(await renewLearningValidation({
+      root: flags.root || process.cwd(), learningId: positional[0],
+      evidence: measurements.map((measurementId, index) => ({ measurementId,
+        applicationId: applications[index], deliveryId: deliveries[index] })),
+      confirmLocalValidation: booleanFlag(flags["confirm-local-validation"])
     }), json);
   }
 
@@ -1112,12 +1136,15 @@ export async function run(argv = process.argv.slice(2)) {
       const staleValidatedLessons = status.records.filter((item) => item.validationLeaseStatus === "stale-validated").length;
       const unprovenValidatedLessons = status.records.filter((item) => item.validationLeaseStatus === "unproven-validated").length;
       const revokedValidatedLessons = status.records.filter((item) => item.validationLeaseStatus === "revoked-validated").length;
+      const renewedValidationLeases = status.records.filter((item) => item.validationLeaseSchema === "agentspine.learning-validation/v2").length;
+      const activeRevalidations = status.records.filter((item) => item.revalidationStatus === "active").length;
+      const staleRevalidations = status.records.filter((item) => item.revalidationStatus === "stale").length;
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
         status: status.records.some((item) => ["stale", "revoked", "unproven"].includes(item.canaryStatus))
           || unboundAfterReceipts > 0 || undeliveredAfterReceipts > 0 || unplannedOutcomeReceipts > 0
           || stalePendingApplications > 0 || staleUnconsumedMeasurements > 0
-          || inactiveEvaluatorRegistryContracts > 0 ? "degraded" : "healthy",
+          || inactiveEvaluatorRegistryContracts > 0 || staleRevalidations > 0 ? "degraded" : "healthy",
         candidates: status.records.length,
         activeCanaries: status.records.filter((item) => item.canaryStatus === "active").length,
         validatedCanaries: status.records.filter((item) => item.canaryStatus === "validated").length,
@@ -1146,6 +1173,9 @@ export async function run(argv = process.argv.slice(2)) {
         revokedEvaluatorRoots: status.evaluatorRegistry.revoked,
         evaluatorRegistryBindings: status.evaluatorRegistry.bindings,
         validationLeases: status.evaluatorRegistry.validationLeases,
+        renewedValidationLeases,
+        activeRevalidations,
+        staleRevalidations,
         currentValidatedLessons,
         staleValidatedLessons,
         unprovenValidatedLessons,

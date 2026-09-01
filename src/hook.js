@@ -719,7 +719,7 @@ export async function runHook(payload = null) {
         now: input.timestamp || new Date(), env: process.env, consume: true
       })) throw new Error("preflight receipt could not be consumed atomically for this exact turn");
       if (event === "UserPromptSubmit") {
-        const activeCanaries = briefing.learning.filter((item) => item.outcomeStatus === "active");
+        const activeCanaries = briefing.learning.filter((item) => ["active", "revalidating"].includes(item.outcomeStatus));
         if (!activeCanaries.length) {
           preflight.learningApplications = {
             status: "not-applicable", receipts: [], authority: "context-only"
@@ -743,7 +743,7 @@ export async function runHook(payload = null) {
             authority: "context-only"
           };
         } catch (error) {
-          briefing.learning = briefing.learning.filter((item) => item.outcomeStatus !== "active");
+          briefing.learning = briefing.learning.filter((item) => !["active", "revalidating"].includes(item.outcomeStatus));
           preflight.learningApplications = {
             status: "degraded", receipts: [], reason: error.message, authority: "context-only"
           };

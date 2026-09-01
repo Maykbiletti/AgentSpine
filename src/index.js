@@ -12,9 +12,10 @@ export {
   recordActivity, recordAttentionEvent, resolveAttention, upsertAttention
 } from "./lib/attention.js";
 export {
-  acceptContinuityLearning, addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
+  acceptContinuityLearning, addLearningEvidence, beginLearningRevalidation, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning, purgeLearningBySubject,
-  purgeStaleLearningApplications, recordLearningOutcome, registerLearningEvaluation, reviewLearning, rollbackLearning
+  purgeStaleLearningApplications, recordLearningOutcome, registerLearningEvaluation, renewLearningValidation,
+  reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 export {
   captureContinuityPrompt, configureContinuity, continuityFindings,

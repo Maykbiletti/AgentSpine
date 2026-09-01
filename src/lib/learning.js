@@ -506,10 +506,12 @@ function validationOutcomeReferences(receipts) {
 
 function validationLeasePayload({
   id, learningId, evaluationId, evaluationDigest, evaluatorRegistryBindingDigest,
-  scope, metric, beforeOutcomes, afterOutcomes, improvement, validatedAt, expiresAt
+  scope, metric, beforeOutcomes, afterOutcomes, baselineOutcomes, predecessorValidation,
+  renewalEvidence, improvement, validatedAt, expiresAt,
+  schema = "agentspine.learning-validation/v1"
 }) {
   return {
-    schema: "agentspine.learning-validation/v1",
+    schema,
     id,
     learningId,
     evaluationId,
@@ -517,8 +519,9 @@ function validationLeasePayload({
     evaluatorRegistryBindingDigest,
     scope,
     metric,
-    beforeOutcomes,
-    afterOutcomes,
+    ...(schema === "agentspine.learning-validation/v1"
+      ? { beforeOutcomes, afterOutcomes }
+      : { baselineOutcomes, predecessorValidation, renewalEvidence }),
     improvement,
     validatedAt,
     expiresAt,
@@ -533,7 +536,21 @@ function storedValidationLeaseStructure(lease) {
     && items.every((entry) => ID_RE.test(entry?.id || "") && DIGEST_RE.test(entry?.digest || "")
       && entry?.authority === "context-only")
     && new Set(items.map((entry) => entry.id)).size === items.length;
-  return lease.schema === "agentspine.learning-validation/v1" && ID_RE.test(lease.id || "")
+  const validPredecessor = lease.predecessorValidation && ID_RE.test(lease.predecessorValidation.id || "")
+    && DIGEST_RE.test(lease.predecessorValidation.digest || "")
+    && lease.predecessorValidation.authority === "context-only";
+  const validRenewalEvidence = Array.isArray(lease.renewalEvidence) && lease.renewalEvidence.length >= 2
+    && lease.renewalEvidence.every((entry) => ID_RE.test(entry?.measurementId || "")
+      && DIGEST_RE.test(entry?.measurementDigest || "") && ID_RE.test(entry?.applicationId || "")
+      && DIGEST_RE.test(entry?.applicationDigest || "") && ID_RE.test(entry?.deliveryId || "")
+      && DIGEST_RE.test(entry?.deliveryDigest || "") && DIGEST_RE.test(entry?.evaluatorRootDigest || "")
+      && entry?.authority === "context-only")
+    && new Set(lease.renewalEvidence.map((entry) => entry.measurementId)).size === lease.renewalEvidence.length
+    && new Set(lease.renewalEvidence.map((entry) => entry.applicationId)).size === lease.renewalEvidence.length
+    && new Set(lease.renewalEvidence.map((entry) => entry.deliveryId)).size === lease.renewalEvidence.length
+    && new Set(lease.renewalEvidence.map((entry) => entry.evaluatorRootDigest)).size === lease.renewalEvidence.length;
+  return ["agentspine.learning-validation/v1", "agentspine.learning-validation/v2"].includes(lease.schema)
+    && ID_RE.test(lease.id || "")
     && ID_RE.test(lease.learningId || "") && ID_RE.test(lease.evaluationId || "")
     && DIGEST_RE.test(lease.evaluationDigest || "") && DIGEST_RE.test(lease.evaluatorRegistryBindingDigest || "")
     && lease.scope && SCOPE_FIELDS.every((field) => Object.hasOwn(lease.scope, field))
@@ -541,7 +558,9 @@ function storedValidationLeaseStructure(lease) {
     && Object.values(lease.scope).every((value) => value === null || ID_RE.test(value))
     && typeof lease.metric?.name === "string" && lease.metric.name.length > 0
     && METRIC_DIRECTIONS.has(lease.metric?.direction)
-    && validReferences(lease.beforeOutcomes) && validReferences(lease.afterOutcomes)
+    && (lease.schema === "agentspine.learning-validation/v1"
+      ? validReferences(lease.beforeOutcomes) && validReferences(lease.afterOutcomes)
+      : validReferences(lease.baselineOutcomes) && validPredecessor && validRenewalEvidence)
     && Number.isFinite(lease.improvement) && lease.improvement >= -1 && lease.improvement <= 1
     && Number.isFinite(new Date(lease.validatedAt).getTime()) && Number.isFinite(new Date(lease.expiresAt).getTime())
     && new Date(lease.expiresAt).getTime() > new Date(lease.validatedAt).getTime()
@@ -556,20 +575,42 @@ function validationLeaseMatchesState(state, lease) {
   const referencesMatch = (references, phase) => references.every((reference) => state.outcomes.some((outcome) =>
     outcome.id === reference.id && outcome.digest === reference.digest && outcome.learningId === lease.learningId
     && outcome.evaluationId === lease.evaluationId && outcome.phase === phase && exactScope(outcome.scope, lease.scope)));
-  return Boolean(candidate && canary && canary.status === "validated"
+  const common = candidate && canary && canary.status === "validated"
     && canary.validationLeaseId === lease.id && canary.validationLeaseDigest === lease.digest
     && canary.validatedAt === lease.validatedAt && canary.expiresAt === lease.expiresAt
     && Math.abs(canary.improvement - lease.improvement) <= 1e-12
     && contract?.schema === "agentspine.learning-evaluation/v7" && contract.digest === lease.evaluationDigest
     && binding?.digest === lease.evaluatorRegistryBindingDigest
-    && exactScope(contract.scope, lease.scope) && digest(contract.metric) === digest(lease.metric)
-    && lease.beforeOutcomes.length >= contract.thresholds.beforeReceipts
-    && lease.afterOutcomes.length >= contract.thresholds.afterReceipts
-    && referencesMatch(lease.beforeOutcomes, "before") && referencesMatch(lease.afterOutcomes, "after")
-    && canary.beforeReceipts.length === lease.beforeOutcomes.length
-    && lease.beforeOutcomes.every((reference) => canary.beforeReceipts.includes(reference.id))
-    && canary.afterReceipts.length === lease.afterOutcomes.length
-    && lease.afterOutcomes.every((reference) => canary.afterReceipts.includes(reference.id)));
+    && exactScope(contract.scope, lease.scope) && digest(contract.metric) === digest(lease.metric);
+  const evidenceMatches = lease.schema === "agentspine.learning-validation/v1"
+    ? lease.beforeOutcomes.length >= contract.thresholds.beforeReceipts
+        && lease.afterOutcomes.length >= contract.thresholds.afterReceipts
+        && referencesMatch(lease.beforeOutcomes, "before") && referencesMatch(lease.afterOutcomes, "after")
+        && canary.beforeReceipts.length === lease.beforeOutcomes.length
+        && lease.beforeOutcomes.every((reference) => canary.beforeReceipts.includes(reference.id))
+        && canary.afterReceipts.length === lease.afterOutcomes.length
+        && lease.afterOutcomes.every((reference) => canary.afterReceipts.includes(reference.id))
+      : lease.baselineOutcomes.length >= contract.thresholds.beforeReceipts
+        && referencesMatch(lease.baselineOutcomes, "before")
+        && lease.renewalEvidence.length >= contract.thresholds.afterReceipts
+        && state.history.some((entry) => entry.kind === "learning-validation"
+          && entry.value?.id === lease.predecessorValidation.id
+          && entry.value?.digest === lease.predecessorValidation.digest
+          && storedValidationLeaseStructure(entry.value))
+      && lease.renewalEvidence.every((evidence) => {
+          const measurement = state.measurements.find((entry) => entry.id === evidence.measurementId
+            && entry.digest === evidence.measurementDigest);
+          const application = state.applications.find((entry) => entry.id === evidence.applicationId
+            && entry.digest === evidence.applicationDigest);
+          const delivery = state.deliveries.find((entry) => entry.id === evidence.deliveryId
+            && entry.digest === evidence.deliveryDigest);
+          return measurement?.phase === "after" && measurement.evaluationId === lease.evaluationId
+            && measurement.measurement?.evaluatorRootDigest === evidence.evaluatorRootDigest
+            && application?.learningId === lease.learningId && delivery?.applicationId === application.id
+            && delivery.learningId === lease.learningId && exactScope(measurement.scope, lease.scope)
+            && exactScope(application.scope, lease.scope) && exactScope(delivery.scope, lease.scope);
+      });
+  return Boolean(common && evidenceMatches);
 }
 
 function validationLeaseState(state, candidate, timestamp) {
@@ -1249,6 +1290,187 @@ export async function registerLearningEvaluation({
   });
 }
 
+export async function beginLearningRevalidation({
+  root = process.cwd(), learningId, confirmLocalValidation = false, now = new Date()
+}) {
+  if (!confirmLocalValidation) throw new Error("revalidation requires explicit local confirmation");
+  if (!ID_RE.test(learningId || "")) throw new Error("learningId is required");
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const candidate = state.candidates.find((entry) => entry.id === learningId);
+    const validation = validationLeaseState(state, candidate, timestamp);
+    if (validation.status !== "active" || validation.evaluation?.schema !== "agentspine.learning-evaluation/v7") {
+      throw new Error("revalidation requires one current registry-bound validation lease");
+    }
+    const canary = candidate.promotion.canary;
+    if (canary.revalidation?.status === "active"
+      && new Date(canary.revalidation.expiresAt).getTime() > new Date(timestamp).getTime()) {
+      return { candidate, revalidation: canary.revalidation, learningPath, unchanged: true };
+    }
+    const possibleExpiry = Math.min(new Date(validation.evaluation.expiresAt).getTime(),
+      new Date(timestamp).getTime() + state.config.canaryTtlDays * 86400000);
+    if (possibleExpiry <= new Date(validation.lease.expiresAt).getTime()) {
+      throw new Error("revalidation cannot extend evidence within the current evaluation contract window");
+    }
+    const revalidation = {
+      schema: "agentspine.learning-revalidation-window/v1",
+      status: "active",
+      startedAt: timestamp,
+      expiresAt: validation.lease.expiresAt,
+      predecessorValidationId: validation.lease.id,
+      predecessorValidationDigest: validation.lease.digest,
+      authority: "context-only"
+    };
+    preserve(state, "learning-candidate", candidate, timestamp);
+    const updated = {
+      ...candidate,
+      promotion: { ...candidate.promotion, canary: { ...canary, revalidation } },
+      updatedAt: timestamp,
+      authority: "context-only"
+    };
+    state.candidates = state.candidates.map((entry) => entry.id === learningId ? updated : entry);
+    return { candidate: updated, revalidation, learningPath, unchanged: false };
+  });
+}
+
+function validationEvidencePreviouslyUsed(state, measurementId, applicationId, deliveryId) {
+  const leases = [
+    ...state.validationLeases,
+    ...state.history.filter((entry) => entry.kind === "learning-validation").map((entry) => entry.value)
+  ];
+  return leases.some((lease) => lease?.schema === "agentspine.learning-validation/v2"
+    && lease.renewalEvidence?.some((entry) => entry.measurementId === measurementId
+      || entry.applicationId === applicationId || entry.deliveryId === deliveryId));
+}
+
+export async function renewLearningValidation({
+  root = process.cwd(), learningId, evidence, confirmLocalValidation = false, now = new Date()
+}) {
+  if (!confirmLocalValidation) throw new Error("validation renewal requires explicit local confirmation");
+  if (!ID_RE.test(learningId || "") || !Array.isArray(evidence) || !evidence.length) {
+    throw new Error("validation renewal requires a learningId and evidence bindings");
+  }
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const candidate = state.candidates.find((entry) => entry.id === learningId);
+    const validation = validationLeaseState(state, candidate, timestamp);
+    const revalidation = candidate?.promotion?.canary?.revalidation;
+    if (validation.status !== "active" || validation.evaluation?.schema !== "agentspine.learning-evaluation/v7"
+      || revalidation?.status !== "active" || revalidation.predecessorValidationId !== validation.lease.id
+      || revalidation.predecessorValidationDigest !== validation.lease.digest
+      || new Date(revalidation.expiresAt).getTime() < new Date(timestamp).getTime()) {
+      throw new Error("validation renewal requires one current matching revalidation window");
+    }
+    const contract = validation.evaluation;
+    const baselineReferences = validation.lease.schema === "agentspine.learning-validation/v1"
+      ? validation.lease.beforeOutcomes : validation.lease.baselineOutcomes;
+    const baselines = baselineReferences.map((reference) => state.outcomes.find((outcome) =>
+      outcome.id === reference.id && outcome.digest === reference.digest));
+    if (baselines.some((item) => !item)) throw new Error("validation renewal baseline evidence is missing");
+    const baselineByRoot = new Map(baselines.map((item) => [item.measurement.evaluatorRootDigest, item]));
+    const normalized = evidence.map((entry) => {
+      const measurement = state.measurements.find((item) => item.id === entry?.measurementId);
+      const application = state.applications.find((item) => item.id === entry?.applicationId);
+      const delivery = state.deliveries.find((item) => item.id === entry?.deliveryId);
+      if (!measurement || !application || !delivery) throw new Error("validation renewal evidence binding is missing");
+      const baseline = baselineByRoot.get(measurement.measurement?.evaluatorRootDigest);
+      if (measurement.phase !== "after" || measurement.learningId !== learningId
+        || measurement.evaluationId !== contract.id || !exactScope(measurement.scope, contract.scope)
+        || !baseline || measurement.measurement.kind === "model-suggestion"
+        || measurement.measurement.kind !== baseline.measurement.kind
+        || measurement.coverage.caseCount !== baseline.coverage.caseCount
+        || new Date(measurement.measuredAt).getTime() < new Date(revalidation.startedAt).getTime()) {
+        throw new Error("validation renewal measurement does not match the frozen baseline cohort");
+      }
+      if (application.learningId !== learningId || !exactScope(application.scope, contract.scope)
+        || new Date(application.projectedAt).getTime() < new Date(revalidation.startedAt).getTime()
+        || delivery.applicationId !== application.id || delivery.learningId !== learningId
+        || !exactScope(delivery.scope, contract.scope)
+        || new Date(measurement.measuredAt).getTime() < new Date(delivery.completedAt).getTime()
+        || new Date(measurement.measuredAt).getTime() > new Date(application.expiresAt).getTime()) {
+        throw new Error("validation renewal requires a distinct completed matching model turn");
+      }
+      if (validationEvidencePreviouslyUsed(state, measurement.id, application.id, delivery.id)) {
+        throw new Error("validation renewal evidence cannot be replayed");
+      }
+      return { measurement, application, delivery, baseline };
+    });
+    const roots = new Set(normalized.map((item) => item.measurement.measurement.evaluatorRootDigest));
+    const applications = new Set(normalized.map((item) => item.application.id));
+    if (roots.size < contract.thresholds.afterReceipts || applications.size < contract.thresholds.afterReceipts
+      || !normalized.some((item) => item.measurement.measurement.kind === "objective")) {
+      throw new Error("validation renewal requires the frozen independent evidence threshold");
+    }
+    if (normalized.some((item) => item.measurement.metric.blockingDefects > 0)) {
+      const rolledBack = rollbackCandidate(state, candidate, "validation renewal recorded a blocking defect",
+        timestamp, "automatic-revalidation-regression");
+      return { ...rolledBack, decision: "rolled-back", learningPath };
+    }
+    const deltas = normalized.map((item) => improvement(contract.metric.direction,
+      item.baseline.metric.value, item.measurement.metric.value));
+    if (deltas.some((value) => value < -contract.thresholds.regressionTolerance)) {
+      const rolledBack = rollbackCandidate(state, candidate, "validation renewal regressed against its frozen baseline",
+        timestamp, "automatic-revalidation-regression");
+      return { ...rolledBack, decision: "rolled-back", learningPath };
+    }
+    const average = deltas.reduce((sum, value) => sum + value, 0) / deltas.length;
+    if (average < contract.thresholds.minImprovement) {
+      const rolledBack = rollbackCandidate(state, candidate, "validation renewal did not meet the frozen minimum improvement",
+        timestamp, "automatic-revalidation-no-improvement");
+      return { ...rolledBack, decision: "rolled-back", learningPath };
+    }
+    const expiresAt = new Date(Math.min(new Date(contract.expiresAt).getTime(),
+      new Date(timestamp).getTime() + state.config.canaryTtlDays * 86400000)).toISOString();
+    if (new Date(expiresAt).getTime() <= new Date(validation.lease.expiresAt).getTime()) {
+      throw new Error("validation renewal cannot extend the current evidence lease");
+    }
+    const payload = validationLeasePayload({
+      schema: "agentspine.learning-validation/v2",
+      id: `validation:${randomUUID()}`,
+      learningId,
+      evaluationId: contract.id,
+      evaluationDigest: contract.digest,
+      evaluatorRegistryBindingDigest: validation.lease.evaluatorRegistryBindingDigest,
+      scope: contract.scope,
+      metric: contract.metric,
+      baselineOutcomes: baselineReferences,
+      predecessorValidation: { id: validation.lease.id, digest: validation.lease.digest, authority: "context-only" },
+      renewalEvidence: normalized.map(({ measurement, application, delivery }) => ({
+        measurementId: measurement.id, measurementDigest: measurement.digest,
+        applicationId: application.id, applicationDigest: application.digest,
+        deliveryId: delivery.id, deliveryDigest: delivery.digest,
+        evaluatorRootDigest: measurement.measurement.evaluatorRootDigest,
+        authority: "context-only"
+      })).sort((a, b) => a.evaluatorRootDigest.localeCompare(b.evaluatorRootDigest)),
+      improvement: average,
+      validatedAt: timestamp,
+      expiresAt
+    });
+    const lease = { ...payload, digest: digest(payload) };
+    preserve(state, "learning-validation", validation.lease, timestamp);
+    state.validationLeases = state.validationLeases.filter((entry) => entry.learningId !== learningId);
+    state.validationLeases.push(lease);
+    state.validationLeases.sort((a, b) => a.id.localeCompare(b.id));
+    preserve(state, "learning-candidate", candidate, timestamp);
+    const renewed = {
+      ...candidate,
+      promotion: { ...candidate.promotion, canary: {
+        ...candidate.promotion.canary,
+        validatedAt: timestamp,
+        expiresAt,
+        improvement: average,
+        validationLeaseId: lease.id,
+        validationLeaseDigest: lease.digest,
+        revalidation: null
+      } },
+      updatedAt: timestamp,
+      authority: "context-only"
+    };
+    state.candidates = state.candidates.map((entry) => entry.id === learningId ? renewed : entry);
+    return { candidate: renewed, lease, decision: "renewed", learningPath };
+  });
+}
+
 export async function recordLearningMeasurement({
   root = process.cwd(), id = `measurement:${randomUUID()}`, learningId, evaluationId, phase, scope, metric,
   measurement, coverage, measuredAt, confirmLocalMeasurement = false, now = new Date()
@@ -1277,8 +1499,12 @@ export async function recordLearningMeasurement({
     if (phase === "before" && candidate.status !== "candidate") {
       throw new Error("before measurements require an unreviewed candidate");
     }
+    const activeRevalidation = candidate?.promotion?.canary?.status === "validated"
+      && candidate.promotion.canary.revalidation?.status === "active"
+      && new Date(candidate.promotion.canary.revalidation.expiresAt).getTime() >= new Date(timestamp).getTime();
     if (phase === "after" && (candidate.status !== "accepted" || candidate.promotion?.mode !== "outcome-canary"
-      || candidate.promotion?.canary?.status !== "active" || candidate.promotion.canary.evaluationId !== evaluationId)) {
+      || (!activeRevalidation && candidate.promotion?.canary?.status !== "active")
+      || candidate.promotion.canary.evaluationId !== evaluationId)) {
       throw new Error("after measurements require the matching active outcome canary");
     }
     const name = safeText(metric?.name, "measurement.metric.name", 120);
@@ -1552,14 +1778,18 @@ export async function recordLearningApplications({
       throw new Error("this session already has an unconfirmed learning application; await Stop or its bounded expiry");
     }
     const receipts = [];
-    for (const item of items.filter((entry) => entry?.outcomeStatus === "active")) {
+    for (const item of items.filter((entry) => ["active", "revalidating"].includes(entry?.outcomeStatus))) {
       const candidate = state.candidates.find((entry) => entry.id === item.id);
       const canary = candidate?.promotion?.canary;
+      const revalidating = item.outcomeStatus === "revalidating";
       if (!candidate || candidate.status !== "accepted" || candidate.promotion?.mode !== "outcome-canary"
-        || canary?.status !== "active" || !exactScope(canary.scope, runtimeScope)) {
+        || (revalidating ? canary?.status !== "validated" || canary.revalidation?.status !== "active"
+          || new Date(canary.revalidation.expiresAt).getTime() < new Date(timestamp).getTime()
+          : canary?.status !== "active")
+        || !exactScope(canary.scope, runtimeScope)) {
         throw new Error(`active learning application no longer matches its exact scope: ${item.id || "unknown"}`);
       }
-      const expiresAt = canary.expiresAt;
+      const expiresAt = revalidating ? canary.revalidation.expiresAt : canary.expiresAt;
       const deliveryExpiresAt = new Date(Math.min(new Date(expiresAt).getTime(),
         new Date(timestamp).getTime() + 5 * 60_000)).toISOString();
       const material = `${candidate.id}\0${preflightReceipt.id}\0${sessionBriefingDigest}`;
@@ -2026,6 +2256,12 @@ export async function purgeStaleLearningMeasurements({ root = process.cwd(), con
   return mutation(root, (state, _catalog, learningPath) => {
     const consumed = new Set(state.outcomes.filter((outcome) => ["agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(outcome.schema))
       .map((outcome) => outcome.measurementReceiptId));
+    const validationHistory = state.history.filter((entry) => entry.kind === "learning-validation")
+      .map((entry) => entry.value);
+    for (const lease of [...state.validationLeases, ...validationHistory]
+      .filter((entry) => entry?.schema === "agentspine.learning-validation/v2")) {
+      for (const evidence of lease.renewalEvidence) consumed.add(evidence.measurementId);
+    }
     const cutoff = new Date(timestamp).getTime() - state.config.outcomeMaxAgeDays * 86400000;
     const ids = new Set(state.measurements.filter((measurement) => !consumed.has(measurement.id)
       && (new Date(measurement.measuredAt).getTime() < cutoff
@@ -2161,7 +2397,12 @@ export async function learningContext({
       evidenceCount: candidate.evidence.length,
       automatic: candidate.automatic,
       acceptedAt: candidate.acceptedAt,
-      outcomeStatus: candidate.promotion?.mode === "outcome-canary" ? candidate.promotion.canary.status : "not-required",
+      outcomeStatus: candidate.promotion?.mode === "outcome-canary"
+        ? (candidate.promotion.canary.status === "validated"
+          && candidate.promotion.canary.revalidation?.status === "active"
+          && new Date(candidate.promotion.canary.revalidation.expiresAt).getTime() >= new Date(timestamp).getTime()
+          ? "revalidating" : candidate.promotion.canary.status)
+        : "not-required",
       authority: "context-only"
     }));
   return {
@@ -2201,6 +2442,10 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       const stale = ["stale-active", "stale-validated"].includes(canaryValidityStatus.status);
       const registryContracts = evaluations.filter((contract) => contract.schema === "agentspine.learning-evaluation/v7");
       const inactiveRegistryContracts = registryContracts.filter((contract) => !activeEvaluationBinding(learning, contract));
+      const renewalMeasurementIds = new Set([...(learning.validationLeases || []),
+        ...learning.history.filter((entry) => entry.kind === "learning-validation").map((entry) => entry.value)]
+        .filter((lease) => lease?.learningId === candidate.id && lease.schema === "agentspine.learning-validation/v2")
+        .flatMap((lease) => lease.renewalEvidence.map((entry) => entry.measurementId)));
       return {
         id: candidate.id,
         kind: candidate.kind,
@@ -2214,10 +2459,12 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           && deliveries.some((delivery) => delivery.id === item.deliveryId)).length,
         measurementReceipts: measurements.length,
         measurementLineageReceipts: measurementLineage.length,
-        consumedMeasurementReceipts: measurements.filter((item) => outcomes.some((outcome) => ["agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(outcome.schema)
-          && outcome.measurementReceiptId === item.id)).length,
+        consumedMeasurementReceipts: measurements.filter((item) => renewalMeasurementIds.has(item.id)
+          || outcomes.some((outcome) => ["agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(outcome.schema)
+            && outcome.measurementReceiptId === item.id)).length,
         staleUnconsumedMeasurements: measurements.filter((item) => new Date(item.measuredAt).getTime() < new Date(timestamp).getTime()
           - learning.config.outcomeMaxAgeDays * 86400000
+          && !renewalMeasurementIds.has(item.id)
           && !outcomes.some((outcome) => ["agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(outcome.schema)
             && outcome.measurementReceiptId === item.id)).length,
         plannedOutcomeReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6", "agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(item.schema)
@@ -2273,6 +2520,11 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           ? "revoked" : (canaryValidityStatus.status === "unproven-validated" ? "unproven" : (canary?.status || "not-applicable"))),
         validationLeaseStatus: canaryValidityStatus.status,
         validationLeaseId: canary?.validationLeaseId || null,
+        validationLeaseSchema: canaryValidityStatus.lease?.schema || null,
+        revalidationStatus: canary?.revalidation?.status === "active"
+          ? (new Date(canary.revalidation.expiresAt).getTime() < new Date(timestamp).getTime() ? "stale" : "active")
+          : "not-applicable",
+        revalidationExpiresAt: canary?.revalidation?.expiresAt || null,
         expiresAt: canary?.expiresAt || null,
         authority: "context-only"
       };
@@ -2430,6 +2682,19 @@ export function learningFindings(learning, graph) {
           && lease.digest === candidate.promotion.canary.validationLeaseDigest
           && storedValidationLeaseStructure(lease) && validationLeaseMatchesState(learning, lease))) {
         findings.push(`missing-validation-lease:${candidate.id}`);
+      }
+      const revalidation = candidate.promotion?.canary?.revalidation;
+      if (revalidation && (candidate.promotion?.canary?.status !== "validated"
+        || revalidation.schema !== "agentspine.learning-revalidation-window/v1"
+        || revalidation.status !== "active" || revalidation.authority !== "context-only"
+        || !Number.isFinite(new Date(revalidation.startedAt).getTime())
+        || !Number.isFinite(new Date(revalidation.expiresAt).getTime())
+        || new Date(revalidation.expiresAt).getTime() <= new Date(revalidation.startedAt).getTime()
+        || !ID_RE.test(revalidation.predecessorValidationId || "")
+        || !DIGEST_RE.test(revalidation.predecessorValidationDigest || "")
+        || !(learning.validationLeases || []).some((lease) => lease.id === revalidation.predecessorValidationId
+          && lease.digest === revalidation.predecessorValidationDigest && lease.learningId === candidate.id))) {
+        findings.push(`invalid-revalidation:${candidate.id}`);
       }
     }
   }

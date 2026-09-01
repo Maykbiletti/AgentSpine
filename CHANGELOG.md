@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-01
+
+### Added
+
+- Explicit local revalidation windows let a current validated behavior lesson collect fresh, root-paired measurements from distinct completed model turns before its evidence expires.
+- Immutable, content-free `agentspine.learning-validation/v2` leases bind the prior lease, frozen baseline cohort, fresh measurement, application and delivery digests, measured improvement and extended expiry.
+
+### Changed
+
+- The native hook records turn applications for explicitly revalidating lessons without exposing measurement administration through MCP or widening the lesson's exact scope.
+- Status and Doctor diagnostics expose renewed leases and active revalidation windows; consumed renewal measurements cannot be purged or replayed.
+
+### Security
+
+- Revalidation cannot extend a timestamp by assertion. It requires the original contract and evaluator registry binding, fresh independent roots, distinct delivered turns, unchanged measurement kind and case coverage, and frozen improvement thresholds. Any blocking defect or paired regression rolls back atomically.
+
 ## [0.21.0] - 2026-09-01
 
 ### Added
@@ -551,7 +567,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.18.0...v0.19.0
