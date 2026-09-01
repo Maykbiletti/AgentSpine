@@ -11,7 +11,7 @@ import {
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
   purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
-  reviewLearning, rollbackLearning
+  registerLearningEvaluator, revokeLearningEvaluator, reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
 import { runHook } from "../src/hook.js";
@@ -62,7 +62,7 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
 async function recordLearningOutcome(input) {
   const { learning } = await loadLearning(input.root);
   const evaluation = learning.evaluations.find((item) => item.id === input.evaluationId);
-  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(evaluation?.schema)) {
+  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation?.schema)) {
     return commitLearningOutcome(input);
   }
   const measurementId = `measurement:${input.id}`;
@@ -94,6 +94,13 @@ function evaluatorRoots(evaluatorIds = syntheticEvaluators) {
 }
 
 async function evaluation(root, learningId, extra = {}) {
+  const ids = extra.evaluatorIds || syntheticEvaluators;
+  const roots = new Map((extra.evaluatorRoots || evaluatorRoots(ids))
+    .map((entry) => [entry.evaluatorId, entry.principalDigest]));
+  for (const evaluatorId of ids) {
+    await registerLearningEvaluator({ root, id: evaluatorId, principalDigest: roots.get(evaluatorId),
+      confirmLocalEvaluator: true, now: extra.now || new Date() });
+  }
   return registerLearningEvaluation({
     root, id: extra.id || "evaluation:fixed", learningId, scope: extra.scope || scopedTurn,
     metric: { name: "fixed-task-success", direction: "higher" },
@@ -101,8 +108,8 @@ async function evaluation(root, learningId, extra = {}) {
       taskDigest: hash(`task:${learningId}`), datasetDigest: syntheticDatasetDigest,
       protocolDigest: hash(`protocol:${learningId}`), minCases: 12
     },
-    evaluatorIds: extra.evaluatorIds || syntheticEvaluators,
-    evaluatorRoots: extra.evaluatorRoots || evaluatorRoots(extra.evaluatorIds || syntheticEvaluators),
+    evaluatorIds: ids,
+    evaluatorRoots: [...roots].map(([evaluatorId, principalDigest]) => ({ evaluatorId, principalDigest })),
     expiresAt: extra.expiresAt || null, confirmLocalEvaluation: true, now: extra.now || new Date()
   });
 }
@@ -298,7 +305,7 @@ test("immutable evaluation contracts prevent benchmark drift and freeze promotio
   const { learning: plannedState, learningPath } = await loadLearning(root);
   const preservedState = JSON.stringify(plannedState);
   await writeFile(learningPath, `${JSON.stringify({ ...plannedState, evaluations: [] })}\n`, "utf8");
-  await assert.rejects(loadLearning(root), /(measurement|evaluation) binding is invalid/);
+  await assert.rejects(loadLearning(root), /binding.*invalid/);
   await writeFile(learningPath, `${preservedState}\n`, "utf8");
   const applicationA = await application(root, "learning:planned", "planned-a");
   await recordLearningOutcome({ root, learningId: "learning:planned", applicationId: applicationA.id, deliveryId: applicationA.deliveryId,
@@ -320,7 +327,7 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
   await addLearningEvidence({ root, id: "learning:coverage", evidence: evidence("evidence:coverage-two", 0.97) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
   const registered = await evaluation(root, "learning:coverage");
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v6");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v7");
   assert.deepEqual(registered.contract.pairing, {
     mode: "same-evaluator", maxOutcomesPerEvaluatorPerPhase: 1,
     matchMeasurementKind: true, matchCaseCount: true, authority: "context-only"
@@ -496,20 +503,15 @@ test("evaluator roots prevent alias independence and bind measurements fail clos
       scope: scopedTurn, evidence: evidence(`evidence:root-${suffix}`), now: start
     });
   }
-  await assert.rejects(registerLearningEvaluation({
-    root, id: "evaluation:duplicate-roots", learningId: "learning:root-primary", scope: scopedTurn,
-    metric: { name: "fixed-task-success", direction: "higher" },
-    benchmark: {
-      taskDigest: hash("root-task"), datasetDigest: syntheticDatasetDigest,
-      protocolDigest: hash("root-protocol"), minCases: 12
-    },
-    evaluatorIds: ["evaluator:root-a", "evaluator:root-b"],
-    evaluatorRoots: [
-      { evaluatorId: "evaluator:root-a", principalDigest: sharedRoot },
-      { evaluatorId: "evaluator:root-b", principalDigest: sharedRoot }
-    ],
-    confirmLocalEvaluation: true, now: start
-  }), /distinct locally attested SHA-256 evaluator root/);
+  await assert.rejects(registerLearningEvaluator({
+    root, id: "evaluator:root-a", principalDigest: sharedRoot, now: start
+  }), /explicit local confirmation/);
+  await registerLearningEvaluator({
+    root, id: "evaluator:root-a", principalDigest: sharedRoot, confirmLocalEvaluator: true, now: start
+  });
+  await assert.rejects(registerLearningEvaluator({
+    root, id: "evaluator:root-alias", principalDigest: sharedRoot, confirmLocalEvaluator: true, now: start
+  }), /IDs and principal roots are immutable/);
   const primary = await evaluation(root, "learning:root-primary", {
     id: "evaluation:root-primary", evaluatorIds: ["evaluator:root-a", "evaluator:root-b"],
     evaluatorRoots: [
@@ -517,16 +519,11 @@ test("evaluator roots prevent alias independence and bind measurements fail clos
       { evaluatorId: "evaluator:root-b", principalDigest: hash("second synthetic evaluator principal") }
     ], now: start, expiresAt: "2026-01-10T00:00:00.000Z"
   });
-  assert.equal(primary.contract.schema, "agentspine.learning-evaluation/v6");
+  assert.equal(primary.contract.schema, "agentspine.learning-evaluation/v7");
+  assert.equal(primary.binding.schema, "agentspine.learning-evaluator-binding/v1");
+  assert.equal(primary.binding.evaluationDigest, primary.contract.digest);
   assert.deepEqual(primary.contract.evaluatorRoots[0], {
     evaluatorId: "evaluator:root-a", principalDigest: sharedRoot, authority: "context-only"
-  });
-  await evaluation(root, "learning:root-alias", {
-    id: "evaluation:root-alias", evaluatorIds: ["evaluator:alias-a", "evaluator:alias-b"],
-    evaluatorRoots: [
-      { evaluatorId: "evaluator:alias-a", principalDigest: sharedRoot },
-      { evaluatorId: "evaluator:alias-b", principalDigest: hash("third synthetic evaluator principal") }
-    ], now: start, expiresAt: "2026-01-10T00:00:00.000Z"
   });
   const first = await recordLearningMeasurement({
     root, id: "measurement:root-primary", learningId: "learning:root-primary",
@@ -550,17 +547,19 @@ test("evaluator roots prevent alias independence and bind measurements fail clos
   });
   assert.equal(committed.receipt.schema, "agentspine.learning-outcome/v9");
   assert.equal(committed.receipt.measurement.evaluatorRootDigest, sharedRoot);
+  await revokeLearningEvaluator({ root, id: "evaluator:root-a", reason: "Synthetic evaluator retired.",
+    confirmLocalEvaluator: true, now: new Date("2026-01-01T00:00:01.000Z") });
   await assert.rejects(recordLearningMeasurement({
-    root, id: "measurement:root-alias", learningId: "learning:root-alias",
-    evaluationId: "evaluation:root-alias", phase: "before", scope: scopedTurn,
+    root, id: "measurement:root-after-revoke", learningId: "learning:root-primary",
+    evaluationId: "evaluation:root-primary", phase: "before", scope: scopedTurn,
     metric: { name: "fixed-task-success", direction: "higher", value: 0.5, blockingDefects: 0 },
     measurement: {
-      kind: "objective", evaluatorId: "evaluator:alias-a", runId: "run:shared-root",
-      sourceDigest: hash("root-alias-source")
+      kind: "objective", evaluatorId: "evaluator:root-b", runId: "run:after-revoke",
+      sourceDigest: hash("root-after-revoke-source")
     },
     coverage: { datasetDigest: syntheticDatasetDigest, caseCount: 12 },
     measuredAt: start, confirmLocalMeasurement: true, now: start
-  }), /evaluator-root run cannot be replayed through an alias ID/);
+  }), /registry binding is missing, changed, or revoked/);
 
   const stored = await loadLearning(root);
   const contract = stored.learning.evaluations.find((item) => item.id === "evaluation:root-primary");
@@ -573,7 +572,48 @@ test("evaluator roots prevent alias independence and bind measurements fail clos
   stored.learning.evaluations = stored.learning.evaluations.map((item) => item.id === contract.id
     ? { ...tamperedPayload, digest: hash(JSON.stringify(tamperedPayload)) } : item);
   await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
-  await assert.rejects(loadLearning(root), /measurement binding is invalid/);
+  await assert.rejects(loadLearning(root), /evaluator binding state is invalid/);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("local evaluator revocation removes canary context and forces automatic rollback", async (t) => {
+  const { root } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2032-01-01T00:00:00.000Z");
+  await proposeLearning({
+    root, id: "learning:revoked-evaluator", kind: "behavior", claim: "Use the registry-bound synthetic strategy.",
+    scope: scopedTurn, evidence: evidence("evidence:registry-one", 0.97), now: start
+  });
+  await addLearningEvidence({ root, id: "learning:revoked-evaluator",
+    evidence: evidence("evidence:registry-two", 0.97), now: start });
+  await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2,
+    minOutcomeReceipts: 2, canaryReceipts: 2 }, now: start });
+  await evaluation(root, "learning:revoked-evaluator", {
+    id: "evaluation:revoked-evaluator", evaluatorIds: ["evaluator:registry-a", "evaluator:registry-b"],
+    now: start, expiresAt: "2032-01-10T00:00:00.000Z"
+  });
+  await recordLearningOutcome({ root, learningId: "learning:revoked-evaluator",
+    ...outcome("outcome:registry-before-a", "before", 0.4, "evaluator:registry-a", {
+      evaluationId: "evaluation:revoked-evaluator", measuredAt: start
+    }), now: start });
+  await recordLearningOutcome({ root, learningId: "learning:revoked-evaluator",
+    ...outcome("outcome:registry-before-b", "before", 0.5, "evaluator:registry-b", {
+      evaluationId: "evaluation:revoked-evaluator", measuredAt: start
+    }), now: start });
+  const promotedAt = new Date("2032-01-01T00:00:01.000Z");
+  const promoted = await evaluateLearning({ root, now: promotedAt });
+  assert.equal(promoted.accepted[0].promotion.canary.status, "active");
+  await revokeLearningEvaluator({ root, id: "evaluator:registry-a", reason: "Synthetic root retired.",
+    confirmLocalEvaluator: true, now: new Date("2032-01-01T00:00:02.000Z") });
+  const context = await learningContext({ root, scope: scopedTurn, now: new Date("2032-01-01T00:00:03.000Z") });
+  assert.equal(context.items.length, 0, "revoked evaluator evidence must not remain in preflight context");
+  assert.equal(context.degraded, true);
+  assert.deepEqual(context.diagnostics, ["revoked-evaluator-canary:learning:revoked-evaluator"]);
+  const reconciled = await evaluateLearning({ root, now: new Date("2032-01-01T00:00:03.000Z") });
+  assert.deepEqual(reconciled.reconciled, [{ id: "learning:revoked-evaluator", decision: "rolled-back" }]);
+  const status = await learningOutcomeStatus({ root });
+  assert.deepEqual(status.evaluatorRegistry, { active: 1, revoked: 1, bindings: 1, authority: "context-only" });
+  assert.equal(status.records[0].inactiveEvaluatorRegistryContracts, 1);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
@@ -890,7 +930,7 @@ test("parallel duplicate outcome receipts are idempotent and remain one immutabl
   assert.equal((await loadLearning(root)).learning.outcomes.length, 1);
 });
 
-test("0.14 through 0.18 evaluation contracts remain readable while new contracts require evaluator roots", async (t) => {
+test("0.14 through 0.19 evaluation contracts remain readable while new contracts require registered evaluator roots", async (t) => {
   const { root } = await fixture(t);
   await proposeLearning({
     root, id: "learning:legacy-contract", kind: "behavior", claim: "Use the legacy synthetic strategy.",
@@ -901,6 +941,7 @@ test("0.14 through 0.18 evaluation contracts remain readable while new contracts
   const { digest: _digest, pairing: _pairing, evaluatorRoots: _roots, ...currentPayload } = learning.evaluations[0];
   const v1Payload = { ...currentPayload, schema: "agentspine.learning-evaluation/v1" };
   learning.evaluations[0] = { ...v1Payload, digest: hash(JSON.stringify(v1Payload)) };
+  learning.evaluationBindings = learning.evaluationBindings.filter((entry) => entry.evaluationId !== "evaluation:fixed");
   await writeFile(learningPath, `${JSON.stringify(learning)}\n`, "utf8");
   assert.equal((await loadLearning(root)).learning.evaluations[0].schema, "agentspine.learning-evaluation/v1");
   const legacyReceipt = await recordLearningOutcome({
@@ -920,6 +961,8 @@ test("0.14 through 0.18 evaluation contracts remain readable while new contracts
   const v2Payload = { ...v3Payload, schema: "agentspine.learning-evaluation/v2" };
   coverageState.learning.evaluations = coverageState.learning.evaluations.map((item) => item.id === current.id
     ? { ...v2Payload, digest: hash(JSON.stringify(v2Payload)) } : item);
+  coverageState.learning.evaluationBindings = coverageState.learning.evaluationBindings
+    .filter((entry) => entry.evaluationId !== current.id);
   await writeFile(coverageState.learningPath, `${JSON.stringify(coverageState.learning)}\n`, "utf8");
   const coverageReceipt = await recordLearningOutcome({
     root, learningId: "learning:coverage-contract",
@@ -940,6 +983,8 @@ test("0.14 through 0.18 evaluation contracts remain readable while new contracts
   const v3ContractPayload = { ...v4Payload, schema: "agentspine.learning-evaluation/v3" };
   provenanceState.learning.evaluations = provenanceState.learning.evaluations.map((item) => item.id === lineageContract.id
     ? { ...v3ContractPayload, digest: hash(JSON.stringify(v3ContractPayload)) } : item);
+  provenanceState.learning.evaluationBindings = provenanceState.learning.evaluationBindings
+    .filter((entry) => entry.evaluationId !== lineageContract.id);
   await writeFile(provenanceState.learningPath, `${JSON.stringify(provenanceState.learning)}\n`, "utf8");
   const provenanceReceipt = await recordLearningOutcome({
     root, learningId: "learning:provenance-contract",
@@ -960,6 +1005,8 @@ test("0.14 through 0.18 evaluation contracts remain readable while new contracts
   const compatibleV4Payload = { ...v4ContractPayload, schema: "agentspine.learning-evaluation/v4" };
   pairedState.learning.evaluations = pairedState.learning.evaluations.map((item) => item.id === pairedContract.id
     ? { ...compatibleV4Payload, digest: hash(JSON.stringify(compatibleV4Payload)) } : item);
+  pairedState.learning.evaluationBindings = pairedState.learning.evaluationBindings
+    .filter((entry) => entry.evaluationId !== pairedContract.id);
   await writeFile(pairedState.learningPath, `${JSON.stringify(pairedState.learning)}\n`, "utf8");
   const lineageReceipt = await recordLearningOutcome({
     root, learningId: "learning:lineage-contract",
@@ -980,6 +1027,8 @@ test("0.14 through 0.18 evaluation contracts remain readable while new contracts
   const compatibleV5Payload = { ...v5ContractPayload, schema: "agentspine.learning-evaluation/v5" };
   legacyPairedState.learning.evaluations = legacyPairedState.learning.evaluations.map((item) => item.id === currentPaired.id
     ? { ...compatibleV5Payload, digest: hash(JSON.stringify(compatibleV5Payload)) } : item);
+  legacyPairedState.learning.evaluationBindings = legacyPairedState.learning.evaluationBindings
+    .filter((entry) => entry.evaluationId !== currentPaired.id);
   await writeFile(legacyPairedState.learningPath, `${JSON.stringify(legacyPairedState.learning)}\n`, "utf8");
   const pairedReceipt = await recordLearningOutcome({
     root, learningId: "learning:paired-contract",
@@ -991,6 +1040,31 @@ test("0.14 through 0.18 evaluation contracts remain readable while new contracts
   const pairedMeasurement = (await loadLearning(root)).learning.measurements
     .find((item) => item.id === "measurement:outcome:paired-contract");
   assert.equal(pairedMeasurement.schema, "agentspine.learning-measurement/v1");
+
+  await proposeLearning({
+    root, id: "learning:root-contract", kind: "behavior", claim: "Use the 0.19 synthetic strategy.",
+    scope: scopedTurn, evidence: evidence("evidence:root-contract")
+  });
+  await evaluation(root, "learning:root-contract", { id: "evaluation:root-contract" });
+  const legacyRootState = await loadLearning(root);
+  const currentRoot = legacyRootState.learning.evaluations.find((item) => item.id === "evaluation:root-contract");
+  const { digest: _currentRootDigest, ...v6ContractPayload } = currentRoot;
+  const compatibleV6Payload = { ...v6ContractPayload, schema: "agentspine.learning-evaluation/v6" };
+  legacyRootState.learning.evaluations = legacyRootState.learning.evaluations.map((item) => item.id === currentRoot.id
+    ? { ...compatibleV6Payload, digest: hash(JSON.stringify(compatibleV6Payload)) } : item);
+  legacyRootState.learning.evaluationBindings = legacyRootState.learning.evaluationBindings
+    .filter((entry) => entry.evaluationId !== currentRoot.id);
+  await writeFile(legacyRootState.learningPath, `${JSON.stringify(legacyRootState.learning)}\n`, "utf8");
+  const rootReceipt = await recordLearningOutcome({
+    root, learningId: "learning:root-contract",
+    ...outcome("outcome:root-contract", "before", 0.4, "evaluator:test-a", {
+      evaluationId: "evaluation:root-contract"
+    })
+  });
+  assert.equal(rootReceipt.receipt.schema, "agentspine.learning-outcome/v9");
+  const rootMeasurement = (await loadLearning(root)).learning.measurements
+    .find((item) => item.id === "measurement:outcome:root-contract");
+  assert.equal(rootMeasurement.schema, "agentspine.learning-measurement/v2");
 });
 
 test("0.10 learning state upgrades in place and corrupt outcome receipts fail closed", async (t) => {
@@ -1108,6 +1182,10 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
     "--privacy", "shared", "--persona", "agent:synthetic", "--user", "user:synthetic",
     "--tenant", "tenant:synthetic", "--project", "project:synthetic", "--task", "task:synthetic", "--json"
   ], state);
+  runCli(["learn-evaluator-register", "evaluator:cli", "--root", root,
+    "--principal-digest", hash("root:cli"), "--confirm-local-evaluator", "--json"], state);
+  runCli(["learn-evaluator-register", "evaluator:cli-two", "--root", root,
+    "--principal-digest", hash("root:cli-two"), "--confirm-local-evaluator", "--json"], state);
   runCli([
     "learn-evaluation", "evaluation:cli", "--root", root, "--learning", "learning:cli-outcome",
     "--metric", "fixed-task-success", "--direction", "higher", "--task-digest", hash("cli-task"),
@@ -1144,6 +1222,9 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
   assert.equal(status.records[0].pairedEvaluatorPairs, 0);
   assert.equal(status.records[0].evaluatorRootBoundReceipts, 1);
   assert.equal(status.records[0].independentEvaluatorRoots, 1);
+  assert.equal(status.records[0].evaluatorRegistryContracts, 1);
+  assert.equal(status.records[0].inactiveEvaluatorRegistryContracts, 0);
+  assert.deepEqual(status.evaluatorRegistry, { active: 2, revoked: 0, bindings: 1, authority: "context-only" });
   assert.equal(status.records[0].measurementReceipts, 1);
   assert.equal(status.records[0].measurementLineageReceipts, 1);
   assert.equal(status.records[0].consumedMeasurementReceipts, 1);
@@ -1153,4 +1234,9 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
   assert.equal(doctor.learningOutcomes.pairedEvaluatorPairs, 0);
   assert.equal(doctor.learningOutcomes.evaluatorRootBoundReceipts, 1);
   assert.equal(doctor.learningOutcomes.independentEvaluatorRoots, 1);
+  assert.equal(doctor.learningOutcomes.activeEvaluatorRoots, 2);
+  assert.equal(doctor.learningOutcomes.revokedEvaluatorRoots, 0);
+  assert.equal(doctor.learningOutcomes.evaluatorRegistryBindings, 1);
+  assert.equal(doctor.learningOutcomes.evaluatorRegistryContracts, 1);
+  assert.equal(doctor.learningOutcomes.inactiveEvaluatorRegistryContracts, 0);
 });

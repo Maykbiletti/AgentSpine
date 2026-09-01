@@ -68,7 +68,7 @@ Status: sparse local foundation implemented; host-specific notification adapters
 
 ## 5. Safe learning
 
-Status: local evidence, review, immutable fixed-benchmark contracts, locally attested evaluator-root independence, globally unique measurement-run lineage, root-paired evaluator cohorts, turn-bound Canary application, single-use outcome comparison, supersession, and rollback workflow implemented.
+Status: local evidence, review, immutable fixed-benchmark contracts, a locally confirmed revocable evaluator-root registry, exact registry bindings, globally unique measurement-run lineage, root-paired evaluator cohorts, turn-bound Canary application, single-use outcome comparison, supersession, and rollback workflow implemented.
 
 - observation candidates remain outside context until accepted;
 - evidence, source fingerprints, confidence, and every prior candidate version are retained;

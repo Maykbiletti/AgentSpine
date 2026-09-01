@@ -51,6 +51,8 @@ function emptyLearning(root) {
     applications: [],
     deliveries: [],
     evaluations: [],
+    evaluatorRegistry: [],
+    evaluationBindings: [],
     history: []
   };
 }
@@ -66,6 +68,8 @@ function normalizeState(value, root) {
     || (value.applications !== undefined && (!Array.isArray(value.applications) || !value.applications.every((item) => item && typeof item === "object")))
     || (value.deliveries !== undefined && (!Array.isArray(value.deliveries) || !value.deliveries.every((item) => item && typeof item === "object")))
     || (value.evaluations !== undefined && (!Array.isArray(value.evaluations) || !value.evaluations.every((item) => item && typeof item === "object")))
+    || (value.evaluatorRegistry !== undefined && (!Array.isArray(value.evaluatorRegistry) || !value.evaluatorRegistry.every((item) => item && typeof item === "object")))
+    || (value.evaluationBindings !== undefined && (!Array.isArray(value.evaluationBindings) || !value.evaluationBindings.every((item) => item && typeof item === "object")))
     || !Array.isArray(value.history) || !value.history.every((item) => item && typeof item === "object")) {
     throw new Error("learning state structure is invalid; run the audit before learning");
   }
@@ -82,7 +86,9 @@ function normalizeState(value, root) {
     measurementLineage: value.measurementLineage || [],
     applications: value.applications || [],
     deliveries: value.deliveries || [],
-    evaluations: value.evaluations || []
+    evaluations: value.evaluations || [],
+    evaluatorRegistry: value.evaluatorRegistry || [],
+    evaluationBindings: value.evaluationBindings || []
   };
   if (normalized.outcomes.some((receipt) => !storedOutcomeStructure(receipt))) {
     throw new Error("learning outcome state is invalid; run the audit before learning");
@@ -101,6 +107,29 @@ function normalizeState(value, root) {
   }
   if (normalized.evaluations.some((contract) => !storedEvaluationStructure(contract))) {
     throw new Error("learning evaluation state is invalid; run the audit before learning");
+  }
+  if (normalized.evaluatorRegistry.some((record) => !storedEvaluatorRecordStructure(record))) {
+    throw new Error("learning evaluator registry is invalid; run the audit before learning");
+  }
+  if (new Set(normalized.evaluatorRegistry.map((record) => record.id)).size !== normalized.evaluatorRegistry.length
+    || new Set(normalized.evaluatorRegistry.map((record) => record.principalDigest)).size !== normalized.evaluatorRegistry.length) {
+    throw new Error("learning evaluator registry contains duplicate identities or roots; run the audit before learning");
+  }
+  if (normalized.evaluationBindings.some((binding) => !storedEvaluationBindingStructure(binding)
+    || !normalized.evaluations.some((contract) => contract.id === binding.evaluationId
+      && contract.digest === binding.evaluationDigest
+      && contract.evaluatorRoots?.length === binding.evaluators.length
+      && binding.evaluators.every((entry) => contract.evaluatorRoots.some((root) => root.evaluatorId === entry.evaluatorId
+        && root.principalDigest === entry.principalDigest))))) {
+    throw new Error("learning evaluator binding state is invalid; run the audit before learning");
+  }
+  if (new Set(normalized.evaluationBindings.map((binding) => binding.evaluationId)).size !== normalized.evaluationBindings.length) {
+    throw new Error("learning evaluator binding is duplicated; run the audit before learning");
+  }
+  if (normalized.evaluations.some((contract) => contract.schema === "agentspine.learning-evaluation/v7"
+    && !normalized.evaluationBindings.some((binding) => binding.evaluationId === contract.id
+      && binding.evaluationDigest === contract.digest))) {
+    throw new Error("learning evaluator binding is missing; run the audit before learning");
   }
   if (normalized.outcomes.some((receipt) => {
     const candidate = normalized.candidates.find((item) => item.id === receipt.learningId);
@@ -126,14 +155,14 @@ function normalizeState(value, root) {
   if (normalized.measurements.some((receipt) => {
     const candidate = normalized.candidates.find((item) => item.id === receipt.learningId);
     const contract = normalized.evaluations.find((item) => item.id === receipt.evaluationId);
-    const evaluatorRoot = contract?.schema === "agentspine.learning-evaluation/v6"
+    const evaluatorRoot = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract?.schema)
       ? contract.evaluatorRoots.find((root) => root.evaluatorId === receipt.measurement?.evaluatorId) : null;
-    return !candidate || !contract || !["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(contract.schema)
+    return !candidate || !contract || !["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
       || contract.learningId !== receipt.learningId || !exactScope(contract.scope, receipt.scope)
       || contract.metric.name !== receipt.metric.name || contract.metric.direction !== receipt.metric.direction
       || !contract.evaluatorIds.includes(receipt.measurement.evaluatorId)
       || contract.benchmark.datasetDigest !== receipt.coverage.datasetDigest
-      || (contract.schema === "agentspine.learning-evaluation/v6"
+      || (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
         && (receipt.schema !== "agentspine.learning-measurement/v2"
           || evaluatorRoot?.principalDigest !== receipt.measurement?.evaluatorRootDigest))
       || receipt.coverage.caseCount < contract.benchmark.minCases
@@ -173,7 +202,7 @@ function normalizeState(value, root) {
       && contract.metric.name === receipt.metric.name && contract.metric.direction === receipt.metric.direction
       && contract.evaluatorIds.includes(receipt.measurement.evaluatorId)
       && (receipt.schema !== "agentspine.learning-outcome/v9"
-        || (contract.schema === "agentspine.learning-evaluation/v6"
+        || (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
           && contract.evaluatorRoots.some((root) => root.evaluatorId === receipt.measurement.evaluatorId
             && root.principalDigest === receipt.measurement.evaluatorRootDigest)))
       && new Date(receipt.measuredAt).getTime() >= new Date(contract.registeredAt).getTime()
@@ -186,7 +215,7 @@ function normalizeState(value, root) {
         || (receipt.schema === "agentspine.learning-outcome/v6" && contract.schema === "agentspine.learning-evaluation/v3")
         || (receipt.schema === "agentspine.learning-outcome/v7" && contract.schema === "agentspine.learning-evaluation/v4")
         || (receipt.schema === "agentspine.learning-outcome/v8" && contract.schema === "agentspine.learning-evaluation/v5")
-        || (receipt.schema === "agentspine.learning-outcome/v9" && contract.schema === "agentspine.learning-evaluation/v6"))
+        || (receipt.schema === "agentspine.learning-outcome/v9" && ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)))
       && receipt.coverage?.datasetDigest === contract.benchmark.datasetDigest
       && receipt.coverage?.caseCount >= contract.benchmark.minCases))) {
     throw new Error("learning outcome coverage binding is invalid; run the audit before learning");
@@ -389,6 +418,74 @@ function evaluatorRootRunDigest(evaluatorRootDigest, runId) {
   return digest([evaluatorRootDigest, runId]);
 }
 
+function evaluatorRecordPayload({ id, principalDigest, status, registeredAt, revokedAt, reason }) {
+  return {
+    schema: "agentspine.learning-evaluator/v1",
+    id,
+    principalDigest,
+    status,
+    registeredAt,
+    revokedAt,
+    reason,
+    confirmation: "local-owner",
+    authority: "context-only"
+  };
+}
+
+function storedEvaluatorRecordStructure(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  const payload = evaluatorRecordPayload(record);
+  return record.schema === "agentspine.learning-evaluator/v1" && ID_RE.test(record.id || "")
+    && DIGEST_RE.test(record.principalDigest || "") && ["active", "revoked"].includes(record.status)
+    && Number.isFinite(new Date(record.registeredAt).getTime())
+    && (record.status === "active"
+      ? record.revokedAt === null && record.reason === null
+      : Number.isFinite(new Date(record.revokedAt).getTime()) && typeof record.reason === "string" && record.reason.length > 0)
+    && record.confirmation === "local-owner" && record.authority === "context-only"
+    && record.digest === digest(payload);
+}
+
+function evaluationBindingPayload({ evaluationId, evaluationDigest, evaluators, boundAt }) {
+  return {
+    schema: "agentspine.learning-evaluator-binding/v1",
+    evaluationId,
+    evaluationDigest,
+    evaluators,
+    boundAt,
+    authority: "context-only"
+  };
+}
+
+function storedEvaluationBindingStructure(binding) {
+  if (!binding || typeof binding !== "object" || Array.isArray(binding)) return false;
+  const payload = evaluationBindingPayload(binding);
+  return binding.schema === "agentspine.learning-evaluator-binding/v1"
+    && ID_RE.test(binding.evaluationId || "") && DIGEST_RE.test(binding.evaluationDigest || "")
+    && Array.isArray(binding.evaluators) && binding.evaluators.length >= 2
+    && binding.evaluators.every((entry) => ID_RE.test(entry?.evaluatorId || "")
+      && DIGEST_RE.test(entry?.principalDigest || "") && DIGEST_RE.test(entry?.registryDigest || "")
+      && entry?.authority === "context-only")
+    && new Set(binding.evaluators.map((entry) => entry.evaluatorId)).size === binding.evaluators.length
+    && new Set(binding.evaluators.map((entry) => entry.principalDigest)).size === binding.evaluators.length
+    && Number.isFinite(new Date(binding.boundAt).getTime()) && binding.authority === "context-only"
+    && binding.digest === digest(payload);
+}
+
+function activeEvaluatorRecord(state, evaluatorId, principalDigest = null) {
+  return state.evaluatorRegistry.find((record) => record.id === evaluatorId && record.status === "active"
+    && (principalDigest === null || record.principalDigest === principalDigest)) || null;
+}
+
+function activeEvaluationBinding(state, contract) {
+  const binding = state.evaluationBindings.find((entry) => entry.evaluationId === contract?.id
+    && entry.evaluationDigest === contract?.digest);
+  if (!binding) return null;
+  return binding.evaluators.every((entry) => {
+    const record = activeEvaluatorRecord(state, entry.evaluatorId, entry.principalDigest);
+    return record?.digest === entry.registryDigest;
+  }) ? binding : null;
+}
+
 function measurementLineagePayload({ measurementReceiptId, learningId, evaluationId, sourceDigest, runDigest,
   evaluatorRootDigest, rootRunDigest, registeredAt,
   schema = "agentspine.learning-measurement-lineage/v1" }) {
@@ -417,9 +514,9 @@ function evaluationPayload({ id, learningId, scope, metric, benchmark, evaluator
   return {
     schema, id, learningId, scope, metric, benchmark,
     evaluatorIds,
-    ...(schema === "agentspine.learning-evaluation/v6" ? { evaluatorRoots } : {}),
+    ...(["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(schema) ? { evaluatorRoots } : {}),
     thresholds,
-    ...(["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(schema) ? { pairing } : {}),
+    ...(["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(schema) ? { pairing } : {}),
     registeredAt, expiresAt, authority: "context-only"
   };
 }
@@ -427,7 +524,7 @@ function evaluationPayload({ id, learningId, scope, metric, benchmark, evaluator
 function storedEvaluationStructure(contract) {
   if (!contract || typeof contract !== "object" || Array.isArray(contract)) return false;
   const payload = evaluationPayload(contract);
-  return ["agentspine.learning-evaluation/v1", "agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(contract.schema)
+  return ["agentspine.learning-evaluation/v1", "agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
     && ID_RE.test(contract.id || "") && ID_RE.test(contract.learningId || "")
     && SCOPE_FIELDS.every((field) => contract.scope?.[field] === null || ID_RE.test(contract.scope?.[field] || ""))
     && typeof contract.metric?.name === "string" && contract.metric.name.length > 0
@@ -444,7 +541,7 @@ function storedEvaluationStructure(contract) {
     && contract.thresholds.regressionTolerance <= 1
     && Number.isInteger(contract.thresholds?.beforeReceipts) && contract.thresholds.beforeReceipts >= 2
     && Number.isInteger(contract.thresholds?.afterReceipts) && contract.thresholds.afterReceipts >= 1
-    && (contract.schema !== "agentspine.learning-evaluation/v6"
+    && (!["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
       || (Array.isArray(contract.evaluatorRoots)
         && contract.evaluatorRoots.length === contract.evaluatorIds.length
         && contract.evaluatorRoots.every((root) => ID_RE.test(root?.evaluatorId || "")
@@ -452,7 +549,7 @@ function storedEvaluationStructure(contract) {
         && new Set(contract.evaluatorRoots.map((root) => root.evaluatorId)).size === contract.evaluatorRoots.length
         && new Set(contract.evaluatorRoots.map((root) => root.principalDigest)).size === contract.evaluatorRoots.length
         && contract.evaluatorRoots.map((root) => root.evaluatorId).sort().join("\0") === [...contract.evaluatorIds].sort().join("\0")))
-    && (!["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(contract.schema)
+    && (!["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
       || (contract.pairing?.mode === "same-evaluator"
         && contract.pairing?.maxOutcomesPerEvaluatorPerPhase === 1
         && contract.pairing?.matchMeasurementKind === true
@@ -864,6 +961,49 @@ function distinctEvidence(candidate) {
   return new Set(candidate.evidence.map((item) => item.sourceSha256 || item.sourceDocument || item.id)).size;
 }
 
+export async function registerLearningEvaluator({
+  root = process.cwd(), id, principalDigest, confirmLocalEvaluator = false, now = new Date()
+}) {
+  if (!confirmLocalEvaluator) throw new Error("evaluator registration requires explicit local confirmation");
+  if (!ID_RE.test(id || "")) throw new Error("evaluator id must be a stable identifier");
+  if (!DIGEST_RE.test(principalDigest || "")) throw new Error("evaluator principalDigest must be SHA-256");
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const existing = state.evaluatorRegistry.find((record) => record.id === id || record.principalDigest === principalDigest);
+    if (existing) {
+      if (existing.id === id && existing.principalDigest === principalDigest && existing.status === "active") {
+        return { evaluator: existing, learningPath, unchanged: true };
+      }
+      throw new Error("evaluator IDs and principal roots are immutable; register a new distinct evaluator instead");
+    }
+    const payload = evaluatorRecordPayload({ id, principalDigest, status: "active", registeredAt: timestamp,
+      revokedAt: null, reason: null });
+    const evaluator = { ...payload, digest: digest(payload) };
+    state.evaluatorRegistry.push(evaluator);
+    state.evaluatorRegistry.sort((a, b) => a.id.localeCompare(b.id));
+    return { evaluator, learningPath, unchanged: false };
+  });
+}
+
+export async function revokeLearningEvaluator({
+  root = process.cwd(), id, reason, confirmLocalEvaluator = false, now = new Date()
+}) {
+  if (!confirmLocalEvaluator) throw new Error("evaluator revocation requires explicit local confirmation");
+  if (!ID_RE.test(id || "")) throw new Error("evaluator id must be a stable identifier");
+  const revokeReason = safeText(reason, "reason", 500);
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const previous = state.evaluatorRegistry.find((record) => record.id === id);
+    if (!previous) throw new Error(`unknown learning evaluator: ${id}`);
+    if (previous.status !== "active") throw new Error("learning evaluator is already revoked");
+    preserve(state, "learning-evaluator", previous, timestamp);
+    const payload = evaluatorRecordPayload({ ...previous, status: "revoked", revokedAt: timestamp, reason: revokeReason });
+    const evaluator = { ...payload, digest: digest(payload) };
+    state.evaluatorRegistry = state.evaluatorRegistry.map((record) => record.id === id ? evaluator : record);
+    return { evaluator, learningPath };
+  });
+}
+
 export async function registerLearningEvaluation({
   root = process.cwd(), id = `evaluation:${randomUUID()}`, learningId, scope, metric, benchmark,
   evaluatorIds, evaluatorRoots, expiresAt = null, confirmLocalEvaluation = false, now = new Date()
@@ -893,21 +1033,24 @@ export async function registerLearningEvaluation({
       throw new Error("evaluation benchmark digests must be SHA-256 values");
     }
     const normalizedEvaluators = [...new Set((evaluatorIds || []).map((value) => String(value)))].sort();
-    const normalizedRoots = (evaluatorRoots || []).map((root) => ({
-      evaluatorId: String(root?.evaluatorId || ""), principalDigest: String(root?.principalDigest || ""),
-      authority: "context-only"
-    })).sort((a, b) => a.evaluatorId.localeCompare(b.evaluatorId));
+    const requestedRoots = new Map((evaluatorRoots || []).map((root) => [String(root?.evaluatorId || ""),
+      String(root?.principalDigest || "")]));
     const requiredEvaluators = Math.max(state.config.minOutcomeReceipts, state.config.canaryReceipts, 2);
     if (normalizedEvaluators.length < requiredEvaluators || normalizedEvaluators.some((value) => !ID_RE.test(value))) {
       throw new Error(`evaluation requires at least ${requiredEvaluators} distinct stable evaluator IDs`);
     }
-    if (normalizedRoots.length !== normalizedEvaluators.length
-      || normalizedRoots.some((root) => !ID_RE.test(root.evaluatorId) || !DIGEST_RE.test(root.principalDigest))
-      || new Set(normalizedRoots.map((root) => root.evaluatorId)).size !== normalizedRoots.length
-      || new Set(normalizedRoots.map((root) => root.principalDigest)).size !== normalizedRoots.length
-      || normalizedRoots.map((root) => root.evaluatorId).join("\0") !== normalizedEvaluators.join("\0")) {
-      throw new Error("evaluation requires one distinct locally attested SHA-256 evaluator root per evaluator ID");
+    const registeredRoots = normalizedEvaluators.map((evaluatorId) => activeEvaluatorRecord(state, evaluatorId));
+    if (registeredRoots.some((record) => !record)
+      || new Set(registeredRoots.map((record) => record.principalDigest)).size !== registeredRoots.length) {
+      throw new Error("evaluation requires every evaluator root to be active in the locally confirmed registry");
     }
+    if (requestedRoots.size && (requestedRoots.size !== registeredRoots.length
+      || registeredRoots.some((record) => requestedRoots.get(record.id) !== record.principalDigest))) {
+      throw new Error("evaluation evaluator roots do not match the active local registry");
+    }
+    const normalizedRoots = registeredRoots.map((record) => ({
+      evaluatorId: record.id, principalDigest: record.principalDigest, authority: "context-only"
+    })).sort((a, b) => a.evaluatorId.localeCompare(b.evaluatorId));
     const expiry = date(expiresAt || new Date(new Date(timestamp).getTime()
       + state.config.outcomeMaxAgeDays * 86400000), "evaluation.expiresAt");
     if (new Date(expiry).getTime() <= new Date(timestamp).getTime()
@@ -915,7 +1058,7 @@ export async function registerLearningEvaluation({
       throw new Error("evaluation expiry must be in the future and no more than 365 days away");
     }
     const payload = evaluationPayload({
-      schema: "agentspine.learning-evaluation/v6",
+      schema: "agentspine.learning-evaluation/v7",
       id, learningId, scope: normalizedScope, metric: { name, direction },
       benchmark: { ...digests, minCases: integer(benchmark?.minCases, "evaluation.benchmark.minCases", 1, 1000000) },
       evaluatorIds: normalizedEvaluators,
@@ -938,7 +1081,10 @@ export async function registerLearningEvaluation({
     const contract = { ...payload, digest: digest(payload) };
     const existing = state.evaluations.find((entry) => entry.id === id);
     if (existing) {
-      if (existing.digest === contract.digest) return { contract: existing, learningPath, unchanged: true };
+      if (existing.digest === contract.digest) {
+        const binding = state.evaluationBindings.find((entry) => entry.evaluationId === existing.id) || null;
+        return { contract: existing, binding, learningPath, unchanged: true };
+      }
       throw new Error("evaluation contract IDs are immutable");
     }
     if (state.evaluations.some((entry) => entry.learningId === learningId
@@ -947,7 +1093,18 @@ export async function registerLearningEvaluation({
     }
     state.evaluations.push(contract);
     state.evaluations.sort((a, b) => a.id.localeCompare(b.id));
-    return { contract, learningPath, unchanged: false };
+    const bindingPayload = evaluationBindingPayload({
+      evaluationId: contract.id,
+      evaluationDigest: contract.digest,
+      evaluators: registeredRoots.map((record) => ({ evaluatorId: record.id,
+        principalDigest: record.principalDigest, registryDigest: record.digest, authority: "context-only" }))
+        .sort((a, b) => a.evaluatorId.localeCompare(b.evaluatorId)),
+      boundAt: timestamp
+    });
+    const binding = { ...bindingPayload, digest: digest(bindingPayload) };
+    state.evaluationBindings.push(binding);
+    state.evaluationBindings.sort((a, b) => a.evaluationId.localeCompare(b.evaluationId));
+    return { contract, binding, learningPath, unchanged: false };
   });
 }
 
@@ -964,9 +1121,12 @@ export async function recordLearningMeasurement({
     const candidate = state.candidates.find((entry) => entry.id === learningId);
     const evaluation = state.evaluations.find((entry) => entry.id === evaluationId);
     const existing = state.measurements.find((entry) => entry.id === id);
-    if (!candidate || !evaluation || !["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(evaluation.schema)
+    if (!candidate || !evaluation || !["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
       || evaluation.learningId !== learningId) {
       throw new Error("measurements require a matching lineage evaluation contract");
+    }
+    if (evaluation.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(state, evaluation)) {
+      throw new Error("measurement evaluator registry binding is missing, changed, or revoked");
     }
     const normalizedScope = normalizeScope(scope);
     if (!scopeContains(candidate.scope, normalizedScope) || !exactScope(evaluation.scope, normalizedScope)) {
@@ -1000,9 +1160,9 @@ export async function recordLearningMeasurement({
     }
     if (!ID_RE.test(runId || "")) throw new Error("measurement runId must be a stable identifier");
     if (!DIGEST_RE.test(sourceDigest || "")) throw new Error("measurement sourceDigest must be a SHA-256 digest");
-    const evaluatorRoot = evaluation.schema === "agentspine.learning-evaluation/v6"
+    const evaluatorRoot = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
       ? evaluation.evaluatorRoots.find((root) => root.evaluatorId === evaluatorId) : null;
-    if (evaluation.schema === "agentspine.learning-evaluation/v6" && !evaluatorRoot) {
+    if (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema) && !evaluatorRoot) {
       throw new Error("measurement evaluator root is not frozen by the evaluation contract");
     }
     const normalizedMeasurement = {
@@ -1028,7 +1188,7 @@ export async function recordLearningMeasurement({
       throw new Error("measurement is outside its evaluation contract window");
     }
     const payload = measurementPayload({
-      schema: evaluation.schema === "agentspine.learning-evaluation/v6"
+      schema: ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
         ? "agentspine.learning-measurement/v2" : "agentspine.learning-measurement/v1",
       id, learningId, evaluationId, phase, scope: normalizedScope,
       metric: normalizedMetric, measurement: normalizedMeasurement, coverage: normalizedCoverage, measuredAt: observedAt });
@@ -1049,7 +1209,7 @@ export async function recordLearningMeasurement({
       }
       throw new Error("measurement receipt IDs are immutable");
     }
-    if (["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(evaluation.schema) && phase === "after") {
+    if (["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema) && phase === "after") {
       const beforeReceiptIds = new Set(candidate.promotion?.canary?.beforeReceipts || []);
       const pairedBefore = state.outcomes.find((entry) => beforeReceiptIds.has(entry.id)
         && ["agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(entry.schema)
@@ -1106,7 +1266,7 @@ function normalizeOutcome(input, candidate, timestamp, application = null, deliv
   measurementReceipt = null) {
   const id = input.id || `outcome:${randomUUID()}`;
   if (!ID_RE.test(id)) throw new Error("outcome.id must be a stable, whitespace-free identifier");
-  const lineageRequired = ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(evaluation?.schema);
+  const lineageRequired = ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation?.schema);
   if (lineageRequired && (!measurementReceipt || measurementReceipt.evaluationId !== evaluation.id
     || measurementReceipt.learningId !== candidate.id)) {
     throw new Error("outcomes require one matching immutable measurement receipt");
@@ -1151,9 +1311,9 @@ function normalizeOutcome(input, candidate, timestamp, application = null, deliv
   const evaluatorId = lineageRequired ? measurementReceipt.measurement.evaluatorId : input.measurement?.evaluatorId;
   if (!ID_RE.test(evaluatorId || "")) throw new Error("outcome.measurement.evaluatorId is required");
   if (!evaluation.evaluatorIds.includes(evaluatorId)) throw new Error("outcome evaluator is not allowed by the evaluation contract");
-  const evaluatorRoot = evaluation.schema === "agentspine.learning-evaluation/v6"
+  const evaluatorRoot = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
     ? evaluation.evaluatorRoots.find((root) => root.evaluatorId === evaluatorId) : null;
-  if (evaluation.schema === "agentspine.learning-evaluation/v6"
+  if (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
     && (measurementReceipt.schema !== "agentspine.learning-measurement/v2"
       || evaluatorRoot?.principalDigest !== measurementReceipt.measurement.evaluatorRootDigest)) {
     throw new Error("outcome evaluator root does not match the frozen evaluation contract");
@@ -1167,7 +1327,7 @@ function normalizeOutcome(input, candidate, timestamp, application = null, deliv
   if (provenanceRequired && !DIGEST_RE.test(sourceDigest || "")) {
     throw new Error("outcome.measurement.sourceDigest is required by the evaluation contract");
   }
-  const coverageRequired = ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(evaluation.schema);
+  const coverageRequired = ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema);
   const coverage = lineageRequired ? measurementReceipt.coverage : coverageRequired ? {
     datasetDigest: input.coverage?.datasetDigest,
     caseCount: integer(input.coverage?.caseCount, "outcome.coverage.caseCount", 1, 1000000),
@@ -1203,7 +1363,7 @@ function normalizeOutcome(input, candidate, timestamp, application = null, deliv
       throw new Error("after outcome predates the completed model-turn delivery");
     }
   }
-  const payload = outcomePayload({ schema: evaluation.schema === "agentspine.learning-evaluation/v6"
+  const payload = outcomePayload({ schema: ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
     ? "agentspine.learning-outcome/v9" : evaluation.schema === "agentspine.learning-evaluation/v5"
     ? "agentspine.learning-outcome/v8" : lineageRequired ? "agentspine.learning-outcome/v7"
     : provenanceRequired ? "agentspine.learning-outcome/v6"
@@ -1340,7 +1500,7 @@ function outcomeFresh(receipt, config, now) {
 }
 
 function outcomeMatchesContract(receipt, contract) {
-  if (contract.schema === "agentspine.learning-evaluation/v6") {
+  if (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)) {
     const root = contract.evaluatorRoots.find((item) => item.evaluatorId === receipt.measurement?.evaluatorId);
     return receipt.schema === "agentspine.learning-outcome/v9"
       && ID_RE.test(receipt.measurementReceiptId || "") && DIGEST_RE.test(receipt.measurementReceiptDigest || "")
@@ -1379,7 +1539,8 @@ function outcomeMatchesContract(receipt, contract) {
 
 function promotableReceipts(state, candidate, timestamp) {
   const contracts = state.evaluations.filter((contract) => contract.learningId === candidate.id
-    && new Date(contract.expiresAt).getTime() >= new Date(timestamp).getTime());
+    && new Date(contract.expiresAt).getTime() >= new Date(timestamp).getTime()
+    && (contract.schema !== "agentspine.learning-evaluation/v7" || activeEvaluationBinding(state, contract)));
   const groups = contracts.map((contract) => ({
     contract,
     receipts: state.outcomes.filter((item) => outcomeMatchesContract(item, contract)
@@ -1387,7 +1548,7 @@ function promotableReceipts(state, candidate, timestamp) {
       && exactScope(item.scope, contract.scope) && outcomeFresh(item, state.config, timestamp)
       && item.measurement.kind !== "model-suggestion")
   })).filter(({ contract, receipts }) => receipts.some((item) => item.measurement.kind === "objective")
-    && new Set(receipts.map((item) => contract.schema === "agentspine.learning-evaluation/v6"
+    && new Set(receipts.map((item) => ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
       ? item.measurement.evaluatorRootDigest : item.measurement.evaluatorId)).size >= contract.thresholds.beforeReceipts)
     .sort((a, b) => b.receipts.length - a.receipts.length || a.contract.id.localeCompare(b.contract.id));
   return groups[0] || null;
@@ -1438,6 +1599,10 @@ function reconcileCanary(state, candidate, timestamp) {
     const result = rollbackCandidate(state, candidate, "outcome evaluation contract is missing, changed, or stale", timestamp, "automatic-stale");
     return { ...result, decision: "rolled-back" };
   }
+  if (evaluation?.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(state, evaluation)) {
+    const result = rollbackCandidate(state, candidate, "outcome evaluator registry binding was revoked or changed", timestamp, "automatic-evaluator-revocation");
+    return { ...result, decision: "rolled-back" };
+  }
   const planned = Boolean(evaluation);
   const receipts = state.outcomes.filter((item) => (planned
     ? outcomeMatchesContract(item, evaluation)
@@ -1452,8 +1617,8 @@ function reconcileCanary(state, candidate, timestamp) {
     const result = rollbackCandidate(state, candidate, "outcome canary recorded a blocking defect", timestamp, "automatic-regression");
     return { ...result, decision: "rolled-back" };
   }
-  const paired = ["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(evaluation?.schema);
-  const rootBound = evaluation?.schema === "agentspine.learning-evaluation/v6";
+  const paired = ["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation?.schema);
+  const rootBound = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation?.schema);
   const beforeByEvaluator = paired ? new Map((canary.beforeReceipts || [])
     .map((id) => state.outcomes.find((item) => item.id === id))
     .filter((item) => item?.schema === (rootBound ? "agentspine.learning-outcome/v9" : "agentspine.learning-outcome/v8"))
@@ -1508,9 +1673,12 @@ export async function recordLearningOutcome({ root = process.cwd(), id, learning
     if (!candidate) throw new Error(`unknown learning candidate: ${learningId}`);
     if (!ID_RE.test(evaluationId || "")) throw new Error("evaluationId is required");
     const evaluation = state.evaluations.find((item) => item.id === evaluationId);
+    if (evaluation?.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(state, evaluation)) {
+      throw new Error("outcome evaluator registry binding is missing, changed, or revoked");
+    }
     const measurementReceipt = measurementReceiptId === null ? null
       : state.measurements.find((item) => item.id === measurementReceiptId);
-    const effectivePhase = ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(evaluation?.schema)
+    const effectivePhase = ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation?.schema)
       ? measurementReceipt?.phase : phase;
     const application = applicationId === null ? null : state.applications.find((item) => item.id === applicationId);
     const delivery = deliveryId === null ? null : state.deliveries.find((item) => item.id === deliveryId);
@@ -1596,10 +1764,12 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
               metric: { name: receipts[0].metric.name, direction: receipts[0].metric.direction },
               evaluationId: contract.id,
               evaluationDigest: contract.digest,
-              pairing: ["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(contract.schema) ? contract.pairing : null,
-              evaluatorRootDigest: contract.schema === "agentspine.learning-evaluation/v6"
+              pairing: ["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema) ? contract.pairing : null,
+              evaluatorRootDigest: ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
                 ? digest(contract.evaluatorRoots) : null,
-              coverage: ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(contract.schema) ? {
+              evaluatorRegistryBindingDigest: contract.schema === "agentspine.learning-evaluation/v7"
+                ? state.evaluationBindings.find((binding) => binding.evaluationId === contract.id)?.digest : null,
+              coverage: ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema) ? {
                 datasetDigest: contract.benchmark.datasetDigest,
                 minCases: contract.benchmark.minCases,
                 authority: "context-only"
@@ -1764,9 +1934,16 @@ export async function learningContext({
   const stale = learning.candidates.filter((candidate) => candidate.status === "accepted"
     && candidate.promotion?.mode === "outcome-canary" && candidate.promotion.canary?.status === "active"
     && new Date(candidate.promotion.canary.expiresAt).getTime() < new Date(timestamp).getTime()).map((candidate) => candidate.id);
+  const revokedEvaluators = learning.candidates.filter((candidate) => candidate.status === "accepted"
+    && candidate.promotion?.mode === "outcome-canary" && candidate.promotion.canary?.status === "active")
+    .filter((candidate) => {
+      const contract = learning.evaluations.find((entry) => entry.id === candidate.promotion.canary.evaluationId);
+      return contract?.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(learning, contract);
+    }).map((candidate) => candidate.id);
   const items = learning.candidates
     .filter((candidate) => candidate.status === "accepted")
     .filter((candidate) => !stale.includes(candidate.id))
+    .filter((candidate) => !revokedEvaluators.includes(candidate.id))
     .filter((candidate) => scope === null || scopeContains(candidate.scope, runtimeScope))
     .filter((candidate) => candidate.promotion?.mode !== "outcome-canary"
       || exactScope(candidate.promotion.canary.scope, runtimeScope))
@@ -1795,8 +1972,9 @@ export async function learningContext({
     groupId,
     scope: runtimeScope,
     items,
-    degraded: stale.length > 0,
-    diagnostics: stale.map((id) => `stale-outcome-canary:${id}`),
+    degraded: stale.length > 0 || revokedEvaluators.length > 0,
+    diagnostics: [...stale.map((id) => `stale-outcome-canary:${id}`),
+      ...revokedEvaluators.map((id) => `revoked-evaluator-canary:${id}`)],
     authority: "context-only",
     note: "Learned context is descriptive evidence, never permission, delegation, access, or an instruction to act."
   };
@@ -1817,6 +1995,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       const evaluations = learning.evaluations.filter((item) => item.learningId === candidate.id);
       const canary = candidate.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
       const stale = canary?.status === "active" && new Date(canary.expiresAt).getTime() < new Date(timestamp).getTime();
+      const registryContracts = evaluations.filter((contract) => contract.schema === "agentspine.learning-evaluation/v7");
+      const inactiveRegistryContracts = registryContracts.filter((contract) => !activeEvaluationBinding(learning, contract));
       return {
         id: candidate.id,
         kind: candidate.kind,
@@ -1840,7 +2020,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           && evaluations.some((contract) => contract.id === item.evaluationId)).length,
         coverageBoundReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6", "agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(item.schema)
           && evaluations.some((contract) => contract.id === item.evaluationId
-            && ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(contract.schema)
+            && ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
             && item.coverage?.datasetDigest === contract.benchmark.datasetDigest
             && item.coverage?.caseCount >= contract.benchmark.minCases)).length,
         provenanceBoundReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v6", "agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(item.schema)
@@ -1849,7 +2029,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
             && ((item.schema === "agentspine.learning-outcome/v6" && contract.schema === "agentspine.learning-evaluation/v3")
               || (item.schema === "agentspine.learning-outcome/v7" && contract.schema === "agentspine.learning-evaluation/v4")
               || (item.schema === "agentspine.learning-outcome/v8" && contract.schema === "agentspine.learning-evaluation/v5")
-              || (item.schema === "agentspine.learning-outcome/v9" && contract.schema === "agentspine.learning-evaluation/v6")))).length,
+              || (item.schema === "agentspine.learning-outcome/v9" && ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema))))).length,
         lineageBoundReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(item.schema)
           && measurements.some((measurement) => measurement.id === item.measurementReceiptId
             && measurement.digest === item.measurementReceiptDigest)).length,
@@ -1871,6 +2051,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           "agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4", "agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6",
           "agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8"].includes(item.schema)).length,
         evaluationContracts: evaluations.length,
+        evaluatorRegistryContracts: registryContracts.length,
+        inactiveEvaluatorRegistryContracts: inactiveRegistryContracts.length,
         activeEvaluationId: canary?.evaluationId || [...evaluations]
           .filter((contract) => new Date(contract.expiresAt).getTime() >= new Date(timestamp).getTime())
           .sort((a, b) => b.registeredAt.localeCompare(a.registeredAt))[0]?.id || null,
@@ -1891,6 +2073,12 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
   return {
     schema: "agentspine.learning-outcome-status/v1",
     root: learning.root,
+    evaluatorRegistry: {
+      active: learning.evaluatorRegistry.filter((record) => record.status === "active").length,
+      revoked: learning.evaluatorRegistry.filter((record) => record.status === "revoked").length,
+      bindings: learning.evaluationBindings.length,
+      authority: "context-only"
+    },
     records,
     learningPath,
     authority: "context-only",
@@ -1937,12 +2125,14 @@ export async function deleteLearning({ root = process.cwd(), id }) {
       throw new Error("roll back an accepted superseding learning before permanent deletion");
     }
     const existed = Boolean(candidate);
+    const evaluationIds = new Set(state.evaluations.filter((entry) => entry.learningId === id).map((entry) => entry.id));
     state.candidates = state.candidates.filter((entry) => entry.id !== id);
     state.outcomes = state.outcomes.filter((entry) => entry.learningId !== id);
     state.measurements = state.measurements.filter((entry) => entry.learningId !== id);
     state.applications = state.applications.filter((entry) => entry.learningId !== id);
     state.deliveries = state.deliveries.filter((entry) => entry.learningId !== id);
     state.evaluations = state.evaluations.filter((entry) => entry.learningId !== id);
+    state.evaluationBindings = state.evaluationBindings.filter((entry) => !evaluationIds.has(entry.evaluationId));
     state.history = state.history.filter((entry) => entry.recordId !== id && entry.value?.id !== id);
     return { deleted: existed, id, learningPath };
   });
@@ -1952,12 +2142,14 @@ export async function purgeLearningBySubject({ root = process.cwd(), subjectId }
   if (!ID_RE.test(subjectId || "")) throw new Error("subjectId is required");
   return mutation(root, (state, _catalog, learningPath) => {
     const ids = new Set(state.candidates.filter((entry) => entry.subjectId === subjectId).map((entry) => entry.id));
+    const evaluationIds = new Set(state.evaluations.filter((entry) => ids.has(entry.learningId)).map((entry) => entry.id));
     state.candidates = state.candidates.filter((entry) => entry.subjectId !== subjectId);
     state.outcomes = state.outcomes.filter((entry) => !ids.has(entry.learningId));
     state.measurements = state.measurements.filter((entry) => !ids.has(entry.learningId));
     state.applications = state.applications.filter((entry) => !ids.has(entry.learningId));
     state.deliveries = state.deliveries.filter((entry) => !ids.has(entry.learningId));
     state.evaluations = state.evaluations.filter((entry) => !ids.has(entry.learningId));
+    state.evaluationBindings = state.evaluationBindings.filter((entry) => !evaluationIds.has(entry.evaluationId));
     state.history = state.history.filter((entry) => entry.subjectId !== subjectId && !ids.has(entry.recordId) && !ids.has(entry.value?.id));
     return { deleted: ids.size, subjectId, learningPath };
   });
@@ -2019,6 +2211,9 @@ export function learningFindings(learning, graph) {
       if (!candidate.acceptedAt || (!manualProof && !automaticProof)) findings.push(`invalid-acceptance:${candidate.id}`);
       if (candidate.promotion?.mode === "outcome-canary" && candidate.promotion?.canary?.status === "active"
         && new Date(candidate.promotion.canary.expiresAt).getTime() < Date.now()) findings.push(`stale-canary:${candidate.id}`);
+      if (candidate.promotion?.mode === "outcome-canary" && candidate.promotion?.canary?.status === "active"
+        && canaryEvaluation?.schema === "agentspine.learning-evaluation/v7"
+        && !activeEvaluationBinding(learning, canaryEvaluation)) findings.push(`inactive-evaluator-canary:${candidate.id}`);
     }
   }
   const outcomeIds = new Set();
@@ -2033,6 +2228,10 @@ export function learningFindings(learning, graph) {
     const candidate = learning.candidates.find((item) => item.id === contract.learningId);
     const valid = storedEvaluationStructure(contract) && candidate && scopeContains(candidate.scope, contract.scope);
     if (!valid || evaluationIds.has(contract.id)) findings.push(`invalid-evaluation:${contract.id || "unknown"}`);
+    if (contract.schema === "agentspine.learning-evaluation/v7") {
+      const binding = (learning.evaluationBindings || []).find((entry) => entry.evaluationId === contract.id);
+      if (!binding || binding.evaluationDigest !== contract.digest) findings.push(`invalid-evaluator-binding:${contract.id}`);
+    }
     evaluationIds.add(contract.id);
   }
   const measurementIds = new Set();
@@ -2059,13 +2258,13 @@ export function learningFindings(learning, graph) {
     const contract = (learning.evaluations || []).find((item) => item.id === receipt.evaluationId);
     const lineage = (learning.measurementLineage || []).find((item) => item.measurementReceiptId === receipt.id);
     const valid = storedMeasurementStructure(receipt) && candidate && contract
-      && ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6"].includes(contract.schema)
+      && ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
       && contract.learningId === receipt.learningId
       && exactScope(contract.scope, receipt.scope) && scopeContains(candidate.scope, receipt.scope)
       && lineage?.sourceDigest === receipt.measurement?.sourceDigest
       && lineage?.runDigest === measurementRunDigest(receipt.measurement?.evaluatorId, receipt.measurement?.runId)
       && (receipt.schema !== "agentspine.learning-measurement/v2"
-        || (contract.schema === "agentspine.learning-evaluation/v6"
+        || (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
           && contract.evaluatorRoots.some((root) => root.evaluatorId === receipt.measurement?.evaluatorId
             && root.principalDigest === receipt.measurement?.evaluatorRootDigest)
           && lineage?.schema === "agentspine.learning-measurement-lineage/v2"
@@ -2112,7 +2311,7 @@ export function learningFindings(learning, graph) {
         || (receipt.schema === "agentspine.learning-outcome/v6" && contract.schema !== "agentspine.learning-evaluation/v3")
         || (receipt.schema === "agentspine.learning-outcome/v7" && contract.schema !== "agentspine.learning-evaluation/v4")
         || (receipt.schema === "agentspine.learning-outcome/v8" && contract.schema !== "agentspine.learning-evaluation/v5")
-        || (receipt.schema === "agentspine.learning-outcome/v9" && contract.schema !== "agentspine.learning-evaluation/v6")
+        || (receipt.schema === "agentspine.learning-outcome/v9" && !["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema))
         || receipt.coverage?.datasetDigest !== contract.benchmark.datasetDigest
         || receipt.coverage?.caseCount < contract.benchmark.minCases) findings.push(`invalid-coverage:${receipt.id}`);
     }

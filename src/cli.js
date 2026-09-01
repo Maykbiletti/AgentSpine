@@ -11,7 +11,8 @@ import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
   purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningMeasurement,
-  recordLearningOutcome, registerLearningEvaluation, reviewLearning, rollbackLearning
+  recordLearningOutcome, registerLearningEvaluation, registerLearningEvaluator, revokeLearningEvaluator,
+  reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 import { configureContinuity, loadContinuity, purgeContinuity } from "./lib/continuity.js";
 import {
@@ -146,6 +147,8 @@ Usage:
   agentspine learn-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine learn-context [root] [--group id] [--include-private] [--kind preference,goal]
   agentspine learn-evaluate [root]
+  agentspine learn-evaluator-register <id> --principal-digest sha256 --confirm-local-evaluator
+  agentspine learn-evaluator-revoke <id> --reason text --confirm-local-evaluator
   agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id --evaluator-roots id=sha256,id=sha256 [--expires-at date] --confirm-local-evaluation
   agentspine learn-measurement <id> --learning id --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --measurement objective|user-feedback|model-suggestion --evaluator id --run id --source-digest sha256 --dataset-digest sha256 --case-count n --confirm-local-measurement
   agentspine learn-outcome <learning-id> --id id --evaluation id --measurement-receipt id [--application id --delivery id]
@@ -462,6 +465,20 @@ export async function run(argv = process.argv.slice(2)) {
 
   if (command === "learn-evaluate") {
     return output(await evaluateLearning({ root: positional[0] || process.cwd() }), json);
+  }
+
+  if (command === "learn-evaluator-register") {
+    return output(await registerLearningEvaluator({
+      root: flags.root || process.cwd(), id: positional[0], principalDigest: flags["principal-digest"],
+      confirmLocalEvaluator: booleanFlag(flags["confirm-local-evaluator"])
+    }), json);
+  }
+
+  if (command === "learn-evaluator-revoke") {
+    return output(await revokeLearningEvaluator({
+      root: flags.root || process.cwd(), id: positional[0], reason: flags.reason,
+      confirmLocalEvaluator: booleanFlag(flags["confirm-local-evaluator"])
+    }), json);
   }
 
   if (command === "learn-evaluation") {
@@ -1089,11 +1106,14 @@ export async function run(argv = process.argv.slice(2)) {
       const pairedEvaluatorPairs = status.records.reduce((sum, item) => sum + item.pairedEvaluatorPairs, 0);
       const evaluatorRootBoundReceipts = status.records.reduce((sum, item) => sum + item.evaluatorRootBoundReceipts, 0);
       const independentEvaluatorRoots = status.records.reduce((sum, item) => sum + item.independentEvaluatorRoots, 0);
+      const evaluatorRegistryContracts = status.records.reduce((sum, item) => sum + item.evaluatorRegistryContracts, 0);
+      const inactiveEvaluatorRegistryContracts = status.records.reduce((sum, item) => sum + item.inactiveEvaluatorRegistryContracts, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
         status: status.records.some((item) => item.canaryStatus === "stale")
           || unboundAfterReceipts > 0 || undeliveredAfterReceipts > 0 || unplannedOutcomeReceipts > 0
-          || stalePendingApplications > 0 || staleUnconsumedMeasurements > 0 ? "degraded" : "healthy",
+          || stalePendingApplications > 0 || staleUnconsumedMeasurements > 0
+          || inactiveEvaluatorRegistryContracts > 0 ? "degraded" : "healthy",
         candidates: status.records.length,
         activeCanaries: status.records.filter((item) => item.canaryStatus === "active").length,
         validatedCanaries: status.records.filter((item) => item.canaryStatus === "validated").length,
@@ -1118,6 +1138,11 @@ export async function run(argv = process.argv.slice(2)) {
         pairedEvaluatorPairs,
         evaluatorRootBoundReceipts,
         independentEvaluatorRoots,
+        activeEvaluatorRoots: status.evaluatorRegistry.active,
+        revokedEvaluatorRoots: status.evaluatorRegistry.revoked,
+        evaluatorRegistryBindings: status.evaluatorRegistry.bindings,
+        evaluatorRegistryContracts,
+        inactiveEvaluatorRegistryContracts,
         unplannedOutcomeReceipts,
         boundAfterReceipts: status.records.reduce((sum, item) => sum + item.boundAfterReceipts, 0),
         unboundAfterReceipts,

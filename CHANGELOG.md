@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-01
+
+### Added
+
+- A separate content-free evaluator registry requires explicit local confirmation before a principal root can enter a new learning experiment. Immutable `agentspine.learning-evaluator-binding/v1` receipts bind evaluation v7 to the exact active registry records.
+- CLI registration and revocation plus status, Doctor and audit diagnostics expose active and revoked roots, binding counts and inactive contracts without storing evaluator content.
+
+### Changed
+
+- New evaluations resolve their roots from the local registry instead of trusting IDs or digests supplied only with the evaluation command. Evaluation v1-v6 history remains readable.
+- Revoking a bound root removes an affected active Canary from preflight context immediately and causes the next evaluation pass to roll it back.
+
+### Security
+
+- Unconfirmed roots, duplicate principal aliases, replaced records, missing bindings and post-revocation measurements or outcomes fail closed. Registry records remain context-only and cannot create identity, rights, credentials, tools, delegation or policy exceptions.
+
 ## [0.19.0] - 2026-09-01
 
 ### Added
@@ -518,7 +534,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.16.0...v0.17.0
