@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-01
+
+### Added
+
+- `agentspine.learning-evaluation/v8` precommits the complete initial Before/After trial cohort: phase, evaluator ID, principal root, provider run ID, frozen benchmark digest and exact case count are fixed before results exist.
+- `agentspine.learning-application/v5` atomically admits the first exact-scope Canary projections into those frozen After slots before delivery or scoring.
+
+### Changed
+
+- Measurement, outcome, validation-lease, status, Doctor and audit checks bind the first experiment to its trial and admission cohort; evaluation v1-v7 and application v1-v4 state remains readable.
+- Stale cleanup retains incomplete initial admissions as evidence while continuing to purge ordinary expired projection residue.
+
+### Security
+
+- A favorable baseline or Canary rerun cannot replace its precommitted provider run, and a later successful turn cannot hide a failed, crashed or withheld first admitted turn. Run, root, case-count, admission, delivery and digest substitution fail closed.
+
 ## [0.25.0] - 2026-09-01
 
 ### Added
@@ -615,7 +631,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.22.0...v0.23.0

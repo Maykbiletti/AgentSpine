@@ -129,7 +129,8 @@ function normalizeState(value, root) {
   if (new Set(normalized.evaluationBindings.map((binding) => binding.evaluationId)).size !== normalized.evaluationBindings.length) {
     throw new Error("learning evaluator binding is duplicated; run the audit before learning");
   }
-  if (normalized.evaluations.some((contract) => contract.schema === "agentspine.learning-evaluation/v7"
+  if (normalized.evaluations.some((contract) => ["agentspine.learning-evaluation/v7",
+    "agentspine.learning-evaluation/v8"].includes(contract.schema)
     && !normalized.evaluationBindings.some((binding) => binding.evaluationId === contract.id
       && binding.evaluationDigest === contract.digest))) {
     throw new Error("learning evaluator binding is missing; run the audit before learning");
@@ -148,6 +149,9 @@ function normalizeState(value, root) {
   if (!revalidationAdmissionsMatchState(normalized)) {
     throw new Error("learning revalidation admission state is invalid; run the audit before learning");
   }
+  if (!initialAdmissionsMatchState(normalized)) {
+    throw new Error("learning initial trial admission state is invalid; run the audit before learning");
+  }
   if (normalized.outcomes.some((receipt) => {
     const candidate = normalized.candidates.find((item) => item.id === receipt.learningId);
     return !candidate || !scopeContains(candidate.scope, receipt.scope);
@@ -160,7 +164,7 @@ function normalizeState(value, root) {
     const application = normalized.applications.find((item) => item.id === receipt.applicationId);
     return !application || application.learningId !== receipt.learningId
       || !["agentspine.learning-application/v2", "agentspine.learning-application/v3",
-        "agentspine.learning-application/v4"].includes(application.schema)
+        "agentspine.learning-application/v4", "agentspine.learning-application/v5"].includes(application.schema)
       || application.sessionId !== receipt.sessionId || application.preflightReceiptId !== receipt.preflightReceiptId
       || !exactScope(application.scope, receipt.scope)
       || new Date(receipt.completedAt).getTime() < new Date(application.projectedAt).getTime()
@@ -173,14 +177,16 @@ function normalizeState(value, root) {
   if (normalized.measurements.some((receipt) => {
     const candidate = normalized.candidates.find((item) => item.id === receipt.learningId);
     const contract = normalized.evaluations.find((item) => item.id === receipt.evaluationId);
-    const evaluatorRoot = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract?.schema)
+    const evaluatorRoot = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+      "agentspine.learning-evaluation/v8"].includes(contract?.schema)
       ? contract.evaluatorRoots.find((root) => root.evaluatorId === receipt.measurement?.evaluatorId) : null;
-    return !candidate || !contract || !["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+    return !candidate || !contract || !["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema)
       || contract.learningId !== receipt.learningId || !exactScope(contract.scope, receipt.scope)
       || contract.metric.name !== receipt.metric.name || contract.metric.direction !== receipt.metric.direction
       || !contract.evaluatorIds.includes(receipt.measurement.evaluatorId)
       || contract.benchmark.datasetDigest !== receipt.coverage.datasetDigest
-      || (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+      || (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+        "agentspine.learning-evaluation/v8"].includes(contract.schema)
         && (receipt.schema !== "agentspine.learning-measurement/v2"
           || evaluatorRoot?.principalDigest !== receipt.measurement?.evaluatorRootDigest))
       || receipt.coverage.caseCount < contract.benchmark.minCases
@@ -188,6 +194,34 @@ function normalizeState(value, root) {
       || new Date(receipt.measuredAt).getTime() < new Date(contract.registeredAt).getTime()
       || new Date(receipt.measuredAt).getTime() > new Date(contract.expiresAt).getTime();
   })) throw new Error("learning measurement binding is invalid; run the audit before learning");
+  if (normalized.measurements.some((receipt) => {
+    const contract = normalized.evaluations.find((entry) => entry.id === receipt.evaluationId);
+    if (contract?.schema !== "agentspine.learning-evaluation/v8") return false;
+    const retainedByValidation = normalized.validationLeases.some((lease) =>
+      lease?.renewalEvidence?.some((entry) => entry.measurementId === receipt.id
+        && entry.measurementDigest === receipt.digest));
+    if (retainedByValidation) return false;
+    const revalidationApplication = receipt.phase === "after" ? normalized.applications.find((entry) =>
+      entry.schema === "agentspine.learning-application/v4" && entry.learningId === receipt.learningId
+      && entry.revalidationAdmission.evaluatorId === receipt.measurement?.evaluatorId
+      && entry.revalidationAdmission.evaluatorRootDigest === receipt.measurement?.evaluatorRootDigest
+      && entry.revalidationAdmission.runId === receipt.measurement?.runId) : null;
+    if (revalidationApplication) {
+      const delivery = normalized.deliveries.find((entry) => entry.applicationId === revalidationApplication.id);
+      return !delivery || new Date(receipt.measuredAt).getTime() < new Date(delivery.completedAt).getTime();
+    }
+    const trial = contract.initialTrials?.[receipt.phase]?.find((entry) =>
+      entry.evaluatorId === receipt.measurement?.evaluatorId);
+    if (!trial || receipt.measurement.evaluatorRootDigest !== trial.evaluatorRootDigest
+      || receipt.measurement.runId !== trial.runId || receipt.coverage.caseCount !== trial.caseCount) return true;
+    if (receipt.phase !== "after") return false;
+    const application = normalized.applications.find((entry) => entry.schema === "agentspine.learning-application/v5"
+      && entry.learningId === receipt.learningId && entry.initialAdmission.evaluationId === contract.id
+      && entry.initialAdmission.evaluationDigest === contract.digest && entry.initialAdmission.slot === trial.slot
+      && entry.initialAdmission.trialDigest === trial.trialDigest);
+    const delivery = application && normalized.deliveries.find((entry) => entry.applicationId === application.id);
+    return !delivery || new Date(receipt.measuredAt).getTime() < new Date(delivery.completedAt).getTime();
+  })) throw new Error("learning initial trial measurement binding is invalid; run the audit before learning");
   const pairedOutcomeKeys = new Set();
   const pairedAfterApplications = new Set();
   for (const receipt of normalized.outcomes) {
@@ -220,7 +254,8 @@ function normalizeState(value, root) {
       && contract.metric.name === receipt.metric.name && contract.metric.direction === receipt.metric.direction
       && contract.evaluatorIds.includes(receipt.measurement.evaluatorId)
       && (receipt.schema !== "agentspine.learning-outcome/v9"
-        || (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+        || (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+          "agentspine.learning-evaluation/v8"].includes(contract.schema)
           && contract.evaluatorRoots.some((root) => root.evaluatorId === receipt.measurement.evaluatorId
             && root.principalDigest === receipt.measurement.evaluatorRootDigest)))
       && new Date(receipt.measuredAt).getTime() >= new Date(contract.registeredAt).getTime()
@@ -233,7 +268,8 @@ function normalizeState(value, root) {
         || (receipt.schema === "agentspine.learning-outcome/v6" && contract.schema === "agentspine.learning-evaluation/v3")
         || (receipt.schema === "agentspine.learning-outcome/v7" && contract.schema === "agentspine.learning-evaluation/v4")
         || (receipt.schema === "agentspine.learning-outcome/v8" && contract.schema === "agentspine.learning-evaluation/v5")
-        || (receipt.schema === "agentspine.learning-outcome/v9" && ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)))
+        || (receipt.schema === "agentspine.learning-outcome/v9" && ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+          "agentspine.learning-evaluation/v8"].includes(contract.schema)))
       && receipt.coverage?.datasetDigest === contract.benchmark.datasetDigest
       && receipt.coverage?.caseCount >= contract.benchmark.minCases))) {
     throw new Error("learning outcome coverage binding is invalid; run the audit before learning");
@@ -730,7 +766,10 @@ function validationLeaseMatchesState(state, lease) {
     && canary.validationLeaseId === lease.id && canary.validationLeaseDigest === lease.digest
     && canary.validatedAt === lease.validatedAt && canary.expiresAt === lease.expiresAt
     && Math.abs(canary.improvement - lease.improvement) <= 1e-12
-    && contract?.schema === "agentspine.learning-evaluation/v7" && contract.digest === lease.evaluationDigest
+    && ["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract?.schema)
+    && contract.digest === lease.evaluationDigest
+    && (contract.schema !== "agentspine.learning-evaluation/v8"
+      || canary.initialTrialsDigest === digest(contract.initialTrials))
     && binding?.digest === lease.evaluatorRegistryBindingDigest
     && exactScope(contract.scope, lease.scope) && digest(contract.metric) === digest(lease.metric);
   const evidenceMatches = lease.schema === "agentspine.learning-validation/v1"
@@ -819,7 +858,35 @@ function validationLeaseMatchesState(state, lease) {
         && evidence.evaluatorRootDigest === selected.evaluatorRootDigest;
     });
   })();
-  return Boolean(common && evidenceMatches && selectionMatches);
+  const initialSelectionMatches = contract?.schema !== "agentspine.learning-evaluation/v8"
+    || lease.schema !== "agentspine.learning-validation/v1" || (() => {
+    if (lease.beforeOutcomes.length !== contract.initialTrials.requiredTrials
+      || lease.afterOutcomes.length !== contract.initialTrials.requiredTrials) return false;
+    const outcomeMatchesTrial = (reference, phase, trial) => {
+      const outcome = state.outcomes.find((entry) => entry.id === reference.id && entry.digest === reference.digest);
+      const measurement = outcome && state.measurements.find((entry) => entry.id === outcome.measurementReceiptId
+        && entry.digest === outcome.measurementReceiptDigest);
+      if (!outcome || !measurement || outcome.phase !== phase
+        || measurement.measurement.evaluatorId !== trial.evaluatorId
+        || measurement.measurement.evaluatorRootDigest !== trial.evaluatorRootDigest
+        || measurement.measurement.runId !== trial.runId || measurement.coverage.caseCount !== trial.caseCount) return false;
+      if (phase === "before") return true;
+      const application = state.applications.find((entry) => entry.id === outcome.applicationId
+        && entry.schema === "agentspine.learning-application/v5"
+        && entry.initialAdmission.evaluationId === contract.id
+        && entry.initialAdmission.evaluationDigest === contract.digest
+        && entry.initialAdmission.slot === trial.slot
+        && entry.initialAdmission.trialDigest === trial.trialDigest);
+      const delivery = application && state.deliveries.find((entry) => entry.id === outcome.deliveryId
+        && entry.applicationId === application.id);
+      return Boolean(application && delivery);
+    };
+    return contract.initialTrials.before.every((trial, index) =>
+      outcomeMatchesTrial(lease.beforeOutcomes[index], "before", trial))
+      && contract.initialTrials.after.every((trial, index) =>
+        outcomeMatchesTrial(lease.afterOutcomes[index], "after", trial));
+  })();
+  return Boolean(common && evidenceMatches && selectionMatches && initialSelectionMatches);
 }
 
 function validationLeaseState(state, candidate, timestamp) {
@@ -830,7 +897,7 @@ function validationLeaseState(state, candidate, timestamp) {
   const evaluation = state.evaluations.find((entry) => entry.id === canary.evaluationId
     && entry.learningId === candidate.id && entry.digest === canary.evaluationDigest) || null;
   if (!evaluation) return { status: "missing-evaluation", lease: null, evaluation: null };
-  if (evaluation.schema !== "agentspine.learning-evaluation/v7") {
+  if (!["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation.schema)) {
     return new Date(canary.expiresAt).getTime() < new Date(timestamp).getTime()
       ? { status: "expired", lease: null, evaluation }
       : { status: "legacy", lease: null, evaluation };
@@ -863,11 +930,13 @@ function canaryValidity(state, candidate, timestamp) {
     return { status: canary.status === "validated" ? "stale-validated" : "stale-active",
       canary, evaluation, lease: null };
   }
-  if (evaluation.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(state, evaluation)) {
+  if (["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation.schema)
+    && !activeEvaluationBinding(state, evaluation)) {
     return { status: canary.status === "validated" ? "revoked-validated" : "revoked-active",
       canary, evaluation, lease: null };
   }
-  if (canary.status === "validated" && evaluation.schema === "agentspine.learning-evaluation/v7") {
+  if (canary.status === "validated"
+    && ["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation.schema)) {
     const validation = validationLeaseState(state, candidate, timestamp);
     if (validation.status !== "active") return { ...validation, status: validation.status === "missing"
       ? "unproven-validated" : `${validation.status}-validated`, canary };
@@ -900,14 +969,70 @@ function storedMeasurementLineageStructure(receipt) {
     && receipt.authority === "context-only" && receipt.digest === digest(payload);
 }
 
+function initialTrialPayload({ evaluationId, learningId, scope, metric, benchmark, phase, slot,
+  evaluatorId, evaluatorRootDigest, runId, caseCount }) {
+  return {
+    schema: "agentspine.learning-initial-trial/v1",
+    evaluationId,
+    learningId,
+    scopeDigest: digest(scope),
+    metricDigest: digest(metric),
+    benchmarkDigest: digest(benchmark),
+    phase,
+    slot,
+    evaluatorId,
+    evaluatorRootDigest,
+    runId,
+    caseCount,
+    authority: "context-only"
+  };
+}
+
+function initialTrialDigest(input) {
+  return digest(initialTrialPayload(input));
+}
+
+function storedInitialTrialPlanStructure(plan, contract) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)
+    || plan.schema !== "agentspine.learning-initial-trials/v1"
+    || plan.mode !== "first-admitted-trials"
+    || !Number.isInteger(plan.requiredTrials) || plan.requiredTrials < 2 || plan.requiredTrials > 10
+    || plan.benchmarkDigest !== digest(contract.benchmark)
+    || plan.authority !== "context-only") return false;
+  const validPhase = (phase) => Array.isArray(plan[phase]) && plan[phase].length === plan.requiredTrials
+    && plan[phase].every((entry, index) => entry?.slot === index + 1
+      && ID_RE.test(entry?.evaluatorId || "") && DIGEST_RE.test(entry?.evaluatorRootDigest || "")
+      && ID_RE.test(entry?.runId || "") && Number.isInteger(entry?.caseCount)
+      && entry.caseCount === contract.benchmark.minCases && DIGEST_RE.test(entry?.trialDigest || "")
+      && entry.authority === "context-only"
+      && entry.trialDigest === initialTrialDigest({
+        evaluationId: contract.id, learningId: contract.learningId, scope: contract.scope,
+        metric: contract.metric, benchmark: contract.benchmark, phase, slot: entry.slot,
+        evaluatorId: entry.evaluatorId, evaluatorRootDigest: entry.evaluatorRootDigest,
+        runId: entry.runId, caseCount: entry.caseCount
+      }))
+    && new Set(plan[phase].map((entry) => entry.evaluatorId)).size === plan[phase].length
+    && new Set(plan[phase].map((entry) => entry.evaluatorRootDigest)).size === plan[phase].length
+    && new Set(plan[phase].map((entry) => entry.runId)).size === plan[phase].length;
+  return validPhase("before") && validPhase("after")
+    && plan.before.every((entry, index) => entry.evaluatorId === plan.after[index].evaluatorId
+      && entry.evaluatorRootDigest === plan.after[index].evaluatorRootDigest
+      && entry.runId !== plan.after[index].runId)
+    && plan.before.every((entry) => contract.evaluatorRoots.some((root) => root.evaluatorId === entry.evaluatorId
+      && root.principalDigest === entry.evaluatorRootDigest));
+}
+
 function evaluationPayload({ id, learningId, scope, metric, benchmark, evaluatorIds, evaluatorRoots, thresholds, pairing,
-  registeredAt, expiresAt, schema = "agentspine.learning-evaluation/v1" }) {
+  initialTrials, registeredAt, expiresAt, schema = "agentspine.learning-evaluation/v1" }) {
   return {
     schema, id, learningId, scope, metric, benchmark,
     evaluatorIds,
-    ...(["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(schema) ? { evaluatorRoots } : {}),
+    ...(["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+      "agentspine.learning-evaluation/v8"].includes(schema) ? { evaluatorRoots } : {}),
     thresholds,
-    ...(["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(schema) ? { pairing } : {}),
+    ...(["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+      "agentspine.learning-evaluation/v8"].includes(schema) ? { pairing } : {}),
+    ...(schema === "agentspine.learning-evaluation/v8" ? { initialTrials } : {}),
     registeredAt, expiresAt, authority: "context-only"
   };
 }
@@ -915,7 +1040,7 @@ function evaluationPayload({ id, learningId, scope, metric, benchmark, evaluator
 function storedEvaluationStructure(contract) {
   if (!contract || typeof contract !== "object" || Array.isArray(contract)) return false;
   const payload = evaluationPayload(contract);
-  return ["agentspine.learning-evaluation/v1", "agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+  return ["agentspine.learning-evaluation/v1", "agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema)
     && ID_RE.test(contract.id || "") && ID_RE.test(contract.learningId || "")
     && SCOPE_FIELDS.every((field) => contract.scope?.[field] === null || ID_RE.test(contract.scope?.[field] || ""))
     && typeof contract.metric?.name === "string" && contract.metric.name.length > 0
@@ -932,7 +1057,8 @@ function storedEvaluationStructure(contract) {
     && contract.thresholds.regressionTolerance <= 1
     && Number.isInteger(contract.thresholds?.beforeReceipts) && contract.thresholds.beforeReceipts >= 2
     && Number.isInteger(contract.thresholds?.afterReceipts) && contract.thresholds.afterReceipts >= 1
-    && (!["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+    && (!["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+      "agentspine.learning-evaluation/v8"].includes(contract.schema)
       || (Array.isArray(contract.evaluatorRoots)
         && contract.evaluatorRoots.length === contract.evaluatorIds.length
         && contract.evaluatorRoots.every((root) => ID_RE.test(root?.evaluatorId || "")
@@ -940,12 +1066,15 @@ function storedEvaluationStructure(contract) {
         && new Set(contract.evaluatorRoots.map((root) => root.evaluatorId)).size === contract.evaluatorRoots.length
         && new Set(contract.evaluatorRoots.map((root) => root.principalDigest)).size === contract.evaluatorRoots.length
         && contract.evaluatorRoots.map((root) => root.evaluatorId).sort().join("\0") === [...contract.evaluatorIds].sort().join("\0")))
-    && (!["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+    && (!["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+      "agentspine.learning-evaluation/v8"].includes(contract.schema)
       || (contract.pairing?.mode === "same-evaluator"
         && contract.pairing?.maxOutcomesPerEvaluatorPerPhase === 1
         && contract.pairing?.matchMeasurementKind === true
         && contract.pairing?.matchCaseCount === true
         && contract.pairing?.authority === "context-only"))
+    && (contract.schema !== "agentspine.learning-evaluation/v8"
+      || storedInitialTrialPlanStructure(contract.initialTrials, contract))
     && Number.isFinite(new Date(contract.registeredAt).getTime())
     && Number.isFinite(new Date(contract.expiresAt).getTime())
     && new Date(contract.expiresAt).getTime() > new Date(contract.registeredAt).getTime()
@@ -954,16 +1083,17 @@ function storedEvaluationStructure(contract) {
 
 function applicationPayload({ id, learningId, scope, preflightReceiptId, promptDigest,
   preflightBriefingDigest, sessionBriefingDigest, sessionId, projectedAt, deliveryExpiresAt, expiresAt,
-  revalidationAdmission,
+  revalidationAdmission, initialAdmission,
   schema = "agentspine.learning-application/v1" }) {
   return {
     schema, id, learningId, scope,
     preflightReceiptId, promptDigest, preflightBriefingDigest, sessionBriefingDigest,
     ...(["agentspine.learning-application/v2", "agentspine.learning-application/v3",
-      "agentspine.learning-application/v4"].includes(schema)
+      "agentspine.learning-application/v4", "agentspine.learning-application/v5"].includes(schema)
       ? { sessionId, deliveryExpiresAt } : {}),
     ...(["agentspine.learning-application/v3", "agentspine.learning-application/v4"].includes(schema)
       ? { revalidationAdmission } : {}),
+    ...(schema === "agentspine.learning-application/v5" ? { initialAdmission } : {}),
     projectedAt, expiresAt, authority: "context-only"
   };
 }
@@ -974,9 +1104,11 @@ function storedApplicationStructure(receipt) {
   const legacy = receipt.schema === "agentspine.learning-application/v1";
   const delivered = receipt.schema === "agentspine.learning-application/v2";
   const admitted = ["agentspine.learning-application/v3", "agentspine.learning-application/v4"].includes(receipt.schema);
+  const initialAdmitted = receipt.schema === "agentspine.learning-application/v5";
   const trialBound = receipt.schema === "agentspine.learning-application/v4";
   const admission = receipt.revalidationAdmission;
-  return (legacy || delivered || admitted) && ID_RE.test(receipt.id || "")
+  const initial = receipt.initialAdmission;
+  return (legacy || delivered || admitted || initialAdmitted) && ID_RE.test(receipt.id || "")
     && ID_RE.test(receipt.learningId || "") && ID_RE.test(receipt.preflightReceiptId || "")
     && SCOPE_FIELDS.every((field) => receipt.scope?.[field] === null || ID_RE.test(receipt.scope?.[field] || ""))
     && [receipt.promptDigest, receipt.preflightBriefingDigest, receipt.sessionBriefingDigest]
@@ -984,7 +1116,7 @@ function storedApplicationStructure(receipt) {
     && Number.isFinite(new Date(receipt.projectedAt).getTime())
     && Number.isFinite(new Date(receipt.expiresAt).getTime())
     && new Date(receipt.expiresAt).getTime() >= new Date(receipt.projectedAt).getTime()
-    && (!(delivered || admitted) || (ID_RE.test(receipt.sessionId || "")
+    && (!(delivered || admitted || initialAdmitted) || (ID_RE.test(receipt.sessionId || "")
       && Number.isFinite(new Date(receipt.deliveryExpiresAt).getTime())
       && new Date(receipt.deliveryExpiresAt).getTime() >= new Date(receipt.projectedAt).getTime()
       && new Date(receipt.deliveryExpiresAt).getTime() <= new Date(receipt.expiresAt).getTime()))
@@ -995,7 +1127,43 @@ function storedApplicationStructure(receipt) {
       && (!trialBound || (ID_RE.test(admission?.evaluatorId || "") && ID_RE.test(admission?.runId || "")
         && DIGEST_RE.test(admission?.trialDigest || "")))
       && admission?.authority === "context-only"))
+    && (!initialAdmitted || (ID_RE.test(initial?.evaluationId || "")
+      && DIGEST_RE.test(initial?.evaluationDigest || "")
+      && Number.isInteger(initial?.slot) && initial.slot >= 1 && initial.slot <= 10
+      && ID_RE.test(initial?.evaluatorId || "") && DIGEST_RE.test(initial?.evaluatorRootDigest || "")
+      && ID_RE.test(initial?.runId || "") && DIGEST_RE.test(initial?.trialDigest || "")
+      && initial?.authority === "context-only"))
     && receipt.authority === "context-only" && receipt.digest === digest(payload);
+}
+
+function initialAdmissionsMatchState(state) {
+  const groups = new Map();
+  for (const receipt of state.applications.filter((entry) => entry.schema === "agentspine.learning-application/v5")) {
+    const admission = receipt.initialAdmission;
+    const contract = state.evaluations.find((entry) => entry.id === admission.evaluationId
+      && entry.digest === admission.evaluationDigest);
+    const candidate = state.candidates.find((entry) => entry.id === receipt.learningId)
+      || state.history.find((entry) => entry.kind === "learning-candidate"
+        && entry.value?.id === receipt.learningId)?.value;
+    const trial = contract?.initialTrials?.after?.[admission.slot - 1];
+    if (!candidate || !contract || contract.schema !== "agentspine.learning-evaluation/v8"
+      || contract.learningId !== receipt.learningId || contract.initialTrials.mode !== "first-admitted-trials"
+      || admission.slot > contract.initialTrials.requiredTrials
+      || admission.evaluatorId !== trial?.evaluatorId
+      || admission.evaluatorRootDigest !== trial?.evaluatorRootDigest
+      || admission.runId !== trial?.runId || admission.trialDigest !== trial?.trialDigest
+      || !exactScope(receipt.scope, contract.scope)
+      || new Date(receipt.projectedAt).getTime() < new Date(contract.registeredAt).getTime()
+      || new Date(receipt.projectedAt).getTime() > new Date(contract.expiresAt).getTime()) return false;
+    const key = `${contract.id}\0${contract.digest}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(receipt);
+  }
+  return [...groups.values()].every((receipts) => {
+    const ordered = [...receipts].sort((a, b) => a.initialAdmission.slot - b.initialAdmission.slot);
+    return new Set(ordered.map((receipt) => receipt.initialAdmission.slot)).size === ordered.length
+      && ordered.every((receipt, index) => receipt.initialAdmission.slot === index + 1);
+  });
 }
 
 function revalidationAdmissionWindow(state, receipt) {
@@ -1482,7 +1650,8 @@ export async function registerLearningEvaluation({
     if (Object.entries(digests).some(([, value]) => !DIGEST_RE.test(value || ""))) {
       throw new Error("evaluation benchmark digests must be SHA-256 values");
     }
-    const normalizedEvaluators = [...new Set((evaluatorIds || []).map((value) => String(value)))].sort();
+    const requestedEvaluators = [...new Set((evaluatorIds || []).map((value) => String(value)))];
+    const normalizedEvaluators = [...requestedEvaluators].sort();
     const requestedRoots = new Map((evaluatorRoots || []).map((root) => [String(root?.evaluatorId || ""),
       String(root?.principalDigest || "")]));
     const requiredEvaluators = Math.max(state.config.minOutcomeReceipts, state.config.canaryReceipts, 2);
@@ -1507,17 +1676,51 @@ export async function registerLearningEvaluation({
       || new Date(expiry).getTime() > new Date(timestamp).getTime() + 365 * 86400000) {
       throw new Error("evaluation expiry must be in the future and no more than 365 days away");
     }
+    const normalizedMetric = { name, direction };
+    const normalizedBenchmark = {
+      ...digests, minCases: integer(benchmark?.minCases, "evaluation.benchmark.minCases", 1, 1000000)
+    };
+    const selectedRoots = requestedEvaluators.slice(0, requiredEvaluators).map((evaluatorId) => {
+      const rootRecord = registeredRoots.find((record) => record.id === evaluatorId);
+      return { evaluatorId, evaluatorRootDigest: rootRecord.principalDigest };
+    });
+    const trialsForPhase = (phase) => selectedRoots.map((rootRecord, index) => {
+      const trial = {
+        slot: index + 1,
+        evaluatorId: rootRecord.evaluatorId,
+        evaluatorRootDigest: rootRecord.evaluatorRootDigest,
+        runId: `run:initial:${phase}:${digest([id, learningId, normalizedScope, normalizedMetric,
+          normalizedBenchmark, phase, index + 1, rootRecord.evaluatorId,
+          rootRecord.evaluatorRootDigest]).slice(0, 32)}`,
+        caseCount: normalizedBenchmark.minCases,
+        authority: "context-only"
+      };
+      return { ...trial, trialDigest: initialTrialDigest({
+        evaluationId: id, learningId, scope: normalizedScope, metric: normalizedMetric,
+        benchmark: normalizedBenchmark, phase, slot: trial.slot, evaluatorId: trial.evaluatorId,
+        evaluatorRootDigest: trial.evaluatorRootDigest, runId: trial.runId, caseCount: trial.caseCount
+      }) };
+    });
+    const initialTrials = {
+      schema: "agentspine.learning-initial-trials/v1",
+      mode: "first-admitted-trials",
+      requiredTrials: requiredEvaluators,
+      benchmarkDigest: digest(normalizedBenchmark),
+      before: trialsForPhase("before"),
+      after: trialsForPhase("after"),
+      authority: "context-only"
+    };
     const payload = evaluationPayload({
-      schema: "agentspine.learning-evaluation/v7",
-      id, learningId, scope: normalizedScope, metric: { name, direction },
-      benchmark: { ...digests, minCases: integer(benchmark?.minCases, "evaluation.benchmark.minCases", 1, 1000000) },
+      schema: "agentspine.learning-evaluation/v8",
+      id, learningId, scope: normalizedScope, metric: normalizedMetric,
+      benchmark: normalizedBenchmark,
       evaluatorIds: normalizedEvaluators,
       evaluatorRoots: normalizedRoots,
       thresholds: {
         minImprovement: state.config.minImprovement,
         regressionTolerance: state.config.regressionTolerance,
-        beforeReceipts: state.config.minOutcomeReceipts,
-        afterReceipts: state.config.canaryReceipts
+        beforeReceipts: requiredEvaluators,
+        afterReceipts: requiredEvaluators
       },
       pairing: {
         mode: "same-evaluator",
@@ -1526,6 +1729,7 @@ export async function registerLearningEvaluation({
         matchCaseCount: true,
         authority: "context-only"
       },
+      initialTrials,
       registeredAt: timestamp, expiresAt: expiry
     });
     const contract = { ...payload, digest: digest(payload) };
@@ -1567,7 +1771,8 @@ export async function beginLearningRevalidation({
   return mutation(root, (state, _catalog, learningPath) => {
     const candidate = state.candidates.find((entry) => entry.id === learningId);
     const validation = validationLeaseState(state, candidate, timestamp);
-    if (validation.status !== "active" || validation.evaluation?.schema !== "agentspine.learning-evaluation/v7") {
+    if (validation.status !== "active"
+      || !["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(validation.evaluation?.schema)) {
       throw new Error("revalidation requires one current registry-bound validation lease");
     }
     const canary = candidate.promotion.canary;
@@ -1653,7 +1858,8 @@ export async function renewLearningValidation({
     const candidate = state.candidates.find((entry) => entry.id === learningId);
     const validation = validationLeaseState(state, candidate, timestamp);
     const revalidation = candidate?.promotion?.canary?.revalidation;
-    if (validation.status !== "active" || validation.evaluation?.schema !== "agentspine.learning-evaluation/v7"
+    if (validation.status !== "active"
+      || !["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(validation.evaluation?.schema)
       || revalidation?.status !== "active" || revalidation.predecessorValidationId !== validation.lease.id
       || revalidation.predecessorValidationDigest !== validation.lease.digest
       || !storedRevalidationWindowStructure(revalidation)
@@ -1893,11 +2099,12 @@ export async function recordLearningMeasurement({
     const candidate = state.candidates.find((entry) => entry.id === learningId);
     const evaluation = state.evaluations.find((entry) => entry.id === evaluationId);
     const existing = state.measurements.find((entry) => entry.id === id);
-    if (!candidate || !evaluation || !["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
+    if (!candidate || !evaluation || !["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation.schema)
       || evaluation.learningId !== learningId) {
       throw new Error("measurements require a matching lineage evaluation contract");
     }
-    if (evaluation.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(state, evaluation)) {
+    if (["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation.schema)
+      && !activeEvaluationBinding(state, evaluation)) {
       throw new Error("measurement evaluator registry binding is missing, changed, or revoked");
     }
     const normalizedScope = normalizeScope(scope);
@@ -1936,9 +2143,11 @@ export async function recordLearningMeasurement({
     }
     if (!ID_RE.test(runId || "")) throw new Error("measurement runId must be a stable identifier");
     if (!DIGEST_RE.test(sourceDigest || "")) throw new Error("measurement sourceDigest must be a SHA-256 digest");
-    const evaluatorRoot = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
+    const evaluatorRoot = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+      "agentspine.learning-evaluation/v8"].includes(evaluation.schema)
       ? evaluation.evaluatorRoots.find((root) => root.evaluatorId === evaluatorId) : null;
-    if (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema) && !evaluatorRoot) {
+    if (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+      "agentspine.learning-evaluation/v8"].includes(evaluation.schema) && !evaluatorRoot) {
       throw new Error("measurement evaluator root is not frozen by the evaluation contract");
     }
     const normalizedMeasurement = {
@@ -1957,14 +2166,44 @@ export async function recordLearningMeasurement({
     if (normalizedCoverage.caseCount < evaluation.benchmark.minCases) {
       throw new Error(`measurement coverage requires at least ${evaluation.benchmark.minCases} cases`);
     }
+    const initialTrial = evaluation.schema === "agentspine.learning-evaluation/v8" && !activeRevalidation
+      ? evaluation.initialTrials?.[phase]?.find((entry) => entry.evaluatorId === evaluatorId) : null;
+    if (evaluation.schema === "agentspine.learning-evaluation/v8" && !activeRevalidation
+      && (!initialTrial || initialTrial.evaluatorRootDigest !== evaluatorRoot?.principalDigest
+        || initialTrial.runId !== runId || initialTrial.caseCount !== normalizedCoverage.caseCount)) {
+      throw new Error("measurement does not match the precommitted initial trial");
+    }
     const observedAt = date(measuredAt || existing?.measuredAt || timestamp, "measurement.measuredAt");
     if (new Date(observedAt).getTime() < new Date(evaluation.registeredAt).getTime()
       || new Date(observedAt).getTime() > new Date(evaluation.expiresAt).getTime()
       || (!existing && new Date(observedAt).getTime() > new Date(timestamp).getTime())) {
       throw new Error("measurement is outside its evaluation contract window");
     }
+    if (evaluation.schema === "agentspine.learning-evaluation/v8" && phase === "after" && !activeRevalidation) {
+      const application = state.applications.find((entry) => entry.schema === "agentspine.learning-application/v5"
+        && entry.learningId === learningId && entry.initialAdmission.evaluationId === evaluation.id
+        && entry.initialAdmission.evaluationDigest === evaluation.digest
+        && entry.initialAdmission.slot === initialTrial.slot
+        && entry.initialAdmission.trialDigest === initialTrial.trialDigest);
+      const delivery = application && state.deliveries.find((entry) => entry.applicationId === application.id);
+      if (!application || !delivery || new Date(observedAt).getTime() < new Date(delivery.completedAt).getTime()) {
+        throw new Error("after measurement requires the precommitted first-admitted trial and completed delivery");
+      }
+    }
+    if (phase === "after" && activeRevalidation) {
+      const application = state.applications.find((entry) => entry.schema === "agentspine.learning-application/v4"
+        && entry.learningId === learningId
+        && entry.revalidationAdmission.evaluatorId === evaluatorId
+        && entry.revalidationAdmission.evaluatorRootDigest === evaluatorRoot?.principalDigest
+        && entry.revalidationAdmission.runId === runId);
+      const delivery = application && state.deliveries.find((entry) => entry.applicationId === application.id);
+      if (!application || !delivery || new Date(observedAt).getTime() < new Date(delivery.completedAt).getTime()) {
+        throw new Error("revalidation measurement requires its precommitted admission slot and completed delivery");
+      }
+    }
     const payload = measurementPayload({
-      schema: ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
+      schema: ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+        "agentspine.learning-evaluation/v8"].includes(evaluation.schema)
         ? "agentspine.learning-measurement/v2" : "agentspine.learning-measurement/v1",
       id, learningId, evaluationId, phase, scope: normalizedScope,
       metric: normalizedMetric, measurement: normalizedMeasurement, coverage: normalizedCoverage, measuredAt: observedAt });
@@ -1985,7 +2224,8 @@ export async function recordLearningMeasurement({
       }
       throw new Error("measurement receipt IDs are immutable");
     }
-    if (["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema) && phase === "after") {
+    if (["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+      "agentspine.learning-evaluation/v8"].includes(evaluation.schema) && phase === "after") {
       const beforeReceiptIds = new Set(candidate.promotion?.canary?.beforeReceipts || []);
       const pairedBefore = state.outcomes.find((entry) => beforeReceiptIds.has(entry.id)
         && ["agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(entry.schema)
@@ -2042,7 +2282,7 @@ function normalizeOutcome(input, candidate, timestamp, application = null, deliv
   measurementReceipt = null) {
   const id = input.id || `outcome:${randomUUID()}`;
   if (!ID_RE.test(id)) throw new Error("outcome.id must be a stable, whitespace-free identifier");
-  const lineageRequired = ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation?.schema);
+  const lineageRequired = ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation?.schema);
   if (lineageRequired && (!measurementReceipt || measurementReceipt.evaluationId !== evaluation.id
     || measurementReceipt.learningId !== candidate.id)) {
     throw new Error("outcomes require one matching immutable measurement receipt");
@@ -2087,9 +2327,11 @@ function normalizeOutcome(input, candidate, timestamp, application = null, deliv
   const evaluatorId = lineageRequired ? measurementReceipt.measurement.evaluatorId : input.measurement?.evaluatorId;
   if (!ID_RE.test(evaluatorId || "")) throw new Error("outcome.measurement.evaluatorId is required");
   if (!evaluation.evaluatorIds.includes(evaluatorId)) throw new Error("outcome evaluator is not allowed by the evaluation contract");
-  const evaluatorRoot = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
+  const evaluatorRoot = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+    "agentspine.learning-evaluation/v8"].includes(evaluation.schema)
     ? evaluation.evaluatorRoots.find((root) => root.evaluatorId === evaluatorId) : null;
-  if (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
+  if (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+    "agentspine.learning-evaluation/v8"].includes(evaluation.schema)
     && (measurementReceipt.schema !== "agentspine.learning-measurement/v2"
       || evaluatorRoot?.principalDigest !== measurementReceipt.measurement.evaluatorRootDigest)) {
     throw new Error("outcome evaluator root does not match the frozen evaluation contract");
@@ -2103,7 +2345,7 @@ function normalizeOutcome(input, candidate, timestamp, application = null, deliv
   if (provenanceRequired && !DIGEST_RE.test(sourceDigest || "")) {
     throw new Error("outcome.measurement.sourceDigest is required by the evaluation contract");
   }
-  const coverageRequired = ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema);
+  const coverageRequired = ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation.schema);
   const coverage = lineageRequired ? measurementReceipt.coverage : coverageRequired ? {
     datasetDigest: input.coverage?.datasetDigest,
     caseCount: integer(input.coverage?.caseCount, "outcome.coverage.caseCount", 1, 1000000),
@@ -2138,8 +2380,21 @@ function normalizeOutcome(input, candidate, timestamp, application = null, deliv
     if (new Date(measuredAt).getTime() < new Date(delivery.completedAt).getTime()) {
       throw new Error("after outcome predates the completed model-turn delivery");
     }
+    if (evaluation.schema === "agentspine.learning-evaluation/v8"
+      && application.schema !== "agentspine.learning-application/v4") {
+      const trial = evaluation.initialTrials.after.find((entry) =>
+        entry.evaluatorId === measurementReceipt.measurement.evaluatorId);
+      if (!trial || application.schema !== "agentspine.learning-application/v5"
+        || application.initialAdmission.evaluationId !== evaluation.id
+        || application.initialAdmission.evaluationDigest !== evaluation.digest
+        || application.initialAdmission.slot !== trial.slot
+        || application.initialAdmission.trialDigest !== trial.trialDigest) {
+        throw new Error("after outcome does not match its precommitted first-admitted trial");
+      }
+    }
   }
-  const payload = outcomePayload({ schema: ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation.schema)
+  const payload = outcomePayload({ schema: ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+    "agentspine.learning-evaluation/v8"].includes(evaluation.schema)
     ? "agentspine.learning-outcome/v9" : evaluation.schema === "agentspine.learning-evaluation/v5"
     ? "agentspine.learning-outcome/v8" : lineageRequired ? "agentspine.learning-outcome/v7"
     : provenanceRequired ? "agentspine.learning-outcome/v6"
@@ -2180,7 +2435,7 @@ export async function recordLearningApplications({
   return mutation(root, (state, _catalog, learningPath) => {
     const pending = state.applications.filter((application) =>
       ["agentspine.learning-application/v2", "agentspine.learning-application/v3",
-        "agentspine.learning-application/v4"].includes(application.schema)
+        "agentspine.learning-application/v4", "agentspine.learning-application/v5"].includes(application.schema)
       && application.sessionId === preflightReceipt.sessionId
       && application.preflightReceiptId !== preflightReceipt.id
       && new Date(application.deliveryExpiresAt).getTime() >= new Date(timestamp).getTime()
@@ -2217,6 +2472,7 @@ export async function recordLearningApplications({
       }
       let schema = "agentspine.learning-application/v2";
       let revalidationAdmission;
+      let initialAdmission;
       if (revalidating && ["agentspine.learning-revalidation-window/v3",
         "agentspine.learning-revalidation-window/v4"].includes(canary.revalidation.schema)) {
         const window = canary.revalidation;
@@ -2241,11 +2497,36 @@ export async function recordLearningApplications({
           };
         }
       }
+      if (!revalidating) {
+        const evaluation = state.evaluations.find((entry) => entry.id === canary.evaluationId
+          && entry.digest === canary.evaluationDigest && entry.learningId === candidate.id);
+        if (evaluation?.schema === "agentspine.learning-evaluation/v8") {
+          const priorAdmissions = state.applications.filter((application) =>
+            application.schema === "agentspine.learning-application/v5"
+            && application.initialAdmission.evaluationId === evaluation.id
+            && application.initialAdmission.evaluationDigest === evaluation.digest);
+          if (priorAdmissions.length < evaluation.initialTrials.requiredTrials) {
+            const slot = priorAdmissions.length + 1;
+            const trial = evaluation.initialTrials.after[slot - 1];
+            schema = "agentspine.learning-application/v5";
+            initialAdmission = {
+              evaluationId: evaluation.id,
+              evaluationDigest: evaluation.digest,
+              slot,
+              evaluatorId: trial.evaluatorId,
+              evaluatorRootDigest: trial.evaluatorRootDigest,
+              runId: trial.runId,
+              trialDigest: trial.trialDigest,
+              authority: "context-only"
+            };
+          }
+        }
+      }
       const payload = applicationPayload({ schema, id, learningId: candidate.id, scope: runtimeScope,
         preflightReceiptId: preflightReceipt.id, promptDigest: preflightReceipt.promptDigest,
         preflightBriefingDigest: preflightReceipt.briefingDigest, sessionBriefingDigest,
         sessionId: preflightReceipt.sessionId, projectedAt: timestamp, deliveryExpiresAt, expiresAt,
-        revalidationAdmission });
+        revalidationAdmission, initialAdmission });
       const receipt = { ...payload, digest: digest(payload) };
       if (state.applications.some((entry) => entry.learningId === candidate.id
         && entry.preflightReceiptId === preflightReceipt.id)) {
@@ -2270,7 +2551,7 @@ export async function recordLearningDeliveries({
   return mutation(root, (state, _catalog, learningPath) => {
     const candidates = state.applications.filter((application) =>
       ["agentspine.learning-application/v2", "agentspine.learning-application/v3",
-        "agentspine.learning-application/v4"].includes(application.schema)
+        "agentspine.learning-application/v4", "agentspine.learning-application/v5"].includes(application.schema)
       && application.sessionId === sessionId && exactScope(application.scope, runtimeScope));
     if (!candidates.length) return { schema: "agentspine.learning-delivery-batch/v1", status: "not-applicable",
       receipts: [], learningPath, authority: "context-only" };
@@ -2311,7 +2592,8 @@ function outcomeFresh(receipt, config, now) {
 }
 
 function outcomeMatchesContract(receipt, contract) {
-  if (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)) {
+  if (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+    "agentspine.learning-evaluation/v8"].includes(contract.schema)) {
     const root = contract.evaluatorRoots.find((item) => item.evaluatorId === receipt.measurement?.evaluatorId);
     return receipt.schema === "agentspine.learning-outcome/v9"
       && ID_RE.test(receipt.measurementReceiptId || "") && DIGEST_RE.test(receipt.measurementReceiptDigest || "")
@@ -2348,18 +2630,43 @@ function outcomeMatchesContract(receipt, contract) {
   return ["agentspine.learning-outcome/v3", "agentspine.learning-outcome/v4"].includes(receipt.schema);
 }
 
+function outcomeMatchesInitialTrial(state, receipt, contract) {
+  if (contract?.schema !== "agentspine.learning-evaluation/v8") return true;
+  const trial = contract.initialTrials?.[receipt.phase]?.find((entry) =>
+    entry.evaluatorId === receipt.measurement?.evaluatorId);
+  const measurement = state.measurements.find((entry) => entry.id === receipt.measurementReceiptId
+    && entry.digest === receipt.measurementReceiptDigest);
+  if (!trial || !measurement || measurement.measurement.evaluatorRootDigest !== trial.evaluatorRootDigest
+    || measurement.measurement.runId !== trial.runId || measurement.coverage.caseCount !== trial.caseCount) return false;
+  if (receipt.phase !== "after") return true;
+  const application = state.applications.find((entry) => entry.id === receipt.applicationId
+    && entry.schema === "agentspine.learning-application/v5"
+    && entry.initialAdmission.evaluationId === contract.id
+    && entry.initialAdmission.evaluationDigest === contract.digest
+    && entry.initialAdmission.slot === trial.slot
+    && entry.initialAdmission.trialDigest === trial.trialDigest);
+  const delivery = application && state.deliveries.find((entry) => entry.id === receipt.deliveryId
+    && entry.applicationId === application.id);
+  return Boolean(application && delivery);
+}
+
 function promotableReceipts(state, candidate, timestamp) {
   const contracts = state.evaluations.filter((contract) => contract.learningId === candidate.id
     && new Date(contract.expiresAt).getTime() >= new Date(timestamp).getTime()
-    && (contract.schema !== "agentspine.learning-evaluation/v7" || activeEvaluationBinding(state, contract)));
-  const groups = contracts.map((contract) => ({
-    contract,
-    receipts: state.outcomes.filter((item) => outcomeMatchesContract(item, contract)
+    && (!["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema)
+      || activeEvaluationBinding(state, contract)));
+  const groups = contracts.map((contract) => {
+    const receipts = state.outcomes.filter((item) => outcomeMatchesContract(item, contract)
       && item.learningId === candidate.id && item.evaluationId === contract.id && item.phase === "before"
       && exactScope(item.scope, contract.scope) && outcomeFresh(item, state.config, timestamp)
-      && item.measurement.kind !== "model-suggestion")
-  })).filter(({ contract, receipts }) => receipts.some((item) => item.measurement.kind === "objective")
-    && new Set(receipts.map((item) => ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+      && item.measurement.kind !== "model-suggestion" && outcomeMatchesInitialTrial(state, item, contract));
+    if (contract.schema === "agentspine.learning-evaluation/v8") receipts.sort((a, b) =>
+      contract.initialTrials.before.findIndex((trial) => trial.evaluatorId === a.measurement.evaluatorId)
+      - contract.initialTrials.before.findIndex((trial) => trial.evaluatorId === b.measurement.evaluatorId));
+    return { contract, receipts };
+  }).filter(({ contract, receipts }) => receipts.some((item) => item.measurement.kind === "objective")
+    && new Set(receipts.map((item) => ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+      "agentspine.learning-evaluation/v8"].includes(contract.schema)
       ? item.measurement.evaluatorRootDigest : item.measurement.evaluatorId)).size >= contract.thresholds.beforeReceipts)
     .sort((a, b) => b.receipts.length - a.receipts.length || a.contract.id.localeCompare(b.contract.id));
   return groups[0] || null;
@@ -2423,13 +2730,15 @@ function reconcileCanary(state, candidate, timestamp) {
     const result = rollbackCandidate(state, candidate, "outcome evaluation contract is missing, changed, or stale", timestamp, "automatic-stale");
     return { ...result, decision: "rolled-back" };
   }
-  if (evaluation?.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(state, evaluation)) {
+  if (["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation?.schema)
+    && !activeEvaluationBinding(state, evaluation)) {
     const result = rollbackCandidate(state, candidate, "outcome evaluator registry binding was revoked or changed", timestamp, "automatic-evaluator-revocation");
     return { ...result, decision: "rolled-back" };
   }
   if (canary.status === "validated") {
     const validation = validationLeaseState(state, candidate, timestamp);
-    if (evaluation?.schema === "agentspine.learning-evaluation/v7" && validation.status !== "active") {
+    if (["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation?.schema)
+      && validation.status !== "active") {
       const result = rollbackCandidate(state, candidate,
         validation.status === "missing" ? "validated learning is missing its immutable evidence lease"
           : "validated learning evidence lease is no longer current",
@@ -2446,20 +2755,26 @@ function reconcileCanary(state, candidate, timestamp) {
     && (!planned || item.evaluationId === evaluation.id)
     && exactScope(item.scope, canary.scope) && item.metric.name === canary.metric.name
     && item.metric.direction === canary.metric.direction && outcomeFresh(item, state.config, timestamp)
+    && outcomeMatchesInitialTrial(state, item, evaluation)
     && state.applications.some((application) => application.id === item.applicationId
       && application.learningId === candidate.id && exactScope(application.scope, canary.scope)));
   if (receipts.some((item) => item.metric.blockingDefects > 0)) {
     const result = rollbackCandidate(state, candidate, "outcome canary recorded a blocking defect", timestamp, "automatic-regression");
     return { ...result, decision: "rolled-back" };
   }
-  const paired = ["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation?.schema);
-  const rootBound = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation?.schema);
+  const paired = ["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+    "agentspine.learning-evaluation/v8"].includes(evaluation?.schema);
+  const rootBound = ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+    "agentspine.learning-evaluation/v8"].includes(evaluation?.schema);
   const beforeByEvaluator = paired ? new Map((canary.beforeReceipts || [])
     .map((id) => state.outcomes.find((item) => item.id === id))
     .filter((item) => item?.schema === (rootBound ? "agentspine.learning-outcome/v9" : "agentspine.learning-outcome/v8"))
     .map((item) => [rootBound ? item.measurement.evaluatorRootDigest : item.measurement.evaluatorId, item])) : new Map();
   const eligible = receipts.filter((item) => item.measurement.kind !== "model-suggestion"
     && (!paired || beforeByEvaluator.has(rootBound ? item.measurement.evaluatorRootDigest : item.measurement.evaluatorId)));
+  if (evaluation?.schema === "agentspine.learning-evaluation/v8") eligible.sort((a, b) =>
+    evaluation.initialTrials.after.findIndex((trial) => trial.evaluatorId === a.measurement.evaluatorId)
+    - evaluation.initialTrials.after.findIndex((trial) => trial.evaluatorId === b.measurement.evaluatorId));
   const independentEvaluators = new Set(eligible.map((item) => rootBound
     ? item.measurement.evaluatorRootDigest : item.measurement.evaluatorId)).size;
   const independentApplications = new Set(eligible.map((item) => item.applicationId)).size;
@@ -2486,7 +2801,7 @@ function reconcileCanary(state, candidate, timestamp) {
   }
   preserve(state, "learning-candidate", candidate, timestamp);
   let validationLease = null;
-  if (evaluation?.schema === "agentspine.learning-evaluation/v7") {
+  if (["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation?.schema)) {
     const binding = activeEvaluationBinding(state, evaluation);
     if (!binding) {
       const result = rollbackCandidate(state, candidate, "outcome evaluator registry binding was revoked or changed",
@@ -2550,12 +2865,13 @@ export async function recordLearningOutcome({ root = process.cwd(), id, learning
     if (!candidate) throw new Error(`unknown learning candidate: ${learningId}`);
     if (!ID_RE.test(evaluationId || "")) throw new Error("evaluationId is required");
     const evaluation = state.evaluations.find((item) => item.id === evaluationId);
-    if (evaluation?.schema === "agentspine.learning-evaluation/v7" && !activeEvaluationBinding(state, evaluation)) {
+    if (["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation?.schema)
+      && !activeEvaluationBinding(state, evaluation)) {
       throw new Error("outcome evaluator registry binding is missing, changed, or revoked");
     }
     const measurementReceipt = measurementReceiptId === null ? null
       : state.measurements.find((item) => item.id === measurementReceiptId);
-    const effectivePhase = ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(evaluation?.schema)
+    const effectivePhase = ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(evaluation?.schema)
       ? measurementReceipt?.phase : phase;
     const application = applicationId === null ? null : state.applications.find((item) => item.id === applicationId);
     const delivery = deliveryId === null ? null : state.deliveries.find((item) => item.id === deliveryId);
@@ -2641,12 +2957,16 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
               metric: { name: receipts[0].metric.name, direction: receipts[0].metric.direction },
               evaluationId: contract.id,
               evaluationDigest: contract.digest,
-              pairing: ["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema) ? contract.pairing : null,
-              evaluatorRootDigest: ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+              pairing: ["agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+                "agentspine.learning-evaluation/v8"].includes(contract.schema) ? contract.pairing : null,
+              evaluatorRootDigest: ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7",
+                "agentspine.learning-evaluation/v8"].includes(contract.schema)
                 ? digest(contract.evaluatorRoots) : null,
-              evaluatorRegistryBindingDigest: contract.schema === "agentspine.learning-evaluation/v7"
+              evaluatorRegistryBindingDigest: ["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema)
                 ? state.evaluationBindings.find((binding) => binding.evaluationId === contract.id)?.digest : null,
-              coverage: ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema) ? {
+              initialTrialsDigest: contract.schema === "agentspine.learning-evaluation/v8"
+                ? digest(contract.initialTrials) : null,
+              coverage: ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema) ? {
                 datasetDigest: contract.benchmark.datasetDigest,
                 minCases: contract.benchmark.minCases,
                 authority: "context-only"
@@ -2884,7 +3204,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       const canary = candidate.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
       const canaryValidityStatus = canaryValidity(learning, candidate, timestamp);
       const stale = ["stale-active", "stale-validated"].includes(canaryValidityStatus.status);
-      const registryContracts = evaluations.filter((contract) => contract.schema === "agentspine.learning-evaluation/v7");
+      const registryContracts = evaluations.filter((contract) =>
+        ["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema));
       const inactiveRegistryContracts = registryContracts.filter((contract) => !activeEvaluationBinding(learning, contract));
       const renewalMeasurementIds = new Set([...(learning.validationLeases || []),
         ...learning.history.filter((entry) => entry.kind === "learning-validation").map((entry) => entry.value)]
@@ -2900,6 +3221,14 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           ? "agentspine.learning-application/v4" : "agentspine.learning-application/v3")
           && application.revalidationAdmission.revalidationWindowId === revalidation.id
           && application.revalidationAdmission.revalidationWindowDigest === revalidation.digest) : [];
+      const initialContract = evaluations.find((contract) => contract.schema === "agentspine.learning-evaluation/v8"
+        && contract.id === canary?.evaluationId && contract.digest === canary?.evaluationDigest)
+        || [...evaluations].filter((contract) => contract.schema === "agentspine.learning-evaluation/v8")
+          .sort((a, b) => b.registeredAt.localeCompare(a.registeredAt))[0] || null;
+      const initialApplications = initialContract ? applications.filter((application) =>
+        application.schema === "agentspine.learning-application/v5"
+        && application.initialAdmission.evaluationId === initialContract.id
+        && application.initialAdmission.evaluationDigest === initialContract.digest) : [];
       const fixedCohortDeliveries = revalidation?.schema === "agentspine.learning-revalidation-window/v2"
         ? deliveries.filter((delivery) => new Date(delivery.completedAt).getTime() >= new Date(revalidation.startedAt).getTime()
           && new Date(delivery.completedAt).getTime() <= new Date(revalidation.expiresAt).getTime()
@@ -2933,7 +3262,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           && evaluations.some((contract) => contract.id === item.evaluationId)).length,
         coverageBoundReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v5", "agentspine.learning-outcome/v6", "agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(item.schema)
           && evaluations.some((contract) => contract.id === item.evaluationId
-            && ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+            && ["agentspine.learning-evaluation/v2", "agentspine.learning-evaluation/v3", "agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema)
             && item.coverage?.datasetDigest === contract.benchmark.datasetDigest
             && item.coverage?.caseCount >= contract.benchmark.minCases)).length,
         provenanceBoundReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v6", "agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(item.schema)
@@ -2942,7 +3271,12 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
             && ((item.schema === "agentspine.learning-outcome/v6" && contract.schema === "agentspine.learning-evaluation/v3")
               || (item.schema === "agentspine.learning-outcome/v7" && contract.schema === "agentspine.learning-evaluation/v4")
               || (item.schema === "agentspine.learning-outcome/v8" && contract.schema === "agentspine.learning-evaluation/v5")
-              || (item.schema === "agentspine.learning-outcome/v9" && ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema))))).length,
+              || (item.schema === "agentspine.learning-outcome/v9" && ["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema))))).length,
+        initialTrialMode: initialContract?.initialTrials.mode || null,
+        initialTrialSlots: initialContract?.initialTrials.requiredTrials || 0,
+        initialAdmittedApplications: initialApplications.length,
+        initialCompletedDeliveries: deliveries.filter((delivery) => initialApplications.some((application) =>
+          application.id === delivery.applicationId)).length,
         lineageBoundReceipts: outcomes.filter((item) => ["agentspine.learning-outcome/v7", "agentspine.learning-outcome/v8", "agentspine.learning-outcome/v9"].includes(item.schema)
           && measurements.some((measurement) => measurement.id === item.measurementReceiptId
             && measurement.digest === item.measurementReceiptDigest)).length,
@@ -2973,12 +3307,12 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
         deliveryReceipts: deliveries.length,
         pendingApplications: applications.filter((application) =>
           ["agentspine.learning-application/v2", "agentspine.learning-application/v3",
-            "agentspine.learning-application/v4"].includes(application.schema)
+            "agentspine.learning-application/v4", "agentspine.learning-application/v5"].includes(application.schema)
           && new Date(application.deliveryExpiresAt).getTime() >= new Date(timestamp).getTime()
           && !deliveries.some((delivery) => delivery.applicationId === application.id)).length,
         stalePendingApplications: applications.filter((application) =>
           ["agentspine.learning-application/v2", "agentspine.learning-application/v3",
-            "agentspine.learning-application/v4"].includes(application.schema)
+            "agentspine.learning-application/v4", "agentspine.learning-application/v5"].includes(application.schema)
           && new Date(application.deliveryExpiresAt).getTime() < new Date(timestamp).getTime()
           && !deliveries.some((delivery) => delivery.applicationId === application.id)).length,
         latestApplicationId: [...applications].sort((a, b) => b.projectedAt.localeCompare(a.projectedAt))[0]?.id || null,
@@ -3163,10 +3497,10 @@ export function learningFindings(learning, graph) {
       if (candidate.promotion?.mode === "outcome-canary" && ["active", "validated"].includes(candidate.promotion?.canary?.status)
         && new Date(candidate.promotion.canary.expiresAt).getTime() <= Date.now()) findings.push(`stale-canary:${candidate.id}`);
       if (candidate.promotion?.mode === "outcome-canary" && ["active", "validated"].includes(candidate.promotion?.canary?.status)
-        && canaryEvaluation?.schema === "agentspine.learning-evaluation/v7"
+        && ["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(canaryEvaluation?.schema)
         && !activeEvaluationBinding(learning, canaryEvaluation)) findings.push(`inactive-evaluator-canary:${candidate.id}`);
       if (candidate.promotion?.mode === "outcome-canary" && candidate.promotion?.canary?.status === "validated"
-        && canaryEvaluation?.schema === "agentspine.learning-evaluation/v7"
+        && ["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(canaryEvaluation?.schema)
         && !(learning.validationLeases || []).some((lease) => lease.id === candidate.promotion.canary.validationLeaseId
           && lease.digest === candidate.promotion.canary.validationLeaseDigest
           && storedValidationLeaseStructure(lease) && validationLeaseMatchesState(learning, lease))) {
@@ -3207,7 +3541,7 @@ export function learningFindings(learning, graph) {
     const candidate = learning.candidates.find((item) => item.id === contract.learningId);
     const valid = storedEvaluationStructure(contract) && candidate && scopeContains(candidate.scope, contract.scope);
     if (!valid || evaluationIds.has(contract.id)) findings.push(`invalid-evaluation:${contract.id || "unknown"}`);
-    if (contract.schema === "agentspine.learning-evaluation/v7") {
+    if (["agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema)) {
       const binding = (learning.evaluationBindings || []).find((entry) => entry.evaluationId === contract.id);
       if (!binding || binding.evaluationDigest !== contract.digest) findings.push(`invalid-evaluator-binding:${contract.id}`);
     }
@@ -3247,13 +3581,13 @@ export function learningFindings(learning, graph) {
     const contract = (learning.evaluations || []).find((item) => item.id === receipt.evaluationId);
     const lineage = (learning.measurementLineage || []).find((item) => item.measurementReceiptId === receipt.id);
     const valid = storedMeasurementStructure(receipt) && candidate && contract
-      && ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+      && ["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema)
       && contract.learningId === receipt.learningId
       && exactScope(contract.scope, receipt.scope) && scopeContains(candidate.scope, receipt.scope)
       && lineage?.sourceDigest === receipt.measurement?.sourceDigest
       && lineage?.runDigest === measurementRunDigest(receipt.measurement?.evaluatorId, receipt.measurement?.runId)
       && (receipt.schema !== "agentspine.learning-measurement/v2"
-        || (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema)
+        || (["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema)
           && contract.evaluatorRoots.some((root) => root.evaluatorId === receipt.measurement?.evaluatorId
             && root.principalDigest === receipt.measurement?.evaluatorRootDigest)
           && lineage?.schema === "agentspine.learning-measurement-lineage/v2"
@@ -3269,7 +3603,7 @@ export function learningFindings(learning, graph) {
     const valid = storedApplicationStructure(receipt) && candidate && scopeContains(candidate.scope, receipt.scope);
     if (!valid || applicationIds.has(receipt.id)) findings.push(`invalid-application:${receipt.id || "unknown"}`);
     if (["agentspine.learning-application/v2", "agentspine.learning-application/v3",
-      "agentspine.learning-application/v4"].includes(receipt.schema)
+      "agentspine.learning-application/v4", "agentspine.learning-application/v5"].includes(receipt.schema)
       && new Date(receipt.deliveryExpiresAt).getTime() < Date.now()
       && !(learning.deliveries || []).some((delivery) => delivery.applicationId === receipt.id)) {
       findings.push(`stale-undelivered-application:${receipt.id}`);
@@ -3301,7 +3635,7 @@ export function learningFindings(learning, graph) {
         || (receipt.schema === "agentspine.learning-outcome/v6" && contract.schema !== "agentspine.learning-evaluation/v3")
         || (receipt.schema === "agentspine.learning-outcome/v7" && contract.schema !== "agentspine.learning-evaluation/v4")
         || (receipt.schema === "agentspine.learning-outcome/v8" && contract.schema !== "agentspine.learning-evaluation/v5")
-        || (receipt.schema === "agentspine.learning-outcome/v9" && !["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7"].includes(contract.schema))
+        || (receipt.schema === "agentspine.learning-outcome/v9" && !["agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8"].includes(contract.schema))
         || receipt.coverage?.datasetDigest !== contract.benchmark.datasetDigest
         || receipt.coverage?.caseCount < contract.benchmark.minCases) findings.push(`invalid-coverage:${receipt.id}`);
     }

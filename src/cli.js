@@ -1165,6 +1165,12 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.revalidationCompletedDeliveries, 0);
       const admittedRevalidationApplications = status.records.reduce((sum, item) =>
         sum + item.revalidationAdmittedApplications, 0);
+      const initialTrialContracts = status.records.filter((item) => item.initialTrialMode === "first-admitted-trials").length;
+      const requiredInitialTrials = status.records.reduce((sum, item) => sum + item.initialTrialSlots, 0);
+      const admittedInitialApplications = status.records.reduce((sum, item) =>
+        sum + item.initialAdmittedApplications, 0);
+      const completedInitialDeliveries = status.records.reduce((sum, item) =>
+        sum + item.initialCompletedDeliveries, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
         status: status.records.some((item) => ["stale", "revoked", "unproven"].includes(item.canaryStatus))
@@ -1203,6 +1209,11 @@ export async function run(argv = process.argv.slice(2)) {
         fixedCohortValidationLeases,
         admissionBoundValidationLeases,
         trialBoundValidationLeases,
+        initialTrialContracts,
+        requiredInitialTrials,
+        admittedInitialApplications,
+        completedInitialDeliveries,
+        incompleteInitialAdmissions: Math.max(0, admittedInitialApplications - completedInitialDeliveries),
         activeRevalidations,
         staleRevalidations,
         fixedCohortRevalidations,
