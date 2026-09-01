@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-02
+
+### Added
+
+- A locally confirmed `agentspine.learning-outcome-revocation/v1` receipt binds one exact measured result to its evaluation, target, measurement, application and delivery digests without retaining the explanation in plaintext.
+- `learn-outcome-revoke` plus scoped status, Doctor, audit and read-only Context MCP diagnostics expose only content-free revocation state.
+
+### Changed
+
+- Revoking an invalid outcome immediately withholds every dependent active or validated lesson and traverses renewed validation leases back through their immutable predecessor chain. Evaluation then rolls the lesson back atomically and restores a safe superseded predecessor.
+- The underlying immutable measurement remains retained and unrevoked. Legacy state upgrades with an empty outcome-revocation ledger; candidate deletion and subject purge remove matching receipts.
+
+### Security
+
+- Outcome withdrawal is fail-closed: candidate, contract, outcome, measurement, application and delivery substitution fail on load; six concurrent retries create one receipt; revoked outcomes cannot be replayed; and foreign scopes receive no diagnostics.
+
 ## [0.31.0] - 2026-09-01
 
 ### Added

@@ -12,7 +12,7 @@ import {
   purgeLearningBySubject, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
   registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, revokeLearningEvidence,
-  revokeLearningDelivery, revokeLearningMeasurement, reviewLearning, rollbackLearning
+  revokeLearningDelivery, revokeLearningMeasurement, revokeLearningOutcome, reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
 import { runHook } from "../src/hook.js";
@@ -154,12 +154,12 @@ async function application(root, learningId, turnId, now = new Date(), outcomeSt
 }
 
 async function establishValidatedLearning(root, {
-  learningId, evaluationId, start, expiresAt, supersedesId = null
+  learningId, evaluationId, start, expiresAt, supersedesId = null, subjectId = null
 }) {
   const suffix = learningId.split(":").at(-1);
   await proposeLearning({
     root, id: learningId, kind: "behavior", claim: `Use validated synthetic strategy ${suffix}.`,
-    privacy: "shared", scope: scopedTurn, supersedesId,
+    privacy: "shared", scope: scopedTurn, supersedesId, subjectId,
     evidence: evidence(`evidence:${suffix}-one`, 0.97), now: start
   });
   await addLearningEvidence({ root, id: learningId,
@@ -672,6 +672,119 @@ test("delivery revocation invalidates turn proof, withholds context, and rolls b
   "automatic-delivery-revocation");
   await deleteLearning({ root, id: "learning:delivery-validated" });
   assert.equal((await loadLearning(root)).learning.deliveryRevocations.length, 0);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("outcome revocation withdraws only the exact result and rolls back its validation lineage", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2040-01-01T00:00:00.000Z");
+  await upsertEntity({ root, id: "person:outcome-member", kind: "person", privacy: "shared" });
+  await proposeLearning({
+    root, id: "learning:outcome-prior", kind: "behavior", claim: "Use the prior synthetic outcome procedure.",
+    subjectId: "person:outcome-member", privacy: "shared", scope: scopedTurn,
+    evidence: evidence("evidence:outcome-prior", 0.97), now: start
+  });
+  await reviewLearning({ root, id: "learning:outcome-prior", decision: "accept",
+    reason: "Synthetic local confirmation.", confirmedByUser: true, now: start });
+  await establishValidatedLearning(root, {
+    learningId: "learning:outcome-current", evaluationId: "evaluation:outcome-current", start,
+    expiresAt: "2040-03-01T00:00:00.000Z", supersedesId: "learning:outcome-prior",
+    subjectId: "person:outcome-member"
+  });
+  const beforeRevocation = (await loadLearning(root)).learning;
+  const candidate = beforeRevocation.candidates.find((item) => item.id === "learning:outcome-current");
+  const outcomeId = candidate.promotion.canary.afterReceipts[0];
+  const outcomeReceipt = beforeRevocation.outcomes.find((item) => item.id === outcomeId);
+  await assert.rejects(revokeLearningOutcome({ root, outcomeId, reasonCode: "binding-invalid",
+    reason: "Synthetic outcome binding invalidated." }), /explicit local confirmation/);
+  const input = { root, outcomeId, reasonCode: "binding-invalid",
+    reason: "Synthetic outcome binding invalidated.", confirmation: "local-outcome-revocation-confirmed", now: start };
+  const attempts = await Promise.all(Array.from({ length: 6 }, () => revokeLearningOutcome(input)));
+  assert.equal(attempts.filter((result) => result.unchanged === false).length, 1);
+  assert.equal((await revokeLearningOutcome({ ...input, now: new Date(start.getTime() + 4000) })).unchanged, true);
+  const stored = await loadLearning(root);
+  assert.equal(stored.learning.outcomeRevocations.length, 1);
+  assert.equal(stored.learning.measurementRevocations.length, 0,
+    "withdrawing an outcome must not over-revoke its immutable measurement");
+  assert.equal(JSON.stringify(stored.learning.outcomeRevocations).includes("Synthetic outcome binding invalidated"), false);
+  const receipt = stored.learning.outcomeRevocations[0];
+  assert.equal(receipt.outcomeDigest, outcomeReceipt.digest);
+  assert.equal(receipt.measurementDigest, stored.learning.measurements
+    .find((item) => item.id === outcomeReceipt.measurementReceiptId).digest);
+  assert.equal(receipt.applicationDigest, stored.learning.applications
+    .find((item) => item.id === outcomeReceipt.applicationId).digest);
+  assert.equal(receipt.deliveryDigest, stored.learning.deliveries
+    .find((item) => item.id === outcomeReceipt.deliveryId).digest);
+
+  const withheld = await learningContext({ root, scope: scopedTurn, now: new Date(start.getTime() + 5000) });
+  assert.deepEqual(withheld.items, []);
+  assert.deepEqual(withheld.diagnostics, ["revoked-learning-outcome:learning:outcome-current"]);
+  const foreign = await learningContext({ root, scope: { ...scopedTurn, projectId: "project:foreign" },
+    now: new Date(start.getTime() + 5000) });
+  assert.deepEqual(foreign.items, []);
+  assert.deepEqual(foreign.diagnostics, []);
+  const status = await learningOutcomeStatus({ root, scope: scopedTurn, now: new Date(start.getTime() + 5000) });
+  assert.equal(status.outcomeRevocations, 1);
+  assert.equal(status.records.find((item) => item.id === "learning:outcome-current").canaryStatus, "revoked-outcome");
+  const cli = runCli(["learn-outcome-revoke", outcomeId, "--root", root, "--reason-code", "binding-invalid",
+    "--reason", "Synthetic outcome binding invalidated.", "--confirm-local-outcome-revocation", "--json"], state);
+  assert.equal(cli.receipt.schema, "agentspine.learning-outcome-revocation/v1");
+  const doctor = runCli(["doctor", root, "--json"], state);
+  assert.equal(doctor.learningOutcomes.status, "degraded");
+  assert.equal(doctor.learningOutcomes.outcomeRevocationReceipts, 1);
+  await assert.rejects(commitLearningOutcome({ root, id: outcomeId, learningId: "learning:outcome-current",
+    evaluationId: "evaluation:outcome-current", measurementReceiptId: outcomeReceipt.measurementReceiptId,
+    applicationId: outcomeReceipt.applicationId, deliveryId: outcomeReceipt.deliveryId,
+    now: new Date(start.getTime() + 5000) }), /outcome was explicitly revoked/);
+
+  const originalState = JSON.stringify(stored.learning);
+  stored.learning.outcomeRevocations[0].outcomeDigest = hash("redirected outcome");
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /outcome revocation state is invalid/);
+  await writeFile(stored.learningPath, `${originalState}\n`, "utf8");
+  const reconciliations = await Promise.all(Array.from({ length: 6 }, () =>
+    evaluateLearning({ root, now: new Date(start.getTime() + 6000) })));
+  assert.equal(reconciliations.flatMap((result) => result.reconciled)
+    .filter((item) => item.id === "learning:outcome-current" && item.decision === "rolled-back").length, 1);
+  const rolledBack = (await loadLearning(root)).learning.candidates
+    .find((item) => item.id === "learning:outcome-current");
+  assert.equal(rolledBack.rollback.mode, "automatic-outcome-revocation");
+  assert.deepEqual((await learningContext({ root, scope: scopedTurn,
+    now: new Date(start.getTime() + 7000) })).items.map((item) => item.id), ["learning:outcome-prior"]);
+  await deleteLearning({ root, id: "learning:outcome-current" });
+  assert.equal((await loadLearning(root)).learning.outcomeRevocations.length, 0);
+  assert.equal((await purgeLearningBySubject({ root, subjectId: "person:outcome-member" })).deleted, 1);
+
+  await proposeLearning({ root, id: "learning:outcome-active", kind: "behavior",
+    claim: "Use the active synthetic outcome procedure.", privacy: "shared", scope: scopedTurn,
+    evidence: evidence("evidence:outcome-active-one", 0.97), now: start });
+  await addLearningEvidence({ root, id: "learning:outcome-active",
+    evidence: evidence("evidence:outcome-active-two", 0.97), now: start });
+  await evaluation(root, "learning:outcome-active", { id: "evaluation:outcome-active",
+    evaluatorIds: ["evaluator:test-a", "evaluator:test-b"], now: start,
+    expiresAt: "2040-03-01T00:00:00.000Z" });
+  for (const [suffix, evaluatorId, value] of [["a", "evaluator:test-a", 0.4], ["b", "evaluator:test-b", 0.5]]) {
+    await recordLearningOutcome({ root, learningId: "learning:outcome-active",
+      ...outcome(`outcome:active-before-${suffix}`, "before", value, evaluatorId,
+        { evaluationId: "evaluation:outcome-active", measuredAt: start }), now: start });
+  }
+  await evaluateLearning({ root, now: new Date(start.getTime() + 8000) });
+  const activeApplication = await application(root, "learning:outcome-active", "outcome-active-a",
+    new Date(start.getTime() + 9000));
+  await recordLearningOutcome({ root, learningId: "learning:outcome-active", applicationId: activeApplication.id,
+    deliveryId: activeApplication.deliveryId,
+    ...outcome("outcome:active-after-a", "after", 0.8, "evaluator:test-a",
+      { evaluationId: "evaluation:outcome-active", measuredAt: new Date(start.getTime() + 9000) }),
+    now: new Date(start.getTime() + 9000) });
+  await revokeLearningOutcome({ root, outcomeId: "outcome:active-after-a", reasonCode: "phase-invalid",
+    reason: "Synthetic active outcome phase invalidated.", confirmation: "local-outcome-revocation-confirmed",
+    now: new Date(start.getTime() + 10000) });
+  const activeWithheld = await learningContext({ root, scope: scopedTurn,
+    now: new Date(start.getTime() + 11000) });
+  assert.deepEqual(activeWithheld.items, []);
+  assert.deepEqual(activeWithheld.diagnostics, ["revoked-learning-outcome:learning:outcome-active"]);
+  await deleteLearning({ root, id: "learning:outcome-active" });
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
@@ -1552,6 +1665,17 @@ test("validated learning renews only from fresh independent delivered-turn evide
   tampered.learning.validationLeases[0].renewalEvidence[0].measurementDigest = hash("tampered-renewal");
   await writeFile(tampered.learningPath, `${JSON.stringify(tampered.learning)}\n`, "utf8");
   await assert.rejects(loadLearning(root), /validation lease state is invalid|validation lease binding is invalid/);
+  await writeFile(stored.learningPath, `${modernState}\n`, "utf8");
+  await revokeLearningOutcome({ root, outcomeId: "outcome:renewed-after-a", reasonCode: "binding-invalid",
+    reason: "Synthetic predecessor outcome invalidated.", confirmation: "local-outcome-revocation-confirmed",
+    now: new Date("2032-04-20T00:00:06.000Z") });
+  const transitive = await learningContext({ root, scope: scopedTurn,
+    now: new Date("2032-04-20T00:00:07.000Z") });
+  assert.deepEqual(transitive.items, []);
+  assert.deepEqual(transitive.diagnostics, ["revoked-learning-outcome:learning:renewed"],
+    "renewed validation must retain and honor revocation of predecessor outcomes");
+  const rolledBack = await evaluateLearning({ root, now: new Date("2032-04-20T00:00:08.000Z") });
+  assert.deepEqual(rolledBack.reconciled, [{ id: "learning:renewed", decision: "rolled-back" }]);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
@@ -2278,6 +2402,7 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   assert.deepEqual(upgraded.evidenceRevocations, []);
   assert.deepEqual(upgraded.measurementRevocations, []);
   assert.deepEqual(upgraded.deliveryRevocations, []);
+  assert.deepEqual(upgraded.outcomeRevocations, []);
   assert.equal(upgraded.config.minOutcomeReceipts, 2);
   assert.equal(upgraded.config.initialTrialOutcomeTimeoutMinutes, 1440);
   await configureLearning({ root, config: { canaryTtlDays: 7 } });

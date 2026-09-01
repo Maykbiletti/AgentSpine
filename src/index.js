@@ -15,7 +15,8 @@ export {
   acceptContinuityLearning, addLearningEvidence, beginLearningRevalidation, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning, purgeLearningBySubject,
   purgeStaleLearningApplications, recordLearningOutcome, registerLearningEvaluation, renewLearningValidation,
-  reviewLearning, revokeLearningDelivery, revokeLearningEvidence, revokeLearningMeasurement, rollbackLearning
+  reviewLearning, revokeLearningDelivery, revokeLearningEvidence, revokeLearningMeasurement, revokeLearningOutcome,
+  rollbackLearning
 } from "./lib/learning.js";
 export {
   captureContinuityPrompt, configureContinuity, continuityFindings,
