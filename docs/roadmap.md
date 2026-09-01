@@ -68,7 +68,7 @@ Status: sparse local foundation implemented; host-specific notification adapters
 
 ## 5. Safe learning
 
-Status: local evidence, review, turn-bound Canary application, outcome comparison, supersession, and rollback workflow implemented.
+Status: local evidence, review, immutable fixed-benchmark contracts, turn-bound Canary application, contract-bound outcome comparison, supersession, and rollback workflow implemented.
 
 - observation candidates remain outside context until accepted;
 - evidence, source fingerprints, confidence, and every prior candidate version are retained;

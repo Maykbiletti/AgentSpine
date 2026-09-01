@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
-  recordLearningApplications, recordLearningOutcome, reviewLearning, rollbackLearning
+  recordLearningApplications, recordLearningOutcome, registerLearningEvaluation,
+  reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
 import { runHook } from "../src/hook.js";
@@ -39,7 +40,7 @@ const scopedTurn = {
 
 function outcome(id, phase, value, evaluatorId, extra = {}) {
   return {
-    id, phase, scope: extra.scope || scopedTurn,
+    id, phase, scope: extra.scope || scopedTurn, evaluationId: extra.evaluationId || "evaluation:fixed",
     metric: {
       name: "fixed-task-success", direction: "higher", value,
       blockingDefects: extra.blockingDefects || 0
@@ -50,6 +51,26 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
     },
     measuredAt: extra.measuredAt
   };
+}
+
+const syntheticEvaluators = [
+  "evaluator:test-a", "evaluator:test-b", "evaluator:test-c", "evaluator:user-b",
+  "evaluator:baseline-a", "evaluator:baseline-b", "evaluator:after-a", "evaluator:after-b",
+  "evaluator:after-c", "evaluator:hook-before-a", "evaluator:hook-before-b", "evaluator:test-race",
+  "evaluator:model-a", "evaluator:model-b"
+];
+
+async function evaluation(root, learningId, extra = {}) {
+  return registerLearningEvaluation({
+    root, id: extra.id || "evaluation:fixed", learningId, scope: extra.scope || scopedTurn,
+    metric: { name: "fixed-task-success", direction: "higher" },
+    benchmark: {
+      taskDigest: hash(`task:${learningId}`), datasetDigest: hash(`dataset:${learningId}`),
+      protocolDigest: hash(`protocol:${learningId}`), minCases: 12
+    },
+    evaluatorIds: extra.evaluatorIds || syntheticEvaluators,
+    expiresAt: extra.expiresAt || null, confirmLocalEvaluation: true, now: extra.now || new Date()
+  });
 }
 
 async function application(root, learningId, turnId, now = new Date()) {
@@ -193,6 +214,63 @@ test("automatic promotion is opt-in, evidence-gated, and limited to low-risk kin
   assert.deepEqual((await learningContext({ root })).items.map((item) => item.id), ["learning:auto"]);
 });
 
+test("immutable evaluation contracts prevent benchmark drift and freeze promotion thresholds", async (t) => {
+  const { root } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  await proposeLearning({
+    root, id: "learning:planned", kind: "behavior", claim: "Use the measured synthetic strategy.",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:planned-one", 0.97)
+  });
+  await addLearningEvidence({ root, id: "learning:planned", evidence: evidence("evidence:planned-two", 0.97) });
+  await configureLearning({
+    root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2, minImprovement: 0.2,
+      minOutcomeReceipts: 2, canaryReceipts: 2 }
+  });
+  const registeredAt = new Date();
+  const expiresAt = new Date(registeredAt.getTime() + 7 * 86400000);
+  await assert.rejects(registerLearningEvaluation({
+    root, id: "evaluation:planned", learningId: "learning:planned", scope: scopedTurn,
+    metric: { name: "fixed-task-success", direction: "higher" },
+    benchmark: { taskDigest: hash("fixed task"), datasetDigest: hash("fixed data"), protocolDigest: hash("fixed protocol"), minCases: 10 },
+    evaluatorIds: syntheticEvaluators, expiresAt, now: registeredAt
+  }), /explicit local confirmation/);
+  const registered = await evaluation(root, "learning:planned", {
+    id: "evaluation:planned", now: registeredAt, expiresAt
+  });
+  assert.equal(registered.contract.thresholds.minImprovement, 0.2);
+  assert.equal(JSON.stringify(registered.contract).includes("fixed task"), false);
+  await assert.rejects(registerLearningEvaluation({
+    root, id: "evaluation:planned", learningId: "learning:planned", scope: scopedTurn,
+    metric: { name: "fixed-task-success", direction: "higher" },
+    benchmark: { taskDigest: hash("changed task"), datasetDigest: hash("fixed data"), protocolDigest: hash("fixed protocol"), minCases: 10 },
+    evaluatorIds: syntheticEvaluators, expiresAt, now: registeredAt, confirmLocalEvaluation: true
+  }), /immutable/);
+  await assert.rejects(recordLearningOutcome({
+    root, learningId: "learning:planned",
+    ...outcome("outcome:wrong-evaluator", "before", 0.4, "evaluator:not-listed", { evaluationId: "evaluation:planned" })
+  }), /not allowed/);
+  await configureLearning({ root, config: { minImprovement: 0 } });
+  await recordLearningOutcome({ root, learningId: "learning:planned",
+    ...outcome("outcome:planned-before-a", "before", 0.4, "evaluator:test-a", { evaluationId: "evaluation:planned" }) });
+  await recordLearningOutcome({ root, learningId: "learning:planned",
+    ...outcome("outcome:planned-before-b", "before", 0.5, "evaluator:test-b", { evaluationId: "evaluation:planned" }) });
+  const promoted = await evaluateLearning({ root });
+  assert.equal(promoted.accepted[0].promotion.canary.evaluationId, "evaluation:planned");
+  const { learning: plannedState, learningPath } = await loadLearning(root);
+  const preservedState = JSON.stringify(plannedState);
+  await writeFile(learningPath, `${JSON.stringify({ ...plannedState, evaluations: [] })}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /evaluation binding is invalid/);
+  await writeFile(learningPath, `${preservedState}\n`, "utf8");
+  const applicationA = await application(root, "learning:planned", "planned-a");
+  await recordLearningOutcome({ root, learningId: "learning:planned", applicationId: applicationA.id,
+    ...outcome("outcome:planned-after-a", "after", 0.55, "evaluator:test-a", { evaluationId: "evaluation:planned" }) });
+  const applicationB = await application(root, "learning:planned", "planned-b");
+  const result = await recordLearningOutcome({ root, learningId: "learning:planned", applicationId: applicationB.id,
+    ...outcome("outcome:planned-after-b", "after", 0.56, "evaluator:test-b", { evaluationId: "evaluation:planned" }) });
+  assert.equal(result.decision, "rolled-back", "later config changes must not weaken the registered threshold");
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
 test("outcome-bound behavior learning completes before, canary, after, and validation with objective evidence", async (t) => {
   const { root } = await fixture(t);
   const beforeBytes = await readFile(join(root, "AGENTS.md"));
@@ -207,6 +285,7 @@ test("outcome-bound behavior learning completes before, canary, after, and valid
       canaryReceipts: 2, minImprovement: 0.1
     }
   });
+  await evaluation(root, "learning:measured");
   await recordLearningOutcome({ root, learningId: "learning:measured", ...outcome("outcome:before-a", "before", 0.4, "evaluator:test-a") });
   await recordLearningOutcome({
     root, learningId: "learning:measured",
@@ -252,6 +331,7 @@ test("after outcomes require distinct exact-turn application receipts", async (t
   });
   await addLearningEvidence({ root, id: "learning:application-bound", evidence: evidence("evidence:application-two", 0.97) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
+  await evaluation(root, "learning:application-bound");
   await recordLearningOutcome({
     root, learningId: "learning:application-bound",
     ...outcome("outcome:application-before-a", "before", 0.4, "evaluator:baseline-a")
@@ -312,6 +392,7 @@ test("UserPromptSubmit records the canary application only after the hard prefli
   });
   await addLearningEvidence({ root, id: "learning:hook-application", evidence: evidence("evidence:hook-application-two", 0.98) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
+  await evaluation(root, "learning:hook-application", { scope: hookScope });
   await recordLearningOutcome({
     root, learningId: "learning:hook-application",
     ...outcome("outcome:hook-before-a", "before", 0.4, "evaluator:hook-before-a", { scope: hookScope })
@@ -358,11 +439,15 @@ test("model suggestions cannot self-promote and contradictory behavior candidate
   await addLearningEvidence({ root, id: "learning:contradiction", evidence: evidence("evidence:contradiction-two", 0.97) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
   for (const learningId of ["learning:model-only", "learning:contradiction"]) {
+    const evaluationId = `evaluation:${learningId.split(":").at(-1)}`;
+    await evaluation(root, learningId, { id: evaluationId });
     await recordLearningOutcome({
-      root, learningId, ...outcome(`outcome:${learningId}:a`, "before", 0.4, "evaluator:model-a", { kind: "model-suggestion" })
+      root, learningId, ...outcome(`outcome:${learningId}:a`, "before", 0.4, "evaluator:model-a",
+        { kind: "model-suggestion", evaluationId })
     });
     await recordLearningOutcome({
-      root, learningId, ...outcome(`outcome:${learningId}:b`, "before", 0.5, "evaluator:model-b", { kind: "model-suggestion" })
+      root, learningId, ...outcome(`outcome:${learningId}:b`, "before", 0.5, "evaluator:model-b",
+        { kind: "model-suggestion", evaluationId })
     });
   }
   const protectedScope = { ...scopedTurn, taskId: "task:protected" };
@@ -371,14 +456,8 @@ test("model suggestions cannot self-promote and contradictory behavior candidate
     privacy: "shared", scope: protectedScope, evidence: evidence("evidence:protected-one", 0.97)
   });
   await addLearningEvidence({ root, id: "learning:protected", evidence: evidence("evidence:protected-two", 0.97) });
-  await recordLearningOutcome({
-    root, learningId: "learning:protected",
-    ...outcome("outcome:protected-a", "before", 0.4, "evaluator:test-a", { scope: protectedScope })
-  });
-  await recordLearningOutcome({
-    root, learningId: "learning:protected",
-    ...outcome("outcome:protected-b", "before", 0.5, "evaluator:test-b", { scope: protectedScope })
-  });
+  await assert.rejects(evaluation(root, "learning:protected", { id: "evaluation:protected", scope: protectedScope }),
+    /low-risk behavior candidates/);
   assert.equal((await evaluateLearning({ root })).accepted.length, 0);
   const status = await learningOutcomeStatus({ root });
   assert.deepEqual(status.records.find((item) => item.id === "learning:model-only").conflictsWith, ["learning:contradiction"]);
@@ -398,6 +477,7 @@ test("a blocking canary defect rolls back automatically and restores the superse
   });
   await addLearningEvidence({ root, id: "learning:new-behavior", evidence: evidence("evidence:new-two", 0.98) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
+  await evaluation(root, "learning:new-behavior");
   await recordLearningOutcome({ root, learningId: "learning:new-behavior", ...outcome("outcome:new-before-a", "before", 0.4, "evaluator:test-a") });
   await recordLearningOutcome({ root, learningId: "learning:new-behavior", ...outcome("outcome:new-before-b", "before", 0.5, "evaluator:test-b") });
   await evaluateLearning({ root });
@@ -420,6 +500,7 @@ test("stale canaries degrade context and evaluation rolls them back", async (t) 
   });
   await addLearningEvidence({ root, id: "learning:stale", evidence: evidence("evidence:stale-two", 0.96), now: start });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2, canaryTtlDays: 1 }, now: start });
+  await evaluation(root, "learning:stale", { now: start, expiresAt: new Date("2026-02-01T00:00:00.000Z") });
   await recordLearningOutcome({ root, learningId: "learning:stale", ...outcome("outcome:stale-a", "before", 0.4, "evaluator:test-a", { measuredAt: start }), now: start });
   await recordLearningOutcome({ root, learningId: "learning:stale", ...outcome("outcome:stale-b", "before", 0.5, "evaluator:test-b", { measuredAt: start }), now: start });
   await evaluateLearning({ root, now: start });
@@ -436,6 +517,7 @@ test("parallel duplicate outcome receipts are idempotent and remain one immutabl
     root, id: "learning:outcome-race", kind: "behavior", claim: "Use one synthetic race-safe action.",
     scope: scopedTurn, evidence: evidence("evidence:race")
   });
+  await evaluation(root, "learning:outcome-race");
   const input = { root, learningId: "learning:outcome-race", ...outcome("outcome:race", "before", 0.4, "evaluator:test-race") };
   const results = await Promise.all(Array.from({ length: 6 }, () => recordLearningOutcome(input)));
   assert.equal(results.filter((item) => item.unchanged === false).length, 1);
@@ -454,6 +536,7 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   const upgraded = (await loadLearning(root)).learning;
   assert.deepEqual(upgraded.outcomes, []);
   assert.deepEqual(upgraded.applications, []);
+  assert.deepEqual(upgraded.evaluations, []);
   assert.equal(upgraded.config.minOutcomeReceipts, 2);
   await configureLearning({ root, config: { canaryTtlDays: 7 } });
   assert.equal((await loadLearning(root)).learning.config.canaryTtlDays, 7);
@@ -462,6 +545,12 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   corruptApplication.applications.push({ schema: "agentspine.learning-application/v1", id: "application:bad" });
   await writeFile(learningPath, `${JSON.stringify(corruptApplication)}\n`, "utf8");
   await assert.rejects(loadLearning(root), /learning application state is invalid/);
+
+  await writeFile(learningPath, `${JSON.stringify(legacy)}\n`, "utf8");
+  const corruptEvaluation = (await loadLearning(root)).learning;
+  corruptEvaluation.evaluations.push({ schema: "agentspine.learning-evaluation/v1", id: "evaluation:bad" });
+  await writeFile(learningPath, `${JSON.stringify(corruptEvaluation)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /learning evaluation state is invalid/);
 
   await writeFile(learningPath, `${JSON.stringify(legacy)}\n`, "utf8");
   const corrupt = (await loadLearning(root)).learning;
@@ -542,8 +631,16 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
     "--tenant", "tenant:synthetic", "--project", "project:synthetic", "--task", "task:synthetic", "--json"
   ], state);
   runCli([
+    "learn-evaluation", "evaluation:cli", "--root", root, "--learning", "learning:cli-outcome",
+    "--metric", "fixed-task-success", "--direction", "higher", "--task-digest", hash("cli-task"),
+    "--dataset-digest", hash("cli-dataset"), "--protocol-digest", hash("cli-protocol"),
+    "--min-cases", "8", "--evaluators", "evaluator:cli,evaluator:cli-two",
+    "--persona", "agent:synthetic", "--user", "user:synthetic", "--tenant", "tenant:synthetic",
+    "--project", "project:synthetic", "--task", "task:synthetic", "--confirm-local-evaluation", "--json"
+  ], state);
+  runCli([
     "learn-outcome", "learning:cli-outcome", "--root", root, "--id", "outcome:cli-before",
-    "--phase", "before", "--metric", "fixed-task-success", "--direction", "higher", "--value", "0.4",
+    "--evaluation", "evaluation:cli", "--phase", "before", "--metric", "fixed-task-success", "--direction", "higher", "--value", "0.4",
     "--measurement", "objective", "--evaluator", "evaluator:cli", "--persona", "agent:synthetic",
     "--user", "user:synthetic", "--tenant", "tenant:synthetic", "--project", "project:synthetic",
     "--task", "task:synthetic", "--json"

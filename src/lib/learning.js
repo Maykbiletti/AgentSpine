@@ -18,6 +18,7 @@ const MEASUREMENT_KINDS = new Set(["objective", "user-feedback", "model-suggesti
 const METRIC_DIRECTIONS = new Set(["higher", "lower"]);
 const SCOPE_FIELDS = ["personaId", "userId", "tenantId", "projectId", "groupId", "taskId"];
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
+const DIGEST_RE = /^[a-f0-9]{64}$/;
 const MAX_STATE_BYTES = 5 * 1024 * 1024;
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret)\s*[:=]\s*\S{8,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i;
 const AUTHORITY_ASSERTION_RE = /\b(?:user|agent|person|they|he|she|i|ich|wir|nutzer|benutzer).{0,60}\b(?:may|can|is allowed|is authorized|has|have|darf|berechtigt|hat|haben).{0,50}\b(?:admin(?:istrator)?|permissions?|rights?|authorization|production access|deploy|billing|spending|policy exception|bypass|zugang|rechte|berechtigung|produktion|abrechnung|ausnahme|umgehen)\b/i;
@@ -46,6 +47,7 @@ function emptyLearning(root) {
     candidates: [],
     outcomes: [],
     applications: [],
+    evaluations: [],
     history: []
   };
 }
@@ -57,6 +59,7 @@ function normalizeState(value, root) {
     || !Array.isArray(value.candidates) || !value.candidates.every((item) => item && typeof item === "object" && Array.isArray(item.evidence))
     || (value.outcomes !== undefined && (!Array.isArray(value.outcomes) || !value.outcomes.every((item) => item && typeof item === "object")))
     || (value.applications !== undefined && (!Array.isArray(value.applications) || !value.applications.every((item) => item && typeof item === "object")))
+    || (value.evaluations !== undefined && (!Array.isArray(value.evaluations) || !value.evaluations.every((item) => item && typeof item === "object")))
     || !Array.isArray(value.history) || !value.history.every((item) => item && typeof item === "object")) {
     throw new Error("learning state structure is invalid; run the audit before learning");
   }
@@ -69,13 +72,17 @@ function normalizeState(value, root) {
       requiresLocalReview: candidate.requiresLocalReview ?? PROTECTED_LESSON_RE.test(candidate.claim || "")
     })),
     outcomes: value.outcomes || [],
-    applications: value.applications || []
+    applications: value.applications || [],
+    evaluations: value.evaluations || []
   };
   if (normalized.outcomes.some((receipt) => !storedOutcomeStructure(receipt))) {
     throw new Error("learning outcome state is invalid; run the audit before learning");
   }
   if (normalized.applications.some((receipt) => !storedApplicationStructure(receipt))) {
     throw new Error("learning application state is invalid; run the audit before learning");
+  }
+  if (normalized.evaluations.some((contract) => !storedEvaluationStructure(contract))) {
+    throw new Error("learning evaluation state is invalid; run the audit before learning");
   }
   if (normalized.outcomes.some((receipt) => {
     const candidate = normalized.candidates.find((item) => item.id === receipt.learningId);
@@ -85,10 +92,32 @@ function normalizeState(value, root) {
     const candidate = normalized.candidates.find((item) => item.id === receipt.learningId);
     return !candidate || !scopeContains(candidate.scope, receipt.scope);
   })) throw new Error("learning application scope is invalid; run the audit before learning");
-  if (normalized.outcomes.some((receipt) => receipt.schema === "agentspine.learning-outcome/v2"
+  if (normalized.evaluations.some((contract) => {
+    const candidate = normalized.candidates.find((item) => item.id === contract.learningId);
+    return !candidate || !scopeContains(candidate.scope, contract.scope);
+  })) throw new Error("learning evaluation scope is invalid; run the audit before learning");
+  if (normalized.outcomes.some((receipt) => ["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3"].includes(receipt.schema)
     && receipt.phase === "after" && !normalized.applications.some((application) => application.id === receipt.applicationId
-      && application.learningId === receipt.learningId && exactScope(application.scope, receipt.scope)))) {
+      && application.learningId === receipt.learningId && exactScope(application.scope, receipt.scope)
+      && new Date(receipt.measuredAt).getTime() >= new Date(application.projectedAt).getTime()
+      && new Date(receipt.measuredAt).getTime() <= new Date(application.expiresAt).getTime()))) {
     throw new Error("learning outcome application binding is invalid; run the audit before learning");
+  }
+  if (normalized.outcomes.some((receipt) => receipt.schema === "agentspine.learning-outcome/v3"
+    && !normalized.evaluations.some((contract) => contract.id === receipt.evaluationId
+      && contract.learningId === receipt.learningId && exactScope(contract.scope, receipt.scope)
+      && contract.metric.name === receipt.metric.name && contract.metric.direction === receipt.metric.direction
+      && contract.evaluatorIds.includes(receipt.measurement.evaluatorId)
+      && new Date(receipt.measuredAt).getTime() >= new Date(contract.registeredAt).getTime()
+      && new Date(receipt.measuredAt).getTime() <= new Date(contract.expiresAt).getTime()))) {
+    throw new Error("learning outcome evaluation binding is invalid; run the audit before learning");
+  }
+  if (normalized.candidates.some((candidate) => candidate.status === "accepted"
+    && candidate.promotion?.mode === "outcome-canary" && candidate.promotion.canary?.evaluationId
+    && !normalized.evaluations.some((contract) => contract.id === candidate.promotion.canary.evaluationId
+      && contract.learningId === candidate.id && contract.digest === candidate.promotion.canary.evaluationDigest
+      && exactScope(contract.scope, candidate.promotion.canary.scope)))) {
+    throw new Error("learning canary evaluation binding is invalid; run the audit before learning");
   }
   return normalized;
 }
@@ -143,7 +172,8 @@ function storedOutcomeStructure(receipt) {
   const payload = outcomePayload(receipt);
   const legacy = receipt.schema === "agentspine.learning-outcome/v1";
   const bound = receipt.schema === "agentspine.learning-outcome/v2";
-  return (legacy || bound) && ID_RE.test(receipt.id || "")
+  const planned = receipt.schema === "agentspine.learning-outcome/v3";
+  return (legacy || bound || planned) && ID_RE.test(receipt.id || "")
     && ID_RE.test(receipt.learningId || "") && OUTCOME_PHASES.has(receipt.phase)
     && SCOPE_FIELDS.every((field) => receipt.scope?.[field] === null || ID_RE.test(receipt.scope?.[field] || ""))
     && typeof receipt.metric?.name === "string" && receipt.metric.name.length > 0
@@ -151,11 +181,46 @@ function storedOutcomeStructure(receipt) {
     && Number.isFinite(receipt.metric?.value) && receipt.metric.value >= 0 && receipt.metric.value <= 1
     && Number.isInteger(receipt.metric?.blockingDefects) && receipt.metric.blockingDefects >= 0
     && MEASUREMENT_KINDS.has(receipt.measurement?.kind) && ID_RE.test(receipt.measurement?.evaluatorId || "")
-    && (receipt.measurement?.sourceDigest === null || /^[a-f0-9]{64}$/.test(receipt.measurement?.sourceDigest || ""))
+    && (receipt.measurement?.sourceDigest === null || DIGEST_RE.test(receipt.measurement?.sourceDigest || ""))
     && (legacy ? receipt.applicationId === undefined : (receipt.phase === "before"
       ? receipt.applicationId === null : ID_RE.test(receipt.applicationId || "")))
+    && (!planned || ID_RE.test(receipt.evaluationId || ""))
     && receipt.authority === "context-only" && receipt.measurement?.authority === "context-only"
     && Number.isFinite(new Date(receipt.measuredAt).getTime()) && receipt.digest === digest(payload);
+}
+
+function evaluationPayload({ id, learningId, scope, metric, benchmark, evaluatorIds, thresholds,
+  registeredAt, expiresAt }) {
+  return {
+    schema: "agentspine.learning-evaluation/v1", id, learningId, scope, metric, benchmark,
+    evaluatorIds, thresholds, registeredAt, expiresAt, authority: "context-only"
+  };
+}
+
+function storedEvaluationStructure(contract) {
+  if (!contract || typeof contract !== "object" || Array.isArray(contract)) return false;
+  const payload = evaluationPayload(contract);
+  return contract.schema === "agentspine.learning-evaluation/v1"
+    && ID_RE.test(contract.id || "") && ID_RE.test(contract.learningId || "")
+    && SCOPE_FIELDS.every((field) => contract.scope?.[field] === null || ID_RE.test(contract.scope?.[field] || ""))
+    && typeof contract.metric?.name === "string" && contract.metric.name.length > 0
+    && METRIC_DIRECTIONS.has(contract.metric?.direction)
+    && [contract.benchmark?.taskDigest, contract.benchmark?.datasetDigest, contract.benchmark?.protocolDigest]
+      .every((value) => DIGEST_RE.test(value || ""))
+    && Number.isInteger(contract.benchmark?.minCases) && contract.benchmark.minCases >= 1
+    && Array.isArray(contract.evaluatorIds) && contract.evaluatorIds.length >= 2
+    && new Set(contract.evaluatorIds).size === contract.evaluatorIds.length
+    && contract.evaluatorIds.every((id) => ID_RE.test(id || ""))
+    && Number.isFinite(contract.thresholds?.minImprovement) && contract.thresholds.minImprovement >= 0
+    && contract.thresholds.minImprovement <= 1
+    && Number.isFinite(contract.thresholds?.regressionTolerance) && contract.thresholds.regressionTolerance >= 0
+    && contract.thresholds.regressionTolerance <= 1
+    && Number.isInteger(contract.thresholds?.beforeReceipts) && contract.thresholds.beforeReceipts >= 2
+    && Number.isInteger(contract.thresholds?.afterReceipts) && contract.thresholds.afterReceipts >= 1
+    && Number.isFinite(new Date(contract.registeredAt).getTime())
+    && Number.isFinite(new Date(contract.expiresAt).getTime())
+    && new Date(contract.expiresAt).getTime() > new Date(contract.registeredAt).getTime()
+    && contract.authority === "context-only" && contract.digest === digest(payload);
 }
 
 function applicationPayload({ id, learningId, scope, preflightReceiptId, promptDigest,
@@ -530,8 +595,75 @@ function distinctEvidence(candidate) {
   return new Set(candidate.evidence.map((item) => item.sourceSha256 || item.sourceDocument || item.id)).size;
 }
 
+export async function registerLearningEvaluation({
+  root = process.cwd(), id = `evaluation:${randomUUID()}`, learningId, scope, metric, benchmark,
+  evaluatorIds, expiresAt = null, confirmLocalEvaluation = false, now = new Date()
+}) {
+  if (!confirmLocalEvaluation) throw new Error("evaluation registration requires explicit local confirmation");
+  if (!ID_RE.test(id || "") || !ID_RE.test(learningId || "")) {
+    throw new Error("evaluation id and learningId must be stable identifiers");
+  }
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const candidate = state.candidates.find((entry) => entry.id === learningId);
+    if (!candidate) throw new Error(`unknown learning candidate: ${learningId}`);
+    if (candidate.kind !== "behavior" || candidate.status !== "candidate" || candidate.requiresLocalReview) {
+      throw new Error("evaluation contracts are limited to unreviewed, low-risk behavior candidates");
+    }
+    const normalizedScope = normalizeScope(scope);
+    if (!scopeContains(candidate.scope, normalizedScope)) throw new Error("evaluation scope does not match the learning candidate");
+    const name = safeText(metric?.name, "evaluation.metric.name", 120);
+    const direction = metric?.direction;
+    if (!METRIC_DIRECTIONS.has(direction)) throw new Error("evaluation.metric.direction must be higher or lower");
+    const digests = {
+      taskDigest: benchmark?.taskDigest,
+      datasetDigest: benchmark?.datasetDigest,
+      protocolDigest: benchmark?.protocolDigest
+    };
+    if (Object.entries(digests).some(([, value]) => !DIGEST_RE.test(value || ""))) {
+      throw new Error("evaluation benchmark digests must be SHA-256 values");
+    }
+    const normalizedEvaluators = [...new Set((evaluatorIds || []).map((value) => String(value)))].sort();
+    const requiredEvaluators = Math.max(state.config.minOutcomeReceipts, state.config.canaryReceipts, 2);
+    if (normalizedEvaluators.length < requiredEvaluators || normalizedEvaluators.some((value) => !ID_RE.test(value))) {
+      throw new Error(`evaluation requires at least ${requiredEvaluators} distinct stable evaluator IDs`);
+    }
+    const expiry = date(expiresAt || new Date(new Date(timestamp).getTime()
+      + state.config.outcomeMaxAgeDays * 86400000), "evaluation.expiresAt");
+    if (new Date(expiry).getTime() <= new Date(timestamp).getTime()
+      || new Date(expiry).getTime() > new Date(timestamp).getTime() + 365 * 86400000) {
+      throw new Error("evaluation expiry must be in the future and no more than 365 days away");
+    }
+    const payload = evaluationPayload({
+      id, learningId, scope: normalizedScope, metric: { name, direction },
+      benchmark: { ...digests, minCases: integer(benchmark?.minCases, "evaluation.benchmark.minCases", 1, 1000000) },
+      evaluatorIds: normalizedEvaluators,
+      thresholds: {
+        minImprovement: state.config.minImprovement,
+        regressionTolerance: state.config.regressionTolerance,
+        beforeReceipts: state.config.minOutcomeReceipts,
+        afterReceipts: state.config.canaryReceipts
+      },
+      registeredAt: timestamp, expiresAt: expiry
+    });
+    const contract = { ...payload, digest: digest(payload) };
+    const existing = state.evaluations.find((entry) => entry.id === id);
+    if (existing) {
+      if (existing.digest === contract.digest) return { contract: existing, learningPath, unchanged: true };
+      throw new Error("evaluation contract IDs are immutable");
+    }
+    if (state.evaluations.some((entry) => entry.learningId === learningId
+      && exactScope(entry.scope, normalizedScope) && new Date(entry.expiresAt).getTime() >= new Date(timestamp).getTime())) {
+      throw new Error("an active evaluation contract already exists for this learning and exact scope");
+    }
+    state.evaluations.push(contract);
+    state.evaluations.sort((a, b) => a.id.localeCompare(b.id));
+    return { contract, learningPath, unchanged: false };
+  });
+}
+
 function outcomePayload({ schema = "agentspine.learning-outcome/v1", id, learningId, phase, scope, metric, measurement,
-  applicationId, measuredAt }) {
+  applicationId, evaluationId, measuredAt }) {
   return {
     schema,
     id,
@@ -540,22 +672,29 @@ function outcomePayload({ schema = "agentspine.learning-outcome/v1", id, learnin
     scope,
     metric,
     measurement,
-    ...(schema === "agentspine.learning-outcome/v2" ? { applicationId } : {}),
+    ...(["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3"].includes(schema) ? { applicationId } : {}),
+    ...(schema === "agentspine.learning-outcome/v3" ? { evaluationId } : {}),
     measuredAt,
     authority: "context-only"
   };
 }
 
-function normalizeOutcome(input, candidate, timestamp, application = null) {
+function normalizeOutcome(input, candidate, timestamp, application = null, evaluation = null) {
   const id = input.id || `outcome:${randomUUID()}`;
   if (!ID_RE.test(id)) throw new Error("outcome.id must be a stable, whitespace-free identifier");
   const phase = input.phase;
   if (!OUTCOME_PHASES.has(phase)) throw new Error("outcome.phase must be before or after");
   const scope = normalizeScope(input.scope);
   if (!scopeContains(candidate.scope, scope)) throw new Error("outcome scope does not match the learning candidate");
+  if (!evaluation || evaluation.learningId !== candidate.id || !exactScope(evaluation.scope, scope)) {
+    throw new Error("outcomes require a matching immutable evaluation contract");
+  }
   const name = safeText(input.metric?.name, "outcome.metric.name", 120);
   const direction = input.metric?.direction;
   if (!METRIC_DIRECTIONS.has(direction)) throw new Error("outcome.metric.direction must be higher or lower");
+  if (name !== evaluation.metric.name || direction !== evaluation.metric.direction) {
+    throw new Error("outcome metric does not match the evaluation contract");
+  }
   const metric = {
     name,
     direction,
@@ -566,12 +705,17 @@ function normalizeOutcome(input, candidate, timestamp, application = null) {
   if (!MEASUREMENT_KINDS.has(kind)) throw new Error("outcome.measurement.kind is unsupported");
   const evaluatorId = input.measurement?.evaluatorId;
   if (!ID_RE.test(evaluatorId || "")) throw new Error("outcome.measurement.evaluatorId is required");
+  if (!evaluation.evaluatorIds.includes(evaluatorId)) throw new Error("outcome evaluator is not allowed by the evaluation contract");
   const sourceDigest = input.measurement?.sourceDigest ?? null;
   if (sourceDigest !== null && !/^[a-f0-9]{64}$/.test(sourceDigest)) {
     throw new Error("outcome.measurement.sourceDigest must be a SHA-256 digest");
   }
   const measurement = { kind, evaluatorId, sourceDigest, authority: "context-only" };
   const measuredAt = date(input.measuredAt || timestamp, "outcome.measuredAt");
+  if (new Date(measuredAt).getTime() < new Date(evaluation.registeredAt).getTime()
+    || new Date(measuredAt).getTime() > new Date(evaluation.expiresAt).getTime()) {
+    throw new Error("outcome is outside its evaluation contract window");
+  }
   const applicationId = phase === "after" ? input.applicationId : null;
   if (phase === "after") {
     if (!ID_RE.test(applicationId || "") || !application) throw new Error("after outcomes require a recorded learning application receipt");
@@ -583,8 +727,8 @@ function normalizeOutcome(input, candidate, timestamp, application = null) {
       throw new Error("after outcome is outside its learning application window");
     }
   }
-  const payload = outcomePayload({ schema: "agentspine.learning-outcome/v2", id, learningId: candidate.id,
-    phase, scope, metric, measurement, applicationId, measuredAt });
+  const payload = outcomePayload({ schema: "agentspine.learning-outcome/v3", id, learningId: candidate.id,
+    phase, scope, metric, measurement, applicationId, evaluationId: evaluation.id, measuredAt });
   return { ...payload, digest: digest(payload) };
 }
 
@@ -657,19 +801,18 @@ function outcomeFresh(receipt, config, now) {
 }
 
 function promotableReceipts(state, candidate, timestamp) {
-  const all = state.outcomes.filter((item) => item.learningId === candidate.id && item.phase === "before"
-    && outcomeFresh(item, state.config, timestamp));
-  const eligible = all.filter((item) => item.measurement.kind !== "model-suggestion");
-  if (!eligible.some((item) => item.measurement.kind === "objective")) return [];
-  const groups = new Map();
-  for (const item of eligible) {
-    const key = JSON.stringify([scopeKey(item.scope), item.metric.name, item.metric.direction]);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  }
-  return [...groups.values()]
-    .filter((items) => new Set(items.map((item) => item.measurement.evaluatorId)).size >= state.config.minOutcomeReceipts)
-    .sort((a, b) => b.length - a.length || a[0].id.localeCompare(b[0].id))[0] || [];
+  const contracts = state.evaluations.filter((contract) => contract.learningId === candidate.id
+    && new Date(contract.expiresAt).getTime() >= new Date(timestamp).getTime());
+  const groups = contracts.map((contract) => ({
+    contract,
+    receipts: state.outcomes.filter((item) => item.schema === "agentspine.learning-outcome/v3"
+      && item.learningId === candidate.id && item.evaluationId === contract.id && item.phase === "before"
+      && exactScope(item.scope, contract.scope) && outcomeFresh(item, state.config, timestamp)
+      && item.measurement.kind !== "model-suggestion")
+  })).filter(({ contract, receipts }) => receipts.some((item) => item.measurement.kind === "objective")
+    && new Set(receipts.map((item) => item.measurement.evaluatorId)).size >= contract.thresholds.beforeReceipts)
+    .sort((a, b) => b.receipts.length - a.receipts.length || a.contract.id.localeCompare(b.contract.id));
+  return groups[0] || null;
 }
 
 function improvement(direction, baseline, value) {
@@ -709,8 +852,19 @@ function reconcileCanary(state, candidate, timestamp) {
     const result = rollbackCandidate(state, candidate, "outcome canary expired before validation", timestamp, "automatic-stale");
     return { ...result, decision: "rolled-back" };
   }
-  const receipts = state.outcomes.filter((item) => item.schema === "agentspine.learning-outcome/v2"
+  const evaluation = canary.evaluationId
+    ? state.evaluations.find((contract) => contract.id === canary.evaluationId && contract.learningId === candidate.id)
+    : null;
+  if (canary.evaluationId && (!evaluation || evaluation.digest !== canary.evaluationDigest
+    || new Date(evaluation.expiresAt).getTime() < new Date(timestamp).getTime())) {
+    const result = rollbackCandidate(state, candidate, "outcome evaluation contract is missing, changed, or stale", timestamp, "automatic-stale");
+    return { ...result, decision: "rolled-back" };
+  }
+  const planned = Boolean(evaluation);
+  const receipts = state.outcomes.filter((item) => item.schema === (planned
+    ? "agentspine.learning-outcome/v3" : "agentspine.learning-outcome/v2")
     && item.learningId === candidate.id && item.phase === "after"
+    && (!planned || item.evaluationId === evaluation.id)
     && exactScope(item.scope, canary.scope) && item.metric.name === canary.metric.name
     && item.metric.direction === canary.metric.direction && outcomeFresh(item, state.config, timestamp)
     && state.applications.some((application) => application.id === item.applicationId
@@ -723,16 +877,21 @@ function reconcileCanary(state, candidate, timestamp) {
   const independentEvaluators = new Set(eligible.map((item) => item.measurement.evaluatorId)).size;
   const independentApplications = new Set(eligible.map((item) => item.applicationId)).size;
   const deltas = eligible.map((item) => improvement(canary.metric.direction, canary.baseline, item.metric.value));
-  if (deltas.some((value) => value < -state.config.regressionTolerance)) {
+  const thresholds = planned ? evaluation.thresholds : {
+    regressionTolerance: state.config.regressionTolerance,
+    afterReceipts: state.config.canaryReceipts,
+    minImprovement: state.config.minImprovement
+  };
+  if (deltas.some((value) => value < -thresholds.regressionTolerance)) {
     const result = rollbackCandidate(state, candidate, "outcome canary regressed against its baseline", timestamp, "automatic-regression");
     return { ...result, decision: "rolled-back" };
   }
-  if (independentEvaluators < state.config.canaryReceipts || independentApplications < state.config.canaryReceipts
+  if (independentEvaluators < thresholds.afterReceipts || independentApplications < thresholds.afterReceipts
     || !eligible.some((item) => item.measurement.kind === "objective")) {
     return { candidate, decision: "active", restored: [] };
   }
   const average = deltas.reduce((sum, value) => sum + value, 0) / deltas.length;
-  if (average < state.config.minImprovement) {
+  if (average < thresholds.minImprovement) {
     const result = rollbackCandidate(state, candidate, "outcome canary did not meet the minimum measured improvement", timestamp, "automatic-no-improvement");
     return { ...result, decision: "rolled-back" };
   }
@@ -751,17 +910,19 @@ function reconcileCanary(state, candidate, timestamp) {
 }
 
 export async function recordLearningOutcome({ root = process.cwd(), id, learningId, phase, scope, metric, measurement,
-  applicationId = null, measuredAt, now = new Date() }) {
+  applicationId = null, evaluationId, measuredAt, now = new Date() }) {
   if (!ID_RE.test(learningId || "")) throw new Error("learningId is required");
   const timestamp = date(now, "now");
   return mutation(root, (state, _catalog, learningPath) => {
     const candidate = state.candidates.find((entry) => entry.id === learningId);
     if (!candidate) throw new Error(`unknown learning candidate: ${learningId}`);
+    if (!ID_RE.test(evaluationId || "")) throw new Error("evaluationId is required");
+    const evaluation = state.evaluations.find((item) => item.id === evaluationId);
     const application = applicationId === null ? null : state.applications.find((item) => item.id === applicationId);
     const existing = id ? state.outcomes.find((item) => item.id === id) : null;
     if (existing) {
-      const retry = normalizeOutcome({ id, phase, scope, metric, measurement, applicationId,
-        measuredAt: measuredAt ?? existing.measuredAt }, candidate, timestamp, application);
+      const retry = normalizeOutcome({ id, phase, scope, metric, measurement, applicationId, evaluationId,
+        measuredAt: measuredAt ?? existing.measuredAt }, candidate, timestamp, application, evaluation);
       if (existing.digest === retry.digest) {
         return { receipt: existing, candidate, decision: "unchanged", learningPath, unchanged: true };
       }
@@ -772,7 +933,8 @@ export async function recordLearningOutcome({ root = process.cwd(), id, learning
       || candidate.promotion?.canary?.status !== "active")) {
       throw new Error("after outcomes require an active outcome canary");
     }
-    const receipt = normalizeOutcome({ id, phase, scope, metric, measurement, applicationId, measuredAt }, candidate, timestamp, application);
+    const receipt = normalizeOutcome({ id, phase, scope, metric, measurement, applicationId, evaluationId,
+      measuredAt }, candidate, timestamp, application, evaluation);
     const duplicate = state.outcomes.find((item) => item.digest === receipt.digest);
     if (duplicate) return { receipt: duplicate, candidate, decision: "unchanged", learningPath, unchanged: true };
     state.outcomes.push(receipt);
@@ -799,8 +961,9 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
         if (OUTCOME_AUTO_KINDS.has(candidate.kind)) {
           if (SCOPE_FIELDS.every((field) => candidate.scope?.[field] === null)) continue;
           if (candidate.requiresLocalReview) continue;
-          const receipts = promotableReceipts(state, candidate, timestamp);
-          if (receipts.length < state.config.minOutcomeReceipts) continue;
+          const planned = promotableReceipts(state, candidate, timestamp);
+          if (!planned) continue;
+          const { contract, receipts } = planned;
           const baseline = receipts.reduce((sum, item) => sum + item.metric.value, 0) / receipts.length;
           accepted.push(acceptCandidate(state, candidate, timestamp, true, {
             mode: "outcome-canary",
@@ -812,9 +975,12 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
               status: "active",
               scope: receipts[0].scope,
               metric: { name: receipts[0].metric.name, direction: receipts[0].metric.direction },
+              evaluationId: contract.id,
+              evaluationDigest: contract.digest,
               baseline,
               beforeReceipts: receipts.map((item) => item.id),
-              expiresAt: new Date(new Date(timestamp).getTime() + state.config.canaryTtlDays * 86400000).toISOString()
+              expiresAt: new Date(Math.min(new Date(contract.expiresAt).getTime(),
+                new Date(timestamp).getTime() + state.config.canaryTtlDays * 86400000)).toISOString()
             },
             authority: "context-only"
           }));
@@ -983,6 +1149,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
     .map((candidate) => {
       const outcomes = learning.outcomes.filter((item) => item.learningId === candidate.id);
       const applications = learning.applications.filter((item) => item.learningId === candidate.id);
+      const evaluations = learning.evaluations.filter((item) => item.learningId === candidate.id);
       const canary = candidate.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
       const stale = canary?.status === "active" && new Date(canary.expiresAt).getTime() < new Date(timestamp).getTime();
       return {
@@ -994,6 +1161,12 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
         afterReceipts: outcomes.filter((item) => item.phase === "after").length,
         boundAfterReceipts: outcomes.filter((item) => item.phase === "after" && item.applicationId
           && applications.some((application) => application.id === item.applicationId)).length,
+        plannedOutcomeReceipts: outcomes.filter((item) => item.schema === "agentspine.learning-outcome/v3"
+          && evaluations.some((contract) => contract.id === item.evaluationId)).length,
+        evaluationContracts: evaluations.length,
+        activeEvaluationId: canary?.evaluationId || [...evaluations]
+          .filter((contract) => new Date(contract.expiresAt).getTime() >= new Date(timestamp).getTime())
+          .sort((a, b) => b.registeredAt.localeCompare(a.registeredAt))[0]?.id || null,
         applicationReceipts: applications.length,
         latestApplicationId: [...applications].sort((a, b) => b.projectedAt.localeCompare(a.projectedAt))[0]?.id || null,
         canaryStatus: stale ? "stale" : (canary?.status || "not-applicable"),
@@ -1053,6 +1226,7 @@ export async function deleteLearning({ root = process.cwd(), id }) {
     state.candidates = state.candidates.filter((entry) => entry.id !== id);
     state.outcomes = state.outcomes.filter((entry) => entry.learningId !== id);
     state.applications = state.applications.filter((entry) => entry.learningId !== id);
+    state.evaluations = state.evaluations.filter((entry) => entry.learningId !== id);
     state.history = state.history.filter((entry) => entry.recordId !== id && entry.value?.id !== id);
     return { deleted: existed, id, learningPath };
   });
@@ -1065,6 +1239,7 @@ export async function purgeLearningBySubject({ root = process.cwd(), subjectId }
     state.candidates = state.candidates.filter((entry) => entry.subjectId !== subjectId);
     state.outcomes = state.outcomes.filter((entry) => !ids.has(entry.learningId));
     state.applications = state.applications.filter((entry) => !ids.has(entry.learningId));
+    state.evaluations = state.evaluations.filter((entry) => !ids.has(entry.learningId));
     state.history = state.history.filter((entry) => entry.subjectId !== subjectId && !ids.has(entry.recordId) && !ids.has(entry.value?.id));
     return { deleted: ids.size, subjectId, learningPath };
   });
@@ -1095,6 +1270,9 @@ export function learningFindings(learning, graph) {
     if (!candidate.scope || Object.keys(candidate.scope).some((field) => !SCOPE_FIELDS.includes(field))
       || Object.values(candidate.scope || {}).some((value) => value !== null && !ID_RE.test(value))) findings.push(`invalid-scope:${candidate.id}`);
     if (candidate.status === "accepted") {
+      const canaryEvaluation = candidate.promotion?.canary?.evaluationId
+        ? (learning.evaluations || []).find((contract) => contract.id === candidate.promotion.canary.evaluationId)
+        : null;
       const manualProof = candidate.automatic === false
         && candidate.review?.decision === "accept" && candidate.review?.confirmedByUser === true;
       const automaticProof = candidate.automatic === true
@@ -1116,7 +1294,10 @@ export function learningFindings(learning, graph) {
           && ["active", "validated"].includes(candidate.promotion?.canary?.status)
           && candidate.confidence >= candidate.promotion?.minConfidence
           && distinctEvidence(candidate) >= candidate.promotion?.minEvidence
-          && candidate.promotion?.canary?.beforeReceipts?.length >= learning.config.minOutcomeReceipts));
+          && candidate.promotion?.canary?.beforeReceipts?.length >= (canaryEvaluation?.thresholds.beforeReceipts
+            ?? learning.config.minOutcomeReceipts)
+          && (!candidate.promotion?.canary?.evaluationId
+            || (canaryEvaluation && canaryEvaluation.digest === candidate.promotion.canary.evaluationDigest))));
       if (!candidate.acceptedAt || (!manualProof && !automaticProof)) findings.push(`invalid-acceptance:${candidate.id}`);
       if (candidate.promotion?.mode === "outcome-canary" && candidate.promotion?.canary?.status === "active"
         && new Date(candidate.promotion.canary.expiresAt).getTime() < Date.now()) findings.push(`stale-canary:${candidate.id}`);
@@ -1129,6 +1310,13 @@ export function learningFindings(learning, graph) {
     if (!valid || outcomeIds.has(receipt.id)) findings.push(`invalid-outcome:${receipt.id || "unknown"}`);
     outcomeIds.add(receipt.id);
   }
+  const evaluationIds = new Set();
+  for (const contract of learning.evaluations || []) {
+    const candidate = learning.candidates.find((item) => item.id === contract.learningId);
+    const valid = storedEvaluationStructure(contract) && candidate && scopeContains(candidate.scope, contract.scope);
+    if (!valid || evaluationIds.has(contract.id)) findings.push(`invalid-evaluation:${contract.id || "unknown"}`);
+    evaluationIds.add(contract.id);
+  }
   const applicationIds = new Set();
   for (const receipt of learning.applications || []) {
     const candidate = learning.candidates.find((item) => item.id === receipt.learningId);
@@ -1137,8 +1325,11 @@ export function learningFindings(learning, graph) {
     applicationIds.add(receipt.id);
   }
   for (const receipt of learning.outcomes || []) {
-    if (receipt.schema === "agentspine.learning-outcome/v2" && receipt.phase === "after"
+    if (["agentspine.learning-outcome/v2", "agentspine.learning-outcome/v3"].includes(receipt.schema) && receipt.phase === "after"
       && !applicationIds.has(receipt.applicationId)) findings.push(`unbound-outcome:${receipt.id}`);
+    if (receipt.schema === "agentspine.learning-outcome/v3" && !evaluationIds.has(receipt.evaluationId)) {
+      findings.push(`unplanned-outcome:${receipt.id}`);
+    }
   }
   for (const entry of learning.history) {
     const value = entry.value || {};

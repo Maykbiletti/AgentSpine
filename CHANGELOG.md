@@ -4,6 +4,23 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-01
+
+### Added
+
+- Immutable `agentspine.learning-evaluation/v1` contracts bind each automatic behavior experiment to a predeclared task, dataset, evaluator protocol, exact scope, evaluator allowlist, case floor, expiry and promotion thresholds.
+- `agentspine.learning-outcome/v3` receipts bind both baseline and post-application measurements to one evaluation contract; CLI, Doctor, audit and read-only status expose planned versus legacy-unplanned evidence.
+
+### Changed
+
+- Automatic Canary promotion and validation use the thresholds frozen in the evaluation contract, so later configuration changes cannot manufacture improvement or suppress a regression.
+- Benchmark registration is an explicit local operation; outcome recording rejects missing, stale, cross-scope, metric-drifted and evaluator-drifted contracts.
+
+### Security
+
+- Evaluation state stores only stable IDs, SHA-256 digests, numeric thresholds, scope and timestamps. Task content, datasets, protocols, prompts, transcripts, credentials and authority remain outside learning state.
+- Model suggestions still cannot promote learning, protected lessons cannot receive automatic evaluation contracts, and a single blocking defect still forces immediate rollback.
+
 ## [0.12.0] - 2026-09-01
 
 ### Added
@@ -405,7 +422,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.4...v0.12.0
 [0.11.4]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.2...v0.11.3

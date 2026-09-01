@@ -10,7 +10,7 @@ import {
 import {
   addLearningEvidence, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
-  recordLearningOutcome, reviewLearning, rollbackLearning
+  recordLearningOutcome, registerLearningEvaluation, reviewLearning, rollbackLearning
 } from "./lib/learning.js";
 import { configureContinuity, loadContinuity, purgeContinuity } from "./lib/continuity.js";
 import {
@@ -137,7 +137,8 @@ Usage:
   agentspine learn-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine learn-context [root] [--group id] [--include-private] [--kind preference,goal]
   agentspine learn-evaluate [root]
-  agentspine learn-outcome <id> --phase before|after --metric name --direction higher|lower --value 0..1 --evaluator id --measurement objective|user-feedback|model-suggestion [--application id] [--blocking-defects n]
+  agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id [--expires-at date] --confirm-local-evaluation
+  agentspine learn-outcome <id> --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --evaluator id --measurement objective|user-feedback|model-suggestion [--application id] [--blocking-defects n]
   agentspine learn-status [root] [--persona id --user id --tenant id --project id --group id --task id]
   agentspine learn-rollback <id> --reason text
   agentspine learn-delete <id>
@@ -451,6 +452,20 @@ export async function run(argv = process.argv.slice(2)) {
     return output(await evaluateLearning({ root: positional[0] || process.cwd() }), json);
   }
 
+  if (command === "learn-evaluation") {
+    return output(await registerLearningEvaluation({
+      root: flags.root || process.cwd(), id: positional[0], learningId: flags.learning,
+      scope: learningScope(flags), metric: { name: flags.metric, direction: flags.direction },
+      benchmark: {
+        taskDigest: flags["task-digest"], datasetDigest: flags["dataset-digest"],
+        protocolDigest: flags["protocol-digest"], minCases: Number(flags["min-cases"])
+      },
+      evaluatorIds: String(flags.evaluators || "").split(",").filter(Boolean),
+      expiresAt: flags["expires-at"] || null,
+      confirmLocalEvaluation: booleanFlag(flags["confirm-local-evaluation"])
+    }), json);
+  }
+
   if (command === "learn-outcome") {
     return output(await recordLearningOutcome({
       root: flags.root || process.cwd(), learningId: positional[0], id: flags.id,
@@ -463,6 +478,7 @@ export async function run(argv = process.argv.slice(2)) {
         kind: flags.measurement || "objective", evaluatorId: flags.evaluator,
         sourceDigest: flags["source-digest"] || null
       },
+      evaluationId: flags.evaluation,
       applicationId: flags.application || null,
       measuredAt: flags.at
     }), json);
@@ -1007,14 +1023,21 @@ export async function run(argv = process.argv.slice(2)) {
     try {
       const status = await learningOutcomeStatus({ root: positional[0] || process.cwd() });
       const unboundAfterReceipts = status.records.reduce((sum, item) => sum + item.afterReceipts - item.boundAfterReceipts, 0);
+      const totalOutcomeReceipts = status.records.reduce((sum, item) => sum + item.beforeReceipts + item.afterReceipts, 0);
+      const plannedOutcomeReceipts = status.records.reduce((sum, item) => sum + item.plannedOutcomeReceipts, 0);
+      const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
-        status: status.records.some((item) => item.canaryStatus === "stale") || unboundAfterReceipts > 0 ? "degraded" : "healthy",
+        status: status.records.some((item) => item.canaryStatus === "stale")
+          || unboundAfterReceipts > 0 || unplannedOutcomeReceipts > 0 ? "degraded" : "healthy",
         candidates: status.records.length,
         activeCanaries: status.records.filter((item) => item.canaryStatus === "active").length,
         validatedCanaries: status.records.filter((item) => item.canaryStatus === "validated").length,
         staleCanaries: status.records.filter((item) => item.canaryStatus === "stale").length,
         awaitingApplication: status.records.filter((item) => item.canaryStatus === "active" && item.applicationReceipts === 0).length,
         applicationReceipts: status.records.reduce((sum, item) => sum + item.applicationReceipts, 0),
+        evaluationContracts: status.records.reduce((sum, item) => sum + item.evaluationContracts, 0),
+        plannedOutcomeReceipts,
+        unplannedOutcomeReceipts,
         boundAfterReceipts: status.records.reduce((sum, item) => sum + item.boundAfterReceipts, 0),
         unboundAfterReceipts,
         contradictions: status.records.filter((item) => item.conflictsWith.length > 0).length,
