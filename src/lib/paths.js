@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 
 export async function canonicalPath(input = process.cwd()) {
@@ -51,10 +51,22 @@ export function stateRoot(env = process.env) {
 }
 
 export function comparablePath(value) {
-  let canonical;
-  try { canonical = realpathSync.native(resolve(value)); } catch {
-    canonical = resolve(value);
+  let cursor = resolve(value);
+  const missing = [];
+  let canonical = cursor;
+  while (true) {
+    try {
+      canonical = realpathSync.native(cursor);
+      break;
+    } catch (error) {
+      if (error.code !== "ENOENT") break;
+      const parent = dirname(cursor);
+      if (parent === cursor) break;
+      missing.unshift(basename(cursor));
+      cursor = parent;
+    }
   }
+  canonical = join(canonical, ...missing);
   return canonical.replace(/[\\/]+$/, "");
 }
 

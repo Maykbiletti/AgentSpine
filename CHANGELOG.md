@@ -4,6 +4,12 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-09-01
+
+### Fixed
+
+- Nonexistent descendants inherit the canonical identity of their nearest existing ancestor, preventing macOS aliases and Windows namespace normalization from misclassifying an internal state directory as external before its first write.
+
 ## [0.11.3] - 2026-09-01
 
 ### Fixed
@@ -381,7 +387,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.3...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.4...HEAD
+[0.11.4]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/Maykbiletti/AgentSpine/compare/v0.11.0...v0.11.1
