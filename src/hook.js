@@ -16,6 +16,7 @@ import { claimChannelEvent } from "./lib/channel-runtime.js";
 import { syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
 import { captureMustRememberPrompt, recordPreflightFailure, runPreflight, verifyPreflightReceipt } from "./lib/preflight.js";
 import { isMainModule } from "./lib/runtime.js";
+import { recordHookScanAudit } from "./lib/hook-audit.js";
 
 const MAX_STDIN_BYTES = 64 * 1024;
 const STANDARD_HOST_CONTEXT_BYTES = 9500;
@@ -471,6 +472,32 @@ function isMutationTool(name = "") {
   return /(^|__)(apply_patch|edit|write|delete|move|rename|bash|exec_command|shell)(_|$)/i.test(name);
 }
 
+function isScanFailOpenTool(name = "") {
+  return /(^|__)(apply_patch|edit|write|bash|exec_command)(_|$)/i.test(name);
+}
+
+function filesystemScanError(error) {
+  return Boolean(error && (error.code === "AGENTSPINE_SCAN_INCOMPLETE" || error.agentSpineScan === true));
+}
+
+async function auditSkippedScans(input, phase, skipped = []) {
+  const item = skipped[0];
+  if (!item) return;
+  await recordHookScanAudit({
+    event: "PreToolUse", toolName: input.tool_name || null, phase,
+    error: { code: item.code, message: `${item.code}: ${item.operation} skipped ${item.path}` },
+    path: item.path, operation: item.operation, now: input.timestamp || new Date()
+  });
+}
+
+async function allowScanFailure(input, phase, error) {
+  await recordHookScanAudit({
+    event: "PreToolUse", toolName: input.tool_name || null, phase, error,
+    path: error?.path || input.cwd || process.cwd(), now: input.timestamp || new Date()
+  });
+  return { blocked: false, scanFailedOpen: true, phase, error: error.message };
+}
+
 function stringValues(value, output = []) {
   if (typeof value === "string") output.push(value);
   else if (Array.isArray(value)) value.forEach((item) => stringValues(item, output));
@@ -545,6 +572,12 @@ export async function runHook(payload = null, options = {}) {
   try {
     resolvedSources = await resolveHostSourceCatalog({ host: instructionHost, cwd, input });
   } catch (error) {
+    if (event === "PreToolUse" && isScanFailOpenTool(input.tool_name) && filesystemScanError(error)) {
+      const allowed = await allowScanFailure(input, "source-resolution", error);
+      if (payload) return allowed;
+      process.stdout.write("{}\n");
+      return;
+    }
     const reason = `AgentSpine source resolution failed closed: ${error.message}`;
     if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
       if (payload) return { blocked: true, failedClosed: true, reason };
@@ -574,6 +607,10 @@ export async function runHook(payload = null, options = {}) {
   let selfstarter = null;
   let channelEvent = null;
   let learningDelivery = null;
+
+  if (event === "PreToolUse" && isScanFailOpenTool(input.tool_name) && resolvedSources.diagnostics.skipped?.length) {
+    await auditSkippedScans(input, "source-resolution", resolvedSources.diagnostics.skipped);
+  }
 
   if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
     const { graph } = await loadGraph(root, catalog);
@@ -624,6 +661,12 @@ export async function runHook(payload = null, options = {}) {
         });
       }
     } catch (error) {
+      if (isScanFailOpenTool(input.tool_name) && filesystemScanError(error)) {
+        const allowed = await allowScanFailure(input, "self-starter", error);
+        if (payload) return allowed;
+        process.stdout.write("{}\n");
+        return;
+      }
       const reason = `AgentSpine self-starter denied this effect: ${error.message}`;
       if (payload) return { blocked: true, reason, selfstarter: { allowed: false, reason: error.message } };
       deny(reason);

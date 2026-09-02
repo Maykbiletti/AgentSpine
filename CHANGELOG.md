@@ -4,6 +4,14 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.52.1] - 2026-09-02
+
+### Fixed
+
+- Bounded source and workspace-fingerprint walkers skip inaccessible or disappearing directories and entries and report deterministic diagnostics.
+- Edit, Write, apply_patch, Bash, and exec_command remain allowed when source or self-starter filesystem scanning fails; a best-effort local audit record retains the error and path.
+- Real Windows `icacls` and unprivileged POSIX permission probes verify the two walkers, hook decision, audit record, and source-byte preservation.
+
 ## [0.52.0] - 2026-09-02
 
 ### Added

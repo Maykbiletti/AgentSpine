@@ -282,6 +282,10 @@ test("workspace fingerprints are content-bound and reject symlink escapes", asyn
   assert.notEqual(after.digest, before.digest);
   if (process.platform !== "win32") {
     const { symlink } = await import("node:fs/promises");
+    const broken = join(root, "broken-link");
+    await symlink(join(root, "missing-target"), broken);
+    const withBrokenLink = await workspaceFingerprint(root);
+    assert.ok(withBrokenLink.skipped.some((item) => item.path === broken && item.code === "ENOENT"));
     await symlink("/tmp", join(root, "outside-link"));
     await assert.rejects(workspaceFingerprint(root), /rejects symbolic link/);
   }

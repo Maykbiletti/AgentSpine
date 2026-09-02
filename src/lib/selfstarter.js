@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, open, opendir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, open, opendir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { buildCatalog } from "./catalog.js";
 import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
@@ -21,6 +21,8 @@ const MAX_WORKSPACE_BYTES = 64 * 1024 * 1024;
 const CONFIRMATION = "local-owner-confirmed";
 const EXCLUDED_NAMES = new Set([".git", "node_modules", ".DS_Store"]);
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret)\s*[:=]\s*\S{8,}/i;
+
+function workspaceScanError(error) { error.agentSpineScan = true; return error; }
 
 function emptyPolicy(root) {
   return { schema: POLICY_SCHEMA, root, revision: 0, grants: [], history: [] };
@@ -138,7 +140,15 @@ async function withLock(path, read, operation, save = true) {
 }
 
 async function pathsFor(root, providedCatalog = null) {
-  const catalog = providedCatalog || await buildCatalog(root);
+  let catalog = providedCatalog;
+  if (!catalog) {
+    try {
+      catalog = await buildCatalog(root);
+    } catch (error) {
+      if (typeof error?.code === "string" && (error.path || error.syscall)) throw workspaceScanError(error);
+      throw error;
+    }
+  }
   const directory = await projectStateDir(catalog.root);
   return {
     catalog,
@@ -147,19 +157,57 @@ async function pathsFor(root, providedCatalog = null) {
   };
 }
 
-async function collectWorkspaceFiles(root) {
+function skippableTraversalError(error) {
+  return ["EPERM", "EACCES", "ENOENT"].includes(error?.code);
+}
+
+function skippedPath(skipped, path, error, operation) {
+  skipped.push({ path, code: error.code, operation });
+}
+
+export async function collectWorkspaceFiles(root) {
   const files = [];
+  const skipped = [];
   let totalBytes = 0;
   async function walk(directory) {
-    const stream = await opendir(directory);
+    let stream;
+    try {
+      stream = await opendir(directory);
+    } catch (error) {
+      if (!skippableTraversalError(error)) throw workspaceScanError(error);
+      skippedPath(skipped, error.path || directory, error, "opendir");
+      return;
+    }
     const entries = [];
-    for await (const entry of stream) entries.push(entry);
+    try {
+      for await (const entry of stream) entries.push(entry);
+    } catch (error) {
+      if (!skippableTraversalError(error)) throw workspaceScanError(error);
+      skippedPath(skipped, directory, error, "readdir");
+      return;
+    }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       if (EXCLUDED_NAMES.has(entry.name)) continue;
       const path = join(directory, entry.name);
-      const metadata = await lstat(path);
-      if (metadata.isSymbolicLink()) throw new Error(`workspace fingerprint rejects symbolic link: ${relative(root, path)}`);
+      let metadata;
+      try {
+        metadata = await lstat(path);
+      } catch (error) {
+        if (!skippableTraversalError(error)) throw workspaceScanError(error);
+        skippedPath(skipped, error.path || path, error, "lstat");
+        continue;
+      }
+      if (metadata.isSymbolicLink()) {
+        try {
+          await realpath(path);
+        } catch (error) {
+          if (!skippableTraversalError(error)) throw workspaceScanError(error);
+          skippedPath(skipped, error.path || path, error, "realpath");
+          continue;
+        }
+        throw new Error(`workspace fingerprint rejects symbolic link: ${relative(root, path)}`);
+      }
       if (metadata.isDirectory()) await walk(path);
       else if (metadata.isFile()) {
         files.push({ path, relativePath: relative(root, path).split(sep).join("/"), size: metadata.size });
@@ -171,18 +219,42 @@ async function collectWorkspaceFiles(root) {
     }
   }
   await walk(root);
-  return files;
+  return { files, skipped: skipped.sort((a, b) => a.path.localeCompare(b.path) || a.operation.localeCompare(b.operation)) };
 }
 
 export async function workspaceFingerprint(inputRoot = process.cwd()) {
   const root = resolve(inputRoot);
-  const files = await collectWorkspaceFiles(root);
+  const collected = await collectWorkspaceFiles(root);
+  const files = [];
+  const skipped = [...collected.skipped];
   const hash = createHash("sha256");
-  for (const file of files) {
+  for (const file of collected.files) {
+    let content;
+    try {
+      content = await readFile(file.path);
+    } catch (error) {
+      if (!skippableTraversalError(error)) throw workspaceScanError(error);
+      skippedPath(skipped, error.path || file.path, error, "readFile");
+      continue;
+    }
+    files.push(file);
     hash.update(file.relativePath).update("\0").update(String(file.size)).update("\0");
-    hash.update(await readFile(file.path)).update("\0");
+    hash.update(content).update("\0");
   }
-  return { digest: hash.digest("hex"), files: files.length, bytes: files.reduce((sum, file) => sum + file.size, 0) };
+  return {
+    digest: hash.digest("hex"), files: files.length, bytes: files.reduce((sum, file) => sum + file.size, 0),
+    skipped: skipped.sort((a, b) => a.path.localeCompare(b.path) || a.operation.localeCompare(b.operation))
+  };
+}
+
+function incompleteWorkspaceScan(skipped) {
+  const first = skipped[0];
+  const error = new Error(`workspace scan skipped ${skipped.length} inaccessible path${skipped.length === 1 ? "" : "s"}: ${first.path}`);
+  error.code = "AGENTSPINE_SCAN_INCOMPLETE";
+  error.path = first.path;
+  error.syscall = first.operation;
+  error.skipped = skipped;
+  return error;
 }
 
 function knownActor(graph, id) {
@@ -649,6 +721,7 @@ export async function authorizeJobEffect({
   const deliveryId = stableId(toolUseId, "toolUseId");
   const at = timestamp(now, "now");
   const fingerprint = await workspaceFingerprint(root);
+  if (fingerprint.skipped.length) throw incompleteWorkspaceScan(fingerprint.skipped);
   return lockedStates(root, ({ policy, state, coordination, paths }) => {
     const job = state.jobs.find((item) => item.id === scope.jobId);
     if (!job) throw new Error("unknown self-starter job");

@@ -21,6 +21,7 @@ const SAFE_NAME = /^[A-Za-z0-9._-]{1,128}$/;
 const SKIP_EXTRA_DIRS = new Set([".git", ".hg", ".svn", ".claude", ".codex", "node_modules", "vendor", "dist", "build", "coverage"]);
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
+function sourceScanError(error) { error.agentSpineScan = true; return error; }
 function registryPath(env = process.env) { return join(stateRoot(env), "source-roots.json"); }
 function emptyRegistry() { return { schema: SOURCE_REGISTRY_SCHEMA, revision: 0, bindings: [], history: [] }; }
 
@@ -89,7 +90,7 @@ async function existingRegular(path) {
     return realpath(path);
   } catch (error) {
     if (error.code === "ENOENT") return null;
-    throw error;
+    throw sourceScanError(error);
   }
 }
 
@@ -100,7 +101,7 @@ async function existingDirectory(path) {
     return realpath(path);
   } catch (error) {
     if (error.code === "ENOENT") return null;
-    throw error;
+    throw sourceScanError(error);
   }
 }
 
@@ -167,7 +168,7 @@ async function findRoot(cwd, markers) {
   while (true) {
     for (const marker of markers) {
       try { await lstat(join(cursor, marker)); return { root: cursor, resolution: "project-marker" }; } catch (error) {
-        if (error.code !== "ENOENT") throw error;
+        if (error.code !== "ENOENT") throw sourceScanError(error);
       }
     }
     const parent = dirname(cursor);
@@ -180,6 +181,14 @@ function skippedExtraDirectory(name) {
   const lower = name.toLowerCase();
   return SKIP_EXTRA_DIRS.has(name) || SKIP_EXTRA_DIRS.has(lower)
     || lower.includes("dropbox") || lower === "onedrive" || lower.startsWith("onedrive - ");
+}
+
+function skippableTraversalError(error) {
+  return ["EPERM", "EACCES", "ENOENT"].includes(error?.code);
+}
+
+function recordSkippedPath(skipped, path, error, operation) {
+  skipped.push({ path, code: error.code, operation });
 }
 
 async function containsProjectMarker(directory) {
@@ -202,21 +211,49 @@ async function containsEmbeddedHostProfile(directory) {
 async function boundedMarkdownTree(directory, prefix, host, scope, precedenceStart, deadline, {
   projectBoundary = false,
   maxFiles = MAX_RULE_FILES,
-  maxDirectoryEntries = MAX_DIRECTORY_ENTRIES
+  maxDirectoryEntries = MAX_DIRECTORY_ENTRIES,
+  skipped = []
 } = {}) {
-  const root = await existingDirectory(directory);
+  let root;
+  try {
+    root = await existingDirectory(directory);
+  } catch (error) {
+    if (!skippableTraversalError(error)) throw sourceScanError(error);
+    recordSkippedPath(skipped, directory, error, "inspect-directory");
+    return [];
+  }
   if (!root) return [];
   const output = [];
   let visitedEntries = 0;
   async function walk(current) {
     if (Date.now() > deadline) throw new Error(`host-native source resolution exceeded ${SOURCE_RESOLUTION_MS} ms`);
-    if (projectBoundary && current !== root
-      && (await containsProjectMarker(current) || await containsEmbeddedHostProfile(current))) return;
+    try {
+      if (projectBoundary && current !== root
+        && (await containsProjectMarker(current) || await containsEmbeddedHostProfile(current))) return;
+    } catch (error) {
+      if (!skippableTraversalError(error)) throw sourceScanError(error);
+      recordSkippedPath(skipped, current, error, "inspect-directory-boundary");
+      return;
+    }
     const entries = [];
-    for await (const entry of await opendir(current)) {
-      visitedEntries += 1;
-      if (visitedEntries > maxDirectoryEntries) throw new Error(`host-native source tree exceeds ${maxDirectoryEntries} entries`);
-      entries.push(entry);
+    let stream;
+    try {
+      stream = await opendir(current);
+    } catch (error) {
+      if (!skippableTraversalError(error)) throw sourceScanError(error);
+      recordSkippedPath(skipped, error.path || current, error, "opendir");
+      return;
+    }
+    try {
+      for await (const entry of stream) {
+        visitedEntries += 1;
+        if (visitedEntries > maxDirectoryEntries) throw new Error(`host-native source tree exceeds ${maxDirectoryEntries} entries`);
+        entries.push(entry);
+      }
+    } catch (error) {
+      if (!skippableTraversalError(error)) throw sourceScanError(error);
+      recordSkippedPath(skipped, current, error, "readdir");
+      return;
     }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
@@ -310,8 +347,9 @@ export async function inspectSourceRegistry(env = process.env) {
 
 async function claudeSources({ cwd, projectRoot, configDir, input, env, registry, deadline, memoryHooks }) {
   const sources = [];
+  const skipped = [];
   await addFile(sources, join(configDir, "CLAUDE.md"), { id: "claude:user/CLAUDE.md", host: "claude", scope: "user", binding: "CLAUDE_CONFIG_DIR", precedence: 100 });
-  sources.push(...await boundedMarkdownTree(join(configDir, "rules"), "claude:user/rules", "claude", "user", 110, deadline));
+  sources.push(...await boundedMarkdownTree(join(configDir, "rules"), "claude:user/rules", "claude", "user", 110, deadline, { skipped }));
   let precedence = 1000;
   for (const directory of ancestorsBetween(projectRoot, cwd)) {
     for (const name of ["CLAUDE.md", "CLAUDE.local.md"]) {
@@ -321,7 +359,7 @@ async function claudeSources({ cwd, projectRoot, configDir, input, env, registry
     await addFile(sources, join(directory, ".claude", "CLAUDE.md"), { id: `claude:project/${relative(projectRoot, join(directory, ".claude", "CLAUDE.md")).replaceAll("\\", "/")}`,
       host: "claude", scope: "project", binding: "native-project-chain", precedence: precedence++ });
   }
-  sources.push(...await boundedMarkdownTree(join(projectRoot, ".claude", "rules"), "claude:project/.claude/rules", "claude", "project", precedence, deadline));
+  sources.push(...await boundedMarkdownTree(join(projectRoot, ".claude", "rules"), "claude:project/.claude/rules", "claude", "project", precedence, deadline, { skipped }));
 
   let memoryRoot = null;
   let memoryProvenance = null;
@@ -377,7 +415,7 @@ async function claudeSources({ cwd, projectRoot, configDir, input, env, registry
       });
     }
   }
-  return { sources, memoryRoot, memoryProvenance, memoryDiagnostics };
+  return { sources, memoryRoot, memoryProvenance, memoryDiagnostics, skipped };
 }
 
 async function codexSources({ cwd, projectRoot, codexHome, config }) {
@@ -411,6 +449,7 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   let hostHome;
   let projectRoot;
   let sources;
+  let skipped = [];
   let hostDetails = {};
   let rootResolution = "explicit-root";
   if (host === "codex") {
@@ -428,6 +467,7 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, [".git"]));
     const result = await claudeSources({ cwd: canonicalCwd, projectRoot, configDir: hostHome, input, env, registry, deadline, memoryHooks });
     sources = result.sources;
+    skipped = result.skipped;
     hostDetails = { memoryRoot: result.memoryRoot, memoryProvenance: result.memoryProvenance,
       memoryDiagnostics: result.memoryDiagnostics };
   }
@@ -436,7 +476,7 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   const skippedFallbackHomeTree = skippedHomeTree && rootResolution === "cwd-fallback";
   if (!skippedHomeTree) {
     sources.push(...await boundedMarkdownTree(projectRoot, "agentspine:project", host, "project", 3000, deadline,
-      { projectBoundary: true, maxFiles: MAX_PROJECT_FILES, maxDirectoryEntries: MAX_PROJECT_DIRECTORY_ENTRIES }));
+      { projectBoundary: true, maxFiles: MAX_PROJECT_FILES, maxDirectoryEntries: MAX_PROJECT_DIRECTORY_ENTRIES, skipped }));
   }
   const nativeNames = new Set(host === "codex"
     ? ["AGENTS.override.md", "AGENTS.md", ...(hostDetails.fallbackNames || [])]
@@ -446,7 +486,13 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   sources = [...new Map(sources.map((item) => [item.path, item])).values()];
   if (sources.length > MAX_SOURCES) throw new Error(`host-native source set exceeds ${MAX_SOURCES} files`);
   if (Date.now() > deadline) throw new Error(`host-native source resolution exceeded ${SOURCE_RESOLUTION_MS} ms`);
-  const documents = await indexExplicitDocuments(sources);
+  let documents;
+  try {
+    documents = await indexExplicitDocuments(sources);
+  } catch (error) {
+    if (typeof error?.code === "string" && (error.path || error.syscall)) throw sourceScanError(error);
+    throw error;
+  }
   if (Date.now() > deadline) throw new Error(`host-native source resolution exceeded ${SOURCE_RESOLUTION_MS} ms`);
   const totalBytes = documents.reduce((sum, document) => sum + document.bytes, 0);
   if (totalBytes > MAX_TOTAL_SOURCE_BYTES) throw new Error("host-native source set exceeds 8 MiB");
@@ -459,6 +505,7 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     personalContinuityLoaded: documents.some((item) => item.sourceScope === "user") || Boolean(activeUserState),
     broadHomeScan: false, projectTreeScan: skippedFallbackHomeTree ? "skipped-unmarked-home"
       : skippedHomeTree ? "skipped-home-root" : "bounded",
+    skipped: skipped.sort((a, b) => a.path.localeCompare(b.path) || a.operation.localeCompare(b.operation)),
     rootResolution, registryRevision: registry.revision,
     ...(host === "claude" ? {
       memoryBound: Boolean(hostDetails.memoryRoot),

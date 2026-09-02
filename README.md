@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.52.1` keeps PreToolUse available when a bounded source or self-starter filesystem scan encounters an inaccessible or disappearing path. EPERM, EACCES, and ENOENT entries are skipped and reported without exposing file content; scan failures on Edit, Write, apply_patch, Bash, and exec_command are allowed and recorded in the local diagnostic audit log. Policy violations and protected-source writes remain fail-closed.
+
 Version `0.52.0` makes every locally attested user-feedback or objective-test anchor single-use for experiment admission within its exact scope. Evaluation v28 and bounded retry v29 atomically register content-free lineage tombstones and bind them into candidate admission v4. They survive candidate deletion and subject purge, so a fresh candidate or recreated contract cannot reuse the same evidence or independence identity; parallel races yield one contract, manipulation fails closed after restart, and foreign scopes remain independent with zero matching diagnostics.
 
 Version `0.51.0` adds precise local withdrawal of a mistaken evidence-source attestation. `learn-evidence-source-attestation-revoke` binds the exact attestation, candidate admission, evaluation, target and scope without retaining its explanation. The affected lesson is withheld immediately; measurements, projections, deliveries, outcomes and renewal are blocked, and the next locked evaluation pass rolls back the dependent lineage while restoring a safe predecessor. Parallel withdrawal is idempotent, manipulation fails closed after restart, and foreign scopes receive zero diagnostics.

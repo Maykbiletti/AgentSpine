@@ -55,7 +55,7 @@ test("BLUN, Claude, and Codex registrations complete a real MCP initialize hands
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
-  assert.equal(result.version, "0.52.0");
+  assert.equal(result.version, "0.52.1");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
   assert.deepEqual(result.hookDiscovery, {
     blun: "plugin-manifest", claude: "default-hooks-directory", codex: "bundled-host-adapter",
