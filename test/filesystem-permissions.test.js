@@ -81,8 +81,14 @@ test("unreadable directories are skipped by both walkers and never deny PreToolU
   assert.ok(output.fingerprintSkipped.some((item) => item.path === canonicalRestricted && ["EPERM", "EACCES"].includes(item.code)),
     JSON.stringify(output.fingerprintSkipped));
   assert.equal(output.sourceDocuments.some((path) => path.includes("PRIVATE.md")), false);
-  assert.equal(output.hook.blocked, false);
-  assert.equal(output.hook.scanFailedOpen, true);
-  assert.ok(output.audit.some((item) => item.path === canonicalRestricted && item.decision === "allow"));
+  assert.deepEqual(output.hooks.map((item) => item.toolName),
+    ["Edit", "Write", "apply_patch", "Bash", "exec_command"]);
+  for (const { toolName, result: hook } of output.hooks) {
+    assert.equal(hook.blocked, false, toolName);
+    assert.equal(hook.scanFailedOpen, true, toolName);
+  }
+  const permissionAudits = output.audit.filter((item) => item.path === canonicalRestricted && item.decision === "allow");
+  assert.deepEqual(permissionAudits.map((item) => item.toolName),
+    ["Edit", "Write", "apply_patch", "Bash", "exec_command"]);
   assert.equal(hash(await readFile(sourcePath)), before);
 });

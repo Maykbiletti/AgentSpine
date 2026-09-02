@@ -1,12 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { blunRuntimeContext, blunRuntimeMessage, runHook } from "../src/hook.js";
-import { hookScanAuditPath } from "../src/lib/hook-audit.js";
 
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -77,42 +76,6 @@ test("oversized PostToolUse image results exit silently without touching project
   assert.equal(unmarked.stdout, "");
   assert.match(unmarked.stderr, /hook input exceeds the 64 KiB limit/);
   assert.deepEqual(await readdir(state), []);
-});
-
-test("PreToolUse fails open and audits a source filesystem scan error", async (t) => {
-  const workspace = await mkdtemp(join(tmpdir(), "agentspine-hook-scan-fail-open-"));
-  const root = join(workspace, "project");
-  const state = join(workspace, "state");
-  const profile = join(workspace, "profile");
-  await Promise.all([mkdir(join(root, ".git"), { recursive: true }), mkdir(state), mkdir(profile)]);
-  await writeFile(join(root, ".claude"), "not a directory\n", "utf8");
-  const canonicalRoot = await realpath(root);
-  const previous = { state: process.env.AGENTSPINE_STATE_DIR, profile: process.env.CLAUDE_CONFIG_DIR };
-  process.env.AGENTSPINE_STATE_DIR = state;
-  process.env.CLAUDE_CONFIG_DIR = profile;
-  t.after(async () => {
-    if (previous.state === undefined) delete process.env.AGENTSPINE_STATE_DIR; else process.env.AGENTSPINE_STATE_DIR = previous.state;
-    if (previous.profile === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = previous.profile;
-    await rm(workspace, { recursive: true, force: true });
-  });
-
-  for (const toolName of ["Edit", "Write", "apply_patch", "Bash", "exec_command"]) {
-    const result = await runHook({
-      hook_event_name: "PreToolUse", host: "claude", cwd: root,
-      tool_name: toolName, tool_input: { file_path: "allowed.txt", content: "allowed\n" }
-    });
-    assert.equal(result.blocked, false, toolName);
-    assert.equal(result.scanFailedOpen, true, toolName);
-    assert.equal(result.phase, "source-resolution", toolName);
-  }
-  const records = (await readFile(hookScanAuditPath(), "utf8")).trim().split("\n").map(JSON.parse);
-  assert.equal(records.length, 5);
-  assert.deepEqual(records.map((item) => item.toolName), ["Edit", "Write", "apply_patch", "Bash", "exec_command"]);
-  for (const record of records) {
-    assert.equal(record.decision, "allow");
-    assert.equal(record.path, join(canonicalRoot, ".claude", "CLAUDE.md"));
-    assert.equal(record.code, "ENOTDIR");
-  }
 });
 
 test("installed hook never recursively scans a Windows-profile home even when it has a project marker", async (t) => {
