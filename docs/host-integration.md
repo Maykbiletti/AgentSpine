@@ -21,6 +21,8 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
+Version `0.40.0` replaces the `0.39.0` plugin cache identity.
+
 Version `0.39.0` replaces the `0.38.0` plugin cache identity.
 
 Version `0.38.0` replaces the `0.37.0` plugin cache identity.
@@ -117,6 +119,8 @@ The audit exits non-zero when a required gate fails, making it suitable for inst
 Use `agentspine doctor --host claude|codex --cwd /active/project --json` or `agentspine source-status --host claude|codex --cwd /active/project --json` to see the checked scope counts and a concrete empty/fail-closed reason. The lifecycle adapter never substitutes the installation directory for the active host hierarchy. Details and official host references are in [host-native source roots](source-roots.md).
 
 The provider-neutral lifecycle adapter covers `SessionStart` (including resume and compact starts), `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `PostCompact`, `Stop`, and `SubagentStop`. Claude Code additionally registers its documented `InstructionsLoaded` observability event; Codex does not. `UserPromptSubmit` is the blocking boundary. Before a prompt can proceed, `agentspine.preflight/v2` loads complete mandatory host instructions, confirmed Must-Remember entries and every locally required retrieval provider, then consumes one exact-turn receipt. Start and compaction boundaries retain the scoped `session_briefing`; no model-side MCP selection is required. Full behavior and the documented command-hook timeout limitation are in [pre-answer recall gate](preflight-recall.md).
+
+PostToolUse can contain an image or another tool result larger than the adapter's 64 KiB input boundary. Version 0.40 gives only that optional host registration an explicit silent-oversize lane: the adapter drains the payload, exits successfully, emits no stdout or stderr and writes no partial state. Session, prompt, compaction, stop and PreToolUse registrations do not receive that lane and remain fail-closed at the same bound.
 
 When an exact locally registered job is waiting, `SessionStart` acquires its lease and injects its real checkpoint automatically. Subsequent tool and stop hooks resolve that job from the native host session; the model does not need to repeat a job envelope. `PreToolUse` first retains the protected-source guard, then rechecks the current execution grant, assignment, scope, capability, lease, and workspace. `PostToolUse` checkpoints exactly one matching result. A new session resumes only after the same checks. Grant and job administration remain local CLI operations and are absent from MCP. No hook creates permissions.
 

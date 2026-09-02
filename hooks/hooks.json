@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\" --silent-oversize-post-tool-use",
             "timeout": 15
           }
         ]

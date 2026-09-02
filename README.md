@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.40.0` makes large image reads quiet: an oversized optional PostToolUse payload is drained and skipped with exit 0, no output and no partial state. Mandatory prompt, source-protection, compaction and completion hooks keep the strict 64 KiB fail-closed boundary.
+
 Version `0.39.0` makes corrective trials finite: `agentspine.learning-evaluation/v13` binds the only retry as attempt 2 of 2 to its exact root evaluation and objective comparison contract. A failed corrective Canary cannot be retried again, even when its timeout is locally revoked.
 Version `0.38.0` keeps a confirmed retry objectively comparable: `agentspine.learning-evaluation/v12` binds its metric, benchmark, case floor, evaluator roots, pairing rules and promotion thresholds to the failed predecessor. A corrected completion timeout is allowed, while moving the measurement goalposts fails closed.
 Version `0.37.0` makes the retry requirement enforceable. A repeated failed behavior and exact scope can receive `agentspine.learning-evaluation/v11` only after explicit local confirmation binds the latest timeout revocation to a distinct candidate, newly observed evidence and a new contract; the old Canary remains terminal and the safe predecessor stays active.

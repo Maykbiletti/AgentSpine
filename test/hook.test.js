@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,8 @@ import { blunRuntimeContext, blunRuntimeMessage, runHook } from "../src/hook.js"
 
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
 
-async function runInstalledHook({ cwd, state, blunHome, input, blun = true, environment = {} }) {
+async function runInstalledHook({ cwd, state, blunHome, input, blun = true, environment = {},
+  args = [], raw = false }) {
   return await new Promise((resolve, reject) => {
     const env = { ...process.env, AGENTSPINE_STATE_DIR: state };
     if (blun) {
@@ -24,7 +25,7 @@ async function runInstalledHook({ cwd, state, blunHome, input, blun = true, envi
     delete env.PLUGIN_ROOT;
     delete env.CLAUDE_CONFIG_DIR;
     Object.assign(env, environment);
-    const child = spawn(process.execPath, [join(pluginRoot, "src", "hook.js")], {
+    const child = spawn(process.execPath, [join(pluginRoot, "src", "hook.js"), ...args], {
       cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"]
@@ -37,12 +38,45 @@ async function runInstalledHook({ cwd, state, blunHome, input, blun = true, envi
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.once("error", reject);
     child.once("close", (code) => {
+      if (raw) return resolve({ code, stdout, stderr });
       if (code !== 0) return reject(new Error(`BLUN hook exited with ${code}: ${stderr}`));
       try { resolve(JSON.parse(stdout)); } catch (error) { reject(error); }
     });
     child.stdin.end(JSON.stringify(input));
   });
 }
+
+test("oversized PostToolUse image results exit silently without touching project or state", async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "agentspine-oversize-post-tool-"));
+  const root = join(workspace, "project");
+  const state = join(workspace, "state");
+  const blunHome = join(workspace, "host");
+  await Promise.all([mkdir(root), mkdir(state), mkdir(blunHome)]);
+  t.after(async () => rm(workspace, { recursive: true, force: true }));
+  const source = "# Synthetic rules\n\nKeep the source unchanged.\n";
+  await writeFile(join(root, "AGENTS.md"), source, "utf8");
+  const oversizedImageResult = {
+    hook_event_name: "PostToolUse", cwd: root, session_id: "session:image-read",
+    tool_use_id: "tool:image-read", tool_name: "Read",
+    tool_response: { type: "image", media_type: "image/png", data: "a".repeat(70 * 1024) }
+  };
+
+  const skipped = await runInstalledHook({
+    cwd: root, state, blunHome, input: oversizedImageResult, raw: true,
+    args: ["--silent-oversize-post-tool-use"]
+  });
+  assert.deepEqual(skipped, { code: 0, stdout: "", stderr: "" });
+  assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
+  assert.deepEqual(await readdir(state), [], "a skipped result must not create partial runtime state");
+
+  const unmarked = await runInstalledHook({
+    cwd: root, state, blunHome, input: oversizedImageResult, raw: true
+  });
+  assert.equal(unmarked.code, 2, "mandatory hook lanes retain the fail-closed input bound");
+  assert.equal(unmarked.stdout, "");
+  assert.match(unmarked.stderr, /hook input exceeds the 64 KiB limit/);
+  assert.deepEqual(await readdir(state), []);
+});
 
 test("installed hook never recursively scans a Windows-profile home even when it has a project marker", async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), "agentspine-unmarked-hook-"));

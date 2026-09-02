@@ -27,15 +27,25 @@ const KNOWN_EVENTS = new Set([
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
 const ATTENTION_WRITE_EVENTS = new Set(["UserPromptSubmit", "PostToolUse", "Stop", "SubagentStop"]);
 const SELFSTART_EVENTS = new Set(["SessionStart", "PostCompact"]);
+const SILENT_OVERSIZE_POST_TOOL_USE = Symbol("silent-oversize-post-tool-use");
+const SILENT_OVERSIZE_POST_TOOL_USE_ARG = "--silent-oversize-post-tool-use";
 
-async function readStdin() {
-  let value = "";
+async function readStdin({ silentOversizePostToolUse = false } = {}) {
+  const chunks = [];
   let bytes = 0;
+  let oversized = false;
   for await (const chunk of process.stdin) {
-    bytes += Buffer.byteLength(chunk);
-    if (bytes > MAX_STDIN_BYTES) throw new Error("hook input exceeds the 64 KiB limit");
-    value += chunk;
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const remaining = Math.max(0, MAX_STDIN_BYTES - bytes);
+    if (remaining) chunks.push(buffer.subarray(0, remaining));
+    bytes += buffer.length;
+    if (bytes > MAX_STDIN_BYTES) oversized = true;
   }
+  if (oversized) {
+    if (silentOversizePostToolUse) return SILENT_OVERSIZE_POST_TOOL_USE;
+    throw new Error("hook input exceeds the 64 KiB limit");
+  }
+  const value = Buffer.concat(chunks, bytes).toString("utf8");
   const parsed = value.trim() ? JSON.parse(value) : {};
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("hook input must be one JSON object");
   return parsed;
@@ -503,8 +513,9 @@ function blockPrompt(reason) {
   })}\n`);
 }
 
-export async function runHook(payload = null) {
-  const input = payload || await readStdin();
+export async function runHook(payload = null, options = {}) {
+  const input = payload || await readStdin(options);
+  if (input === SILENT_OVERSIZE_POST_TOOL_USE) return;
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("hook input must be one JSON object");
   const event = input.hook_event_name || input.event_name || "";
   if (!KNOWN_EVENTS.has(event)) throw new Error(`unsupported hook event: ${event || "missing"}`);
@@ -788,7 +799,11 @@ export async function runHook(payload = null) {
 }
 
 if (isMainModule(import.meta.url)) {
-  runHook().catch((error) => {
+  const args = process.argv.slice(2);
+  const silentOversizePostToolUse = args.length === 1 && args[0] === SILENT_OVERSIZE_POST_TOOL_USE_ARG;
+  const argumentError = args.length && !silentOversizePostToolUse
+    ? new Error(`unsupported hook argument: ${args[0]}`) : null;
+  (argumentError ? Promise.reject(argumentError) : runHook(null, { silentOversizePostToolUse })).catch((error) => {
     process.stderr.write(`AgentSpine hook: ${String(error.message).slice(0, 2048)}\n`);
     // Claude command hooks treat exit 2 as a blocking failure. Exit 1 is
     // fail-open, which is unsafe for malformed pre-answer payloads.

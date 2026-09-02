@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-09-02
+
+### Added
+
+- Claude Code, Codex and BLUN mark only their optional PostToolUse registration as a silent-oversize lane.
+- The installed-entrypoint test sends a synthetic 70 KiB image result and proves exit 0, empty stdout, empty stderr, byte-preserved sources and zero partial runtime state.
+
+### Changed
+
+- Oversized PostToolUse results are drained and skipped before JSON parsing, so image reads no longer produce a red lifecycle-hook error.
+
+### Security
+
+- The 64 KiB fail-closed limit remains unchanged for UserPromptSubmit, PreToolUse, session, compaction and completion hooks. Calling the adapter without the PostToolUse-only marker still exits 2 on the same oversized payload.
+
 ## [0.39.0] - 2026-09-02
 
 ### Added

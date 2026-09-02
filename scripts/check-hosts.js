@@ -35,7 +35,9 @@ function validateHooks(root, hooks, { required, commandRoot }) {
     assert(Array.isArray(registrations[0].hooks) && registrations[0].hooks.length === 1, `${event} must have exactly one hook command`);
     const command = registrations[0].hooks[0];
     assert(command.type === "command", `${event} must use a command hook`);
-    assert(command.command === `node "\${${commandRoot}}/src/hook.js"`, `${event} must use the bundled lifecycle adapter`);
+    const expected = `node "\${${commandRoot}}/src/hook.js"${event === "PostToolUse"
+      ? " --silent-oversize-post-tool-use" : ""}`;
+    assert(command.command === expected, `${event} must use the bundled lifecycle adapter`);
     assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} timeout is unsafe`);
   }
   const extras = Object.keys(hooks.hooks || {}).filter((event) => !required.includes(event));
@@ -56,7 +58,9 @@ function validateBlunHooks(root, hooks) {
     const registrations = hooks.filter((hook) => hook.event === event);
     assert(registrations.length === 1, `${event} must have exactly one BLUN registration`);
     const command = registrations[0];
-    assert(command.command === 'node "./src/hook.js"', `${event} must use the bundled BLUN lifecycle adapter`);
+    const expected = `node "./src/hook.js"${event === "PostToolUse"
+      ? " --silent-oversize-post-tool-use" : ""}`;
+    assert(command.command === expected, `${event} must use the bundled BLUN lifecycle adapter`);
     assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} BLUN timeout is unsafe`);
   }
   return { events: required, commands: required.length, entrypoint: relative(root, resolve(root, "src/hook.js")) };
