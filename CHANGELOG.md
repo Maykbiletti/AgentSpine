@@ -4,6 +4,20 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-09-02
+
+### Added
+
+- New initial evaluation v22 and bounded retry v23 contracts embed a content-free, digested `agentspine.learning-blocking-defect-policy/v1`. It freezes the covered phases, any-defect aggregation rule, pre-Canary rejection and post-Canary rollback before a measurement exists.
+
+### Changed
+
+- One eligible baseline receipt with a blocking defect now prevents Canary admission even when every numeric score and the cohort average would otherwise pass. Existing after-Canary and revalidation rollback behavior remains unchanged, and historical v1-v21 contracts remain readable.
+
+### Security
+
+- Re-signed phase, aggregation or action manipulation fails closed after restart. A favorable replay cannot replace the precommitted defective evaluator slot, exact-scope diagnostics expose only matching counts and the policy digest, foreign groups receive zero, and user-owned sources remain byte-for-byte unchanged.
+
 ## [0.47.0] - 2026-09-02
 
 ### Added

@@ -1273,6 +1273,10 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.candidateAdmissionEvaluationContracts, 0);
       const candidateEvidenceCohortEvaluationContracts = status.records.reduce((sum, item) =>
         sum + item.candidateEvidenceCohortEvaluationContracts, 0);
+      const blockingDefectBoundEvaluationContracts = status.records.reduce((sum, item) =>
+        sum + item.blockingDefectBoundEvaluationContracts, 0);
+      const blockingDefectOutcomeReceipts = status.records.reduce((sum, item) =>
+        sum + item.blockingDefectOutcomeReceipts, 0);
       const deadlineBoundApplications = status.records.reduce((sum, item) =>
         sum + item.deadlineBoundApplications, 0);
       const trialRetryEvaluationContracts = status.records.reduce((sum, item) =>
@@ -1321,6 +1325,8 @@ export async function run(argv = process.argv.slice(2)) {
         promotionBoundEvaluationContracts,
         candidateAdmissionEvaluationContracts,
         candidateEvidenceCohortEvaluationContracts,
+        blockingDefectBoundEvaluationContracts,
+        blockingDefectOutcomeReceipts,
         deadlineBoundApplications,
         trialRetryEvaluationContracts,
         comparableTrialRetryEvaluationContracts,

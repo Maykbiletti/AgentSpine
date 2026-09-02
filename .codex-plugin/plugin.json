@@ -1,6 +1,6 @@
 {
   "name": "agent-spine",
-  "version": "0.47.0",
+  "version": "0.48.0",
   "description": "A non-destructive identity and memory spine for Codex agents.",
   "author": {
     "name": "Mayk Biletti",
