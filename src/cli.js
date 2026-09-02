@@ -151,7 +151,7 @@ Usage:
   agentspine learn-evaluate [root]
   agentspine learn-evaluator-register <id> --principal-digest sha256 --confirm-local-evaluator
   agentspine learn-evaluator-revoke <id> --reason text --confirm-local-evaluator
-  agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id --evaluator-roots id=sha256,id=sha256 [--expires-at date] --confirm-local-evaluation
+  agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id --evaluator-roots id=sha256,id=sha256 [--expires-at date] [--retry-trial-failure id --confirm-local-trial-retry] --confirm-local-evaluation
   agentspine learn-evaluation-revoke <evaluation-id> --reason-code benchmark-invalid|protocol-invalid|scope-invalid|threshold-invalid|duplicate|other --reason text --confirm-local-evaluation-revocation
   agentspine learn-validation-revoke <validation-lease-id> --reason-code decision-invalid|cohort-invalid|binding-invalid|scope-invalid|duplicate|other --reason text --confirm-local-validation-revocation
   agentspine learn-trial-failure-revoke <trial-failure-id> --reason-code clock-invalid|host-invalid|receipt-invalid|scope-invalid|duplicate|other --reason text --confirm-local-trial-failure-revocation
@@ -512,6 +512,8 @@ export async function run(argv = process.argv.slice(2)) {
       evaluatorIds: String(flags.evaluators || "").split(",").filter(Boolean),
       evaluatorRoots: evaluatorRootsFlag(flags["evaluator-roots"]),
       expiresAt: flags["expires-at"] || null,
+      retryTrialFailureId: flags["retry-trial-failure"] || null,
+      confirmLocalTrialRetry: booleanFlag(flags["confirm-local-trial-retry"]),
       confirmLocalEvaluation: booleanFlag(flags["confirm-local-evaluation"])
     }), json);
   }
@@ -1265,6 +1267,8 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.deadlineBoundEvaluationContracts, 0);
       const deadlineBoundApplications = status.records.reduce((sum, item) =>
         sum + item.deadlineBoundApplications, 0);
+      const trialRetryEvaluationContracts = status.records.reduce((sum, item) =>
+        sum + item.trialRetryEvaluationContracts, 0);
       const trialFailureReceipts = status.records.reduce((sum, item) => sum + item.trialFailureReceipts, 0);
       const trialFailureRevocationReceipts = status.records.reduce((sum, item) =>
         sum + item.trialFailureRevocationReceipts, 0);
@@ -1300,6 +1304,7 @@ export async function run(argv = process.argv.slice(2)) {
         targetBoundApplications,
         deadlineBoundEvaluationContracts,
         deadlineBoundApplications,
+        trialRetryEvaluationContracts,
         trialFailureReceipts,
         trialFailureRevocationReceipts,
         evaluationRevocationReceipts,

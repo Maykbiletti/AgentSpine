@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-09-02
+
+### Added
+
+- `agentspine.learning-evaluation/v11` embeds a content-free retry admission that binds a new candidate and contract to one exact locally revoked initial-trial failure.
+- CLI, Doctor and scoped status expose retry-bound evaluation counts without exposing claims, evidence or revocation reasons; audit validates the complete retry lineage.
+
+### Changed
+
+- Repeating the same failed behavior and scope now requires the latest matching revocation, explicit local retry confirmation, a distinct candidate, evidence observed after revocation and a new evaluation contract.
+- Retry admission retains the original failed Canary as terminal and keeps the safe predecessor active until the new independent experiment succeeds.
+
+### Security
+
+- Reused or stale evidence, an older revocation, redirected target or scope, concurrent duplicate admission, cross-group diagnostics and predecessor deletion with a live dependent retry fail closed.
+
 ## [0.36.0] - 2026-09-02
 
 ### Added

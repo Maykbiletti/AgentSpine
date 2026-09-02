@@ -23,22 +23,24 @@ const MAX_STATE_BYTES = 5 * 1024 * 1024;
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret)\s*[:=]\s*\S{8,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i;
 const AUTHORITY_ASSERTION_RE = /\b(?:user|agent|person|they|he|she|i|ich|wir|nutzer|benutzer).{0,60}\b(?:may|can|is allowed|is authorized|has|have|darf|berechtigt|hat|haben).{0,50}\b(?:admin(?:istrator)?|permissions?|rights?|authorization|production access|deploy|billing|spending|policy exception|bypass|zugang|rechte|berechtigung|produktion|abrechnung|ausnahme|umgehen)\b/i;
 const PROTECTED_LESSON_RE = /\b(?:security|safety|identity|authentication|authorization|permissions?|credentials?|secrets?|policy|production|deployment|payments?|billing|tool access|file access|network access|database access|sicherheit|identität|authentifizierung|berechtigungen?|zugang|richtlinie|produktion|zahlungen?)\b/i;
-const EVALUATION_SCHEMAS = new Set(Array.from({ length: 10 }, (_, index) =>
+const EVALUATION_SCHEMAS = new Set(Array.from({ length: 11 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 1}`));
-const COVERAGE_EVALUATIONS = new Set(Array.from({ length: 9 }, (_, index) =>
+const COVERAGE_EVALUATIONS = new Set(Array.from({ length: 10 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 2}`));
-const LINEAGE_EVALUATIONS = new Set(Array.from({ length: 7 }, (_, index) =>
+const LINEAGE_EVALUATIONS = new Set(Array.from({ length: 8 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 4}`));
-const PAIRED_EVALUATIONS = new Set(Array.from({ length: 6 }, (_, index) =>
+const PAIRED_EVALUATIONS = new Set(Array.from({ length: 7 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 5}`));
-const ROOT_BOUND_EVALUATIONS = new Set(Array.from({ length: 5 }, (_, index) =>
+const ROOT_BOUND_EVALUATIONS = new Set(Array.from({ length: 6 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 6}`));
-const REGISTRY_BOUND_EVALUATIONS = new Set(Array.from({ length: 4 }, (_, index) =>
+const REGISTRY_BOUND_EVALUATIONS = new Set(Array.from({ length: 5 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 7}`));
 const INITIAL_TRIAL_EVALUATIONS = new Set(["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9",
-  "agentspine.learning-evaluation/v10"]);
-const TARGET_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10"]);
-const DEADLINE_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v10"]);
+  "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11"]);
+const TARGET_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10",
+  "agentspine.learning-evaluation/v11"]);
+const DEADLINE_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11"]);
+const TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v11"]);
 const DELIVERABLE_APPLICATIONS = new Set(Array.from({ length: 6 }, (_, index) =>
   `agentspine.learning-application/v${index + 2}`));
 const INITIAL_TRIAL_APPLICATIONS = new Set(["agentspine.learning-application/v5", "agentspine.learning-application/v6",
@@ -222,6 +224,12 @@ function normalizeState(value, root) {
     || new Set(normalized.trialFailureRevocations.map((entry) => entry.trialFailureId)).size
       !== normalized.trialFailureRevocations.length) {
     throw new Error("learning trial failure revocation state is invalid; run the audit before learning");
+  }
+  const retryContracts = normalized.evaluations.filter((contract) => TRIAL_RETRY_EVALUATIONS.has(contract.schema));
+  if (retryContracts.some((contract) => !trialRetryMatchesState(normalized, contract))
+    || new Set(retryContracts.map((contract) => contract.retry.trialFailureRevocationId)).size
+      !== retryContracts.length) {
+    throw new Error("learning trial retry state is invalid; run the audit before learning");
   }
   if (normalized.evaluationRevocations.some((receipt) => !storedEvaluationRevocationStructure(receipt)
     || !evaluationRevocationMatchesState(normalized, receipt))
@@ -1573,8 +1581,46 @@ function storedCompletionPolicyStructure(policy) {
     && policy.authority === "context-only" && policy.digest === digest(payload);
 }
 
+function trialRetryPayload({ trialFailureId, trialFailureDigest, trialFailureRevocationId,
+  trialFailureRevocationDigest, predecessorLearningId, learningId, targetDigest, scopeDigest,
+  minimumEvidenceObservedAt, admittedAt }) {
+  return {
+    schema: "agentspine.learning-trial-retry/v1",
+    trialFailureId,
+    trialFailureDigest,
+    trialFailureRevocationId,
+    trialFailureRevocationDigest,
+    predecessorLearningId,
+    learningId,
+    targetDigest,
+    scopeDigest,
+    minimumEvidenceObservedAt,
+    admittedAt,
+    authority: "context-only"
+  };
+}
+
+function storedTrialRetryStructure(retry) {
+  if (!retry || typeof retry !== "object" || Array.isArray(retry)) return false;
+  const payload = trialRetryPayload(retry);
+  return retry.schema === "agentspine.learning-trial-retry/v1"
+    && Object.keys(retry).length === 13
+    && Object.keys(retry).every((field) => ["schema", "trialFailureId", "trialFailureDigest",
+      "trialFailureRevocationId", "trialFailureRevocationDigest", "predecessorLearningId", "learningId",
+      "targetDigest", "scopeDigest", "minimumEvidenceObservedAt", "admittedAt", "authority", "digest"].includes(field))
+    && [retry.trialFailureId, retry.trialFailureRevocationId, retry.predecessorLearningId, retry.learningId]
+      .every((value) => ID_RE.test(value || ""))
+    && [retry.trialFailureDigest, retry.trialFailureRevocationDigest, retry.targetDigest, retry.scopeDigest]
+      .every((value) => DIGEST_RE.test(value || ""))
+    && Number.isFinite(new Date(retry.minimumEvidenceObservedAt).getTime())
+    && Number.isFinite(new Date(retry.admittedAt).getTime())
+    && new Date(retry.admittedAt).getTime() > new Date(retry.minimumEvidenceObservedAt).getTime()
+    && retry.authority === "context-only" && retry.digest === digest(payload);
+}
+
 function evaluationPayload({ id, learningId, scope, metric, benchmark, evaluatorIds, evaluatorRoots, thresholds, pairing,
-  initialTrials, target, completionPolicy, registeredAt, expiresAt, schema = "agentspine.learning-evaluation/v1" }) {
+  initialTrials, target, completionPolicy, retry, registeredAt, expiresAt,
+  schema = "agentspine.learning-evaluation/v1" }) {
   return {
     schema, id, learningId, scope, metric, benchmark,
     evaluatorIds,
@@ -1584,6 +1630,7 @@ function evaluationPayload({ id, learningId, scope, metric, benchmark, evaluator
     ...(INITIAL_TRIAL_EVALUATIONS.has(schema) ? { initialTrials } : {}),
     ...(TARGET_BOUND_EVALUATIONS.has(schema) ? { target } : {}),
     ...(DEADLINE_BOUND_EVALUATIONS.has(schema) ? { completionPolicy } : {}),
+    ...(TRIAL_RETRY_EVALUATIONS.has(schema) ? { retry } : {}),
     registeredAt, expiresAt, authority: "context-only"
   };
 }
@@ -1628,6 +1675,12 @@ function storedEvaluationStructure(contract) {
       || (storedLearningTargetStructure(contract.target) && contract.target.learningId === contract.learningId))
     && (!DEADLINE_BOUND_EVALUATIONS.has(contract.schema)
       || storedCompletionPolicyStructure(contract.completionPolicy))
+    && (!TRIAL_RETRY_EVALUATIONS.has(contract.schema)
+      || (storedTrialRetryStructure(contract.retry)
+        && contract.retry.learningId === contract.learningId
+        && contract.retry.targetDigest === contract.target?.digest
+        && contract.retry.scopeDigest === digest(contract.scope)
+        && contract.retry.admittedAt === contract.registeredAt))
     && Number.isFinite(new Date(contract.registeredAt).getTime())
     && Number.isFinite(new Date(contract.expiresAt).getTime())
     && new Date(contract.expiresAt).getTime() > new Date(contract.registeredAt).getTime()
@@ -1710,7 +1763,7 @@ function initialAdmissionsMatchState(state) {
       ? contract.schema !== "agentspine.learning-evaluation/v8"
       : receipt.schema === "agentspine.learning-application/v6"
         ? contract.schema !== "agentspine.learning-evaluation/v9"
-        : contract.schema !== "agentspine.learning-evaluation/v10")
+        : !DEADLINE_BOUND_EVALUATIONS.has(contract.schema))
       || contract.learningId !== receipt.learningId || contract.initialTrials.mode !== "first-admitted-trials"
       || (TARGET_BOUND_APPLICATIONS.has(receipt.schema)
         && (admission.targetDigest !== contract.target.digest || !learningTargetMatchesCandidate(contract.target, candidate)))
@@ -1780,7 +1833,7 @@ function trialFailureMatchesState(state, receipt) {
   const application = state.applications.find((entry) => entry.id === receipt.applicationId
     && entry.digest === receipt.applicationDigest && entry.learningId === receipt.learningId);
   const candidate = state.candidates.find((entry) => entry.id === receipt.learningId);
-  if (!evaluation || evaluation.schema !== "agentspine.learning-evaluation/v10"
+  if (!evaluation || !DEADLINE_BOUND_EVALUATIONS.has(evaluation.schema)
     || !application || application.schema !== "agentspine.learning-application/v7"
     || application.initialAdmission.evaluationId !== evaluation.id
     || application.initialAdmission.evaluationDigest !== evaluation.digest
@@ -1868,6 +1921,55 @@ function trialFailureRevocationMatchesState(state, receipt) {
 
 function revokedTrialFailure(state, trialFailureId) {
   return state.trialFailureRevocations.find((receipt) => receipt.trialFailureId === trialFailureId) || null;
+}
+
+function evidenceIdentity(evidence) {
+  return evidence.sourceSha256 || evidence.sourceDocument || evidence.id;
+}
+
+function retryableTrialFailures(state, candidate) {
+  return state.trialFailureRevocations.map((revocation) => {
+    const failure = state.trialFailures.find((entry) => entry.id === revocation.trialFailureId
+      && entry.digest === revocation.trialFailureDigest);
+    const predecessor = state.candidates.find((entry) => entry.id === revocation.learningId);
+    return { revocation, failure, predecessor };
+  }).filter(({ revocation, failure, predecessor }) => failure && predecessor
+    && predecessor.id !== candidate.id && predecessor.status === "rolled-back"
+    && predecessor.kind === candidate.kind && predecessor.claim === candidate.claim
+    && predecessor.subjectId === candidate.subjectId && predecessor.privacy === candidate.privacy
+    && predecessor.groupId === candidate.groupId && exactScope(predecessor.scope, candidate.scope)
+    && trialFailureRevocationMatchesState(state, revocation))
+    .sort((left, right) => new Date(left.revocation.revokedAt).getTime()
+      - new Date(right.revocation.revokedAt).getTime());
+}
+
+function trialRetryMatchesState(state, contract) {
+  if (!TRIAL_RETRY_EVALUATIONS.has(contract?.schema) || !storedTrialRetryStructure(contract.retry)) return false;
+  const retry = contract.retry;
+  const failure = state.trialFailures.find((entry) => entry.id === retry.trialFailureId
+    && entry.digest === retry.trialFailureDigest);
+  const revocation = state.trialFailureRevocations.find((entry) => entry.id === retry.trialFailureRevocationId
+    && entry.digest === retry.trialFailureRevocationDigest && entry.trialFailureId === retry.trialFailureId);
+  const predecessor = state.candidates.find((entry) => entry.id === retry.predecessorLearningId);
+  const candidate = state.candidates.find((entry) => entry.id === retry.learningId);
+  if (!failure || !revocation || !predecessor || !candidate
+    || !trialFailureRevocationMatchesState(state, revocation)
+    || predecessor.id !== failure.learningId || predecessor.status !== "rolled-back"
+    || candidate.id !== contract.learningId
+    || predecessor.kind !== candidate.kind || predecessor.claim !== candidate.claim
+    || predecessor.subjectId !== candidate.subjectId || predecessor.privacy !== candidate.privacy
+    || predecessor.groupId !== candidate.groupId || !exactScope(predecessor.scope, candidate.scope)
+    || retry.targetDigest !== learningTargetForCandidate(candidate).digest
+    || retry.scopeDigest !== digest(candidate.scope)
+    || retry.minimumEvidenceObservedAt !== revocation.revokedAt
+    || new Date(candidate.createdAt).getTime() <= new Date(revocation.revokedAt).getTime()) return false;
+  const predecessorEvidence = new Set(predecessor.evidence.map(evidenceIdentity));
+  const candidateEvidence = candidate.evidence.map(evidenceIdentity);
+  return candidate.evidence.length >= Math.max(2, state.config.minEvidence)
+    && new Set(candidateEvidence).size === candidateEvidence.length
+    && candidate.evidence.every((entry) =>
+    new Date(entry.observedAt).getTime() > new Date(revocation.revokedAt).getTime()
+      && !predecessorEvidence.has(evidenceIdentity(entry)));
 }
 
 function revalidationAdmissionWindow(state, receipt) {
@@ -2675,7 +2777,8 @@ export async function revokeLearningEvaluator({
 
 export async function registerLearningEvaluation({
   root = process.cwd(), id = `evaluation:${randomUUID()}`, learningId, scope, metric, benchmark,
-  evaluatorIds, evaluatorRoots, expiresAt = null, confirmLocalEvaluation = false, now = new Date()
+  evaluatorIds, evaluatorRoots, expiresAt = null, retryTrialFailureId = null,
+  confirmLocalEvaluation = false, confirmLocalTrialRetry = false, now = new Date()
 }) {
   if (!confirmLocalEvaluation) throw new Error("evaluation registration requires explicit local confirmation");
   if (!ID_RE.test(id || "") || !ID_RE.test(learningId || "")) {
@@ -2762,6 +2865,36 @@ export async function registerLearningEvaluation({
       authority: "context-only"
     };
     const target = learningTargetForCandidate(candidate);
+    const retryable = retryableTrialFailures(state, candidate);
+    let retry = null;
+    if (retryable.length) {
+      if (!confirmLocalTrialRetry) {
+        throw new Error("a repeated failed learning requires explicit local trial-retry confirmation");
+      }
+      if (!ID_RE.test(retryTrialFailureId || "")) {
+        throw new Error("retryTrialFailureId must identify the revoked failure being retried");
+      }
+      const selected = retryable.find((entry) => entry.failure.id === retryTrialFailureId);
+      const latest = retryable[retryable.length - 1];
+      if (!selected || selected.revocation.id !== latest.revocation.id) {
+        throw new Error("trial retry must bind the latest matching revoked failure");
+      }
+      const retryPayload = trialRetryPayload({
+        trialFailureId: selected.failure.id,
+        trialFailureDigest: selected.failure.digest,
+        trialFailureRevocationId: selected.revocation.id,
+        trialFailureRevocationDigest: selected.revocation.digest,
+        predecessorLearningId: selected.predecessor.id,
+        learningId: candidate.id,
+        targetDigest: target.digest,
+        scopeDigest: digest(candidate.scope),
+        minimumEvidenceObservedAt: selected.revocation.revokedAt,
+        admittedAt: timestamp
+      });
+      retry = { ...retryPayload, digest: digest(retryPayload) };
+    } else if (retryTrialFailureId !== null || confirmLocalTrialRetry) {
+      throw new Error("trial retry confirmation does not match a revoked failure for this exact learning scope");
+    }
     const completionPolicyPayloadValue = completionPolicyPayload({
       deliveryTimeoutMs: 5 * 60_000,
       outcomeTimeoutMs: state.config.initialTrialOutcomeTimeoutMinutes * 60_000
@@ -2771,7 +2904,7 @@ export async function registerLearningEvaluation({
       digest: digest(completionPolicyPayloadValue)
     };
     const payload = evaluationPayload({
-      schema: "agentspine.learning-evaluation/v10",
+      schema: retry ? "agentspine.learning-evaluation/v11" : "agentspine.learning-evaluation/v10",
       id, learningId, scope: normalizedScope, metric: normalizedMetric,
       benchmark: normalizedBenchmark,
       evaluatorIds: normalizedEvaluators,
@@ -2792,9 +2925,13 @@ export async function registerLearningEvaluation({
       initialTrials,
       target,
       completionPolicy,
+      retry,
       registeredAt: timestamp, expiresAt: expiry
     });
     const contract = { ...payload, digest: digest(payload) };
+    if (retry && !trialRetryMatchesState(state, contract)) {
+      throw new Error("trial retry requires a fresh candidate and independently observed evidence after revocation");
+    }
     const existing = state.evaluations.find((entry) => entry.id === id);
     if (existing) {
       if (existing.digest === contract.digest) {
@@ -2802,6 +2939,10 @@ export async function registerLearningEvaluation({
         return { contract: existing, binding, learningPath, unchanged: true };
       }
       throw new Error("evaluation contract IDs are immutable");
+    }
+    if (retry && state.evaluations.some((entry) => TRIAL_RETRY_EVALUATIONS.has(entry.schema)
+      && entry.retry.trialFailureRevocationId === retry.trialFailureRevocationId)) {
+      throw new Error("the revoked trial failure already has an immutable retry contract");
     }
     if (state.evaluations.some((entry) => entry.learningId === learningId
       && exactScope(entry.scope, normalizedScope) && new Date(entry.expiresAt).getTime() >= new Date(timestamp).getTime())) {
@@ -3793,7 +3934,7 @@ export async function recordLearningApplications({
           if (priorAdmissions.length < evaluation.initialTrials.requiredTrials) {
             const slot = priorAdmissions.length + 1;
             const trial = evaluation.initialTrials.after[slot - 1];
-            schema = evaluation.schema === "agentspine.learning-evaluation/v10"
+            schema = DEADLINE_BOUND_EVALUATIONS.has(evaluation.schema)
               ? "agentspine.learning-application/v7"
               : evaluation.schema === "agentspine.learning-evaluation/v9"
                 ? "agentspine.learning-application/v6" : "agentspine.learning-application/v5";
@@ -5051,6 +5192,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           TARGET_BOUND_EVALUATIONS.has(contract.schema)).length,
         deadlineBoundEvaluationContracts: evaluations.filter((contract) =>
           DEADLINE_BOUND_EVALUATIONS.has(contract.schema)).length,
+        trialRetryEvaluationContracts: evaluations.filter((contract) =>
+          TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
         activeTargetDigest: TARGET_BOUND_EVALUATIONS.has(initialContract?.schema)
           ? initialContract.target.digest : null,
         activeCompletionPolicyDigest: DEADLINE_BOUND_EVALUATIONS.has(initialContract?.schema)
@@ -5163,6 +5306,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       validationLeases: learning.validationLeases.length,
       authority: "context-only"
     },
+    trialRetryEvaluationContracts: learning.evaluations.filter((contract) =>
+      TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
     trialFailureRevocations: learning.trialFailureRevocations.length,
     evaluationRevocations: learning.evaluationRevocations.length,
     validationRevocations: learning.validationRevocations.length,
@@ -5220,6 +5365,15 @@ export async function deleteLearning({ root = process.cwd(), id }) {
     const candidate = state.candidates.find((entry) => entry.id === id);
     if (candidate?.status === "accepted" && candidate.supersededIds?.length) {
       throw new Error("roll back an accepted superseding learning before permanent deletion");
+    }
+    if (state.evaluations.some((entry) => TRIAL_RETRY_EVALUATIONS.has(entry.schema)
+      && entry.retry.predecessorLearningId === id && entry.learningId !== id)) {
+      throw new Error("delete the dependent trial-retry learning before its failed predecessor");
+    }
+    const retryContract = state.evaluations.find((entry) => TRIAL_RETRY_EVALUATIONS.has(entry.schema)
+      && entry.learningId === id);
+    if (retryContract && state.candidates.some((entry) => entry.id === retryContract.retry.predecessorLearningId)) {
+      throw new Error("purge the shared subject atomically to delete a trial-retry lineage");
     }
     const existed = Boolean(candidate);
     const evaluationIds = new Set(state.evaluations.filter((entry) => entry.learningId === id).map((entry) => entry.id));
@@ -5421,6 +5575,14 @@ export function learningFindings(learning, graph) {
     }
     trialFailureRevocationIds.add(receipt.id);
     revokedTrialFailureIds.add(receipt.trialFailureId);
+  }
+  const retryRevocationIds = new Set();
+  for (const contract of (learning.evaluations || []).filter((entry) => TRIAL_RETRY_EVALUATIONS.has(entry.schema))) {
+    if (!trialRetryMatchesState(learning, contract)
+      || retryRevocationIds.has(contract.retry?.trialFailureRevocationId)) {
+      findings.push(`invalid-trial-retry:${contract.id || "unknown"}`);
+    }
+    retryRevocationIds.add(contract.retry?.trialFailureRevocationId);
   }
   const evaluationRevocationIds = new Set();
   const revokedEvaluationIds = new Set();

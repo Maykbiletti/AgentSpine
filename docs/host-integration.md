@@ -21,6 +21,8 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
+Version `0.37.0` replaces the `0.36.0` plugin cache identity.
+
 Version `0.36.0` replaces the `0.35.0` plugin cache identity.
 
 The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Codex keeps its host-specific adapter in `hooks/codex.json`, while `.codex-plugin/plugin.json` omits the unsupported `hooks` field and passes the official plugin validator. Version `0.35.0` replaces the `0.34.0` plugin cache identity. The hook definitions contain only portable documented fields; `hooks/version.json` carries the separately validated bundle release and preflight contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise staged clean install, previous-version cache rejection, upgrade, host-native source resolution, indexed and lazy Claude memory, automatic multilingual briefing, pre-answer recall, authenticated persona graph reconciliation, attention, exact job start, tool checkpoint, new-session resume, purge, and uninstall preservation:
