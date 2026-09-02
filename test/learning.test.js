@@ -12,7 +12,8 @@ import {
   purgeLearningBySubject, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
   registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, revokeLearningEvidence,
-  revokeLearningDelivery, revokeLearningMeasurement, revokeLearningOutcome, reviewLearning, rollbackLearning
+  revokeLearningApplication, revokeLearningDelivery, revokeLearningMeasurement, revokeLearningOutcome,
+  reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
 import { runHook } from "../src/hook.js";
@@ -672,6 +673,160 @@ test("delivery revocation invalidates turn proof, withholds context, and rolls b
   "automatic-delivery-revocation");
   await deleteLearning({ root, id: "learning:delivery-validated" });
   assert.equal((await loadLearning(root)).learning.deliveryRevocations.length, 0);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("application revocation withdraws the exact projection and blocks every downstream proof", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2039-04-01T00:00:00.000Z");
+  await upsertEntity({ root, id: "person:application-member", kind: "person", privacy: "shared" });
+  await proposeLearning({
+    root, id: "learning:application-prior", kind: "behavior",
+    claim: "Use the prior synthetic projection procedure.", subjectId: "person:application-member",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:application-prior", 0.97), now: start
+  });
+  await reviewLearning({ root, id: "learning:application-prior", decision: "accept",
+    reason: "Synthetic local confirmation.", confirmedByUser: true, now: start });
+  await establishValidatedLearning(root, {
+    learningId: "learning:application-current", evaluationId: "evaluation:application-current", start,
+    expiresAt: "2039-06-01T00:00:00.000Z", supersedesId: "learning:application-prior",
+    subjectId: "person:application-member"
+  });
+  const beforeRevocation = (await loadLearning(root)).learning;
+  const candidate = beforeRevocation.candidates.find((item) => item.id === "learning:application-current");
+  const outcomeReceipt = beforeRevocation.outcomes.find((item) =>
+    item.id === candidate.promotion.canary.afterReceipts[0]);
+  const applicationReceipt = beforeRevocation.applications.find((item) =>
+    item.id === outcomeReceipt.applicationId);
+  const deliveryReceipt = beforeRevocation.deliveries.find((item) =>
+    item.id === outcomeReceipt.deliveryId);
+  await assert.rejects(revokeLearningApplication({ root, applicationId: applicationReceipt.id,
+    reasonCode: "projection-invalid", reason: "Synthetic projection binding invalidated." }),
+  /explicit local confirmation/);
+  const input = {
+    root, applicationId: applicationReceipt.id, reasonCode: "projection-invalid",
+    reason: "Synthetic projection binding invalidated.",
+    confirmation: "local-application-revocation-confirmed", now: start
+  };
+  const attempts = await Promise.all(Array.from({ length: 6 }, () => revokeLearningApplication(input)));
+  assert.equal(attempts.filter((result) => result.unchanged === false).length, 1);
+  assert.equal((await revokeLearningApplication({ ...input,
+    now: new Date(start.getTime() + 4000) })).unchanged, true);
+  await assert.rejects(revokeLearningApplication({ ...input, reasonCode: "scope-invalid",
+    reason: "Synthetic conflicting reason.", now: new Date(start.getTime() + 4000) }), /immutable/);
+  const stored = await loadLearning(root);
+  assert.equal(stored.learning.applicationRevocations.length, 1);
+  assert.equal(stored.learning.measurementRevocations.length, 0);
+  assert.equal(stored.learning.deliveryRevocations.length, 0);
+  assert.equal(stored.learning.outcomeRevocations.length, 0,
+    "withdrawing a projection must not over-revoke immutable downstream evidence");
+  assert.equal(JSON.stringify(stored.learning.applicationRevocations)
+    .includes("Synthetic projection binding invalidated"), false);
+  const receipt = stored.learning.applicationRevocations[0];
+  assert.equal(receipt.applicationDigest, applicationReceipt.digest);
+  assert.equal(receipt.deliveryDigest, deliveryReceipt.digest);
+  assert.equal(receipt.outcomeDigest, outcomeReceipt.digest);
+  assert.equal(receipt.evaluationDigest, stored.learning.evaluations
+    .find((item) => item.id === "evaluation:application-current").digest);
+
+  const withheld = await learningContext({ root, scope: scopedTurn,
+    now: new Date(start.getTime() + 5000) });
+  assert.deepEqual(withheld.items, []);
+  assert.deepEqual(withheld.diagnostics,
+    ["revoked-learning-application:learning:application-current"]);
+  const foreign = await learningContext({ root, scope: { ...scopedTurn, projectId: "project:foreign" },
+    now: new Date(start.getTime() + 5000) });
+  assert.deepEqual(foreign.items, []);
+  assert.deepEqual(foreign.diagnostics, []);
+  const status = await learningOutcomeStatus({ root, scope: scopedTurn,
+    now: new Date(start.getTime() + 5000) });
+  assert.equal(status.applicationRevocations, 1);
+  assert.equal(status.records.find((item) => item.id === "learning:application-current")
+    .canaryStatus, "revoked-application");
+  const cli = runCli(["learn-application-revoke", applicationReceipt.id, "--root", root,
+    "--reason-code", "projection-invalid", "--reason", "Synthetic projection binding invalidated.",
+    "--confirm-local-application-revocation", "--json"], state);
+  assert.equal(cli.receipt.schema, "agentspine.learning-application-revocation/v1");
+  const doctor = runCli(["doctor", root, "--json"], state);
+  assert.equal(doctor.learningOutcomes.status, "degraded");
+  assert.equal(doctor.learningOutcomes.applicationRevocationReceipts, 1);
+  await assert.rejects(commitLearningOutcome({ root, id: "outcome:application-replay",
+    learningId: "learning:application-current", evaluationId: "evaluation:application-current",
+    measurementReceiptId: outcomeReceipt.measurementReceiptId, applicationId: applicationReceipt.id,
+    deliveryId: deliveryReceipt.id, now: new Date(start.getTime() + 5000) }),
+  /application was explicitly revoked/);
+
+  const originalState = JSON.stringify(stored.learning);
+  stored.learning.applicationRevocations[0].applicationDigest = hash("redirected application");
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /application revocation state is invalid/);
+  await writeFile(stored.learningPath, `${originalState}\n`, "utf8");
+  const reconciliations = await Promise.all(Array.from({ length: 6 }, () =>
+    evaluateLearning({ root, now: new Date(start.getTime() + 6000) })));
+  assert.equal(reconciliations.flatMap((result) => result.reconciled)
+    .filter((item) => item.id === "learning:application-current" && item.decision === "rolled-back").length, 1);
+  const rolledBack = (await loadLearning(root)).learning.candidates
+    .find((item) => item.id === "learning:application-current");
+  assert.equal(rolledBack.rollback.mode, "automatic-application-revocation");
+  assert.deepEqual((await learningContext({ root, scope: scopedTurn,
+    now: new Date(start.getTime() + 7000) })).items.map((item) => item.id),
+  ["learning:application-prior"]);
+  await deleteLearning({ root, id: "learning:application-current" });
+  assert.equal((await loadLearning(root)).learning.applicationRevocations.length, 0);
+  assert.equal((await purgeLearningBySubject({ root, subjectId: "person:application-member" })).deleted, 1);
+
+  await proposeLearning({ root, id: "learning:application-active", kind: "behavior",
+    claim: "Use the active synthetic projection procedure.", privacy: "shared", scope: scopedTurn,
+    evidence: evidence("evidence:application-active-one", 0.97), now: start });
+  await addLearningEvidence({ root, id: "learning:application-active",
+    evidence: evidence("evidence:application-active-two", 0.97), now: start });
+  await evaluation(root, "learning:application-active", { id: "evaluation:application-active",
+    evaluatorIds: ["evaluator:test-a", "evaluator:test-b"], now: start,
+    expiresAt: "2039-06-01T00:00:00.000Z" });
+  for (const [suffix, evaluatorId, value] of [["a", "evaluator:test-a", 0.4], ["b", "evaluator:test-b", 0.5]]) {
+    await recordLearningOutcome({ root, learningId: "learning:application-active",
+      ...outcome(`outcome:application-active-before-${suffix}`, "before", value, evaluatorId,
+        { evaluationId: "evaluation:application-active", measuredAt: start }), now: start });
+  }
+  await evaluateLearning({ root, now: new Date(start.getTime() + 8000) });
+  const completedFirst = await application(root, "learning:application-active", "application-active-first",
+    new Date(start.getTime() + 9000));
+  await recordLearningOutcome({ root, learningId: "learning:application-active",
+    applicationId: completedFirst.id, deliveryId: completedFirst.deliveryId,
+    ...outcome("outcome:application-active-after-a", "after", 0.8, "evaluator:test-a", {
+      evaluationId: "evaluation:application-active", measuredAt: new Date(start.getTime() + 9000)
+    }), now: new Date(start.getTime() + 9000) });
+  await application(root, "learning:application-active", "application-active-second",
+    new Date(start.getTime() + 10000));
+  const pending = await projectedApplication(root, "learning:application-active", "application-pending",
+    new Date(start.getTime() + 11000));
+  assert.equal(pending.schema, "agentspine.learning-application/v2");
+  await revokeLearningApplication({ root, applicationId: pending.id, reasonCode: "preflight-invalid",
+    reason: "Synthetic preflight binding invalidated.",
+    confirmation: "local-application-revocation-confirmed", now: new Date(start.getTime() + 12000) });
+  await assert.rejects(recordLearningDeliveries({ root, sessionId: "session:application-pending",
+    scope: scopedTurn, hookEvent: "Stop", completedAt: new Date(start.getTime() + 13000) }),
+  /application was explicitly revoked/);
+  const replacement = await recordLearningApplications({ root, items: [{ id: "learning:application-active",
+    outcomeStatus: "active" }], scope: scopedTurn, preflightReceipt: {
+    schema: "agentspine.preflight/v2", id: "preflight:application-replacement", status: "ready",
+    sessionId: "session:application-replacement", promptDigest: hash("prompt:application-replacement"),
+    briefingDigest: hash("preflight:application-replacement"), agentId: scopedTurn.personaId,
+    userId: scopedTurn.userId, tenantId: scopedTurn.tenantId, projectId: scopedTurn.projectId,
+    groupId: scopedTurn.groupId, taskId: scopedTurn.taskId,
+    createdAt: new Date(start.getTime() + 13000).toISOString(),
+    expiresAt: new Date(start.getTime() + 73000).toISOString()
+  }, sessionBriefingDigest: hash("briefing:application-replacement"),
+  projectedAt: new Date(start.getTime() + 13000) });
+  assert.equal(replacement.receipts.length, 1,
+    "an unconsumed ordinary projection revocation must not poison a later independent turn");
+  const purged = await purgeStaleLearningApplications({ root,
+    confirmation: "local-user-purge-confirmed", now: new Date(start.getTime() + 400000) });
+  assert.equal(purged.purged, 1, "stale cleanup may remove the unrelated replacement projection only");
+  assert.equal((await loadLearning(root)).learning.applications.some((item) => item.id === pending.id), true,
+    "stale cleanup must retain an application referenced by a revocation");
+  assert.equal((await loadLearning(root)).learning.applicationRevocations.length, 1);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
@@ -2401,6 +2556,7 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   assert.deepEqual(upgraded.trialFailures, []);
   assert.deepEqual(upgraded.evidenceRevocations, []);
   assert.deepEqual(upgraded.measurementRevocations, []);
+  assert.deepEqual(upgraded.applicationRevocations, []);
   assert.deepEqual(upgraded.deliveryRevocations, []);
   assert.deepEqual(upgraded.outcomeRevocations, []);
   assert.equal(upgraded.config.minOutcomeReceipts, 2);

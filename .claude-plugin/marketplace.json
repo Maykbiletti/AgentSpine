@@ -9,7 +9,7 @@
       "name": "agent-spine",
       "source": ".",
       "description": "Map existing rules, soul, and memory without rewriting source files.",
-      "version": "0.32.0",
+      "version": "0.33.0",
       "author": {
         "name": "Mayk Biletti"
       },

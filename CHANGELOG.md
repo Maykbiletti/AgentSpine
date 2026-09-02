@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-09-02
+
+### Added
+
+- A locally confirmed `agentspine.learning-application-revocation/v1` receipt binds one exact projected turn to its evaluation, candidate target, application and optional delivery and outcome digests without retaining the explanation in plaintext.
+- `learn-application-revoke` plus scoped status, Doctor, audit and read-only Context MCP diagnostics expose only content-free revocation state.
+
+### Changed
+
+- Revoking an invalid preflight, scope or projection binding immediately withholds every dependent active or validated lesson. Evaluation then rolls it back atomically and restores a safe superseded predecessor.
+- A revoked projection cannot produce a delivery, measurement, outcome, promotion or validation renewal. Existing delivery, measurement and outcome receipts remain immutable and unrevoked. Legacy state upgrades with an empty application-revocation ledger; candidate deletion and subject purge remove matching receipts.
+
+### Security
+
+- Projection withdrawal is fail-closed: candidate, contract, target, application, delivery and outcome substitution fail on load; six concurrent retries create one receipt; conflicting retries and replacement of revoked cohort admissions are rejected; and foreign scopes receive no diagnostics.
+
 ## [0.32.0] - 2026-09-02
 
 ### Added
