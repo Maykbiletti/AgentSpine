@@ -1265,6 +1265,8 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.targetBoundApplications, 0);
       const deadlineBoundEvaluationContracts = status.records.reduce((sum, item) =>
         sum + item.deadlineBoundEvaluationContracts, 0);
+      const stalenessBoundEvaluationContracts = status.records.reduce((sum, item) =>
+        sum + item.stalenessBoundEvaluationContracts, 0);
       const deadlineBoundApplications = status.records.reduce((sum, item) =>
         sum + item.deadlineBoundApplications, 0);
       const trialRetryEvaluationContracts = status.records.reduce((sum, item) =>
@@ -1309,6 +1311,7 @@ export async function run(argv = process.argv.slice(2)) {
         targetBoundEvaluationContracts,
         targetBoundApplications,
         deadlineBoundEvaluationContracts,
+        stalenessBoundEvaluationContracts,
         deadlineBoundApplications,
         trialRetryEvaluationContracts,
         comparableTrialRetryEvaluationContracts,

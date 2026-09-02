@@ -23,30 +23,35 @@ const MAX_STATE_BYTES = 5 * 1024 * 1024;
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret)\s*[:=]\s*\S{8,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i;
 const AUTHORITY_ASSERTION_RE = /\b(?:user|agent|person|they|he|she|i|ich|wir|nutzer|benutzer).{0,60}\b(?:may|can|is allowed|is authorized|has|have|darf|berechtigt|hat|haben).{0,50}\b(?:admin(?:istrator)?|permissions?|rights?|authorization|production access|deploy|billing|spending|policy exception|bypass|zugang|rechte|berechtigung|produktion|abrechnung|ausnahme|umgehen)\b/i;
 const PROTECTED_LESSON_RE = /\b(?:security|safety|identity|authentication|authorization|permissions?|credentials?|secrets?|policy|production|deployment|payments?|billing|tool access|file access|network access|database access|sicherheit|identität|authentifizierung|berechtigungen?|zugang|richtlinie|produktion|zahlungen?)\b/i;
-const EVALUATION_SCHEMAS = new Set(Array.from({ length: 13 }, (_, index) =>
+const EVALUATION_SCHEMAS = new Set(Array.from({ length: 15 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 1}`));
-const COVERAGE_EVALUATIONS = new Set(Array.from({ length: 12 }, (_, index) =>
+const COVERAGE_EVALUATIONS = new Set(Array.from({ length: 14 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 2}`));
-const LINEAGE_EVALUATIONS = new Set(Array.from({ length: 10 }, (_, index) =>
+const LINEAGE_EVALUATIONS = new Set(Array.from({ length: 12 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 4}`));
-const PAIRED_EVALUATIONS = new Set(Array.from({ length: 9 }, (_, index) =>
+const PAIRED_EVALUATIONS = new Set(Array.from({ length: 11 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 5}`));
-const ROOT_BOUND_EVALUATIONS = new Set(Array.from({ length: 8 }, (_, index) =>
+const ROOT_BOUND_EVALUATIONS = new Set(Array.from({ length: 10 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 6}`));
-const REGISTRY_BOUND_EVALUATIONS = new Set(Array.from({ length: 7 }, (_, index) =>
+const REGISTRY_BOUND_EVALUATIONS = new Set(Array.from({ length: 9 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 7}`));
 const INITIAL_TRIAL_EVALUATIONS = new Set(["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9",
   "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12",
-  "agentspine.learning-evaluation/v13"]);
+  "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15"]);
 const TARGET_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10",
-  "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13"]);
+  "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13",
+  "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15"]);
 const DEADLINE_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11",
-  "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13"]);
+  "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14",
+  "agentspine.learning-evaluation/v15"]);
 const TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12",
-  "agentspine.learning-evaluation/v13"]);
+  "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v15"]);
 const COMPARABLE_TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v12",
-  "agentspine.learning-evaluation/v13"]);
-const BOUNDED_TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v13"]);
+  "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v15"]);
+const BOUNDED_TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v13",
+  "agentspine.learning-evaluation/v15"]);
+const STALENESS_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v14",
+  "agentspine.learning-evaluation/v15"]);
 const DELIVERABLE_APPLICATIONS = new Set(Array.from({ length: 6 }, (_, index) =>
   `agentspine.learning-application/v${index + 2}`));
 const INITIAL_TRIAL_APPLICATIONS = new Set(["agentspine.learning-application/v5", "agentspine.learning-application/v6",
@@ -502,7 +507,9 @@ function normalizeState(value, root) {
         || (candidate.promotion.canary.targetDigest === contract.target.digest
           && learningTargetMatchesCandidate(contract.target, candidate)))
       && (!DEADLINE_BOUND_EVALUATIONS.has(contract.schema)
-        || candidate.promotion.canary.completionPolicyDigest === contract.completionPolicy.digest)))) {
+        || candidate.promotion.canary.completionPolicyDigest === contract.completionPolicy.digest)
+      && (!STALENESS_BOUND_EVALUATIONS.has(contract.schema)
+        || candidate.promotion.canary.stalenessPolicyDigest === contract.stalenessPolicy.digest)))) {
     throw new Error("learning canary evaluation binding is invalid; run the audit before learning");
   }
   if (normalized.validationLeases.some((lease) => !validationLeaseMatchesState(normalized, lease))) {
@@ -1168,6 +1175,8 @@ function validationLeaseMatchesState(state, lease) {
       || (canary.targetDigest === contract.target.digest && learningTargetMatchesCandidate(contract.target, candidate)))
     && (!DEADLINE_BOUND_EVALUATIONS.has(contract.schema)
       || canary.completionPolicyDigest === contract.completionPolicy.digest)
+    && (!STALENESS_BOUND_EVALUATIONS.has(contract.schema)
+      || canary.stalenessPolicyDigest === contract.stalenessPolicy.digest)
     && binding?.digest === lease.evaluatorRegistryBindingDigest
     && exactScope(contract.scope, lease.scope) && digest(contract.metric) === digest(lease.metric);
   const evidenceMatches = lease.schema === "agentspine.learning-validation/v1"
@@ -1599,19 +1608,50 @@ function storedCompletionPolicyStructure(policy) {
     && policy.authority === "context-only" && policy.digest === digest(payload);
 }
 
+function stalenessPolicyPayload({ outcomeMaxAgeDays, canaryTtlDays }) {
+  return {
+    schema: "agentspine.learning-staleness-policy/v1",
+    outcomeMaxAgeDays,
+    canaryTtlDays,
+    staleOutcome: "ineligible",
+    expiredCanary: "automatic-rollback",
+    authority: "context-only"
+  };
+}
+
+function storedStalenessPolicyStructure(policy) {
+  if (!policy || typeof policy !== "object" || Array.isArray(policy)) return false;
+  const payload = stalenessPolicyPayload(policy);
+  return policy.schema === "agentspine.learning-staleness-policy/v1"
+    && Number.isInteger(policy.outcomeMaxAgeDays) && policy.outcomeMaxAgeDays >= 1
+    && policy.outcomeMaxAgeDays <= 365
+    && Number.isInteger(policy.canaryTtlDays) && policy.canaryTtlDays >= 1
+    && policy.canaryTtlDays <= 90
+    && policy.staleOutcome === "ineligible" && policy.expiredCanary === "automatic-rollback"
+    && policy.authority === "context-only" && policy.digest === digest(payload);
+}
+
+function evaluationStalenessPolicy(contract, config) {
+  return STALENESS_BOUND_EVALUATIONS.has(contract?.schema)
+    ? contract.stalenessPolicy
+    : { outcomeMaxAgeDays: config.outcomeMaxAgeDays, canaryTtlDays: config.canaryTtlDays };
+}
+
 function trialComparisonDigest(contract, candidateGate = null) {
   const thresholds = {
     ...contract.thresholds,
     minConfidence: contract.thresholds?.minConfidence ?? candidateGate?.minConfidence,
     minEvidence: contract.thresholds?.minEvidence ?? candidateGate?.minEvidence
   };
+  const stalenessBound = STALENESS_BOUND_EVALUATIONS.has(contract.schema);
   return digest({
-    schema: "agentspine.learning-trial-comparison/v1",
+    schema: stalenessBound ? "agentspine.learning-trial-comparison/v2" : "agentspine.learning-trial-comparison/v1",
     metric: contract.metric,
     benchmark: contract.benchmark,
     evaluatorRoots: contract.evaluatorRoots,
     thresholds,
     pairing: contract.pairing,
+    ...(stalenessBound ? { stalenessPolicyDigest: contract.stalenessPolicy.digest } : {}),
     authority: "context-only"
   });
 }
@@ -1671,7 +1711,7 @@ function storedTrialRetryStructure(retry) {
 }
 
 function evaluationPayload({ id, learningId, scope, metric, benchmark, evaluatorIds, evaluatorRoots, thresholds, pairing,
-  initialTrials, target, completionPolicy, retry, registeredAt, expiresAt,
+  initialTrials, target, completionPolicy, stalenessPolicy, retry, registeredAt, expiresAt,
   schema = "agentspine.learning-evaluation/v1" }) {
   return {
     schema, id, learningId, scope, metric, benchmark,
@@ -1682,6 +1722,7 @@ function evaluationPayload({ id, learningId, scope, metric, benchmark, evaluator
     ...(INITIAL_TRIAL_EVALUATIONS.has(schema) ? { initialTrials } : {}),
     ...(TARGET_BOUND_EVALUATIONS.has(schema) ? { target } : {}),
     ...(DEADLINE_BOUND_EVALUATIONS.has(schema) ? { completionPolicy } : {}),
+    ...(STALENESS_BOUND_EVALUATIONS.has(schema) ? { stalenessPolicy } : {}),
     ...(TRIAL_RETRY_EVALUATIONS.has(schema) ? { retry } : {}),
     registeredAt, expiresAt, authority: "context-only"
   };
@@ -1732,6 +1773,8 @@ function storedEvaluationStructure(contract) {
       || (storedLearningTargetStructure(contract.target) && contract.target.learningId === contract.learningId))
     && (!DEADLINE_BOUND_EVALUATIONS.has(contract.schema)
       || storedCompletionPolicyStructure(contract.completionPolicy))
+    && (!STALENESS_BOUND_EVALUATIONS.has(contract.schema)
+      || storedStalenessPolicyStructure(contract.stalenessPolicy))
     && (!TRIAL_RETRY_EVALUATIONS.has(contract.schema)
       || (storedTrialRetryStructure(contract.retry)
         && contract.retry.learningId === contract.learningId
@@ -2999,8 +3042,17 @@ export async function registerLearningEvaluation({
       authority: "context-only"
     };
     const target = learningTargetForCandidate(candidate);
+    const stalenessPolicyPayloadValue = stalenessPolicyPayload({
+      outcomeMaxAgeDays: state.config.outcomeMaxAgeDays,
+      canaryTtlDays: state.config.canaryTtlDays
+    });
+    const stalenessPolicy = {
+      ...stalenessPolicyPayloadValue,
+      digest: digest(stalenessPolicyPayloadValue)
+    };
     const retryable = retryableTrialFailures(state, candidate);
     let retry = null;
+    let evaluationSchema = "agentspine.learning-evaluation/v14";
     if (retryable.length) {
       if (!confirmLocalTrialRetry) {
         throw new Error("a repeated failed learning requires explicit local trial-retry confirmation");
@@ -3030,12 +3082,17 @@ export async function registerLearningEvaluation({
         minConfidence: state.config.minConfidence,
         minEvidence: state.config.minEvidence
       };
+      evaluationSchema = STALENESS_BOUND_EVALUATIONS.has(predecessorEvaluation.schema)
+        ? "agentspine.learning-evaluation/v15"
+        : "agentspine.learning-evaluation/v13";
       const comparisonDigest = trialComparisonDigest({
+        schema: evaluationSchema,
         metric: normalizedMetric,
         benchmark: normalizedBenchmark,
         evaluatorRoots: normalizedRoots,
         thresholds,
-        pairing
+        pairing,
+        stalenessPolicy
       });
       if (comparisonDigest !== trialComparisonDigest(predecessorEvaluation, selected.predecessor.promotion)) {
         throw new Error("trial retry objective contract drift is not allowed");
@@ -3073,7 +3130,7 @@ export async function registerLearningEvaluation({
       digest: digest(completionPolicyPayloadValue)
     };
     const payload = evaluationPayload({
-      schema: retry ? "agentspine.learning-evaluation/v13" : "agentspine.learning-evaluation/v10",
+      schema: evaluationSchema,
       id, learningId, scope: normalizedScope, metric: normalizedMetric,
       benchmark: normalizedBenchmark,
       evaluatorIds: normalizedEvaluators,
@@ -3083,6 +3140,7 @@ export async function registerLearningEvaluation({
       initialTrials,
       target,
       completionPolicy,
+      stalenessPolicy,
       retry,
       registeredAt: timestamp, expiresAt: expiry
     });
@@ -3271,7 +3329,8 @@ export async function beginLearningRevalidation({
       return { candidate, revalidation: canary.revalidation, learningPath, unchanged: true };
     }
     const possibleExpiry = Math.min(new Date(validation.evaluation.expiresAt).getTime(),
-      new Date(timestamp).getTime() + state.config.canaryTtlDays * 86400000);
+      new Date(timestamp).getTime()
+        + evaluationStalenessPolicy(validation.evaluation, state.config).canaryTtlDays * 86400000);
     if (possibleExpiry <= new Date(validation.lease.expiresAt).getTime()) {
       throw new Error("revalidation cannot extend evidence within the current evaluation contract window");
     }
@@ -3540,7 +3599,8 @@ export async function renewLearningValidation({
       return { ...rolledBack, decision: "rolled-back", learningPath };
     }
     const expiresAt = new Date(Math.min(new Date(contract.expiresAt).getTime(),
-      new Date(timestamp).getTime() + state.config.canaryTtlDays * 86400000)).toISOString();
+      new Date(timestamp).getTime()
+        + evaluationStalenessPolicy(contract, state.config).canaryTtlDays * 86400000)).toISOString();
     if (new Date(expiresAt).getTime() <= new Date(validation.lease.expiresAt).getTime()) {
       throw new Error("validation renewal cannot extend the current evidence lease");
     }
@@ -4390,8 +4450,10 @@ export async function revokeLearningOutcome({
   });
 }
 
-function outcomeFresh(receipt, config, now) {
-  return new Date(receipt.measuredAt).getTime() >= new Date(now).getTime() - config.outcomeMaxAgeDays * 86400000;
+function outcomeFresh(receipt, contract, config, now) {
+  const policy = evaluationStalenessPolicy(contract, config);
+  return new Date(receipt.measuredAt).getTime() >= new Date(now).getTime()
+    - policy.outcomeMaxAgeDays * 86400000;
 }
 
 function outcomeMatchesContract(receipt, contract) {
@@ -4464,7 +4526,7 @@ function promotableReceipts(state, candidate, timestamp) {
   const groups = contracts.map((contract) => {
     const receipts = state.outcomes.filter((item) => outcomeMatchesContract(item, contract)
       && item.learningId === candidate.id && item.evaluationId === contract.id && item.phase === "before"
-      && exactScope(item.scope, contract.scope) && outcomeFresh(item, state.config, timestamp)
+      && exactScope(item.scope, contract.scope) && outcomeFresh(item, contract, state.config, timestamp)
       && !revokedMeasurement(state, item.measurementReceiptId)
       && item.measurement.kind !== "model-suggestion" && outcomeMatchesInitialTrial(state, item, contract));
     if (INITIAL_TRIAL_EVALUATIONS.has(contract.schema)) receipts.sort((a, b) =>
@@ -4743,7 +4805,7 @@ function reconcileCanary(state, candidate, timestamp) {
     && item.learningId === candidate.id && item.phase === "after"
     && (!planned || item.evaluationId === evaluation.id)
     && exactScope(item.scope, canary.scope) && item.metric.name === canary.metric.name
-    && item.metric.direction === canary.metric.direction && outcomeFresh(item, state.config, timestamp)
+    && item.metric.direction === canary.metric.direction && outcomeFresh(item, evaluation, state.config, timestamp)
     && outcomeMatchesInitialTrial(state, item, evaluation)
     && state.applications.some((application) => application.id === item.applicationId
       && application.learningId === candidate.id && exactScope(application.scope, canary.scope)));
@@ -5019,6 +5081,8 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
               targetDigest: TARGET_BOUND_EVALUATIONS.has(contract.schema) ? contract.target.digest : null,
               completionPolicyDigest: DEADLINE_BOUND_EVALUATIONS.has(contract.schema)
                 ? contract.completionPolicy.digest : null,
+              stalenessPolicyDigest: STALENESS_BOUND_EVALUATIONS.has(contract.schema)
+                ? contract.stalenessPolicy.digest : null,
               coverage: COVERAGE_EVALUATIONS.has(contract.schema) ? {
                 datasetDigest: contract.benchmark.datasetDigest,
                 minCases: contract.benchmark.minCases,
@@ -5027,7 +5091,8 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
               baseline,
               beforeReceipts: receipts.map((item) => item.id),
               expiresAt: new Date(Math.min(new Date(contract.expiresAt).getTime(),
-                new Date(timestamp).getTime() + state.config.canaryTtlDays * 86400000)).toISOString()
+                new Date(timestamp).getTime()
+                  + evaluationStalenessPolicy(contract, state.config).canaryTtlDays * 86400000)).toISOString()
             },
             authority: "context-only"
           }));
@@ -5393,6 +5458,10 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           TARGET_BOUND_EVALUATIONS.has(contract.schema)).length,
         deadlineBoundEvaluationContracts: evaluations.filter((contract) =>
           DEADLINE_BOUND_EVALUATIONS.has(contract.schema)).length,
+        stalenessBoundEvaluationContracts: evaluations.filter((contract) =>
+          STALENESS_BOUND_EVALUATIONS.has(contract.schema)).length,
+        activeStalenessPolicyDigest: STALENESS_BOUND_EVALUATIONS.has(initialContract?.schema)
+          ? initialContract.stalenessPolicy.digest : null,
         trialRetryEvaluationContracts: evaluations.filter((contract) =>
           TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
         comparableTrialRetryEvaluationContracts: evaluations.filter((contract) =>
@@ -5521,6 +5590,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       COMPARABLE_TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
     boundedTrialRetryEvaluationContracts: learning.evaluations.filter((contract) =>
       BOUNDED_TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
+    stalenessBoundEvaluationContracts: records.reduce((sum, record) =>
+      sum + record.stalenessBoundEvaluationContracts, 0),
     trialRetryExhaustions: records.reduce((sum, record) => sum + record.trialRetryExhaustionReceipts, 0),
     trialFailureRevocations: learning.trialFailureRevocations.length,
     evaluationRevocations: learning.evaluationRevocations.length,

@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-09-02
+
+### Added
+
+- New initial experiments use `agentspine.learning-evaluation/v14`; bounded retries use v15. Both embed a content-free, digested `agentspine.learning-staleness-policy/v1` that fixes outcome age and Canary lifetime before any result is admitted.
+- Scoped status, Doctor and audit report staleness-bound contract counts and policy digests without exposing claims, evidence, benchmark content or identities.
+
+### Changed
+
+- Outcome freshness, initial Canary expiry, validation renewal and revalidation now use the immutable contract policy. Later `learn-config` changes apply only to future contracts.
+- A v15 retry comparison includes the frozen staleness-policy digest, so a corrective attempt cannot widen its evidence window or Canary lifetime. Historical v1-v13 contracts remain readable.
+
+### Security
+
+- Widening mutable configuration can no longer resurrect stale Before/After evidence or extend an already registered experiment. Policy tampering fails closed on reload, foreign groups receive neither counts nor digests, and user-owned sources remain byte-for-byte unchanged.
+
 ## [0.42.0] - 2026-09-02
 
 ### Added
