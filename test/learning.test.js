@@ -12,7 +12,7 @@ import {
   purgeLearningBySubject, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
   registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, revokeLearningEvidence,
-  revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningMeasurement, revokeLearningOutcome, revokeLearningValidation,
+  revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningMeasurement, revokeLearningOutcome, revokeLearningTrialFailure, revokeLearningValidation,
   reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
@@ -1535,6 +1535,116 @@ test("immutable trial deadlines turn missing delivery or outcome into one blocki
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
+test("trial failure revocation withdraws false blocking proof without resurrecting its canary", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2039-01-01T00:00:00.000Z");
+  const alphaScope = { ...scopedTurn, groupId: "group:failure-alpha" };
+  await upsertEntity({ root, id: "group:failure-alpha", kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: "group:failure-beta", kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: "person:failure-member", kind: "person", privacy: "group" });
+  await linkEntities({ root, from: "person:failure-member", to: "group:failure-alpha",
+    relation: "member-of", privacy: "group" });
+  await proposeLearning({ root, id: "learning:failure-prior", kind: "behavior",
+    claim: "Use the prior synthetic group procedure.", subjectId: "person:failure-member",
+    privacy: "group", groupId: "group:failure-alpha", scope: alphaScope,
+    evidence: evidence("evidence:failure-prior", 0.97), now: start });
+  await reviewLearning({ root, id: "learning:failure-prior", decision: "accept",
+    reason: "Synthetic local confirmation.", confirmedByUser: true, now: start });
+  await proposeLearning({ root, id: "learning:failure-current", kind: "behavior",
+    claim: "Use the measured synthetic group procedure.", subjectId: "person:failure-member",
+    privacy: "group", groupId: "group:failure-alpha", scope: alphaScope,
+    supersedesId: "learning:failure-prior",
+    evidence: evidence("evidence:failure-current-one", 0.97), now: start });
+  await addLearningEvidence({ root, id: "learning:failure-current",
+    evidence: evidence("evidence:failure-current-two", 0.97), now: start });
+  await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2,
+    minOutcomeReceipts: 2, canaryReceipts: 2, initialTrialOutcomeTimeoutMinutes: 5 }, now: start });
+  const registered = await evaluation(root, "learning:failure-current", {
+    id: "evaluation:failure-current", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    scope: alphaScope, now: start, expiresAt: new Date(start.getTime() + 86400000)
+  });
+  for (const [index, evaluatorId] of ["evaluator:test-a", "evaluator:test-b"].entries()) {
+    await recordLearningOutcome({ root, learningId: "learning:failure-current",
+      ...outcome(`outcome:failure-before-${index}`, "before", 0.4 + index * 0.05, evaluatorId, {
+        evaluationId: registered.contract.id, scope: alphaScope, measuredAt: start
+      }), now: start });
+  }
+  await evaluateLearning({ root, now: new Date(start.getTime() + 1000) });
+  const applicationReceipt = await projectedApplication(root, "learning:failure-current", "failure-current",
+    new Date(start.getTime() + 2000), "active", alphaScope);
+  const deadlinePassed = new Date(new Date(applicationReceipt.deliveryExpiresAt).getTime() + 1);
+  await evaluateLearning({ root, now: deadlinePassed });
+  const failed = await loadLearning(root);
+  const failure = failed.learning.trialFailures[0];
+  assert.equal(failed.learning.candidates.find((item) => item.id === "learning:failure-current").status,
+    "rolled-back");
+  assert.equal(failed.learning.candidates.find((item) => item.id === "learning:failure-prior").status,
+    "accepted");
+  await assert.rejects(revokeLearningTrialFailure({ root, trialFailureId: failure.id,
+    reasonCode: "clock-invalid", reason: "Synthetic local clock invalidation." }),
+  /explicit local confirmation/);
+  const input = { root, trialFailureId: failure.id, reasonCode: "clock-invalid",
+    reason: "Synthetic local clock invalidation.", confirmation: "local-trial-failure-revocation-confirmed",
+    now: new Date(deadlinePassed.getTime() + 1000) };
+  const attempts = await Promise.all(Array.from({ length: 6 }, () => revokeLearningTrialFailure(input)));
+  assert.equal(attempts.filter((result) => result.unchanged === false).length, 1);
+  assert.equal(attempts.every((result) => result.requiresFreshCandidate === true), true);
+  assert.equal((await revokeLearningTrialFailure({ ...input,
+    now: new Date(deadlinePassed.getTime() + 2000) })).unchanged, true);
+  await assert.rejects(revokeLearningTrialFailure({ ...input, reasonCode: "host-invalid",
+    reason: "Synthetic conflicting invalidation." }), /immutable/);
+  const revoked = await loadLearning(root);
+  const receipt = revoked.learning.trialFailureRevocations[0];
+  const binding = revoked.learning.evaluationBindings.find((item) =>
+    item.evaluationId === registered.contract.id);
+  assert.equal(receipt.trialFailureDigest, failure.digest);
+  assert.equal(receipt.evaluationDigest, registered.contract.digest);
+  assert.equal(receipt.evaluatorBindingDigest, binding.digest);
+  assert.equal(receipt.applicationDigest, applicationReceipt.digest);
+  assert.equal(receipt.targetDigest, registered.contract.target.digest);
+  assert.equal(receipt.retryPolicy, "fresh-candidate-and-contract-required");
+  assert.equal(JSON.stringify(receipt).includes("Synthetic local clock invalidation"), false);
+  const alpha = await learningContext({ root, groupId: "group:failure-alpha", scope: alphaScope,
+    now: new Date(deadlinePassed.getTime() + 3000) });
+  assert.deepEqual(alpha.items.map((item) => item.id), ["learning:failure-prior"]);
+  assert.deepEqual(alpha.diagnostics, ["revoked-learning-trial-failure:learning:failure-current"]);
+  assert.equal(alpha.degraded, true);
+  assert.deepEqual((await learningContext({ root, groupId: "group:failure-beta",
+    scope: { ...alphaScope, groupId: "group:failure-beta" },
+    now: new Date(deadlinePassed.getTime() + 3000) })).diagnostics, []);
+  const status = await learningOutcomeStatus({ root, scope: alphaScope,
+    now: new Date(deadlinePassed.getTime() + 3000) });
+  const record = status.records.find((item) => item.id === "learning:failure-current");
+  assert.equal(status.trialFailureRevocations, 1);
+  assert.equal(record.trialFailureReceipts, 1);
+  assert.equal(record.trialFailureRevocationReceipts, 1);
+  assert.deepEqual(record.revokedTrialFailureIds, [failure.id]);
+  assert.equal(record.status, "rolled-back", "revocation must never resurrect a failed Canary");
+  const cli = runCli(["learn-trial-failure-revoke", failure.id, "--root", root,
+    "--reason-code", "clock-invalid", "--reason", "Synthetic local clock invalidation.",
+    "--confirm-local-trial-failure-revocation", "--json"], state);
+  assert.equal(cli.receipt.schema, "agentspine.learning-trial-failure-revocation/v1");
+  const doctor = runCli(["doctor", root, "--json"], state);
+  assert.equal(doctor.learningOutcomes.status, "degraded");
+  assert.equal(doctor.learningOutcomes.trialFailureRevocationReceipts, 1);
+  assert.equal((await recordLearningDeliveries({ root, sessionId: "session:failure-current",
+    scope: alphaScope, hookEvent: "Stop", completedAt: new Date(deadlinePassed.getTime() + 4000) })).status,
+  "stale", "revocation must not make a late Stop valid");
+  const originalState = JSON.stringify(revoked.learning);
+  revoked.learning.trialFailureRevocations[0].applicationDigest = hash("redirected application");
+  await writeFile(revoked.learningPath, `${JSON.stringify(revoked.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /trial failure revocation state is invalid/);
+  await writeFile(revoked.learningPath, `${originalState}\n`, "utf8");
+  await deleteLearning({ root, id: "learning:failure-current" });
+  const deleted = (await loadLearning(root)).learning;
+  assert.equal(deleted.trialFailures.length, 0);
+  assert.equal(deleted.trialFailureRevocations.length, 0);
+  assert.equal(deleted.history.some((entry) => entry.value?.learningId === "learning:failure-current"), false);
+  assert.equal((await purgeLearningBySubject({ root, subjectId: "person:failure-member" })).deleted, 1);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
 test("measurement lineage blocks cross-contract reuse and purges only stale unconsumed runs", async (t) => {
   const { root } = await fixture(t);
   const sourceBytes = await readFile(join(root, "AGENTS.md"));
@@ -2735,6 +2845,7 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   assert.deepEqual(upgraded.measurements, []);
   assert.deepEqual(upgraded.measurementLineage, []);
   assert.deepEqual(upgraded.trialFailures, []);
+  assert.deepEqual(upgraded.trialFailureRevocations, []);
   assert.deepEqual(upgraded.evaluationRevocations, []);
   assert.deepEqual(upgraded.validationRevocations, []);
   assert.deepEqual(upgraded.evidenceRevocations, []);

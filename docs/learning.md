@@ -117,6 +117,8 @@ Version 0.34 adds precise withdrawal of an invalid evaluation contract. `learn-e
 
 Version 0.35 adds precise withdrawal of an invalid validation decision. `learn-validation-revoke` requires explicit local confirmation and writes one `agentspine.learning-validation-revocation/v1` receipt binding the exact lease digest, scope digest, candidate target, evaluation and evaluator-registry binding. The explanation is retained only as a digest. The active lease and every immutable predecessor are treated as one validation chain, so renewal cannot hide an invalid earlier decision. The dependent lesson is withheld immediately and rolled back atomically, while contracts, measurements, outcomes and user-owned sources remain unchanged. Replay, redirected bindings, conflicting concurrent retries and foreign-scope diagnostics fail closed. MCP remains read-only.
 
+Version 0.36 adds precise withdrawal of a false blocking initial-trial timeout. `learn-trial-failure-revoke` requires explicit local confirmation and writes one `agentspine.learning-trial-failure-revocation/v1` receipt binding the exact failure, contract, evaluator-registry binding, application, target and scope. The explanation is retained only as a digest. The original failure and underlying evidence remain immutable, and no average can overrule another blocking defect. Revocation never reactivates the failed Canary or accepts late delivery or outcome evidence: a retry requires a fresh candidate and evaluation contract while the safe predecessor stays active. Replay, redirected bindings, conflicting concurrent requests and foreign-group diagnostics fail closed. MCP remains read-only.
+
 Measurement receipts bind the exact contract, phase, scope, metric value, blocking-defect count, measurement kind, evaluator ID, evaluator-root digest, stable provider run ID, source digest, dataset coverage and measurement time. They store no evaluator name, key, certificate, cases, task, dataset, prompt, answer, transcript, credential, or source content. Source digests, evaluator/run pairs and evaluator-root/run pairs remain globally single-use across the project. `learn-outcome` consumes exactly one receipt; copied metric, scope or coverage fields cannot substitute for its immutable digest, and a receipt cannot be consumed twice. Objective measurements, explicit user feedback and model suggestions remain separate. Model suggestions never count toward automatic promotion or validation. Legacy v1-v8 evaluation contracts, application v1-v5, measurement and lineage v1, and outcome v1-v8 receipts remain readable; new v9 contracts add exact candidate targets to precommitted initial trials, root-bound independence and the current local registry binding.
 
 Before promotion, the candidate needs the contract's number of independent, fresh, non-model receipts, including at least one objective evaluator. All receipts must bind to the same unexpired evaluation contract; changing the metric, scope, evaluator set, benchmark digest or thresholds requires a new candidate and contract. It also needs the normal distinct-evidence and confidence thresholds. A conflicting active candidate blocks automatic promotion. Security, safety, identity, authentication, authorization, credential, policy, production, deployment, payment, and access lessons are marked for local review and cannot receive an automatic evaluation contract. Successful evaluation creates a time-limited canary rather than a final unmeasured claim. Only that exact scope receives the canary in its next briefing.
@@ -244,6 +246,11 @@ agentspine learn-validation-revoke validation:synthetic-lease \
   --reason-code decision-invalid \
   --reason "Locally verified synthetic validation fault" \
   --confirm-local-validation-revocation
+
+agentspine learn-trial-failure-revoke trial-failure:synthetic-timeout \
+  --reason-code clock-invalid \
+  --reason "Locally verified synthetic clock fault" \
+  --confirm-local-trial-failure-revocation
 
 agentspine learn-delivery-revoke delivery:synthetic-stop-receipt \
   --reason-code hook-invalid \

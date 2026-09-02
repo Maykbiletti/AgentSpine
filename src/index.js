@@ -15,7 +15,7 @@ export {
   acceptContinuityLearning, addLearningEvidence, beginLearningRevalidation, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning, purgeLearningBySubject,
   purgeStaleLearningApplications, recordLearningOutcome, registerLearningEvaluation, renewLearningValidation,
-  reviewLearning, revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningEvidence, revokeLearningMeasurement, revokeLearningOutcome, revokeLearningValidation,
+  reviewLearning, revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningEvidence, revokeLearningMeasurement, revokeLearningOutcome, revokeLearningTrialFailure, revokeLearningValidation,
   rollbackLearning
 } from "./lib/learning.js";
 export {

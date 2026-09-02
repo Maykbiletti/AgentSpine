@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-09-02
+
+### Added
+
+- A locally confirmed `agentspine.learning-trial-failure-revocation/v1` receipt withdraws one exact false initial-trial timeout while binding its contract, evaluator registry, application, target and scope.
+- `learn-trial-failure-revoke` plus Doctor, audit, scoped status and read-only Context MCP diagnostics expose the content-free withdrawal state.
+
+### Changed
+
+- Invalid timeout proof no longer remains indistinguishable from a genuine blocking defect. Its explanation is retained only as a digest, while the original failure receipt and all underlying evidence remain immutable.
+- Revocation never resurrects the rolled-back Canary or reuses its expired cohort. A retry requires a fresh candidate and evaluation contract, and the restored safe predecessor remains active.
+
+### Security
+
+- Missing local confirmation, redirected failure, contract, application, target, scope or evaluator bindings, conflicting replay and cross-group diagnostics fail closed. Six concurrent identical requests create one receipt.
+
 ## [0.35.0] - 2026-09-02
 
 ### Added

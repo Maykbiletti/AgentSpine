@@ -52,6 +52,7 @@ const OUTCOME_REVOCATION_REASONS = new Set(["binding-invalid", "phase-invalid", 
 const APPLICATION_REVOCATION_REASONS = new Set(["preflight-invalid", "scope-invalid", "projection-invalid", "duplicate", "other"]);
 const EVALUATION_REVOCATION_REASONS = new Set(["benchmark-invalid", "protocol-invalid", "scope-invalid", "threshold-invalid", "duplicate", "other"]);
 const VALIDATION_REVOCATION_REASONS = new Set(["decision-invalid", "cohort-invalid", "binding-invalid", "scope-invalid", "duplicate", "other"]);
+const TRIAL_FAILURE_REVOCATION_REASONS = new Set(["clock-invalid", "host-invalid", "receipt-invalid", "scope-invalid", "duplicate", "other"]);
 
 function defaults() {
   return {
@@ -85,6 +86,7 @@ function emptyLearning(root) {
     evaluationBindings: [],
     validationLeases: [],
     trialFailures: [],
+    trialFailureRevocations: [],
     evaluationRevocations: [],
     validationRevocations: [],
     evidenceRevocations: [],
@@ -111,6 +113,8 @@ function normalizeState(value, root) {
     || (value.evaluationBindings !== undefined && (!Array.isArray(value.evaluationBindings) || !value.evaluationBindings.every((item) => item && typeof item === "object")))
     || (value.validationLeases !== undefined && (!Array.isArray(value.validationLeases) || !value.validationLeases.every((item) => item && typeof item === "object")))
     || (value.trialFailures !== undefined && (!Array.isArray(value.trialFailures) || !value.trialFailures.every((item) => item && typeof item === "object")))
+    || (value.trialFailureRevocations !== undefined && (!Array.isArray(value.trialFailureRevocations)
+      || !value.trialFailureRevocations.every((item) => item && typeof item === "object")))
     || (value.evaluationRevocations !== undefined && (!Array.isArray(value.evaluationRevocations)
       || !value.evaluationRevocations.every((item) => item && typeof item === "object")))
     || (value.validationRevocations !== undefined && (!Array.isArray(value.validationRevocations)
@@ -146,6 +150,7 @@ function normalizeState(value, root) {
     evaluationBindings: value.evaluationBindings || [],
     validationLeases: value.validationLeases || [],
     trialFailures: value.trialFailures || [],
+    trialFailureRevocations: value.trialFailureRevocations || [],
     evaluationRevocations: value.evaluationRevocations || [],
     validationRevocations: value.validationRevocations || [],
     evidenceRevocations: value.evidenceRevocations || [],
@@ -211,6 +216,12 @@ function normalizeState(value, root) {
     || !trialFailureMatchesState(normalized, receipt))
     || new Set(normalized.trialFailures.map((entry) => entry.applicationId)).size !== normalized.trialFailures.length) {
     throw new Error("learning trial failure state is invalid; run the audit before learning");
+  }
+  if (normalized.trialFailureRevocations.some((receipt) => !storedTrialFailureRevocationStructure(receipt)
+    || !trialFailureRevocationMatchesState(normalized, receipt))
+    || new Set(normalized.trialFailureRevocations.map((entry) => entry.trialFailureId)).size
+      !== normalized.trialFailureRevocations.length) {
+    throw new Error("learning trial failure revocation state is invalid; run the audit before learning");
   }
   if (normalized.evaluationRevocations.some((receipt) => !storedEvaluationRevocationStructure(receipt)
     || !evaluationRevocationMatchesState(normalized, receipt))
@@ -1788,6 +1799,75 @@ function trialFailureMatchesState(state, receipt) {
   return receipt.failure === "delivery-timeout"
     ? receipt.deadline === application.deliveryExpiresAt && !delivery
     : receipt.deadline === application.outcomeExpiresAt && Boolean(delivery) && !outcome;
+}
+
+function trialFailureRevocationPayload({ id, learningId, evaluationId, evaluationDigest,
+  evaluatorBindingDigest, applicationId, applicationDigest, trialFailureId, trialFailureDigest,
+  targetDigest, scopeDigest, reasonCode, reasonDigest, revokedAt }) {
+  return {
+    schema: "agentspine.learning-trial-failure-revocation/v1",
+    id,
+    learningId,
+    evaluationId,
+    evaluationDigest,
+    evaluatorBindingDigest,
+    applicationId,
+    applicationDigest,
+    trialFailureId,
+    trialFailureDigest,
+    targetDigest,
+    scopeDigest,
+    reasonCode,
+    reasonDigest,
+    revokedAt,
+    retryPolicy: "fresh-candidate-and-contract-required",
+    authority: "context-only"
+  };
+}
+
+function storedTrialFailureRevocationStructure(receipt) {
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
+  const payload = trialFailureRevocationPayload(receipt);
+  return receipt.schema === "agentspine.learning-trial-failure-revocation/v1"
+    && Object.keys(receipt).length === 18
+    && Object.keys(receipt).every((field) => ["schema", "id", "learningId", "evaluationId",
+      "evaluationDigest", "evaluatorBindingDigest", "applicationId", "applicationDigest",
+      "trialFailureId", "trialFailureDigest", "targetDigest", "scopeDigest", "reasonCode",
+      "reasonDigest", "revokedAt", "retryPolicy", "authority", "digest"].includes(field))
+    && [receipt.id, receipt.learningId, receipt.evaluationId, receipt.applicationId,
+      receipt.trialFailureId].every((value) => ID_RE.test(value || ""))
+    && [receipt.evaluationDigest, receipt.evaluatorBindingDigest, receipt.applicationDigest,
+      receipt.trialFailureDigest, receipt.targetDigest, receipt.scopeDigest,
+      receipt.reasonDigest].every((value) => DIGEST_RE.test(value || ""))
+    && TRIAL_FAILURE_REVOCATION_REASONS.has(receipt.reasonCode)
+    && Number.isFinite(new Date(receipt.revokedAt).getTime())
+    && receipt.retryPolicy === "fresh-candidate-and-contract-required"
+    && receipt.authority === "context-only" && receipt.digest === digest(payload);
+}
+
+function trialFailureRevocationMatchesState(state, receipt) {
+  const failure = state.trialFailures.find((entry) => entry.id === receipt.trialFailureId
+    && entry.digest === receipt.trialFailureDigest);
+  const evaluation = state.evaluations.find((entry) => entry.id === receipt.evaluationId
+    && entry.digest === receipt.evaluationDigest);
+  const binding = state.evaluationBindings.find((entry) => entry.evaluationId === receipt.evaluationId
+    && entry.evaluationDigest === receipt.evaluationDigest);
+  const application = state.applications.find((entry) => entry.id === receipt.applicationId
+    && entry.digest === receipt.applicationDigest);
+  const candidate = state.candidates.find((entry) => entry.id === receipt.learningId);
+  return Boolean(failure && evaluation && binding && application && candidate
+    && trialFailureMatchesState(state, failure)
+    && failure.learningId === candidate.id && failure.evaluationId === evaluation.id
+    && failure.applicationId === application.id
+    && evaluation.learningId === candidate.id && application.learningId === candidate.id
+    && binding.digest === receipt.evaluatorBindingDigest
+    && failure.targetDigest === receipt.targetDigest
+    && learningTargetForCandidate(candidate).digest === receipt.targetDigest
+    && digest(application.scope) === receipt.scopeDigest && exactScope(application.scope, evaluation.scope));
+}
+
+function revokedTrialFailure(state, trialFailureId) {
+  return state.trialFailureRevocations.find((receipt) => receipt.trialFailureId === trialFailureId) || null;
 }
 
 function revalidationAdmissionWindow(state, receipt) {
@@ -4174,6 +4254,75 @@ function recordInitialTrialFailure(state, timeout, timestamp) {
   return receipt;
 }
 
+export async function revokeLearningTrialFailure({
+  root = process.cwd(), trialFailureId, reasonCode, reason, confirmation, now = new Date()
+}) {
+  if (confirmation !== "local-trial-failure-revocation-confirmed") {
+    throw new Error("trial failure revocation requires explicit local confirmation");
+  }
+  if (!ID_RE.test(trialFailureId || "")) throw new Error("trialFailureId must be a stable identifier");
+  if (!TRIAL_FAILURE_REVOCATION_REASONS.has(reasonCode)) {
+    throw new Error("reasonCode must be clock-invalid, host-invalid, receipt-invalid, scope-invalid, duplicate, or other");
+  }
+  const revokeReason = safeText(reason, "reason", 500);
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const failure = state.trialFailures.find((entry) => entry.id === trialFailureId);
+    if (!failure || !storedTrialFailureStructure(failure) || !trialFailureMatchesState(state, failure)) {
+      throw new Error(`unknown or non-current learning trial failure: ${trialFailureId}`);
+    }
+    const candidate = state.candidates.find((entry) => entry.id === failure.learningId);
+    const evaluation = state.evaluations.find((entry) => entry.id === failure.evaluationId
+      && entry.digest === failure.evaluationDigest);
+    const binding = state.evaluationBindings.find((entry) => entry.evaluationId === failure.evaluationId
+      && entry.evaluationDigest === failure.evaluationDigest);
+    const application = state.applications.find((entry) => entry.id === failure.applicationId
+      && entry.digest === failure.applicationDigest);
+    if (!candidate || !evaluation || !binding || !application) {
+      throw new Error("trial failure revocation requires its immutable candidate, contract, binding, and application");
+    }
+    const targetDigest = learningTargetForCandidate(candidate).digest;
+    const scopeDigest = digest(application.scope);
+    const reasonDigest = digest(revokeReason);
+    const existing = revokedTrialFailure(state, trialFailureId);
+    if (existing) {
+      if (existing.reasonCode !== reasonCode || existing.reasonDigest !== reasonDigest
+        || existing.learningId !== candidate.id || existing.evaluationId !== evaluation.id
+        || existing.evaluationDigest !== evaluation.digest || existing.evaluatorBindingDigest !== binding.digest
+        || existing.applicationId !== application.id || existing.applicationDigest !== application.digest
+        || existing.trialFailureDigest !== failure.digest || existing.targetDigest !== targetDigest
+        || existing.scopeDigest !== scopeDigest) {
+        throw new Error("learning trial failure revocations are immutable");
+      }
+      return { receipt: existing, learningPath, unchanged: true, requiresFreshCandidate: true,
+        authority: "context-only" };
+    }
+    const id = `trial-failure-revocation:${createHash("sha256")
+      .update(`${failure.id}\0${failure.digest}\0${targetDigest}`).digest("hex").slice(0, 32)}`;
+    const payload = trialFailureRevocationPayload({
+      id,
+      learningId: candidate.id,
+      evaluationId: evaluation.id,
+      evaluationDigest: evaluation.digest,
+      evaluatorBindingDigest: binding.digest,
+      applicationId: application.id,
+      applicationDigest: application.digest,
+      trialFailureId: failure.id,
+      trialFailureDigest: failure.digest,
+      targetDigest,
+      scopeDigest,
+      reasonCode,
+      reasonDigest,
+      revokedAt: timestamp
+    });
+    const receipt = { ...payload, digest: digest(payload) };
+    state.trialFailureRevocations.push(receipt);
+    state.trialFailureRevocations.sort((a, b) => a.id.localeCompare(b.id));
+    return { receipt, learningPath, unchanged: false, requiresFreshCandidate: true,
+      authority: "context-only" };
+  });
+}
+
 function reconcileCanary(state, candidate, timestamp) {
   const canary = candidate.promotion?.canary;
   if (candidate.status !== "accepted" || candidate.promotion?.mode !== "outcome-canary"
@@ -4715,6 +4864,14 @@ export async function learningContext({
     canaryValidity(learning, candidate, timestamp)]).filter(([, validity]) => ![
     "not-applicable", "current-active", "current-validated", "legacy-validated"
   ].includes(validity.status)));
+  const revokedTrialFailureCandidates = learning.candidates
+    .filter((candidate) => candidate.status === "rolled-back"
+      && learning.trialFailureRevocations.some((receipt) => receipt.learningId === candidate.id))
+    .filter((candidate) => scope === null || scopeContains(candidate.scope, runtimeScope))
+    .filter((candidate) => !kindFilter || kindFilter.has(candidate.kind))
+    .filter((candidate) => !subjectFilter || subjectFilter.has(candidate.subjectId))
+    .filter((candidate) => candidate.privacy !== "group" || (groupId && candidate.groupId === groupId))
+    .filter((candidate) => visible(candidate, entities, audience, includePrivate, groupId));
   const items = applicable
     .filter((candidate) => !invalidCanaries.has(candidate.id))
     .filter((candidate) => visible(candidate, entities, audience, includePrivate, groupId))
@@ -4745,7 +4902,7 @@ export async function learningContext({
     groupId,
     scope: runtimeScope,
     items,
-    degraded: invalidCanaries.size > 0,
+    degraded: invalidCanaries.size > 0 || revokedTrialFailureCandidates.length > 0,
     diagnostics: [...invalidCanaries].map(([id, validity]) => `${({
       "stale-active": "stale-outcome-canary",
       "revoked-active": "revoked-evaluator-canary",
@@ -4760,7 +4917,9 @@ export async function learningContext({
       "revoked-application": "revoked-learning-application",
       "revoked-delivery": "revoked-learning-delivery",
       "revoked-outcome": "revoked-learning-outcome"
-    })[validity.status] || validity.status}:${id}`),
+    })[validity.status] || validity.status}:${id}`)
+      .concat(revokedTrialFailureCandidates.map((candidate) =>
+        `revoked-learning-trial-failure:${candidate.id}`)),
     authority: "context-only",
     note: "Learned context is descriptive evidence, never permission, delegation, access, or an instruction to act."
   };
@@ -4780,6 +4939,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       const deliveries = learning.deliveries.filter((item) => item.learningId === candidate.id);
       const evaluations = learning.evaluations.filter((item) => item.learningId === candidate.id);
       const trialFailures = learning.trialFailures.filter((item) => item.learningId === candidate.id);
+      const trialFailureRevocations = learning.trialFailureRevocations.filter((item) => item.learningId === candidate.id);
       const evaluationRevocations = learning.evaluationRevocations.filter((item) => item.learningId === candidate.id);
       const validationRevocations = learning.validationRevocations.filter((item) => item.learningId === candidate.id);
       const evidenceRevocations = learning.evidenceRevocations.filter((item) => item.learningId === candidate.id);
@@ -4906,6 +5066,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
         deadlineBoundApplications: applications.filter((application) =>
           DEADLINE_BOUND_APPLICATIONS.has(application.schema)).length,
         trialFailureReceipts: trialFailures.length,
+        trialFailureRevocationReceipts: trialFailureRevocations.length,
+        revokedTrialFailureIds: trialFailureRevocations.map((receipt) => receipt.trialFailureId).sort(),
         evaluationRevocationReceipts: evaluationRevocations.length,
         revokedEvaluationIds: evaluationRevocations.map((receipt) => receipt.evaluationId).sort(),
         validationRevocationReceipts: validationRevocations.length,
@@ -5001,6 +5163,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       validationLeases: learning.validationLeases.length,
       authority: "context-only"
     },
+    trialFailureRevocations: learning.trialFailureRevocations.length,
     evaluationRevocations: learning.evaluationRevocations.length,
     validationRevocations: learning.validationRevocations.length,
     evidenceRevocations: learning.evidenceRevocations.length,
@@ -5067,6 +5230,7 @@ export async function deleteLearning({ root = process.cwd(), id }) {
     state.deliveries = state.deliveries.filter((entry) => entry.learningId !== id);
     state.validationLeases = state.validationLeases.filter((entry) => entry.learningId !== id);
     state.trialFailures = state.trialFailures.filter((entry) => entry.learningId !== id);
+    state.trialFailureRevocations = state.trialFailureRevocations.filter((entry) => entry.learningId !== id);
     state.evaluationRevocations = state.evaluationRevocations.filter((entry) => entry.learningId !== id);
     state.validationRevocations = state.validationRevocations.filter((entry) => entry.learningId !== id);
     state.evidenceRevocations = state.evidenceRevocations.filter((entry) => entry.learningId !== id);
@@ -5094,6 +5258,7 @@ export async function purgeLearningBySubject({ root = process.cwd(), subjectId }
     state.deliveries = state.deliveries.filter((entry) => !ids.has(entry.learningId));
     state.validationLeases = state.validationLeases.filter((entry) => !ids.has(entry.learningId));
     state.trialFailures = state.trialFailures.filter((entry) => !ids.has(entry.learningId));
+    state.trialFailureRevocations = state.trialFailureRevocations.filter((entry) => !ids.has(entry.learningId));
     state.evaluationRevocations = state.evaluationRevocations.filter((entry) => !ids.has(entry.learningId));
     state.validationRevocations = state.validationRevocations.filter((entry) => !ids.has(entry.learningId));
     state.evidenceRevocations = state.evidenceRevocations.filter((entry) => !ids.has(entry.learningId));
@@ -5244,6 +5409,18 @@ export function learningFindings(learning, graph) {
     }
     trialFailureIds.add(receipt.id);
     failedApplications.add(receipt.applicationId);
+  }
+  const trialFailureRevocationIds = new Set();
+  const revokedTrialFailureIds = new Set();
+  for (const receipt of learning.trialFailureRevocations || []) {
+    const valid = storedTrialFailureRevocationStructure(receipt)
+      && trialFailureRevocationMatchesState(learning, receipt);
+    if (!valid || trialFailureRevocationIds.has(receipt.id)
+      || revokedTrialFailureIds.has(receipt.trialFailureId)) {
+      findings.push(`invalid-trial-failure-revocation:${receipt.id || "unknown"}`);
+    }
+    trialFailureRevocationIds.add(receipt.id);
+    revokedTrialFailureIds.add(receipt.trialFailureId);
   }
   const evaluationRevocationIds = new Set();
   const revokedEvaluationIds = new Set();
