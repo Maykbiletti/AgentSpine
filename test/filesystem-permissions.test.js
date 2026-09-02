@@ -88,7 +88,10 @@ test("unreadable directories are skipped by both walkers and never deny PreToolU
     assert.equal(hook.scanFailedOpen, true, toolName);
   }
   const permissionAudits = output.audit.filter((item) => item.path === canonicalRestricted && item.decision === "allow");
-  assert.deepEqual(permissionAudits.map((item) => item.toolName),
-    ["Edit", "Write", "apply_patch", "Bash", "exec_command"]);
+  const auditedTools = [...new Set(permissionAudits.map((item) => item.toolName))];
+  assert.deepEqual(auditedTools, ["Edit", "Write", "apply_patch", "Bash", "exec_command"]);
+  for (const toolName of auditedTools) {
+    assert.ok(permissionAudits.some((item) => item.toolName === toolName && item.code), toolName);
+  }
   assert.equal(hash(await readFile(sourcePath)), before);
 });
