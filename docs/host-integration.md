@@ -21,6 +21,8 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
+Version `0.39.0` replaces the `0.38.0` plugin cache identity.
+
 Version `0.38.0` replaces the `0.37.0` plugin cache identity.
 
 Version `0.36.0` replaces the `0.35.0` plugin cache identity.

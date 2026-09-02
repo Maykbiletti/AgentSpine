@@ -1271,6 +1271,8 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.trialRetryEvaluationContracts, 0);
       const comparableTrialRetryEvaluationContracts = status.records.reduce((sum, item) =>
         sum + item.comparableTrialRetryEvaluationContracts, 0);
+      const boundedTrialRetryEvaluationContracts = status.records.reduce((sum, item) =>
+        sum + item.boundedTrialRetryEvaluationContracts, 0);
       const trialFailureReceipts = status.records.reduce((sum, item) => sum + item.trialFailureReceipts, 0);
       const trialFailureRevocationReceipts = status.records.reduce((sum, item) =>
         sum + item.trialFailureRevocationReceipts, 0);
@@ -1308,6 +1310,7 @@ export async function run(argv = process.argv.slice(2)) {
         deadlineBoundApplications,
         trialRetryEvaluationContracts,
         comparableTrialRetryEvaluationContracts,
+        boundedTrialRetryEvaluationContracts,
         trialFailureReceipts,
         trialFailureRevocationReceipts,
         evaluationRevocationReceipts,

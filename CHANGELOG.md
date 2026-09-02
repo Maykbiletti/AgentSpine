@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-09-02
+
+### Added
+
+- `agentspine.learning-evaluation/v13` embeds `agentspine.learning-trial-retry/v3`, freezing the corrective Canary as attempt 2 of 2 and binding it to the exact root evaluation and comparison contract.
+- Scoped status, Doctor and audit distinguish bounded retry contracts without exposing lesson, evidence, benchmark or revocation content.
+
+### Changed
+
+- A locally revoked false timeout can admit one fresh comparable corrective trial. A failed corrective trial remains terminal even if its timeout is later revoked; continuing requires a genuinely new learning lineage instead of repeated selection.
+
+### Security
+
+- Third-attempt admission, concurrent budget races, rewritten attempt counters and root redirection fail closed. Historical v11 and v12 retry contracts remain readable.
+
 ## [0.38.0] - 2026-09-02
 
 ### Added
