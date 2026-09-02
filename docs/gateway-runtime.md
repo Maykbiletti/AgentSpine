@@ -85,6 +85,21 @@ The runner returns one bounded JSON result:
 }
 ```
 
+For a dependency-bound goal step, the runner may instead report one concrete missing input before acting:
+
+```json
+{
+  "checkpoint": { "inspected": true },
+  "knowledgeGap": {
+    "question": "Which synthetic region should the bounded check use?",
+    "reason": "The objective criterion requires a region, but no region is present.",
+    "requiredEvidence": "owner-input"
+  }
+}
+```
+
+The question pauses only that exact step and survives restart without creating another wake. It cannot be combined with `completed` or a generic `blocked` result. Channel replies and flat goals cannot create knowledge gaps because they lack the plan-step resolution boundary.
+
 Start one diagnostic tick:
 
 ```bash
@@ -121,7 +136,18 @@ agentspine goal-assign goal:release \
   --confirm-local-goal
 ```
 
-The immutable definition digest binds 1-32 exact step IDs, titles, success criteria and dependencies. Only the current dependency-ready step enters the durable lane, and the host request receives that exact step separately from the complete plan. A successful host result completes that step rather than the whole goal; the next ready step is selected deterministically. A blocked step retains its checkpoint and requires the owner to repeat the same confirmed assignment before it becomes runnable again. Restart reconciliation recreates exactly one missing runnable step after a torn policy/runtime write. Cycles, unknown dependencies, definition drift, stale leases and out-of-order completion fail closed. Plans and checkpoints remain context-only: they cannot choose or grant a tool, route, identity, delegation, payment, production right or policy exception.
+When the worker returns `needs-clarification`, inspect the open gap with `gateway-status` and resolve its exact stable ID:
+
+```bash
+agentspine goal-clarify goal:release \
+  --gap knowledge-gap:0123456789abcdef0123456789abcdef \
+  --answer "Use synthetic-region-west." --source owner-input \
+  --confirm-local-goal
+```
+
+For `--source objective-observation`, `--source-digest` must carry the exact 64-character SHA-256 digest of the local observation. The answer, source class and optional digest are immutable once accepted. Six concurrent identical resolutions converge on one continuation; a conflicting second answer is rejected.
+
+The immutable definition digest binds 1-32 exact step IDs, titles, success criteria and dependencies. Only the current dependency-ready step enters the durable lane, and the host request receives that exact step separately from the complete plan. A successful host result completes that step rather than the whole goal; the next ready step is selected deterministically. A generically blocked step retains its checkpoint and requires the owner to repeat the same confirmed assignment before it becomes runnable again. A step with an open knowledge gap cannot use that shortcut: it resumes only through `goal-clarify`, and the resolved context is included in the next exact host request. Restart reconciliation recreates exactly one missing runnable step after a torn policy/runtime write but never duplicates an open question. Cycles, unknown dependencies, definition drift, stale leases, out-of-order completion, weak answer provenance and altered gap bindings fail closed. Plans, gaps, answers and checkpoints remain context-only: they cannot choose or grant a tool, route, identity, delegation, payment, production right or policy exception.
 
 Promise, resolved-blocker, deadline, assignment, follow-up, and direct-message wakes share bounded per-agent lanes. Each effect rechecks current policy, identity, group, route, current plan step, and kill-switch state.
 

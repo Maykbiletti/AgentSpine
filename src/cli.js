@@ -29,7 +29,7 @@ import {
   channelRuntimeContext, grantChannelBinding, loadChannelPolicy, revokeChannelBinding
 } from "./lib/channel-runtime.js";
 import { personaContext, syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
-import { assignGoal, gatewayContext, setGatewayControl } from "./lib/gateway-runtime.js";
+import { assignGoal, gatewayContext, resolveGoalKnowledgeGap, setGatewayControl } from "./lib/gateway-runtime.js";
 import {
   configureSharing, deleteShared, initDirectoryAdapter, publishLearning, pullShared,
   reviewShared, rollbackShared, sharedContext, sharedInbox
@@ -217,6 +217,7 @@ Usage:
   agentspine persona-sync [root] --roster absolute-path --confirm-local-persona
   agentspine personas [root] [--persona id] [--group id] [--include-inactive]
   agentspine goal-assign <goal-id> --agent id --owner id --project id --success text (--next-step text | --plan plan.json) [--group id] [--deadline date] --confirm-local-goal
+  agentspine goal-clarify <goal-id> --gap id --answer text [--source owner-input|objective-observation] [--source-digest sha256] --confirm-local-goal
   agentspine gateway-control [root] [--enabled true|false] [--kill-switch true|false] --confirm-local-gateway
   agentspine gateway-status [root] [--agent id]
   agentspine share-keygen <signer-id> [--public-out signer.json] [--rotate] [--confirm-local-share]
@@ -985,6 +986,15 @@ export async function run(argv = process.argv.slice(2)) {
       ownerSubjectId: flags.owner, projectId: flags.project, groupId: flags.group || null,
       priority: Number(flags.priority ?? 70), successCriterion: flags.success,
       nextSafeStep: flags["next-step"] || null, steps: await goalPlanFlag(flags.plan), deadline: flags.deadline || null,
+      confirmation: booleanFlag(flags["confirm-local-goal"]) ? "local-owner-confirmed" : null
+    }), json);
+  }
+
+  if (command === "goal-clarify") {
+    return output(await resolveGoalKnowledgeGap({
+      root: flags.root || process.cwd(), goalId: positional[0], gapId: flags.gap,
+      answer: flags.answer, answerSource: flags.source || "owner-input",
+      sourceDigest: flags["source-digest"] || null,
       confirmation: booleanFlag(flags["confirm-local-goal"]) ? "local-owner-confirmed" : null
     }), json);
   }

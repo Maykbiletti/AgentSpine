@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-09-03
+
+### Added
+
+- Goal-plan workers can stop the exact current step on a bounded knowledge gap, expose one durable clarification, and resume with the resolved context after restart.
+- `goal-clarify` binds the answer to the exact goal, step, immutable plan definition and original request; owner input remains distinct from an objective observation with a required SHA-256 source digest.
+
+### Security
+
+- Knowledge-gap questions and answers are context-only and reject secrets plus authority-shaped content. Conflicting resolutions, weak provenance, duplicate questions, cross-agent context reads and state manipulation fail closed.
+
+### Changed
+
+- Six concurrent identical resolutions converge on one answer and one runnable continuation; reconciliation leaves an open question paused instead of generating repeated wakes.
+
 ## [0.53.0] - 2026-09-02
 
 ### Added

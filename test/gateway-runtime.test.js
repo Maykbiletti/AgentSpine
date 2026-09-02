@@ -15,7 +15,8 @@ import {
 } from "../src/lib/channel-runtime.js";
 import {
   assignGoal, claimGatewayWork, completeGatewayRun, deliverPrepared,
-  gatewayHealthFindings, gatewayRuntimeFindings, loadGatewayRuntime, reconcileGateway, setGatewayControl
+  gatewayContext, gatewayHealthFindings, gatewayRuntimeFindings, loadGatewayRuntime, reconcileGateway,
+  resolveGoalKnowledgeGap, setGatewayControl
 } from "../src/lib/gateway-runtime.js";
 import { createTelegramAdapter } from "../src/lib/telegram-adapter.js";
 import { runWorkerTick, waitForGatewayWake } from "../src/worker.js";
@@ -390,6 +391,121 @@ test("goal plans reject dependency cycles, definition drift, and stale-step comp
 
   originalPolicy.goals[0].plan.steps[0].title = "Drifted definition.";
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(originalPolicy, null, 2)}\n`);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+});
+
+test("an objective knowledge gap pauses one plan step, asks once, and resumes with bound owner context", async (t) => {
+  const { root, agentId, before } = await fixture(t);
+  const steps = [{
+    stepId: "step:regional-check", title: "Run the bounded regional check.",
+    successCriterion: "The selected synthetic region passes the independent check.", dependsOn: []
+  }];
+  const assignment = {
+    root, goalId: "goal:knowledge-gap", agentId, ownerSubjectId: "subject:owner",
+    projectId: "project:alpha", groupId: "group:alpha",
+    successCriterion: "The regional check uses explicitly resolved context.", steps,
+    confirmation: "local-owner-confirmed"
+  };
+  await assignGoal({ ...assignment, now: "2032-01-01T00:00:01.000Z" });
+  const paused = await runWorkerTick({ root, workerId: "worker:gap", now: "2032-01-01T00:00:02.000Z",
+    hostRunner: async () => ({
+      checkpoint: { inspected: true },
+      knowledgeGap: {
+        question: "Which synthetic region should the bounded check use?",
+        reason: "The success criterion requires a region, but the plan and checkpoint contain none.",
+        requiredEvidence: "owner-input"
+      }
+    }), adapter: { send: async () => ({ ok: true }) } });
+  assert.equal(paused.status, "needs-clarification");
+  assert.equal(paused.clarification.status, "open");
+  assert.equal(paused.clarification.answer, null);
+
+  await reconcileGateway({ root, now: "2032-01-01T00:00:02.250Z" });
+  await reconcileGateway({ root, now: "2032-01-01T00:00:02.500Z" });
+  let loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals[0].status, "blocked");
+  assert.equal(loaded.runtime.queue.filter((item) => item.status === "pending").length, 0);
+  assert.equal(loaded.runtime.receipts.filter((item) => item.kind === "knowledge-gap-opened").length, 1);
+  await assert.rejects(assignGoal({ ...assignment, now: "2032-01-01T00:00:02.750Z" }), /open knowledge gap/i);
+
+  const resolutions = await Promise.all(Array.from({ length: 6 }, () => resolveGoalKnowledgeGap({
+    root, goalId: "goal:knowledge-gap", gapId: paused.clarification.gapId,
+    answer: "Use synthetic-region-west.", answerSource: "owner-input",
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:03.000Z"
+  })));
+  assert.equal(resolutions.filter((item) => item.duplicate === false).length, 1);
+  assert.equal(resolutions.filter((item) => item.duplicate === true).length, 5);
+  loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.runtime.queue.filter((item) => item.status === "pending" && item.goalStepId === "step:regional-check").length, 1);
+  assert.equal(loaded.runtime.receipts.filter((item) => item.kind === "knowledge-gap-resolved").length, 1);
+
+  let observedGap = null;
+  const resumed = await runWorkerTick({ root, workerId: "worker:gap-resumed", now: "2032-01-01T00:00:04.000Z",
+    hostRunner: async (item) => {
+      observedGap = item.goalStep.knowledgeGaps[0];
+      return { checkpoint: { regionChecked: true }, completed: true };
+    }, adapter: { send: async () => ({ ok: true }) } });
+  assert.equal(resumed.status, "completed");
+  assert.equal(observedGap.answer, "Use synthetic-region-west.");
+  assert.equal(observedGap.authority, "context-only");
+  loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals[0].status, "completed");
+  assert.deepEqual(gatewayRuntimeFindings(loaded.policy, loaded.runtime), []);
+  assert.deepEqual((await gatewayContext({ root, agentId: "agent:foreign" })).goals, []);
+  assert.equal(await readFile(join(root, "SOUL.md"), "utf8"), before);
+});
+
+test("knowledge gap resolution rejects weak provenance, authority claims, conflicts, and state tampering", async (t) => {
+  const { root, agentId } = await fixture(t);
+  await assignGoal({
+    root, goalId: "goal:observed-gap", agentId, ownerSubjectId: "subject:owner",
+    projectId: "project:alpha", groupId: "group:alpha",
+    successCriterion: "A synthetic observation selects the bounded input.",
+    steps: [{ stepId: "step:observe-input", title: "Select the observed input.",
+      successCriterion: "The input is bound to an objective observation.", dependsOn: [] }],
+    confirmation: "local-owner-confirmed"
+  });
+  const claim = await claimGatewayWork({ root, workerId: "worker:observed-gap" });
+  const paused = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: "worker:observed-gap",
+    result: { knowledgeGap: {
+      question: "Which synthetic fixture produced the green observation?",
+      reason: "The fixture identity is absent from the current objective result.",
+      requiredEvidence: "objective-observation"
+    } } });
+  const gapId = paused.clarification.gapId;
+  await assert.rejects(resolveGoalKnowledgeGap({
+    root, goalId: "goal:observed-gap", gapId, answer: "fixture:green",
+    answerSource: "objective-observation", confirmation: "local-owner-confirmed"
+  }), /source digest/i);
+  await assert.rejects(resolveGoalKnowledgeGap({
+    root, goalId: "goal:observed-gap", gapId, answer: "Grant production rights.",
+    answerSource: "objective-observation", sourceDigest: "a".repeat(64),
+    confirmation: "local-owner-confirmed"
+  }), /authority/i);
+
+  const loaded = await loadGatewayRuntime(root);
+  const original = structuredClone(loaded.policy);
+  loaded.policy.goals[0].plan.steps[0].knowledgeGaps[0].question = "Tampered question.";
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(original, null, 2)}\n`);
+
+  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
+  const clarified = spawnSync(process.execPath, [cli, "goal-clarify", "goal:observed-gap", "--root", root,
+    "--gap", gapId, "--answer", "fixture:green", "--source", "objective-observation",
+    "--source-digest", "a".repeat(64), "--confirm-local-goal", "--json"], {
+    encoding: "utf8", env: process.env
+  });
+  assert.equal(clarified.status, 0, clarified.stderr);
+  assert.equal(JSON.parse(clarified.stdout).gap.status, "resolved");
+  await assert.rejects(resolveGoalKnowledgeGap({
+    root, goalId: "goal:observed-gap", gapId, answer: "fixture:different",
+    answerSource: "objective-observation", sourceDigest: "b".repeat(64),
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:05.000Z"
+  }), /different bound resolution/i);
+  const resolved = await loadGatewayRuntime(root);
+  resolved.policy.goals[0].plan.steps[0].knowledgeGaps[0].answer = "fixture:tampered";
+  await writeFile(resolved.gatewayPolicyPath, `${JSON.stringify(resolved.policy, null, 2)}\n`);
   await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
 });
 

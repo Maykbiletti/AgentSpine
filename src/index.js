@@ -45,10 +45,10 @@ export {
   personaRuntimeFindings, syncPersonaRosterFromEnvironment
 } from "./lib/persona-runtime.js";
 export {
-  GATEWAY_EVENT_SCHEMA, GATEWAY_POLICY_SCHEMA, GATEWAY_RUNTIME_SCHEMA, GOAL_PLAN_SCHEMA,
+  GATEWAY_EVENT_SCHEMA, GATEWAY_POLICY_SCHEMA, GATEWAY_RUNTIME_SCHEMA, GOAL_PLAN_SCHEMA, KNOWLEDGE_GAP_SCHEMA,
   assignGoal, claimGatewayWork, completeGatewayRun, deliverPrepared,
   enqueueGatewayWake, gatewayContext, gatewayRuntimeFindings,
-  inspectGatewayRuntime, loadGatewayRuntime, reconcileGateway, setGatewayControl
+  inspectGatewayRuntime, loadGatewayRuntime, reconcileGateway, resolveGoalKnowledgeGap, setGatewayControl
 } from "./lib/gateway-runtime.js";
 export { createTelegramAdapter } from "./lib/telegram-adapter.js";
 export { evaluateVoiceOutput, voiceCue } from "./lib/voice-runtime.js";

@@ -155,7 +155,11 @@ export async function runWorkerTick({ root = process.cwd(), workerId = "gateway-
     return { status: failed.item.status, processed: true, queueId: failed.item.queueId, retryAt: failed.item.availableAt };
   }
   const completed = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId, result, now });
-  if (!completed.outbox) return { status: completed.item.status, processed: true, queueId: completed.item.queueId };
+  if (!completed.outbox) return {
+    status: completed.clarification ? "needs-clarification" : completed.item.status,
+    processed: true, queueId: completed.item.queueId,
+    ...(completed.clarification ? { clarification: completed.clarification } : {})
+  };
   const delivery = await deliverPrepared({ root, outboxId: completed.outbox.outboxId,
     adapter: deliveryAdapter, now });
   if (delivery.outbox.status === "delivered") await acknowledgeChannelDelivery({ root,

@@ -16,6 +16,7 @@ export const GATEWAY_POLICY_SCHEMA = "agentspine.gateway-policy/v1";
 export const GATEWAY_RUNTIME_SCHEMA = "agentspine.gateway-runtime/v1";
 export const GATEWAY_EVENT_SCHEMA = "agentspine.gateway-event/v1";
 export const GOAL_PLAN_SCHEMA = "agentspine.goal-plan/v1";
+export const KNOWLEDGE_GAP_SCHEMA = "agentspine.knowledge-gap/v1";
 
 const CONFIRMATION = "local-owner-confirmed";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -31,6 +32,7 @@ const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z
 const SECRET_KEY_RE = /"(?:api[-_ ]?key|token|password|secret|credential)"\s*:/i;
 const AUTHORITY_RE = /\b(?:permission|rights?|roles?|owner|trusted|delegat|authorized|approval|production|payment|spending|tool capability|send capability)\b/i;
 const HEALTH_VALUES = new Set(["stopped", "running", "unknown", "healthy", "degraded", "failed"]);
+const KNOWLEDGE_EVIDENCE = new Set(["owner-input", "objective-observation"]);
 
 function emptyPolicy(root) {
   return { schema: GATEWAY_POLICY_SCHEMA, root, revision: 0, enabled: false, killSwitch: false, goals: [], history: [] };
@@ -73,6 +75,67 @@ function safeCheckpoint(value) {
   return JSON.parse(content);
 }
 
+function safeKnowledgeText(value, field, maximum) {
+  const text = safeText(value, field, maximum);
+  if (AUTHORITY_RE.test(text)) throw new Error(field + " cannot grant or describe authority");
+  return text;
+}
+
+function knowledgeGapSubjectMaterial(gap) {
+  return {
+    goalId: gap.goalId, goalStepId: gap.goalStepId, planDefinitionsDigest: gap.planDefinitionsDigest,
+    question: gap.question, reason: gap.reason, requiredEvidence: gap.requiredEvidence,
+    authority: "context-only"
+  };
+}
+
+function knowledgeGapRequestMaterial(gap) {
+  return {
+    subjectDigest: gap.subjectDigest, requestedAt: gap.requestedAt,
+    requestedByQueueId: gap.requestedByQueueId, authority: "context-only"
+  };
+}
+
+function knowledgeGapResolutionMaterial(gap) {
+  return {
+    requestDigest: gap.requestDigest, answer: gap.answer, answerSource: gap.answerSource,
+    sourceDigest: gap.sourceDigest, resolvedAt: gap.resolvedAt,
+    resolvedBySubjectId: gap.resolvedBySubjectId, authority: "context-only"
+  };
+}
+
+function validKnowledgeGap(gap) {
+  if (!(gap && gap.schema === KNOWLEDGE_GAP_SCHEMA && ID_RE.test(gap.gapId || "")
+    && ID_RE.test(gap.goalId || "") && ID_RE.test(gap.goalStepId || "")
+    && /^[a-f0-9]{64}$/.test(gap.planDefinitionsDigest || "")
+    && typeof gap.question === "string" && gap.question.length <= 500
+    && typeof gap.reason === "string" && gap.reason.length <= 500
+    && KNOWLEDGE_EVIDENCE.has(gap.requiredEvidence)
+    && ID_RE.test(gap.requestedByQueueId || "")
+    && Number.isFinite(new Date(gap.requestedAt).getTime())
+    && /^[a-f0-9]{64}$/.test(gap.subjectDigest || "")
+    && /^[a-f0-9]{64}$/.test(gap.requestDigest || "")
+    && ["open", "resolved"].includes(gap.status) && gap.authority === "context-only")) return false;
+  try {
+    if (safeKnowledgeText(gap.question, "knowledgeGap.question", 500) !== gap.question
+      || safeKnowledgeText(gap.reason, "knowledgeGap.reason", 500) !== gap.reason) return false;
+  } catch { return false; }
+  if (gap.subjectDigest !== sha256(JSON.stringify(knowledgeGapSubjectMaterial(gap)))
+    || gap.gapId !== "knowledge-gap:" + gap.subjectDigest.slice(0, 32)
+    || gap.requestDigest !== sha256(JSON.stringify(knowledgeGapRequestMaterial(gap)))) return false;
+  if (gap.status === "open") return gap.answer === null && gap.answerSource === null && gap.sourceDigest === null
+    && gap.resolvedAt === null && gap.resolvedBySubjectId === null && gap.resolutionDigest === null;
+  if (!(typeof gap.answer === "string" && gap.answer.length <= 2000
+    && gap.answerSource === gap.requiredEvidence
+    && (gap.sourceDigest === null || /^[a-f0-9]{64}$/.test(gap.sourceDigest))
+    && Number.isFinite(new Date(gap.resolvedAt).getTime()) && ID_RE.test(gap.resolvedBySubjectId || "")
+    && /^[a-f0-9]{64}$/.test(gap.resolutionDigest || ""))) return false;
+  if (new Date(gap.resolvedAt) < new Date(gap.requestedAt)) return false;
+  if ((gap.answerSource === "objective-observation") !== (gap.sourceDigest !== null)) return false;
+  try { if (safeKnowledgeText(gap.answer, "knowledgeGap.answer", 2000) !== gap.answer) return false; } catch { return false; }
+  return gap.resolutionDigest === sha256(JSON.stringify(knowledgeGapResolutionMaterial(gap)));
+}
+
 function planDefinitionMaterial(steps) {
   return steps.map(({ stepId, title, successCriterion, dependsOn }) => ({ stepId, title, successCriterion, dependsOn }));
 }
@@ -94,6 +157,10 @@ function validGoalPlan(plan) {
       && (step.blocker === null || (typeof step.blocker === "string" && step.blocker.length <= 500 && !SECRET_RE.test(step.blocker)))
       && (step.completedAt === null || Number.isFinite(new Date(step.completedAt).getTime()))
       && (step.completedByQueueId === null || ID_RE.test(step.completedByQueueId || ""))
+      && (step.knowledgeGaps === undefined || (Array.isArray(step.knowledgeGaps) && step.knowledgeGaps.length <= 16
+        && new Set(step.knowledgeGaps.map((gap) => gap.gapId)).size === step.knowledgeGaps.length
+        && step.knowledgeGaps.every((gap) => validKnowledgeGap(gap)
+          && gap.goalStepId === step.stepId && gap.planDefinitionsDigest === plan.definitionsDigest)))
       && Number.isFinite(new Date(step.updatedAt).getTime()))) return false;
   }
   const visiting = new Set(); const visited = new Set();
@@ -111,6 +178,9 @@ function validGoalPlan(plan) {
     && !step.dependsOn.every((dependency) => completed.has(dependency)))) return false;
   if (plan.steps.some((step) => (step.status === "completed") !== (step.completedAt !== null && step.completedByQueueId !== null))) return false;
   if (plan.steps.some((step) => (step.status === "blocked") !== (step.blocker !== null))) return false;
+  if (plan.steps.some((step) => (step.knowledgeGaps || []).filter((gap) => gap.status === "open").length > 1)) return false;
+  if (plan.steps.some((step) => (step.knowledgeGaps || []).some((gap) => gap.status === "open")
+    && step.status !== "blocked")) return false;
   if (plan.definitionsDigest !== sha256(JSON.stringify(planDefinitionMaterial(plan.steps)))) return false;
   const current = plan.steps.filter((step) => ["active", "blocked"].includes(step.status));
   return current.length <= 1 && (plan.currentStepId === null
@@ -132,7 +202,8 @@ function createGoalPlan(steps, now) {
     title: safeText(step?.title, `steps[${index}].title`, 500),
     successCriterion: safeText(step?.successCriterion, `steps[${index}].successCriterion`),
     dependsOn: Array.isArray(step?.dependsOn) ? step.dependsOn.map((dependency) => exactId(dependency, `steps[${index}].dependsOn`)) : [],
-    status: "pending", checkpoint: null, blocker: null, completedAt: null, completedByQueueId: null, updatedAt: now
+    status: "pending", checkpoint: null, blocker: null, completedAt: null, completedByQueueId: null,
+    knowledgeGaps: [], updatedAt: now
   }));
   const plan = { schema: GOAL_PLAN_SCHEMA, revision: 0, currentStepId: null, steps: normalized,
     definitionsDigest: sha256(JSON.stringify(planDefinitionMaterial(normalized))), authority: "context-only-plan" };
@@ -143,6 +214,28 @@ function createGoalPlan(steps, now) {
 
 function currentPlanStep(goal) {
   return goal.plan?.steps.find((step) => step.stepId === goal.plan.currentStepId) || null;
+}
+
+function createKnowledgeGap(goal, step, queueId, request, now) {
+  const gap = {
+    schema: KNOWLEDGE_GAP_SCHEMA, gapId: null, goalId: goal.goalId, goalStepId: step.stepId,
+    planDefinitionsDigest: goal.plan.definitionsDigest,
+    question: safeKnowledgeText(request?.question, "knowledgeGap.question", 500),
+    reason: safeKnowledgeText(request?.reason, "knowledgeGap.reason", 500),
+    requiredEvidence: request?.requiredEvidence,
+    requestedAt: now, requestedByQueueId: exactId(queueId, "requestedByQueueId"),
+    subjectDigest: null, requestDigest: null, status: "open", answer: null, answerSource: null,
+    sourceDigest: null, resolvedAt: null, resolvedBySubjectId: null, resolutionDigest: null,
+    authority: "context-only"
+  };
+  if (!KNOWLEDGE_EVIDENCE.has(gap.requiredEvidence)) {
+    throw new Error("knowledgeGap.requiredEvidence must be owner-input or objective-observation");
+  }
+  gap.subjectDigest = sha256(JSON.stringify(knowledgeGapSubjectMaterial(gap)));
+  gap.gapId = "knowledge-gap:" + gap.subjectDigest.slice(0, 32);
+  gap.requestDigest = sha256(JSON.stringify(knowledgeGapRequestMaterial(gap)));
+  if (!validKnowledgeGap(gap)) throw new Error("knowledge gap request is invalid");
+  return gap;
 }
 
 function planQueueKey(goalId, stepId, phase, suffix = "") {
@@ -171,6 +264,7 @@ function validGoal(goal) {
     && goal.authority === "authenticated-goal-policy" && Number.isFinite(new Date(goal.createdAt).getTime())
     && Number.isFinite(new Date(goal.updatedAt).getTime())
     && (goal.plan === undefined || goal.plan === null || (validGoalPlan(goal.plan)
+      && goal.plan.steps.every((step) => (step.knowledgeGaps || []).every((gap) => gap.goalId === goal.goalId))
       && (goal.status !== "active" || (currentPlanStep(goal)?.status === "active" && goal.nextSafeStep === currentPlanStep(goal).title))
       && (goal.status !== "blocked" || currentPlanStep(goal)?.status === "blocked")
       && (goal.status !== "completed" || goal.plan.steps.every((step) => step.status === "completed"))));
@@ -399,6 +493,9 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
     if (previous?.plan && previous.status === "blocked") {
       const blockedStep = currentPlanStep(previous);
       if (!blockedStep || blockedStep.status !== "blocked") throw new Error("blocked goal plan has no bound blocked step");
+      if ((blockedStep.knowledgeGaps || []).some((gap) => gap.status === "open")) {
+        throw new Error("blocked goal plan has an open knowledge gap; resolve it with goal-clarify");
+      }
       policy.history.push({ kind: "goal", at: createdAt, value: structuredClone(previous), authority: "authenticated-goal-policy" });
       blockedStep.status = "active"; blockedStep.blocker = null; blockedStep.updatedAt = createdAt;
       previous.status = "active"; previous.blocker = null; previous.updatedAt = createdAt; previous.plan.revision += 1;
@@ -426,6 +523,64 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
     }
     await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
     return { goal, gatewayPolicyPath: paths.gatewayPolicyPath };
+  });
+}
+
+export async function resolveGoalKnowledgeGap({ root = process.cwd(), goalId, gapId, answer,
+  answerSource = "owner-input", sourceDigest = null, confirmation, now = new Date() }) {
+  if (confirmation !== CONFIRMATION) throw new Error("knowledge gap resolution requires explicit local owner confirmation");
+  const paths = await pathsFor(root);
+  return withLock(paths, async () => {
+    const [policy, runtime, personas] = await Promise.all([
+      readJson(paths.gatewayPolicyPath, paths.catalog.root, normalizePolicy, emptyPolicy),
+      readJson(paths.gatewayRuntimePath, paths.catalog.root, normalizeRuntime, emptyRuntime),
+      loadPersonaRuntime(paths.catalog.root, paths.catalog)
+    ]);
+    goalId = exactId(goalId, "goalId"); gapId = exactId(gapId, "gapId");
+    const goal = policy.goals.find((item) => item.goalId === goalId);
+    const step = goal && currentPlanStep(goal);
+    if (!goal?.plan || !step) throw new Error("knowledge gap resolution requires the exact current goal-plan step");
+    assertActivePersona(personas.policy, personas.runtime, goal.agentId, goal.projectId, goal.groupId);
+    const gap = (step.knowledgeGaps || []).find((item) => item.gapId === gapId);
+    if (!gap) throw new Error("knowledge gap is not bound to the current goal-plan step");
+    answer = safeKnowledgeText(answer, "answer", 2000);
+    if (!KNOWLEDGE_EVIDENCE.has(answerSource) || answerSource !== gap.requiredEvidence) {
+      throw new Error("answer source does not satisfy the requested evidence class");
+    }
+    sourceDigest = sourceDigest === null || sourceDigest === undefined || sourceDigest === "" ? null : String(sourceDigest);
+    if ((answerSource === "objective-observation") !== (/^[a-f0-9]{64}$/.test(sourceDigest || ""))) {
+      throw new Error("objective observation answers require one exact SHA-256 source digest");
+    }
+    if (gap.status === "resolved") {
+      if (gap.answer !== answer || gap.answerSource !== answerSource || gap.sourceDigest !== sourceDigest) {
+        throw new Error("knowledge gap already has a different bound resolution");
+      }
+      return { goal: structuredClone(goal), gap: structuredClone(gap), duplicate: true };
+    }
+    if (goal.status !== "blocked" || step.status !== "blocked") {
+      throw new Error("open knowledge gap resolution requires the exact blocked goal-plan step");
+    }
+    const resolvedAt = timestamp(now);
+    const candidate = { ...gap, status: "resolved", answer, answerSource, sourceDigest,
+      resolvedAt, resolvedBySubjectId: goal.ownerSubjectId, resolutionDigest: null };
+    candidate.resolutionDigest = sha256(JSON.stringify(knowledgeGapResolutionMaterial(candidate)));
+    if (!validKnowledgeGap(candidate)) throw new Error("knowledge gap resolution is invalid");
+    policy.history.push({ kind: "goal", at: resolvedAt, value: structuredClone(goal), authority: "authenticated-goal-policy" });
+    Object.assign(gap, candidate);
+    step.status = "active"; step.blocker = null; step.updatedAt = resolvedAt;
+    goal.status = "active"; goal.blocker = null; goal.updatedAt = resolvedAt; goal.nextSafeStep = step.title;
+    goal.plan.revision += 1; policy.revision += 1;
+    const key = planQueueKey(goal.goalId, step.stepId, "clarified", gap.resolutionDigest.slice(0, 20));
+    let queued = runtime.queue.find((item) => item.dedupeKey === key);
+    if (!queued) {
+      queued = newGoalQueue(goal, step, "follow-up", key, resolvedAt);
+      runtime.queue.push(queued); runtime.revision += 1;
+      appendReceipt(runtime, "knowledge-gap-resolved", queued.queueId, resolvedAt, {
+        goalStepId: step.stepId, gapId: gap.gapId, answerSource
+      });
+    }
+    await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
+    return { goal: structuredClone(goal), gap: structuredClone(gap), queueId: queued.queueId, duplicate: false };
   });
 }
 
@@ -629,7 +784,16 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
         throw new Error("run completion is not bound to the current active goal step");
       }
     }
+    const knowledgeGapRequest = result?.knowledgeGap === undefined || result?.knowledgeGap === null
+      ? null : result.knowledgeGap;
+    if (knowledgeGapRequest && (item.channelEventId || !item.goalStepId || !boundGoal?.plan)) {
+      throw new Error("knowledge gaps require an exact goal-plan step without a channel obligation");
+    }
+    if (knowledgeGapRequest && (result?.blocked || result?.completed)) {
+      throw new Error("knowledge gap result cannot also complete or generically block a step");
+    }
     const text = result?.text ? safeText(result.text, "result.text", 16000) : null;
+    let clarification = null;
     preserve(runtime, "queue", item, "run-completed", current);
     if (item.channelEventId) {
       if (!text) throw new Error("a channel obligation requires a non-empty response");
@@ -650,7 +814,7 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
       }
       item.status = "awaiting-delivery";
     } else {
-      item.status = result?.blocked ? "blocked" : "completed"; item.completedAt = current;
+      item.status = result?.blocked || knowledgeGapRequest ? "blocked" : "completed"; item.completedAt = current;
       const goal = boundGoal;
       if (goal) {
         policy.history.push({ kind: "goal", at: current, value: structuredClone(goal), authority: "authenticated-goal-policy" });
@@ -660,7 +824,28 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
         if (goal.plan && item.goalStepId) {
           const step = currentPlanStep(goal);
           step.checkpoint = checkpoint; step.updatedAt = current;
-          if (result?.blocked) {
+          if (knowledgeGapRequest) {
+            if (!Array.isArray(step.knowledgeGaps)) step.knowledgeGaps = [];
+            const proposed = createKnowledgeGap(goal, step, item.queueId, knowledgeGapRequest, current);
+            const existing = step.knowledgeGaps.find((gap) => gap.gapId === proposed.gapId);
+            if (!existing && step.knowledgeGaps.length >= 16) throw new Error("goal step exceeds 16 knowledge gaps");
+            if (existing?.status === "resolved") {
+              goal.blocker = "The host repeated an already resolved knowledge gap.";
+              step.status = "blocked"; step.blocker = goal.blocker; goal.status = "blocked";
+              appendReceipt(runtime, "knowledge-gap-regression", item.queueId, current, {
+                goalStepId: step.stepId, gapId: existing.gapId
+              });
+            } else {
+              const gap = existing || proposed;
+              if (!existing) step.knowledgeGaps.push(gap);
+              goal.blocker = gap.question; step.status = "blocked"; step.blocker = gap.question; goal.status = "blocked";
+              clarification = structuredClone(gap);
+              appendReceipt(runtime, "knowledge-gap-opened", item.queueId, current, {
+                goalStepId: step.stepId, gapId: gap.gapId, requiredEvidence: gap.requiredEvidence
+              });
+            }
+            goal.plan.revision += 1;
+          } else if (result?.blocked) {
             step.status = "blocked"; step.blocker = goal.blocker; goal.status = "blocked";
           } else if (result?.completed) {
             step.status = "completed"; step.completedAt = current; step.completedByQueueId = item.queueId; step.blocker = null;
@@ -704,7 +889,7 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     runtime.health.host = "healthy"; runtime.health.worker = "healthy"; runtime.health.lastTickAt = current;
     appendReceipt(runtime, "run-terminal", item.queueId, current, { status: item.status, goalStepId: item.goalStepId || null }); runtime.revision += 1;
     await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
-    return { item, outbox: runtime.outbox.find((entry) => entry.queueId === item.queueId) || null };
+    return { item, outbox: runtime.outbox.find((entry) => entry.queueId === item.queueId) || null, clarification };
   });
 }
 
