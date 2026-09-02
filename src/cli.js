@@ -98,6 +98,16 @@ function booleanFlag(value, fallback = false) {
   throw new Error(`expected boolean flag, received: ${value}`);
 }
 
+async function goalPlanFlag(path) {
+  if (!path) return null;
+  const content = await readFile(path, "utf8");
+  if (Buffer.byteLength(content) > 64 * 1024) throw new Error("goal plan exceeds 64 KiB");
+  const parsed = JSON.parse(content);
+  const steps = Array.isArray(parsed) ? parsed : parsed?.steps;
+  if (!Array.isArray(steps)) throw new Error("goal plan must be a JSON array or an object with a steps array");
+  return steps;
+}
+
 function learningScope(flags) {
   return {
     personaId: flags.persona || null,
@@ -206,7 +216,7 @@ Usage:
   agentspine channel-events [root] [--agent id] [--project id] [--group id] [--provider telegram] [--include-terminal]
   agentspine persona-sync [root] --roster absolute-path --confirm-local-persona
   agentspine personas [root] [--persona id] [--group id] [--include-inactive]
-  agentspine goal-assign <goal-id> --agent id --owner id --project id --success text --next-step text [--group id] [--deadline date] --confirm-local-goal
+  agentspine goal-assign <goal-id> --agent id --owner id --project id --success text (--next-step text | --plan plan.json) [--group id] [--deadline date] --confirm-local-goal
   agentspine gateway-control [root] [--enabled true|false] [--kill-switch true|false] --confirm-local-gateway
   agentspine gateway-status [root] [--agent id]
   agentspine share-keygen <signer-id> [--public-out signer.json] [--rotate] [--confirm-local-share]
@@ -974,7 +984,7 @@ export async function run(argv = process.argv.slice(2)) {
       root: flags.root || process.cwd(), goalId: positional[0], agentId: flags.agent,
       ownerSubjectId: flags.owner, projectId: flags.project, groupId: flags.group || null,
       priority: Number(flags.priority ?? 70), successCriterion: flags.success,
-      nextSafeStep: flags["next-step"], deadline: flags.deadline || null,
+      nextSafeStep: flags["next-step"] || null, steps: await goalPlanFlag(flags.plan), deadline: flags.deadline || null,
       confirmation: booleanFlag(flags["confirm-local-goal"]) ? "local-owner-confirmed" : null
     }), json);
   }

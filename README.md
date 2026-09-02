@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.53.0` adds durable hierarchical goal plans to the optional gateway worker. An owner can precommit a bounded dependency graph of objective steps; the worker leases only the current ready step, advances after its explicit success result, resumes the exact step after restart, and reconstructs one missing wake after a torn write. Cycles, definition drift and stale-step completion fail closed, while the plan remains context-only and cannot grant tools, rights or delegation.
+
 Version `0.52.1` keeps PreToolUse available when a bounded source or self-starter filesystem scan encounters an inaccessible or disappearing path. EPERM, EACCES, and ENOENT entries are skipped and reported without exposing file content; scan failures on Edit, Write, apply_patch, Bash, and exec_command are allowed and recorded in the local diagnostic audit log. Policy violations and protected-source writes remain fail-closed.
 
 Version `0.52.0` makes every locally attested user-feedback or objective-test anchor single-use for experiment admission within its exact scope. Evaluation v28 and bounded retry v29 atomically register content-free lineage tombstones and bind them into candidate admission v4. They survive candidate deletion and subject purge, so a fresh candidate or recreated contract cannot reuse the same evidence or independence identity; parallel races yield one contract, manipulation fails closed after restart, and foreign scopes remain independent with zero matching diagnostics.
@@ -253,7 +255,7 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine channel-events …` | Inspect the exact-scope durable ingress queue and leases |
 | `agentspine persona-sync …` | Synchronize an explicitly approved external authenticated roster |
 | `agentspine personas …` | Inspect active and historical persona identities and provenance |
-| `agentspine goal-assign …` | Assign one authenticated focused goal to an active agent |
+| `agentspine goal-assign …` | Assign one authenticated focused goal or dependency-bound plan to an active agent |
 | `agentspine gateway-control …` | Enable, stop, or kill-switch the local worker under explicit owner control |
 | `agentspine gateway-status …` | Inspect goals, queue, delivery receipts, and independent health gates |
 | `agentspine share-init …` | Initialize an optional provider-neutral directory adapter outside the project |

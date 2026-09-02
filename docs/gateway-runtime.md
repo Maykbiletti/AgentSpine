@@ -102,7 +102,28 @@ Remove `--once` under a service manager for continuous operation. AgentSpine doe
 
 ## Goals, attention, and recovery
 
-An agent without a queued message or an owner-assigned goal reports `idle/needs-goal`. `goal-assign` creates one exact focused goal for an active authenticated agent. Promise, resolved-blocker, deadline, assignment, follow-up, and direct-message wakes share bounded per-agent lanes. Each effect rechecks current policy, identity, group, route, and kill-switch state.
+An agent without a queued message or an owner-assigned goal reports `idle/needs-goal`. `goal-assign` creates one exact focused goal for an active authenticated agent. It can also precommit a bounded dependency plan from a JSON file:
+
+```json
+{
+  "steps": [
+    { "stepId": "step:observe", "title": "Observe the state.", "successCriterion": "The input digest is recorded.", "dependsOn": [] },
+    { "stepId": "step:act", "title": "Apply the bounded action.", "successCriterion": "The action reports success.", "dependsOn": ["step:observe"] },
+    { "stepId": "step:verify", "title": "Verify the outcome.", "successCriterion": "The independent check passes.", "dependsOn": ["step:act"] }
+  ]
+}
+```
+
+```bash
+agentspine goal-assign goal:release \
+  --agent persona:synthetic --owner subject:synthetic --project project:synthetic \
+  --success "All three acceptance gates pass." --plan plan.json \
+  --confirm-local-goal
+```
+
+The immutable definition digest binds 1-32 exact step IDs, titles, success criteria and dependencies. Only the current dependency-ready step enters the durable lane, and the host request receives that exact step separately from the complete plan. A successful host result completes that step rather than the whole goal; the next ready step is selected deterministically. A blocked step retains its checkpoint and requires the owner to repeat the same confirmed assignment before it becomes runnable again. Restart reconciliation recreates exactly one missing runnable step after a torn policy/runtime write. Cycles, unknown dependencies, definition drift, stale leases and out-of-order completion fail closed. Plans and checkpoints remain context-only: they cannot choose or grant a tool, route, identity, delegation, payment, production right or policy exception.
+
+Promise, resolved-blocker, deadline, assignment, follow-up, and direct-message wakes share bounded per-agent lanes. Each effect rechecks current policy, identity, group, route, current plan step, and kill-switch state.
 
 Queue leases expire safely, retries are bounded, and the worker wakes on relevant desired-state files or a capped timer without watching its own runtime writes. Prepared and demonstrably effect-free failed deliveries resume after restart. A revoked reply capability or exhausted no-effect retry budget becomes `dead-letter`; ambiguous sends become `delivery-unknown` and are never automatically replayed. Already delivered outbox entries are never sent twice. Checkpoints reject secrets and authority-shaped content. The ten-gate audit replays persona events, gateway history, receipts, lanes, queue IDs, delivery IDs, independent health heartbeats, and current authority markers.
 

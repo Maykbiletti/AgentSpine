@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { applyPersonaRoster, loadPersonaRuntime } from "../src/lib/persona-runtime.js";
 import { recordAttentionEvent } from "../src/lib/attention.js";
 import { createTask } from "../src/lib/coordination.js";
@@ -287,6 +289,135 @@ test("authenticated goal assignment remains idle-safe without a goal and checkpo
   const { policy, runtime } = await loadGatewayRuntime(root);
   assert.deepEqual(policy.goals[0].checkpoint, { gate: 1 });
   assert.equal(runtime.queue.some((item) => item.kind === "follow-up" && item.status === "pending"), true);
+});
+
+test("dependency-bound goal plans resume after a torn write and complete three objective steps in order", async (t) => {
+  const { root, agentId, before } = await fixture(t);
+  const planSteps = [
+    { stepId: "step:observe", title: "Observe the synthetic state.",
+      successCriterion: "The observed digest is recorded.", dependsOn: [] },
+    { stepId: "step:act", title: "Apply the bounded synthetic action.",
+      successCriterion: "The bounded action reports success.", dependsOn: ["step:observe"] },
+    { stepId: "step:verify", title: "Verify the synthetic outcome.",
+      successCriterion: "The independent outcome check is green.", dependsOn: ["step:act"] }
+  ];
+  await assignGoal({
+    root, goalId: "goal:vertical", agentId, ownerSubjectId: "subject:owner", projectId: "project:alpha",
+    groupId: "group:alpha", successCriterion: "Three synthetic acceptance gates pass in dependency order.",
+    steps: planSteps,
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:01.000Z"
+  });
+
+  // Simulate the policy write surviving while the matching runtime write is lost.
+  let loaded = await loadGatewayRuntime(root);
+  loaded.runtime.queue = [];
+  loaded.runtime.receipts = [];
+  await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
+  await reconcileGateway({ root, now: "2032-01-01T00:00:02.000Z" });
+  await reconcileGateway({ root, now: "2032-01-01T00:00:02.500Z" });
+  loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.runtime.queue.filter((item) => item.goalStepId === "step:observe" && item.status === "pending").length, 1);
+
+  const claims = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+    root, workerId: `worker:plan:${index}`, now: "2032-01-01T00:00:03.000Z"
+  })));
+  assert.equal(claims.filter((claim) => claim.item).length, 1);
+  const observe = claims.find((claim) => claim.item);
+  assert.equal(observe.item.goalStepId, "step:observe");
+  await completeGatewayRun({ root, queueId: observe.item.queueId, workerId: observe.item.lease.workerId,
+    result: { checkpoint: { observed: true }, completed: true }, now: "2032-01-01T00:00:04.000Z" });
+  loaded = await loadGatewayRuntime(root);
+  assert.deepEqual(loaded.policy.goals[0].plan.steps.map((step) => step.status), ["completed", "active", "pending"]);
+  assert.equal(loaded.policy.goals[0].status, "active");
+
+  const act = await claimGatewayWork({ root, workerId: "worker:plan:act", now: "2032-01-01T00:00:05.000Z" });
+  assert.equal(act.item.goalStepId, "step:act");
+  await completeGatewayRun({ root, queueId: act.item.queueId, workerId: "worker:plan:act",
+    result: { checkpoint: { dependency: "offline" }, blocked: true, blocker: "Synthetic dependency is unavailable." },
+    now: "2032-01-01T00:00:05.500Z" });
+  loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals[0].status, "blocked");
+  const resumed = await assignGoal({
+    root, goalId: "goal:vertical", agentId, ownerSubjectId: "subject:owner", projectId: "project:alpha",
+    groupId: "group:alpha", successCriterion: "Three synthetic acceptance gates pass in dependency order.",
+    steps: planSteps, confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:05.750Z"
+  });
+  assert.equal(resumed.resumed, true);
+  const resumedAct = await claimGatewayWork({ root, workerId: "worker:plan:act-resumed", now: "2032-01-01T00:00:05.900Z" });
+  assert.equal(resumedAct.item.goalStepId, "step:act");
+  await completeGatewayRun({ root, queueId: resumedAct.item.queueId, workerId: "worker:plan:act-resumed",
+    result: { checkpoint: { acted: true }, completed: true }, now: "2032-01-01T00:00:06.000Z" });
+  loaded = await loadGatewayRuntime(root);
+  assert.deepEqual(loaded.policy.goals[0].plan.steps.map((step) => step.status), ["completed", "completed", "active"]);
+
+  const verify = await claimGatewayWork({ root, workerId: "worker:plan:verify", now: "2032-01-01T00:00:07.000Z" });
+  assert.equal(verify.item.goalStepId, "step:verify");
+  await completeGatewayRun({ root, queueId: verify.item.queueId, workerId: "worker:plan:verify",
+    result: { checkpoint: { verified: true }, completed: true }, now: "2032-01-01T00:00:08.000Z" });
+  loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals[0].status, "completed");
+  assert.deepEqual(loaded.policy.goals[0].plan.steps.map((step) => step.status), ["completed", "completed", "completed"]);
+  assert.deepEqual(gatewayRuntimeFindings(loaded.policy, loaded.runtime), []);
+  assert.equal(await readFile(join(root, "SOUL.md"), "utf8"), before);
+});
+
+test("goal plans reject dependency cycles, definition drift, and stale-step completion", async (t) => {
+  const { root, agentId } = await fixture(t);
+  const base = {
+    root, agentId, ownerSubjectId: "subject:owner", projectId: "project:alpha", groupId: "group:alpha",
+    successCriterion: "Synthetic plan remains bound.", confirmation: "local-owner-confirmed"
+  };
+  await assert.rejects(assignGoal({ ...base, goalId: "goal:cycle", steps: [
+    { stepId: "step:a", title: "Step A.", successCriterion: "A passes.", dependsOn: ["step:b"] },
+    { stepId: "step:b", title: "Step B.", successCriterion: "B passes.", dependsOn: ["step:a"] }
+  ] }), /acyclic dependency graph/i);
+
+  await assignGoal({ ...base, goalId: "goal:bound", steps: [
+    { stepId: "step:first", title: "First bounded step.", successCriterion: "First passes.", dependsOn: [] },
+    { stepId: "step:second", title: "Second bounded step.", successCriterion: "Second passes.", dependsOn: ["step:first"] }
+  ], now: "2032-01-01T00:00:01.000Z" });
+  const claim = await claimGatewayWork({ root, workerId: "worker:stale", now: "2032-01-01T00:00:02.000Z" });
+  const loaded = await loadGatewayRuntime(root);
+  const originalPolicy = structuredClone(loaded.policy);
+  const goal = loaded.policy.goals[0];
+  goal.plan.steps[0].status = "completed"; goal.plan.steps[0].completedAt = "2032-01-01T00:00:02.500Z";
+  goal.plan.steps[0].completedByQueueId = claim.item.queueId;
+  goal.plan.steps[1].status = "active"; goal.plan.steps[1].updatedAt = "2032-01-01T00:00:02.500Z";
+  goal.plan.currentStepId = "step:second"; goal.nextSafeStep = goal.plan.steps[1].title; goal.updatedAt = "2032-01-01T00:00:02.500Z";
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
+  await assert.rejects(completeGatewayRun({ root, queueId: claim.item.queueId, workerId: "worker:stale",
+    result: { completed: true }, now: "2032-01-01T00:00:03.000Z" }), /not bound to the current active goal step/i);
+
+  originalPolicy.goals[0].plan.steps[0].title = "Drifted definition.";
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(originalPolicy, null, 2)}\n`);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+});
+
+test("goal-assign CLI reads a bounded plan without changing its source bytes", async (t) => {
+  const { root, agentId } = await fixture(t);
+  const planPath = join(root, "synthetic-goal-plan.json");
+  const planBytes = `${JSON.stringify({ steps: [
+    { stepId: "step:cli-one", title: "Run the first CLI step.", successCriterion: "First CLI gate passes.", dependsOn: [] },
+    { stepId: "step:cli-two", title: "Run the second CLI step.", successCriterion: "Second CLI gate passes.", dependsOn: ["step:cli-one"] }
+  ] }, null, 2)}\n`;
+  await writeFile(planPath, planBytes);
+  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
+  const result = spawnSync(process.execPath, [cli, "goal-assign", "goal:cli-plan", "--root", root,
+    "--agent", agentId, "--owner", "subject:owner", "--project", "project:alpha", "--group", "group:alpha",
+    "--success", "Both CLI gates pass.", "--plan", planPath, "--confirm-local-goal", "--json"], {
+    encoding: "utf8", env: process.env
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).goal.plan.currentStepId, "step:cli-one");
+  let observedStep = null;
+  await runWorkerTick({ root, workerId: "worker:cli-plan", now: "2032-01-01T00:00:03.000Z",
+    hostRunner: async (item) => {
+      observedStep = item.goalStep;
+      return { checkpoint: { cli: true }, completed: false };
+    }, adapter: { send: async () => ({ ok: true }) } });
+  assert.equal(observedStep.stepId, "step:cli-one");
+  assert.equal(observedStep.successCriterion, "First CLI gate passes.");
+  assert.equal(await readFile(planPath, "utf8"), planBytes);
 });
 
 test("startup reconciliation creates one deadline wake and health detects a silent scheduler", async (t) => {

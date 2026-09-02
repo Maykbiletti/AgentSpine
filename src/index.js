@@ -45,7 +45,7 @@ export {
   personaRuntimeFindings, syncPersonaRosterFromEnvironment
 } from "./lib/persona-runtime.js";
 export {
-  GATEWAY_EVENT_SCHEMA, GATEWAY_POLICY_SCHEMA, GATEWAY_RUNTIME_SCHEMA,
+  GATEWAY_EVENT_SCHEMA, GATEWAY_POLICY_SCHEMA, GATEWAY_RUNTIME_SCHEMA, GOAL_PLAN_SCHEMA,
   assignGoal, claimGatewayWork, completeGatewayRun, deliverPrepared,
   enqueueGatewayWake, gatewayContext, gatewayRuntimeFindings,
   inspectGatewayRuntime, loadGatewayRuntime, reconcileGateway, setGatewayControl

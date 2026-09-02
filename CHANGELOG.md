@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-09-02
+
+### Added
+
+- Owner-confirmed focused goals can carry a bounded, immutable dependency graph with 1-32 objective steps, per-step success criteria, checkpoints and explicit current-step binding.
+- The durable worker advances only the exact leased step, opens the next dependency-ready step deterministically, reconstructs one missing runnable step after a torn policy/runtime write, and requires renewed owner confirmation to resume a blocked step.
+
+### Security
+
+- Cycles, unknown dependencies, definition-digest drift and stale-step completion fail closed. Six concurrent workers still lease exactly one step, while goal plans remain context-only and cannot create tools, rights, delegation or policy exceptions.
+
+### Changed
+
+- `goal-assign` accepts `--plan plan.json`; existing flat goals and historical queue records remain compatible.
+
 ## [0.52.1] - 2026-09-02
 
 ### Fixed

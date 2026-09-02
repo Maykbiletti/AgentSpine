@@ -90,12 +90,15 @@ async function hostWorkItem(root, item) {
   const identity = personas.policy.bindings.find((entry) => entry.id === persona?.bindingId && entry.active);
   if (!persona || !identity) throw new Error("claimed work lost its authenticated agent identity");
   const goal = item.goalId === null ? null : policy.goals.find((entry) => entry.goalId === item.goalId) || null;
+  const goalStep = item.goalStepId === null || item.goalStepId === undefined ? null
+    : goal?.plan?.steps.find((entry) => entry.stepId === item.goalStepId) || null;
+  if (item.goalStepId && !goalStep) throw new Error("claimed work lost its exact goal-plan step");
   const event = item.channelEventId === null ? null
     : channel.runtime.events.find((entry) => entry.eventId === item.channelEventId) || null;
   if (item.channelEventId && !event) throw new Error("claimed channel work lost its exact event");
   return {
     ...structuredClone(item), host: identity.host, profileId: identity.profileId, projectRoot: root,
-    goal: goal ? structuredClone(goal) : null,
+    goal: goal ? structuredClone(goal) : null, goalStep: goalStep ? structuredClone(goalStep) : null,
     hostEnvironment: {
       AGENTSPINE_GATEWAY_CONTEXT: "agentspine.gateway-start/v1",
       AGENTSPINE_ENTITY_ID: item.agentId,

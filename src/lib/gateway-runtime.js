@@ -15,12 +15,14 @@ import { evaluateVoiceOutput } from "./voice-runtime.js";
 export const GATEWAY_POLICY_SCHEMA = "agentspine.gateway-policy/v1";
 export const GATEWAY_RUNTIME_SCHEMA = "agentspine.gateway-runtime/v1";
 export const GATEWAY_EVENT_SCHEMA = "agentspine.gateway-event/v1";
+export const GOAL_PLAN_SCHEMA = "agentspine.goal-plan/v1";
 
 const CONFIRMATION = "local-owner-confirmed";
 const MAX_BYTES = 8 * 1024 * 1024;
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/+~-]{0,255}$/;
 const ROUTE_RE = /^-?[A-Za-z0-9][A-Za-z0-9:_.@/+~-]{0,255}$/;
 const GOAL_STATUSES = new Set(["active", "blocked", "completed", "cancelled"]);
+const PLAN_STEP_STATUSES = new Set(["pending", "active", "blocked", "completed", "cancelled"]);
 const QUEUE_STATUSES = new Set(["pending", "leased", "awaiting-delivery", "completed", "blocked", "dead-letter", "cancelled"]);
 const OUTBOX_STATUSES = new Set(["prepared", "sending", "delivered", "failed", "dead-letter", "delivery-unknown", "acknowledged"]);
 const WAKE_KINDS = new Set(["direct-message", "deadline", "promise", "resolved-blocker", "assignment", "follow-up", "relationship"]);
@@ -71,6 +73,90 @@ function safeCheckpoint(value) {
   return JSON.parse(content);
 }
 
+function planDefinitionMaterial(steps) {
+  return steps.map(({ stepId, title, successCriterion, dependsOn }) => ({ stepId, title, successCriterion, dependsOn }));
+}
+
+function validGoalPlan(plan) {
+  if (!(plan && plan.schema === GOAL_PLAN_SCHEMA && plan.authority === "context-only-plan"
+    && Number.isInteger(plan.revision) && plan.revision >= 0 && Array.isArray(plan.steps)
+    && plan.steps.length > 0 && plan.steps.length <= 32 && /^[a-f0-9]{64}$/.test(plan.definitionsDigest || "")
+    && (plan.currentStepId === null || ID_RE.test(plan.currentStepId || "")))) return false;
+  const ids = new Set(plan.steps.map((step) => step?.stepId));
+  if (ids.size !== plan.steps.length || ids.has(undefined)) return false;
+  for (const step of plan.steps) {
+    if (!(ID_RE.test(step.stepId || "") && typeof step.title === "string" && step.title.length > 0 && step.title.length <= 500
+      && typeof step.successCriterion === "string" && step.successCriterion.length > 0 && step.successCriterion.length <= 1000
+      && Array.isArray(step.dependsOn) && new Set(step.dependsOn).size === step.dependsOn.length
+      && step.dependsOn.every((dependency) => ids.has(dependency) && dependency !== step.stepId)
+      && PLAN_STEP_STATUSES.has(step.status)
+      && (step.checkpoint === null || (() => { try { safeCheckpoint(step.checkpoint); return true; } catch { return false; } })())
+      && (step.blocker === null || (typeof step.blocker === "string" && step.blocker.length <= 500 && !SECRET_RE.test(step.blocker)))
+      && (step.completedAt === null || Number.isFinite(new Date(step.completedAt).getTime()))
+      && (step.completedByQueueId === null || ID_RE.test(step.completedByQueueId || ""))
+      && Number.isFinite(new Date(step.updatedAt).getTime()))) return false;
+  }
+  const visiting = new Set(); const visited = new Set();
+  const visit = (stepId) => {
+    if (visiting.has(stepId)) return false;
+    if (visited.has(stepId)) return true;
+    visiting.add(stepId);
+    const step = plan.steps.find((entry) => entry.stepId === stepId);
+    if (!step.dependsOn.every(visit)) return false;
+    visiting.delete(stepId); visited.add(stepId); return true;
+  };
+  if (!plan.steps.every((step) => visit(step.stepId))) return false;
+  const completed = new Set(plan.steps.filter((step) => step.status === "completed").map((step) => step.stepId));
+  if (plan.steps.some((step) => ["completed", "active", "blocked"].includes(step.status)
+    && !step.dependsOn.every((dependency) => completed.has(dependency)))) return false;
+  if (plan.steps.some((step) => (step.status === "completed") !== (step.completedAt !== null && step.completedByQueueId !== null))) return false;
+  if (plan.steps.some((step) => (step.status === "blocked") !== (step.blocker !== null))) return false;
+  if (plan.definitionsDigest !== sha256(JSON.stringify(planDefinitionMaterial(plan.steps)))) return false;
+  const current = plan.steps.filter((step) => ["active", "blocked"].includes(step.status));
+  return current.length <= 1 && (plan.currentStepId === null
+    ? current.length === 0 : current.length === 1 && current[0].stepId === plan.currentStepId);
+}
+
+function activateNextPlanStep(plan, now) {
+  const completed = new Set(plan.steps.filter((step) => step.status === "completed").map((step) => step.stepId));
+  const next = plan.steps.find((step) => step.status === "pending" && step.dependsOn.every((dependency) => completed.has(dependency)));
+  if (!next) { plan.currentStepId = null; return null; }
+  next.status = "active"; next.updatedAt = now; plan.currentStepId = next.stepId; plan.revision += 1;
+  return next;
+}
+
+function createGoalPlan(steps, now) {
+  if (!Array.isArray(steps) || steps.length === 0 || steps.length > 32) throw new Error("goal plan requires 1-32 steps");
+  const normalized = steps.map((step, index) => ({
+    stepId: exactId(step?.stepId ?? step?.id, `steps[${index}].stepId`),
+    title: safeText(step?.title, `steps[${index}].title`, 500),
+    successCriterion: safeText(step?.successCriterion, `steps[${index}].successCriterion`),
+    dependsOn: Array.isArray(step?.dependsOn) ? step.dependsOn.map((dependency) => exactId(dependency, `steps[${index}].dependsOn`)) : [],
+    status: "pending", checkpoint: null, blocker: null, completedAt: null, completedByQueueId: null, updatedAt: now
+  }));
+  const plan = { schema: GOAL_PLAN_SCHEMA, revision: 0, currentStepId: null, steps: normalized,
+    definitionsDigest: sha256(JSON.stringify(planDefinitionMaterial(normalized))), authority: "context-only-plan" };
+  if (!validGoalPlan(plan)) throw new Error("goal plan must be an acyclic dependency graph with exact unique step IDs");
+  activateNextPlanStep(plan, now);
+  return plan;
+}
+
+function currentPlanStep(goal) {
+  return goal.plan?.steps.find((step) => step.stepId === goal.plan.currentStepId) || null;
+}
+
+function planQueueKey(goalId, stepId, phase, suffix = "") {
+  return ["goal", goalId, "step", stepId, phase, suffix].filter(Boolean).join(":");
+}
+
+function newGoalQueue(goal, step, kind, key, current, availableAt = current) {
+  return { queueId: "gateway-queue:" + sha256(key).slice(0, 32), dedupeKey: key, kind,
+    agentId: goal.agentId, projectId: goal.projectId, groupId: goal.groupId, goalId: goal.goalId,
+    goalStepId: step?.stepId || null, channelEventId: null, priority: PRIORITY[kind], status: "pending",
+    attempts: 0, lease: null, availableAt, createdAt: current, updatedAt: current,
+    completedAt: null, lastError: null, authority: "execution-state-only" };
+}
+
 function validGoal(goal) {
   return goal && ID_RE.test(goal.goalId || "") && ID_RE.test(goal.agentId || "")
     && ID_RE.test(goal.ownerSubjectId || "") && ID_RE.test(goal.projectId || "")
@@ -83,7 +169,11 @@ function validGoal(goal) {
     && (goal.blocker === null || (typeof goal.blocker === "string" && goal.blocker.length <= 500 && !SECRET_RE.test(goal.blocker)))
     && (goal.heartbeatAt === null || Number.isFinite(new Date(goal.heartbeatAt).getTime()))
     && goal.authority === "authenticated-goal-policy" && Number.isFinite(new Date(goal.createdAt).getTime())
-    && Number.isFinite(new Date(goal.updatedAt).getTime());
+    && Number.isFinite(new Date(goal.updatedAt).getTime())
+    && (goal.plan === undefined || goal.plan === null || (validGoalPlan(goal.plan)
+      && (goal.status !== "active" || (currentPlanStep(goal)?.status === "active" && goal.nextSafeStep === currentPlanStep(goal).title))
+      && (goal.status !== "blocked" || currentPlanStep(goal)?.status === "blocked")
+      && (goal.status !== "completed" || goal.plan.steps.every((step) => step.status === "completed"))));
 }
 
 function validPolicyHistory(item) {
@@ -98,6 +188,7 @@ function validQueue(item) {
     && ID_RE.test(item.agentId || "") && ID_RE.test(item.projectId || "")
     && (item.groupId === null || ID_RE.test(item.groupId || ""))
     && (item.goalId === null || ID_RE.test(item.goalId || ""))
+    && (item.goalStepId === undefined || item.goalStepId === null || (item.goalId !== null && ID_RE.test(item.goalStepId || "")))
     && (item.channelEventId === null || ID_RE.test(item.channelEventId || ""))
     && QUEUE_STATUSES.has(item.status) && Number.isInteger(item.priority) && item.priority >= 0 && item.priority <= 100
     && Number.isInteger(item.attempts) && item.attempts >= 0 && item.attempts <= 20
@@ -277,7 +368,7 @@ export async function setGatewayControl({ root = process.cwd(), enabled, killSwi
 }
 
 export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerSubjectId, projectId, groupId = null,
-  priority = 70, successCriterion, nextSafeStep, deadline = null, confirmation, now = new Date() }) {
+  priority = 70, successCriterion, nextSafeStep = null, steps = null, deadline = null, confirmation, now = new Date() }) {
   if (confirmation !== CONFIRMATION) throw new Error("goal assignment requires explicit local owner confirmation");
   const paths = await pathsFor(root);
   return withLock(paths, async () => {
@@ -291,15 +382,35 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
     const createdAt = timestamp(now);
     const active = policy.goals.find((item) => item.agentId === agentId && item.status === "active" && item.goalId !== goalId);
     if (active) throw new Error("an agent may have only one active focused goal");
+    const plan = steps === null ? null : createGoalPlan(steps, createdAt);
+    const firstStep = plan ? plan.steps.find((step) => step.stepId === plan.currentStepId) : null;
     const goal = { goalId: exactId(goalId, "goalId"), agentId, ownerSubjectId: exactId(ownerSubjectId, "ownerSubjectId"),
       projectId, groupId, priority: Number(priority), successCriterion: safeText(successCriterion, "successCriterion"),
-      nextSafeStep: safeText(nextSafeStep, "nextSafeStep"), deadline: deadline === null ? null : timestamp(deadline),
+      nextSafeStep: safeText(firstStep?.title || nextSafeStep, "nextSafeStep"), deadline: deadline === null ? null : timestamp(deadline),
       status: "active", checkpoint: null, heartbeatAt: null, blocker: null, createdAt, updatedAt: createdAt,
-      authority: "authenticated-goal-policy" };
+      plan, authority: "authenticated-goal-policy" };
     if (!validGoal(goal)) throw new Error("goal assignment is invalid");
     const previous = policy.goals.find((item) => item.goalId === goal.goalId);
     if (previous && [previous.agentId, previous.ownerSubjectId, previous.projectId, previous.groupId].join("\0")
       !== [goal.agentId, goal.ownerSubjectId, goal.projectId, goal.groupId].join("\0")) throw new Error("goal scope is immutable");
+    if (previous?.plan && previous.plan.definitionsDigest !== goal.plan?.definitionsDigest) {
+      throw new Error("goal plan definitions are immutable; assign a new goal ID");
+    }
+    if (previous?.plan && previous.status === "blocked") {
+      const blockedStep = currentPlanStep(previous);
+      if (!blockedStep || blockedStep.status !== "blocked") throw new Error("blocked goal plan has no bound blocked step");
+      policy.history.push({ kind: "goal", at: createdAt, value: structuredClone(previous), authority: "authenticated-goal-policy" });
+      blockedStep.status = "active"; blockedStep.blocker = null; blockedStep.updatedAt = createdAt;
+      previous.status = "active"; previous.blocker = null; previous.updatedAt = createdAt; previous.plan.revision += 1;
+      policy.revision += 1;
+      const key = planQueueKey(previous.goalId, blockedStep.stepId, "owner-resume", String(previous.plan.revision));
+      const queued = newGoalQueue(previous, blockedStep, "follow-up", key, createdAt);
+      runtime.queue.push(queued); runtime.revision += 1;
+      appendReceipt(runtime, "goal-step-resumed", queued.queueId, createdAt, { goalStepId: blockedStep.stepId });
+      await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
+      return { goal: structuredClone(previous), gatewayPolicyPath: paths.gatewayPolicyPath, resumed: true };
+    }
+    if (previous?.plan) return { goal: structuredClone(previous), gatewayPolicyPath: paths.gatewayPolicyPath, duplicate: true };
     if (previous) {
       policy.history.push({ kind: "goal", at: createdAt, value: structuredClone(previous), authority: "authenticated-goal-policy" });
       goal.createdAt = previous.createdAt;
@@ -307,12 +418,9 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
     policy.goals = policy.goals.filter((item) => item.goalId !== goal.goalId);
     policy.goals.push(goal);
     policy.revision += 1;
-    const key = "goal:" + goal.goalId + ":assignment";
+    const key = firstStep ? planQueueKey(goal.goalId, firstStep.stepId, "assignment") : "goal:" + goal.goalId + ":assignment";
     if (!runtime.queue.some((item) => item.dedupeKey === key)) {
-      runtime.queue.push({ queueId: "gateway-queue:" + sha256(key).slice(0, 32), dedupeKey: key, kind: "assignment",
-        agentId, projectId, groupId, goalId: goal.goalId, channelEventId: null, priority: PRIORITY.assignment,
-        status: "pending", attempts: 0, lease: null, availableAt: createdAt, createdAt, updatedAt: createdAt,
-        completedAt: null, lastError: null, authority: "execution-state-only" });
+      runtime.queue.push(newGoalQueue(goal, firstStep, "assignment", key, createdAt));
       runtime.revision += 1;
       appendReceipt(runtime, "queued", "gateway-queue:" + sha256(key).slice(0, 32), createdAt, { kind: "assignment", dedupeKey: key });
     }
@@ -340,7 +448,7 @@ export async function enqueueGatewayWake({ root = process.cwd(), kind, agentId, 
     if (existing) return { item: existing, duplicate: true };
     const createdAt = timestamp(now);
     const item = { queueId: "gateway-queue:" + sha256(key).slice(0, 32), dedupeKey: key, kind, agentId, projectId, groupId,
-      goalId, channelEventId, priority: PRIORITY[kind], status: "pending", attempts: 0, lease: null,
+      goalId, goalStepId: null, channelEventId, priority: PRIORITY[kind], status: "pending", attempts: 0, lease: null,
       availableAt: availableAt === null ? createdAt : timestamp(availableAt), createdAt, updatedAt: createdAt,
       completedAt: null, lastError: null, authority: "execution-state-only" };
     runtime.queue.push(item); runtime.revision += 1;
@@ -378,6 +486,20 @@ export async function reconcileGateway({ root = process.cwd(), now = new Date() 
       appendReceipt(runtime, "delivery-unknown", outbox.outboxId, current, { reason: "crash-during-send" });
     }
     if (policy.enabled && !policy.killSwitch) {
+      for (const goal of policy.goals.filter((item) => item.status === "active" && item.plan)) {
+        const step = currentPlanStep(goal);
+        if (!step) throw new Error("active goal plan has no current step");
+        const runnable = runtime.queue.some((item) => item.goalId === goal.goalId && item.goalStepId === step.stepId
+          && ["pending", "leased", "awaiting-delivery"].includes(item.status));
+        if (!runnable) {
+          const key = planQueueKey(goal.goalId, step.stepId, "recovery", String(goal.plan.revision));
+          if (!runtime.queue.some((item) => item.dedupeKey === key)) {
+            const queued = newGoalQueue(goal, step, "follow-up", key, current);
+            runtime.queue.push(queued);
+            appendReceipt(runtime, "queued", queued.queueId, current, { kind: "follow-up", goalStepId: step.stepId });
+          }
+        }
+      }
       for (const goal of policy.goals.filter((item) => item.status === "active" && item.deadline
         && new Date(item.deadline) <= new Date(current))) {
         try { assertActivePersona(personas.policy, personas.runtime, goal.agentId, goal.projectId, goal.groupId); }
@@ -386,7 +508,7 @@ export async function reconcileGateway({ root = process.cwd(), now = new Date() 
         if (!runtime.queue.some((item) => item.dedupeKey === key)) runtime.queue.push({
           queueId: "gateway-queue:" + sha256(key).slice(0, 32), dedupeKey: key, kind: "deadline",
           agentId: goal.agentId, projectId: goal.projectId, groupId: goal.groupId, goalId: goal.goalId,
-          channelEventId: null, priority: PRIORITY.deadline, status: "pending", attempts: 0, lease: null,
+          goalStepId: currentPlanStep(goal)?.stepId || null, channelEventId: null, priority: PRIORITY.deadline, status: "pending", attempts: 0, lease: null,
           availableAt: current, createdAt: current, updatedAt: current, completedAt: null, lastError: null,
           authority: "execution-state-only"
         });
@@ -396,7 +518,7 @@ export async function reconcileGateway({ root = process.cwd(), now = new Date() 
         const key = "channel:" + event.eventId;
         if (!runtime.queue.some((item) => item.dedupeKey === key)) runtime.queue.push({ queueId: "gateway-queue:" + sha256(key).slice(0, 32),
           dedupeKey: key, kind: "direct-message", agentId: event.agentId, projectId: event.projectId, groupId: event.groupId,
-          goalId: null, channelEventId: event.eventId, priority: PRIORITY["direct-message"], status: "pending", attempts: 0,
+          goalId: null, goalStepId: null, channelEventId: event.eventId, priority: PRIORITY["direct-message"], status: "pending", attempts: 0,
           lease: null, availableAt: current, createdAt: current, updatedAt: current, completedAt: null, lastError: null, authority: "execution-state-only" });
       }
       for (const event of attention.attention.events.filter((item) => item.entityId
@@ -407,7 +529,7 @@ export async function reconcileGateway({ root = process.cwd(), now = new Date() 
         const key = "attention:" + event.id + ":" + event.status;
         if (!runtime.queue.some((entry) => entry.dedupeKey === key)) runtime.queue.push({ queueId: "gateway-queue:" + sha256(key).slice(0, 32),
           dedupeKey: key, kind, agentId: event.entityId, projectId: event.projectId, groupId: event.groupId,
-          goalId: null, channelEventId: null, priority: PRIORITY[kind], status: "pending", attempts: 0, lease: null,
+          goalId: null, goalStepId: null, channelEventId: null, priority: PRIORITY[kind], status: "pending", attempts: 0, lease: null,
           availableAt: event.dueAt || current, createdAt: current, updatedAt: current, completedAt: null, lastError: null, authority: "execution-state-only" });
       }
     }
@@ -438,14 +560,26 @@ export async function claimGatewayWork({ root = process.cwd(), workerId, leaseSe
     for (const candidate of items) {
       try {
         assertActivePersona(personas.policy, personas.runtime, candidate.agentId, candidate.projectId, candidate.groupId);
-        item = candidate;
-        break;
       } catch {
         preserve(runtime, "queue", candidate, "identity-revoked", current);
         candidate.status = "cancelled"; candidate.completedAt = current; candidate.updatedAt = current;
         appendReceipt(runtime, "identity-revoked", candidate.queueId, current, {});
         runtime.revision += 1; revoked = true;
+        continue;
       }
+      if (candidate.goalStepId) {
+        const goal = policy.goals.find((entry) => entry.goalId === candidate.goalId);
+        const step = goal && currentPlanStep(goal);
+        if (!goal?.plan || goal.status !== "active" || step?.stepId !== candidate.goalStepId || step.status !== "active") {
+          preserve(runtime, "queue", candidate, "plan-step-stale", current);
+          candidate.status = "cancelled"; candidate.completedAt = current; candidate.updatedAt = current;
+          appendReceipt(runtime, "plan-step-stale", candidate.queueId, current, { goalStepId: candidate.goalStepId });
+          runtime.revision += 1; revoked = true;
+          continue;
+        }
+      }
+      item = candidate;
+      break;
     }
     if (!item && revoked) await writeJson(paths.gatewayRuntimePath, runtime);
     if (!item) return { item: null, reason: runtime.queue.some((entry) => entry.status === "pending") ? "waiting" : "idle/needs-goal" };
@@ -488,6 +622,13 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     const current = timestamp(now);
     const lane = runtime.lanes.find((entry) => entry.queueId === item.queueId && entry.workerId === workerId && entry.status === "leased");
     if (!lane) throw new Error("agent lane lease is missing");
+    const boundGoal = item.goalId ? policy.goals.find((entry) => entry.goalId === item.goalId) : null;
+    if (item.goalStepId) {
+      const step = boundGoal && currentPlanStep(boundGoal);
+      if (!boundGoal?.plan || boundGoal.status !== "active" || step?.stepId !== item.goalStepId || step.status !== "active") {
+        throw new Error("run completion is not bound to the current active goal step");
+      }
+    }
     const text = result?.text ? safeText(result.text, "result.text", 16000) : null;
     preserve(runtime, "queue", item, "run-completed", current);
     if (item.channelEventId) {
@@ -510,20 +651,49 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
       item.status = "awaiting-delivery";
     } else {
       item.status = result?.blocked ? "blocked" : "completed"; item.completedAt = current;
-      const goal = item.goalId ? policy.goals.find((entry) => entry.goalId === item.goalId) : null;
+      const goal = boundGoal;
       if (goal) {
         policy.history.push({ kind: "goal", at: current, value: structuredClone(goal), authority: "authenticated-goal-policy" });
-        goal.checkpoint = result?.checkpoint === undefined ? goal.checkpoint : safeCheckpoint(result.checkpoint); goal.heartbeatAt = current;
+        const checkpoint = result?.checkpoint === undefined ? goal.checkpoint : safeCheckpoint(result.checkpoint);
+        goal.checkpoint = checkpoint; goal.heartbeatAt = current;
         goal.blocker = result?.blocked ? safeText(result.blocker || "Run blocked.", "blocker", 500) : null;
-        goal.status = result?.completed ? "completed" : result?.blocked ? "blocked" : "active"; goal.updatedAt = current;
+        if (goal.plan && item.goalStepId) {
+          const step = currentPlanStep(goal);
+          step.checkpoint = checkpoint; step.updatedAt = current;
+          if (result?.blocked) {
+            step.status = "blocked"; step.blocker = goal.blocker; goal.status = "blocked";
+          } else if (result?.completed) {
+            step.status = "completed"; step.completedAt = current; step.completedByQueueId = item.queueId; step.blocker = null;
+            goal.plan.currentStepId = null; goal.plan.revision += 1;
+            const next = activateNextPlanStep(goal.plan, current);
+            if (next) {
+              goal.status = "active"; goal.nextSafeStep = next.title; goal.blocker = null;
+              const key = planQueueKey(goal.goalId, next.stepId, "ready", String(goal.plan.revision));
+              if (!runtime.queue.some((entry) => entry.dedupeKey === key)) {
+                const queued = newGoalQueue(goal, next, "follow-up", key, current);
+                runtime.queue.push(queued);
+                appendReceipt(runtime, "goal-step-ready", queued.queueId, current, { goalStepId: next.stepId });
+              }
+            } else {
+              goal.status = "completed";
+            }
+          } else {
+            goal.status = "active"; step.blocker = null;
+          }
+        } else if (!goal.plan) {
+          goal.status = result?.completed ? "completed" : result?.blocked ? "blocked" : "active";
+        }
+        goal.updatedAt = current;
         policy.revision += 1;
-        if (goal.status === "active") {
+        if (goal.status === "active" && (!goal.plan || !result?.completed)) {
           const checkpointDigest = sha256(JSON.stringify(goal.checkpoint || { heartbeatAt: current })).slice(0, 20);
-          const key = "goal:" + goal.goalId + ":follow-up:" + checkpointDigest;
+          const step = currentPlanStep(goal);
+          const key = step ? planQueueKey(goal.goalId, step.stepId, "follow-up", checkpointDigest)
+            : "goal:" + goal.goalId + ":follow-up:" + checkpointDigest;
           if (!runtime.queue.some((entry) => entry.dedupeKey === key)) runtime.queue.push({
             queueId: "gateway-queue:" + sha256(key).slice(0, 32), dedupeKey: key, kind: "follow-up",
             agentId: goal.agentId, projectId: goal.projectId, groupId: goal.groupId, goalId: goal.goalId,
-            channelEventId: null, priority: PRIORITY["follow-up"], status: "pending", attempts: 0, lease: null,
+            goalStepId: step?.stepId || null, channelEventId: null, priority: PRIORITY["follow-up"], status: "pending", attempts: 0, lease: null,
             availableAt: new Date(new Date(current).getTime() + 60000).toISOString(), createdAt: current, updatedAt: current,
             completedAt: null, lastError: null, authority: "execution-state-only"
           });
@@ -532,7 +702,7 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     }
     item.lease = null; item.updatedAt = current; lane.status = "completed"; lane.updatedAt = current;
     runtime.health.host = "healthy"; runtime.health.worker = "healthy"; runtime.health.lastTickAt = current;
-    appendReceipt(runtime, "run-terminal", item.queueId, current, { status: item.status }); runtime.revision += 1;
+    appendReceipt(runtime, "run-terminal", item.queueId, current, { status: item.status, goalStepId: item.goalStepId || null }); runtime.revision += 1;
     await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
     return { item, outbox: runtime.outbox.find((entry) => entry.queueId === item.queueId) || null };
   });
@@ -704,6 +874,10 @@ export function gatewayRuntimeFindings(policy, runtime) {
     if (queueIds.has(item.queueId)) findings.push("duplicate-queue-item:" + item.queueId);
     if (dedupeKeys.has(item.dedupeKey)) findings.push("duplicate-queue-dedupe:" + item.dedupeKey);
     queueIds.add(item.queueId); dedupeKeys.add(item.dedupeKey);
+    if (item.goalStepId) {
+      const goal = policy.goals.find((entry) => entry.goalId === item.goalId);
+      if (!goal?.plan?.steps.some((step) => step.stepId === item.goalStepId)) findings.push("orphan-goal-step:" + item.queueId);
+    }
   }
   const outboxIds = new Set(); const idempotencyKeys = new Set();
   for (const item of runtime.outbox) {
