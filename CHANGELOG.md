@@ -4,6 +4,20 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-09-02
+
+### Added
+
+- New initial evaluation v28 and bounded retry v29 contracts atomically register content-free, exact-scope candidate-evidence lineage receipts and bind their digest into candidate admission v4.
+
+### Changed
+
+- A locally attested user-feedback or objective-test anchor is single-use for experiment admission within its exact scope. Its lineage tombstone survives ordinary candidate deletion and subject purge; historical v1-v27 evaluations remain readable.
+
+### Security
+
+- Six candidates racing with the same evidence produce one contract, while the other five fail closed. Evidence-digest or independence-digest replay, exact-ID recreation after deletion, and re-signed lineage manipulation fail closed after restart; foreign scopes remain independent and receive zero matching diagnostics, and user-owned sources remain byte-for-byte unchanged.
+
 ## [0.51.0] - 2026-09-02
 
 ### Added

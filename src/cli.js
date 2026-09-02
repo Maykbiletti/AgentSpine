@@ -1221,6 +1221,7 @@ export async function run(argv = process.argv.slice(2)) {
       const legacyProvenanceReceipts = status.records.reduce((sum, item) => sum + item.legacyProvenanceReceipts, 0);
       const measurementReceipts = status.records.reduce((sum, item) => sum + item.measurementReceipts, 0);
       const measurementLineageReceipts = status.records.reduce((sum, item) => sum + item.measurementLineageReceipts, 0);
+      const candidateEvidenceLineageReceipts = status.candidateEvidenceLineageReceipts;
       const consumedMeasurementReceipts = status.records.reduce((sum, item) => sum + item.consumedMeasurementReceipts, 0);
       const staleUnconsumedMeasurements = status.records.reduce((sum, item) => sum + item.staleUnconsumedMeasurements, 0);
       const lineageBoundReceipts = status.records.reduce((sum, item) => sum + item.lineageBoundReceipts, 0);
@@ -1285,6 +1286,8 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.candidateAdmissionEvaluationContracts, 0);
       const evidenceSourceAttestedEvaluationContracts = status.records.reduce((sum, item) =>
         sum + item.evidenceSourceAttestedEvaluationContracts, 0);
+      const candidateEvidenceLineageEvaluationContracts = status.records.reduce((sum, item) =>
+        sum + item.candidateEvidenceLineageEvaluationContracts, 0);
       const candidateEvidenceCohortEvaluationContracts = status.records.reduce((sum, item) =>
         sum + item.candidateEvidenceCohortEvaluationContracts, 0);
       const blockingDefectBoundEvaluationContracts = status.records.reduce((sum, item) =>
@@ -1346,6 +1349,8 @@ export async function run(argv = process.argv.slice(2)) {
         promotionBoundEvaluationContracts,
         candidateAdmissionEvaluationContracts,
         evidenceSourceAttestedEvaluationContracts,
+        candidateEvidenceLineageEvaluationContracts,
+        candidateEvidenceLineageReceipts,
         candidateEvidenceCohortEvaluationContracts,
         blockingDefectBoundEvaluationContracts,
         evidenceSourceBoundEvaluationContracts,

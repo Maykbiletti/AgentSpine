@@ -41,6 +41,8 @@ Every candidate and evidence record carries `authority: context-only`. Accepted 
 
 Evidence is append-only while a candidate is awaiting review. Supported evidence types are `user-statement`, `document`, `interaction`, and `test`. Document evidence must reference a discovered Markdown source; AgentSpine records that source's SHA-256 at observation time without editing it.
 
+Version 0.52 makes locally attested `user-statement` and `test` anchors single-use for experiment admission within an exact scope. New v28/v29 evaluations atomically register only evidence, independence, target and scope digests plus source class and admission time; no claim, summary or evidence ID is retained in the lineage receipt. These tombstones intentionally survive candidate deletion and subject purge so deletion cannot reset the experiment history. The same source may still support an independent experiment in a genuinely different exact scope, whose scoped diagnostics do not reveal the first lineage.
+
 Adding evidence stores the previous candidate version in history before recalculating confidence. Distinct evidence IDs or source fingerprints are counted for automatic evaluation. Secret-shaped content is rejected before it reaches learning state.
 
 ## Explicit review

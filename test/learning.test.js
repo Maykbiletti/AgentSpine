@@ -65,13 +65,13 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
 async function recordLearningOutcome(input) {
   const { learning } = await loadLearning(input.root);
   const evaluation = learning.evaluations.find((item) => item.id === input.evaluationId);
-  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27"].includes(evaluation?.schema)) {
+  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27", "agentspine.learning-evaluation/v28", "agentspine.learning-evaluation/v29"].includes(evaluation?.schema)) {
     return commitLearningOutcome(input);
   }
-  const initialTrial = ["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27"].includes(evaluation.schema)
+  const initialTrial = ["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27", "agentspine.learning-evaluation/v28", "agentspine.learning-evaluation/v29"].includes(evaluation.schema)
     ? evaluation.initialTrials?.[input.phase]?.find((entry) => entry.evaluatorId === input.measurement?.evaluatorId)
     : null;
-  if (["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27"].includes(evaluation.schema) && !initialTrial) {
+  if (["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27", "agentspine.learning-evaluation/v28", "agentspine.learning-evaluation/v29"].includes(evaluation.schema) && !initialTrial) {
     return commitLearningOutcome(input);
   }
   const measurementId = `measurement:${input.id}`;
@@ -1235,7 +1235,7 @@ test("staleness policy freezes outcome freshness and Canary lifetime across conf
     id: "evaluation:staleness-old", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
     scope: alphaScope, now: start, expiresAt: "2036-01-20T00:00:00.000Z"
   });
-  assert.equal(staleContract.contract.schema, "agentspine.learning-evaluation/v26");
+  assert.equal(staleContract.contract.schema, "agentspine.learning-evaluation/v28");
   assert.deepEqual(staleContract.contract.stalenessPolicy, {
     schema: "agentspine.learning-staleness-policy/v1",
     outcomeMaxAgeDays: 1,
@@ -1371,7 +1371,7 @@ test("promotion gates are frozen before evaluation and survive config drift, rac
     decision: passingContract.candidateAdmission.decision,
     authority: passingContract.candidateAdmission.authority
   }, {
-    schema: "agentspine.learning-candidate-admission/v3",
+    schema: "agentspine.learning-candidate-admission/v4",
     learningId: "learning:promotion-pass",
     targetDigest: passingContract.target.digest,
     minConfidence: 0.9,
@@ -1495,10 +1495,10 @@ test("candidate admission freezes a fresh evidence cohort before measurement und
     evaluation(root, "learning:admission", { ...input, now: new Date(start.getTime() + 3000) })));
   assert.equal(attempts.filter((entry) => entry.unchanged === false).length, 1);
   const contract = attempts[0].contract;
-  assert.equal(contract.schema, "agentspine.learning-evaluation/v26");
+  assert.equal(contract.schema, "agentspine.learning-evaluation/v28");
   assert.equal(contract.candidateAdmission.observedConfidence, 0.97);
   assert.equal(contract.candidateAdmission.evidenceCount, 2);
-  assert.equal(contract.candidateAdmission.schema, "agentspine.learning-candidate-admission/v3");
+  assert.equal(contract.candidateAdmission.schema, "agentspine.learning-candidate-admission/v4");
   assert.equal(contract.candidateAdmission.evidencePolicy.maxAgeDays, 30);
   assert.equal(contract.candidateAdmission.evidenceCohort.length, 2,
     "stale evidence is excluded from the immutable admission cohort");
@@ -1569,6 +1569,7 @@ test("candidate evidence policy survives config drift and historical v18 admissi
   const current = stored.learning.evaluations.find((entry) => entry.id === registered.contract.id);
   const { digest: _admissionDigest, evidencePolicy: _evidencePolicy,
     evidenceCohort: _evidenceCohort, evidenceSourceAttestations: _evidenceSourceAttestations,
+    evidenceLineageDigest: _evidenceLineageDigest,
     ...admissionFields } = current.candidateAdmission;
   const v1AdmissionPayload = {
     ...admissionFields,
@@ -1633,7 +1634,7 @@ test("locally attested evidence sources reject relabeling before measurement and
     evaluation(root, "learning:evidence-source", input)));
   assert.equal(attempts.filter((entry) => entry.unchanged === false).length, 1);
   const contract = attempts[0].contract;
-  assert.equal(contract.schema, "agentspine.learning-evaluation/v26");
+  assert.equal(contract.schema, "agentspine.learning-evaluation/v28");
   assert.deepEqual(contract.evidenceSourcePolicy, {
     schema: "agentspine.learning-evidence-source-policy/v2",
     qualifyingTypes: ["user-statement", "test"],
@@ -1645,7 +1646,7 @@ test("locally attested evidence sources reject relabeling before measurement and
     authority: "context-only",
     digest: contract.evidenceSourcePolicy.digest
   });
-  assert.equal(contract.candidateAdmission.schema, "agentspine.learning-candidate-admission/v3");
+  assert.equal(contract.candidateAdmission.schema, "agentspine.learning-candidate-admission/v4");
   assert.equal(contract.candidateAdmission.evidenceSourceAttestations.length, 1);
   assert.equal(contract.candidateAdmission.evidenceSourceAttestations[0].sourceClass, "objective-test");
   assert.doesNotMatch(JSON.stringify(contract.candidateAdmission.evidenceSourceAttestations),
@@ -1689,6 +1690,117 @@ test("locally attested evidence sources reject relabeling before measurement and
     "a re-signed false source attestation fails closed after restart");
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
+
++test("qualifying candidate evidence is single-use per exact scope across races, deletion, purge, and restart", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2043-08-01T00:00:00.000Z");
+  const alphaScope = { ...scopedTurn, groupId: "group:evidence-lineage-alpha" };
+  const betaScope = { ...scopedTurn, groupId: "group:evidence-lineage-beta" };
+  const subjectId = "person:evidence-lineage-member";
+  await upsertEntity({ root, id: alphaScope.groupId, kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: betaScope.groupId, kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: subjectId, kind: "person", privacy: "group" });
+  await linkEntities({ root, from: subjectId, to: alphaScope.groupId,
+    relation: "member-of", privacy: "group" });
+  await linkEntities({ root, from: subjectId, to: betaScope.groupId,
+    relation: "member-of", privacy: "group" });
+  await configureLearning({ root, config: { minConfidence: 0.9, minEvidence: 2 }, now: start });
+  const sharedUserEvidence = evidence("evidence:single-use-user", 0.97);
+  const sharedTestEvidence = { ...evidence("evidence:single-use-test", 0.97), type: "test" };
+  const candidates = Array.from({ length: 6 }, (_, index) => ({
+    id: `learning:evidence-lineage-race-${index}`,
+    claim: `Use synthetic single-use evidence strategy ${index}.`
+  }));
+  for (const candidate of candidates) {
+    await proposeLearning({ root, ...candidate, kind: "behavior", subjectId,
+      privacy: "group", groupId: alphaScope.groupId, scope: alphaScope,
+      evidence: sharedUserEvidence, now: start });
+    await addLearningEvidence({ root, id: candidate.id, evidence: sharedTestEvidence, now: start });
+  }
+  const attempts = await Promise.allSettled(candidates.map((candidate, index) =>
+    evaluation(root, candidate.id, {
+      id: `evaluation:evidence-lineage-race-${index}`,
+      evaluatorIds: ["evaluator:test-a", "evaluator:test-b"], scope: alphaScope,
+      now: start, expiresAt: "2043-09-01T00:00:00.000Z"
+    })));
+  assert.equal(attempts.filter((entry) => entry.status === "fulfilled").length, 1);
+  assert.equal(attempts.filter((entry) => entry.status === "rejected"
+    && /already admitted in this exact scope/.test(entry.reason.message)).length, 5);
+  const winnerIndex = attempts.findIndex((entry) => entry.status === "fulfilled");
+  const winner = candidates[winnerIndex];
+  const winnerResult = attempts[winnerIndex].value;
+  assert.equal(winnerResult.contract.schema, "agentspine.learning-evaluation/v28");
+  assert.equal(winnerResult.contract.candidateAdmission.schema,
+    "agentspine.learning-candidate-admission/v4");
+  let stored = await loadLearning(root);
+  assert.equal(stored.learning.candidateEvidenceLineage.length, 2);
+  assert.equal(stored.learning.candidateEvidenceLineage.every((entry) =>
+    entry.schema === "agentspine.learning-candidate-evidence-lineage/v1"), true);
+  assert.equal(winnerResult.contract.candidateAdmission.evidenceLineageDigest,
+    hash(JSON.stringify(stored.learning.candidateEvidenceLineage)));
+  assert.doesNotMatch(JSON.stringify(stored.learning.candidateEvidenceLineage),
+    /Synthetic evidence|single-use-user|single-use-test/);
+  const alphaStatus = await learningOutcomeStatus({ root, scope: alphaScope, now: start });
+  assert.equal(alphaStatus.candidateEvidenceLineageReceipts, 2);
+  assert.equal(alphaStatus.candidateEvidenceLineageEvaluationContracts, 1);
+  assert.equal(alphaStatus.records.find((record) => record.id === winner.id)
+    .activeCandidateEvidenceLineageDigest,
+  winnerResult.contract.candidateAdmission.evidenceLineageDigest);
+  assert.equal((await learningOutcomeStatus({ root, scope: betaScope, now: start }))
+    .candidateEvidenceLineageReceipts, 0);
+
+  await deleteLearning({ root, id: winner.id });
+  stored = await loadLearning(root);
+  assert.equal(stored.learning.candidateEvidenceLineage.length, 2,
+    "single-use lineage survives ordinary candidate deletion");
+  await proposeLearning({ root, id: "learning:evidence-lineage-replay", kind: "behavior",
+    claim: "Use a replayed synthetic evidence strategy.", subjectId,
+    privacy: "group", groupId: alphaScope.groupId, scope: alphaScope,
+    evidence: sharedUserEvidence, now: start });
+  await addLearningEvidence({ root, id: "learning:evidence-lineage-replay",
+    evidence: sharedTestEvidence, now: start });
+  await assert.rejects(evaluation(root, "learning:evidence-lineage-replay", {
+    id: winnerResult.contract.id, evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    scope: alphaScope, now: start, expiresAt: "2043-09-01T00:00:00.000Z"
+  }), /already admitted in this exact scope/,
+  "deleting the original evaluation cannot reopen an exact-ID replay");
+
+  await proposeLearning({ root, id: "learning:evidence-lineage-beta", kind: "behavior",
+    claim: "Use a scope-isolated synthetic evidence strategy.", subjectId,
+    privacy: "group", groupId: betaScope.groupId, scope: betaScope,
+    evidence: sharedUserEvidence, now: start });
+  await addLearningEvidence({ root, id: "learning:evidence-lineage-beta",
+    evidence: sharedTestEvidence, now: start });
+  await evaluation(root, "learning:evidence-lineage-beta", {
+    id: "evaluation:evidence-lineage-beta", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    scope: betaScope, now: start, expiresAt: "2043-09-01T00:00:00.000Z"
+  });
+  assert.equal((await learningOutcomeStatus({ root, scope: betaScope, now: start }))
+    .candidateEvidenceLineageReceipts, 2, "foreign exact scope has an independent lineage");
+  assert.equal((await learningOutcomeStatus({ root, scope: alphaScope, now: start }))
+    .candidateEvidenceLineageReceipts, 2, "foreign lineage count does not leak");
+  const doctor = runCli(["doctor", root, "--json"], state);
+  assert.equal(doctor.learningOutcomes.candidateEvidenceLineageReceipts, 4);
+  assert.equal(doctor.learningOutcomes.candidateEvidenceLineageEvaluationContracts, 1);
+  assert.equal(runCli(["audit", root, "--json"], state)
+    .learningDiagnostics.candidateEvidenceLineageReceipts, 4);
+
+  stored = await loadLearning(root);
+  const original = JSON.stringify(stored.learning);
+  stored.learning.candidateEvidenceLineage[0].independenceDigest = hash("redirected single-use evidence");
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /candidate evidence lineage state is invalid/,
+    "re-signed or redirected lineage fails closed after restart");
+  await writeFile(stored.learningPath, `${original}\n`, "utf8");
+  assert.equal((await purgeLearningBySubject({ root, subjectId })).deleted, 7);
+  stored = await loadLearning(root);
+  assert.equal(stored.learning.candidates.length, 0);
+  assert.equal(stored.learning.candidateEvidenceLineage.length, 4,
+    "content-free replay tombstones survive subject purge");
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
 
 test("locally revoked evidence source attestations withhold and roll back their complete learning lineage", async (t) => {
   const { root, state } = await fixture(t);
@@ -1819,7 +1931,7 @@ test("one frozen baseline blocking defect prevents Canary admission and cannot b
     id: "evaluation:blocking-baseline", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
     now: start, expiresAt: "2044-02-01T00:00:00.000Z"
   });
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v26");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v28");
   assert.equal(registered.contract.blockingDefectPolicy.aggregation, "any-defect-overrides-average");
   assert.equal(registered.contract.blockingDefectPolicy.beforeAction, "block-canary-admission");
   await recordLearningOutcome({ root, learningId: "learning:blocking-baseline",
@@ -1883,7 +1995,7 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
   await addLearningEvidence({ root, id: "learning:coverage", evidence: evidence("evidence:coverage-two", 0.97) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
   const registered = await evaluation(root, "learning:coverage");
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v26");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v28");
   assert.deepEqual(registered.contract.pairing, {
     mode: "same-evaluator", maxOutcomesPerEvaluatorPerPhase: 1,
     matchMeasurementKind: true, matchCaseCount: true, authority: "context-only"
@@ -1985,7 +2097,7 @@ test("initial trials reject favorable reruns and retain the first admitted crash
     id: "evaluation:initial-trials", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"], now: start,
     expiresAt: "2036-02-01T00:00:00.000Z"
   });
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v26");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v28");
   assert.equal(registered.contract.initialTrials.mode, "first-admitted-trials");
   assert.deepEqual(registered.contract.initialTrials.before.map((entry) => entry.slot), [1, 2]);
   await assert.rejects(recordLearningMeasurement({
@@ -2065,7 +2177,7 @@ test("evaluation targets freeze the exact evidence-backed lesson revision across
   const registered = await evaluation(root, "learning:target-lock", {
     id: "evaluation:target-lock", now: start, expiresAt: "2037-02-01T00:00:00.000Z"
   });
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v26");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v28");
   assert.equal(registered.contract.target.schema, "agentspine.learning-target/v1");
   assert.equal(registered.contract.target.learningId, "learning:target-lock");
   assert.deepEqual(Object.keys(registered.contract.target).sort(), ["authority", "claimDigest", "digest",
@@ -2139,7 +2251,7 @@ test("immutable trial deadlines turn missing delivery or outcome into one blocki
       id: evaluationId, evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
       now: base, expiresAt: new Date(base.getTime() + 86400000)
     });
-    assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v26");
+    assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v28");
     assert.equal(registered.contract.completionPolicy.schema, "agentspine.learning-completion-policy/v1");
     assert.equal(registered.contract.completionPolicy.deliveryTimeoutMs, 300000);
     assert.equal(registered.contract.completionPolicy.outcomeTimeoutMs, 300000);
@@ -2337,7 +2449,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
     benchmark: registered.contract.benchmark,
     scope: alphaScope, retryTrialFailureId: failure.id, confirmLocalTrialRetry: true,
     now: retryBase, expiresAt: new Date(retryBase.getTime() + 86400000)
-  }), /fresh candidate and independently observed evidence/);
+  }), /(?:fresh candidate and independently observed evidence|already admitted in this exact scope)/);
   await deleteLearning({ root, id: "learning:failure-retry-stale" });
   await proposeLearning({ root, id: "learning:failure-retry-reused", kind: "behavior",
     claim: "Use the measured synthetic group procedure.", subjectId: "person:failure-member",
@@ -2349,7 +2461,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
     benchmark: registered.contract.benchmark,
     scope: alphaScope, retryTrialFailureId: failure.id, confirmLocalTrialRetry: true,
     now: new Date(retryBase.getTime() + 1000), expiresAt: new Date(retryBase.getTime() + 86400000)
-  }), /fresh candidate and independently observed evidence/);
+  }), /already admitted in this exact scope/);
   await deleteLearning({ root, id: "learning:failure-retry-reused" });
   await proposeLearning({ root, id: "learning:failure-retry", kind: "behavior",
     claim: "Use the measured synthetic group procedure.", subjectId: "person:failure-member",
@@ -2402,7 +2514,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
       retryTrialFailureId: failure.id, confirmLocalTrialRetry: true })));
   assert.equal(retryAttempts.filter((result) => result.unchanged === false).length, 1);
   const retryContract = retryAttempts[0].contract;
-  assert.equal(retryContract.schema, "agentspine.learning-evaluation/v27");
+  assert.equal(retryContract.schema, "agentspine.learning-evaluation/v29");
   assert.equal(retryContract.evidenceSourcePolicy.digest,
     registered.contract.evidenceSourcePolicy.digest);
   assert.equal(retryContract.retry.schema, "agentspine.learning-trial-retry/v3");
@@ -2814,7 +2926,7 @@ test("evaluator roots prevent alias independence and bind measurements fail clos
       { evaluatorId: "evaluator:root-b", principalDigest: hash("second synthetic evaluator principal") }
     ], now: start, expiresAt: "2026-01-10T00:00:00.000Z"
   });
-  assert.equal(primary.contract.schema, "agentspine.learning-evaluation/v26");
+  assert.equal(primary.contract.schema, "agentspine.learning-evaluation/v28");
   assert.equal(primary.binding.schema, "agentspine.learning-evaluator-binding/v1");
   assert.equal(primary.binding.evaluationDigest, primary.contract.digest);
   assert.deepEqual(primary.contract.evaluatorRoots[0], {
