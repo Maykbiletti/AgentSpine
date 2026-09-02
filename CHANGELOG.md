@@ -4,6 +4,20 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-09-02
+
+### Added
+
+- New initial evaluation v18 and bounded retry v19 contracts embed a content-free, digested `agentspine.learning-candidate-admission/v1` receipt. It binds the exact candidate target and scope, frozen confidence and evidence gates, observed confidence, distinct evidence count and admission time before measurement.
+
+### Changed
+
+- Behavior evaluation registration now rejects candidates that have not already met both frozen gates. At least two distinct evidence items are required even if mutable configuration is lower; failed admission creates no evaluation contract or measurement lineage. Historical v1-v17 contracts remain readable.
+
+### Security
+
+- Re-signed admission-count, target, scope or gate manipulation fails closed after restart. Parallel admission is idempotent, exact-scope diagnostics expose only a content-free matching count and digest, foreign groups receive zero, and user-owned sources remain byte-for-byte unchanged.
+
 ## [0.45.0] - 2026-09-02
 
 ### Added

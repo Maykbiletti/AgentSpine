@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.46.0` requires a candidate to satisfy its frozen confidence and independent-evidence gates before an evaluation contract or measurement lineage can exist. Evaluation v18 and bounded retry v19 embed a content-free candidate-admission receipt bound to the exact target and scope; parallel registration is idempotent, rewritten counts fail closed after restart, and foreign scopes receive zero diagnostics.
+
 Version `0.45.0` freezes minimum confidence and independent-evidence requirements in every new behavior evaluation before any benchmark outcome is admitted. Evaluation v16 and bounded retry v17 use those immutable gates despite later configuration changes; scoped status and Context MCP expose only matching content-free counts and digests, while Doctor and audit remain project-wide.
 
 Version `0.44.0` makes scoped learning diagnostics fully group-isolated. Every top-level evaluator, binding, lease, retry, exhaustion, staleness and revocation count returned by `learn-status` or the read-only Context MCP is now derived only from candidate records visible to that exact scope; foreign scopes receive zeros without learning whether protected state exists. Unscoped Doctor and audit remain project-wide for local operators.

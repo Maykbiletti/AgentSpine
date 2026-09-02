@@ -64,13 +64,13 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
 async function recordLearningOutcome(input) {
   const { learning } = await loadLearning(input.root);
   const evaluation = learning.evaluations.find((item) => item.id === input.evaluationId);
-  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17"].includes(evaluation?.schema)) {
+  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19"].includes(evaluation?.schema)) {
     return commitLearningOutcome(input);
   }
-  const initialTrial = ["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17"].includes(evaluation.schema)
+  const initialTrial = ["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19"].includes(evaluation.schema)
     ? evaluation.initialTrials?.[input.phase]?.find((entry) => entry.evaluatorId === input.measurement?.evaluatorId)
     : null;
-  if (["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17"].includes(evaluation.schema) && !initialTrial) {
+  if (["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19"].includes(evaluation.schema) && !initialTrial) {
     return commitLearningOutcome(input);
   }
   const measurementId = `measurement:${input.id}`;
@@ -200,7 +200,7 @@ function runCli(args, state) {
   const result = spawnSync(process.execPath, [cli, ...args], {
     encoding: "utf8", env: { ...process.env, AGENTSPINE_STATE_DIR: state }
   });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
   return JSON.parse(result.stdout);
 }
 
@@ -513,7 +513,9 @@ test("measurement revocation is immutable, immediately withheld, group-isolated,
 
   await proposeLearning({ root, id: "learning:measurement-unconsumed", kind: "behavior",
     claim: "Use the synthetic unconsumed measurement procedure.", privacy: "shared", scope: scopedTurn,
-    evidence: evidence("evidence:measurement-unconsumed", 0.97), now: start });
+    evidence: evidence("evidence:measurement-unconsumed-one", 0.97), now: start });
+  await addLearningEvidence({ root, id: "learning:measurement-unconsumed",
+    evidence: evidence("evidence:measurement-unconsumed-two", 0.97), now: start });
   const unconsumedContract = (await evaluation(root, "learning:measurement-unconsumed", {
     id: "evaluation:measurement-unconsumed", evaluatorIds: ["evaluator:test-c", "evaluator:user-b"],
     now: start, expiresAt: "2037-02-01T00:00:00.000Z"
@@ -1226,7 +1228,7 @@ test("staleness policy freezes outcome freshness and Canary lifetime across conf
     id: "evaluation:staleness-old", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
     scope: alphaScope, now: start, expiresAt: "2036-01-20T00:00:00.000Z"
   });
-  assert.equal(staleContract.contract.schema, "agentspine.learning-evaluation/v16");
+  assert.equal(staleContract.contract.schema, "agentspine.learning-evaluation/v18");
   assert.deepEqual(staleContract.contract.stalenessPolicy, {
     schema: "agentspine.learning-staleness-policy/v1",
     outcomeMaxAgeDays: 1,
@@ -1322,24 +1324,13 @@ test("promotion gates are frozen before evaluation and survive config drift, rac
   });
   await addLearningEvidence({ root, id: "learning:promotion-low",
     evidence: evidence("evidence:promotion-low-two", 0.8), now: start });
-  const lowContract = await evaluation(root, "learning:promotion-low", {
+  await assert.rejects(evaluation(root, "learning:promotion-low", {
     id: "evaluation:promotion-low", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
     scope: alphaScope, now: start, expiresAt: "2041-02-01T00:00:00.000Z"
-  });
-  assert.equal(lowContract.contract.schema, "agentspine.learning-evaluation/v16");
-  assert.equal(lowContract.contract.thresholds.minConfidence, 0.9);
-  assert.equal(lowContract.contract.thresholds.minEvidence, 2);
-  for (const [index, evaluatorId] of ["evaluator:test-a", "evaluator:test-b"].entries()) {
-    await recordLearningOutcome({ root, learningId: "learning:promotion-low",
-      ...outcome(`outcome:promotion-low-${index}`, "before", 0.4 + index * 0.05, evaluatorId, {
-        evaluationId: lowContract.contract.id, scope: alphaScope, measuredAt: start
-      }), now: start });
-  }
-  await configureLearning({ root, config: { minConfidence: 0.5, minEvidence: 1 },
-    now: new Date(start.getTime() + 1000) });
-  const lowered = await evaluateLearning({ root, now: new Date(start.getTime() + 2000) });
-  assert.equal(lowered.accepted.some((entry) => entry.id === "learning:promotion-low"), false,
-    "lowering mutable config cannot admit a candidate below its frozen confidence gate");
+  }), /already satisfies the frozen confidence and evidence gates/,
+  "an ineligible candidate cannot consume a measurement contract");
+  assert.equal((await loadLearning(root)).learning.evaluations.length, 0,
+    "failed admission leaves no evaluation contract behind");
 
   const passingAt = new Date(start.getTime() + 3000);
   await configureLearning({ root, config: { minConfidence: 0.9, minEvidence: 2 }, now: passingAt });
@@ -1362,6 +1353,33 @@ test("promotion gates are frozen before evaluation and survive config drift, rac
   const passingContract = parallel[0].contract;
   assert.deepEqual({ minConfidence: passingContract.thresholds.minConfidence,
     minEvidence: passingContract.thresholds.minEvidence }, { minConfidence: 0.9, minEvidence: 2 });
+  assert.deepEqual({
+    schema: passingContract.candidateAdmission.schema,
+    learningId: passingContract.candidateAdmission.learningId,
+    targetDigest: passingContract.candidateAdmission.targetDigest,
+    minConfidence: passingContract.candidateAdmission.minConfidence,
+    minEvidence: passingContract.candidateAdmission.minEvidence,
+    observedConfidence: passingContract.candidateAdmission.observedConfidence,
+    evidenceCount: passingContract.candidateAdmission.evidenceCount,
+    decision: passingContract.candidateAdmission.decision,
+    authority: passingContract.candidateAdmission.authority
+  }, {
+    schema: "agentspine.learning-candidate-admission/v1",
+    learningId: "learning:promotion-pass",
+    targetDigest: passingContract.target.digest,
+    minConfidence: 0.9,
+    minEvidence: 2,
+    observedConfidence: 0.97,
+    evidenceCount: 2,
+    decision: "eligible",
+    authority: "context-only"
+  });
+  assert.match(passingContract.candidateAdmission.digest, /^[a-f0-9]{64}$/);
+  await configureLearning({ root, config: { minConfidence: 0.5, minEvidence: 1 },
+    now: new Date(passingAt.getTime() + 500) });
+  assert.deepEqual((await loadLearning(root)).learning.evaluations.find((entry) => entry.id === passingContract.id)
+    .thresholds, passingContract.thresholds,
+  "lowering mutable config does not change the pre-admitted candidate gates");
   await configureLearning({ root, config: { minConfidence: 1, minEvidence: 10 },
     now: new Date(passingAt.getTime() + 1000) });
   assert.equal((await loadLearning(root)).learning.evaluations.find((entry) => entry.id === passingContract.id)
@@ -1381,18 +1399,23 @@ test("promotion gates are frozen before evaluation and survive config drift, rac
   const status = await learningOutcomeStatus({ root, scope: passingScope,
     now: new Date(passingAt.getTime() + 2001) });
   assert.equal(status.promotionBoundEvaluationContracts, 1);
+  assert.equal(status.candidateAdmissionEvaluationContracts, 1);
   assert.match(status.records.find((entry) => entry.id === "learning:promotion-pass")
     .activePromotionThresholdDigest, /^[a-f0-9]{64}$/);
+  assert.equal(status.records.find((entry) => entry.id === "learning:promotion-pass")
+    .activeCandidateAdmissionDigest, passingContract.candidateAdmission.digest);
   const foreign = await learningOutcomeStatus({ root, scope: betaScope,
     now: new Date(passingAt.getTime() + 2001) });
   assert.equal(foreign.promotionBoundEvaluationContracts, 0);
+  assert.equal(foreign.candidateAdmissionEvaluationContracts, 0);
   assert.deepEqual(foreign.records, []);
   const doctor = runCli(["doctor", root, "--json"], state);
-  assert.equal(doctor.learningOutcomes.promotionBoundEvaluationContracts, 2);
+  assert.equal(doctor.learningOutcomes.promotionBoundEvaluationContracts, 1);
+  assert.equal(doctor.learningOutcomes.candidateAdmissionEvaluationContracts, 1);
   const audit = runCli(["audit", root, "--json"], state);
   assert.equal(audit.ok, true);
   assert.match(audit.gates.find((gate) => gate.name === "Context privacy").detail,
-    /2 promotion-bound contracts/);
+    /1 promotion-bound contracts, 1 candidate-admission contracts/);
 
   const clean = await loadLearning(root);
   const cleanBytes = `${JSON.stringify(clean.learning)}\n`;
@@ -1400,6 +1423,75 @@ test("promotion gates are frozen before evaluation and survive config drift, rac
   await writeFile(clean.learningPath, `${JSON.stringify(clean.learning)}\n`, "utf8");
   await assert.rejects(loadLearning(root), /learning evaluation state is invalid/);
   await writeFile(clean.learningPath, cleanBytes, "utf8");
+  const admissionTampered = await loadLearning(root);
+  admissionTampered.learning.evaluations.find((entry) => entry.id === passingContract.id)
+    .candidateAdmission.evidenceCount = 99;
+  await writeFile(admissionTampered.learningPath, `${JSON.stringify(admissionTampered.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /learning evaluation state is invalid/);
+  await writeFile(admissionTampered.learningPath, cleanBytes, "utf8");
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("candidate admission rejects thin evidence before measurement and stays scope-bound under race and tampering", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2042-01-01T00:00:00.000Z");
+  const alphaScope = { ...scopedTurn, groupId: "group:admission-alpha", taskId: "task:admission" };
+  const betaScope = { ...alphaScope, groupId: "group:admission-beta" };
+  await upsertEntity({ root, id: alphaScope.groupId, kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: betaScope.groupId, kind: "group", privacy: "shared" });
+  await configureLearning({ root, config: { minConfidence: 0.9, minEvidence: 2 }, now: start });
+  await proposeLearning({
+    root, id: "learning:admission", kind: "behavior",
+    claim: "Use the independently measured synthetic admission procedure.",
+    privacy: "group", groupId: alphaScope.groupId, scope: alphaScope,
+    evidence: evidence("evidence:admission-one", 0.97), now: start
+  });
+  const input = {
+    id: "evaluation:admission", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    scope: alphaScope, now: start, expiresAt: "2042-02-01T00:00:00.000Z"
+  };
+  await assert.rejects(evaluation(root, "learning:admission", input),
+    /already satisfies the frozen confidence and evidence gates/);
+  assert.equal((await loadLearning(root)).learning.evaluations.length, 0,
+    "one observation cannot create a measurement contract");
+  await addLearningEvidence({ root, id: "learning:admission",
+    evidence: evidence("evidence:admission-two", 0.97), now: new Date(start.getTime() + 1000) });
+  const attempts = await Promise.all(Array.from({ length: 6 }, () =>
+    evaluation(root, "learning:admission", { ...input, now: new Date(start.getTime() + 2000) })));
+  assert.equal(attempts.filter((entry) => entry.unchanged === false).length, 1);
+  const contract = attempts[0].contract;
+  assert.equal(contract.schema, "agentspine.learning-evaluation/v18");
+  assert.equal(contract.candidateAdmission.observedConfidence, 0.97);
+  assert.equal(contract.candidateAdmission.evidenceCount, 2);
+  assert.equal(contract.candidateAdmission.targetDigest, contract.target.digest);
+  assert.equal((await learningOutcomeStatus({ root, scope: alphaScope, now: start }))
+    .candidateAdmissionEvaluationContracts, 1);
+  assert.equal((await learningOutcomeStatus({ root, scope: betaScope, now: start }))
+    .candidateAdmissionEvaluationContracts, 0);
+  assert.equal(runCli(["doctor", root, "--json"], state)
+    .learningOutcomes.candidateAdmissionEvaluationContracts, 1);
+  assert.match(runCli(["audit", root, "--json"], state)
+    .gates.find((gate) => gate.name === "Context privacy").detail,
+  /1 candidate-admission contracts/);
+
+  const stored = await loadLearning(root);
+  const manipulated = stored.learning.evaluations.find((entry) => entry.id === contract.id);
+  manipulated.candidateAdmission.evidenceCount = 3;
+  const admissionPayload = { ...manipulated.candidateAdmission };
+  delete admissionPayload.digest;
+  manipulated.candidateAdmission.digest = hash(JSON.stringify(admissionPayload));
+  const contractPayload = { ...manipulated };
+  delete contractPayload.digest;
+  manipulated.digest = hash(JSON.stringify(contractPayload));
+  const binding = stored.learning.evaluationBindings.find((entry) => entry.evaluationId === contract.id);
+  binding.evaluationDigest = manipulated.digest;
+  const bindingPayload = { ...binding };
+  delete bindingPayload.digest;
+  binding.digest = hash(JSON.stringify(bindingPayload));
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /candidate admission is invalid or changed/,
+    "a re-signed but false evidence count fails closed after restart");
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
@@ -1413,7 +1505,7 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
   await addLearningEvidence({ root, id: "learning:coverage", evidence: evidence("evidence:coverage-two", 0.97) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
   const registered = await evaluation(root, "learning:coverage");
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v16");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v18");
   assert.deepEqual(registered.contract.pairing, {
     mode: "same-evaluator", maxOutcomesPerEvaluatorPerPhase: 1,
     matchMeasurementKind: true, matchCaseCount: true, authority: "context-only"
@@ -1515,7 +1607,7 @@ test("initial trials reject favorable reruns and retain the first admitted crash
     id: "evaluation:initial-trials", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"], now: start,
     expiresAt: "2036-02-01T00:00:00.000Z"
   });
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v16");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v18");
   assert.equal(registered.contract.initialTrials.mode, "first-admitted-trials");
   assert.deepEqual(registered.contract.initialTrials.before.map((entry) => entry.slot), [1, 2]);
   await assert.rejects(recordLearningMeasurement({
@@ -1595,7 +1687,7 @@ test("evaluation targets freeze the exact evidence-backed lesson revision across
   const registered = await evaluation(root, "learning:target-lock", {
     id: "evaluation:target-lock", now: start, expiresAt: "2037-02-01T00:00:00.000Z"
   });
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v16");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v18");
   assert.equal(registered.contract.target.schema, "agentspine.learning-target/v1");
   assert.equal(registered.contract.target.learningId, "learning:target-lock");
   assert.deepEqual(Object.keys(registered.contract.target).sort(), ["authority", "claimDigest", "digest",
@@ -1669,7 +1761,7 @@ test("immutable trial deadlines turn missing delivery or outcome into one blocki
       id: evaluationId, evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
       now: base, expiresAt: new Date(base.getTime() + 86400000)
     });
-    assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v16");
+    assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v18");
     assert.equal(registered.contract.completionPolicy.schema, "agentspine.learning-completion-policy/v1");
     assert.equal(registered.contract.completionPolicy.deliveryTimeoutMs, 300000);
     assert.equal(registered.contract.completionPolicy.outcomeTimeoutMs, 300000);
@@ -1932,7 +2024,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
       retryTrialFailureId: failure.id, confirmLocalTrialRetry: true })));
   assert.equal(retryAttempts.filter((result) => result.unchanged === false).length, 1);
   const retryContract = retryAttempts[0].contract;
-  assert.equal(retryContract.schema, "agentspine.learning-evaluation/v17");
+  assert.equal(retryContract.schema, "agentspine.learning-evaluation/v19");
   assert.equal(retryContract.retry.schema, "agentspine.learning-trial-retry/v3");
   assert.equal(retryContract.retry.trialFailureId, failure.id);
   assert.equal(retryContract.retry.trialFailureRevocationId, receipt.id);
@@ -2073,6 +2165,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
   const predecessorContract = compatibleState.learning.evaluations.find((item) =>
     item.id === retryContract.retry.predecessorEvaluationId);
   const { digest: _predecessorContractDigest, stalenessPolicy: _predecessorStaleness,
+    candidateAdmission: _predecessorCandidateAdmission,
     ...predecessorContractFields } = predecessorContract;
   const predecessorContractPayload = {
     ...predecessorContractFields, schema: "agentspine.learning-evaluation/v10"
@@ -2081,6 +2174,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
     digest: hash(JSON.stringify(predecessorContractPayload))
   });
   delete predecessorContract.stalenessPolicy;
+  delete predecessorContract.candidateAdmission;
   const predecessorBinding = compatibleState.learning.evaluationBindings.find((item) =>
     item.evaluationId === predecessorContract.id);
   predecessorBinding.evaluationDigest = predecessorContract.digest;
@@ -2141,6 +2235,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
     ...comparableRetryPayload, digest: hash(JSON.stringify(comparableRetryPayload))
   };
   const { digest: _boundedContractDigest, stalenessPolicy: _retryStaleness,
+    candidateAdmission: _retryCandidateAdmission,
     ...comparableContractFields } = legacyContract;
   const comparableContractPayload = {
     ...comparableContractFields, schema: "agentspine.learning-evaluation/v12"
@@ -2149,6 +2244,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
     digest: hash(JSON.stringify(comparableContractPayload))
   });
   delete legacyContract.stalenessPolicy;
+  delete legacyContract.candidateAdmission;
   const legacyBinding = compatibleState.learning.evaluationBindings.find((item) =>
     item.evaluationId === legacyContract.id);
   const { digest: _legacyBindingDigest, ...legacyBindingFields } = legacyBinding;
@@ -2224,8 +2320,10 @@ test("measurement lineage blocks cross-contract reuse and purges only stale unco
   for (const suffix of ["one", "two"]) {
     await proposeLearning({
       root, id: `learning:lineage-${suffix}`, kind: "behavior", claim: `Use synthetic strategy ${suffix}.`,
-      scope: scopedTurn, evidence: evidence(`evidence:lineage-${suffix}`), now: start
+      scope: scopedTurn, evidence: evidence(`evidence:lineage-${suffix}-one`), now: start
     });
+    await addLearningEvidence({ root, id: `learning:lineage-${suffix}`,
+      evidence: evidence(`evidence:lineage-${suffix}-two`), now: start });
     await evaluation(root, `learning:lineage-${suffix}`, {
       id: `evaluation:lineage-${suffix}`, now: start,
       expiresAt: "2026-01-10T00:00:00.000Z"
@@ -2309,8 +2407,10 @@ test("evaluator roots prevent alias independence and bind measurements fail clos
   for (const suffix of ["primary", "alias"]) {
     await proposeLearning({
       root, id: `learning:root-${suffix}`, kind: "behavior", claim: `Use root-bound strategy ${suffix}.`,
-      scope: scopedTurn, evidence: evidence(`evidence:root-${suffix}`), now: start
+      scope: scopedTurn, evidence: evidence(`evidence:root-${suffix}-one`), now: start
     });
+    await addLearningEvidence({ root, id: `learning:root-${suffix}`,
+      evidence: evidence(`evidence:root-${suffix}-two`), now: start });
   }
   await assert.rejects(registerLearningEvaluator({
     root, id: "evaluator:root-a", principalDigest: sharedRoot, now: start
@@ -2328,7 +2428,7 @@ test("evaluator roots prevent alias independence and bind measurements fail clos
       { evaluatorId: "evaluator:root-b", principalDigest: hash("second synthetic evaluator principal") }
     ], now: start, expiresAt: "2026-01-10T00:00:00.000Z"
   });
-  assert.equal(primary.contract.schema, "agentspine.learning-evaluation/v16");
+  assert.equal(primary.contract.schema, "agentspine.learning-evaluation/v18");
   assert.equal(primary.binding.schema, "agentspine.learning-evaluator-binding/v1");
   assert.equal(primary.binding.evaluationDigest, primary.contract.digest);
   assert.deepEqual(primary.contract.evaluatorRoots[0], {
@@ -3199,8 +3299,9 @@ test("parallel duplicate outcome receipts are idempotent and remain one immutabl
   const { root } = await fixture(t);
   await proposeLearning({
     root, id: "learning:outcome-race", kind: "behavior", claim: "Use one synthetic race-safe action.",
-    scope: scopedTurn, evidence: evidence("evidence:race")
+    scope: scopedTurn, evidence: evidence("evidence:race-one")
   });
+  await addLearningEvidence({ root, id: "learning:outcome-race", evidence: evidence("evidence:race-two") });
   await evaluation(root, "learning:outcome-race", {
     evaluatorIds: ["evaluator:test-race", "evaluator:test-a"]
   });
@@ -3214,12 +3315,15 @@ test("0.14 through 0.27 evaluation contracts remain readable while new contracts
   const { root } = await fixture(t);
   await proposeLearning({
     root, id: "learning:legacy-contract", kind: "behavior", claim: "Use the legacy synthetic strategy.",
-    scope: scopedTurn, evidence: evidence("evidence:legacy-contract")
+    scope: scopedTurn, evidence: evidence("evidence:legacy-contract-one")
   });
+  await addLearningEvidence({ root, id: "learning:legacy-contract",
+    evidence: evidence("evidence:legacy-contract-two") });
   await evaluation(root, "learning:legacy-contract");
   const { learning, learningPath } = await loadLearning(root);
   const { digest: _digest, pairing: _pairing, evaluatorRoots: _roots, initialTrials: _initial, target: _target,
     completionPolicy: _completionPolicy, stalenessPolicy: _stalenessPolicy,
+    candidateAdmission: _candidateAdmission,
     ...currentPayload } = learning.evaluations[0];
   const v1Payload = { ...currentPayload, schema: "agentspine.learning-evaluation/v1" };
   learning.evaluations[0] = { ...v1Payload, digest: hash(JSON.stringify(v1Payload)) };
@@ -3234,14 +3338,16 @@ test("0.14 through 0.27 evaluation contracts remain readable while new contracts
 
   await proposeLearning({
     root, id: "learning:coverage-contract", kind: "behavior", claim: "Use the 0.15 synthetic strategy.",
-    scope: scopedTurn, evidence: evidence("evidence:coverage-contract")
+    scope: scopedTurn, evidence: evidence("evidence:coverage-contract-one")
   });
+  await addLearningEvidence({ root, id: "learning:coverage-contract",
+    evidence: evidence("evidence:coverage-contract-two") });
   await evaluation(root, "learning:coverage-contract", { id: "evaluation:coverage-contract" });
   const coverageState = await loadLearning(root);
   const current = coverageState.learning.evaluations.find((item) => item.id === "evaluation:coverage-contract");
   const { digest: _coverageDigest, pairing: _coveragePairing, evaluatorRoots: _coverageRoots,
     initialTrials: _coverageInitial, target: _coverageTarget, completionPolicy: _coveragePolicy,
-    stalenessPolicy: _coverageStaleness, ...v3Payload } = current;
+    stalenessPolicy: _coverageStaleness, candidateAdmission: _coverageAdmission, ...v3Payload } = current;
   const v2Payload = { ...v3Payload, schema: "agentspine.learning-evaluation/v2" };
   coverageState.learning.evaluations = coverageState.learning.evaluations.map((item) => item.id === current.id
     ? { ...v2Payload, digest: hash(JSON.stringify(v2Payload)) } : item);
@@ -3258,14 +3364,16 @@ test("0.14 through 0.27 evaluation contracts remain readable while new contracts
 
   await proposeLearning({
     root, id: "learning:provenance-contract", kind: "behavior", claim: "Use the 0.16 synthetic strategy.",
-    scope: scopedTurn, evidence: evidence("evidence:provenance-contract")
+    scope: scopedTurn, evidence: evidence("evidence:provenance-contract-one")
   });
+  await addLearningEvidence({ root, id: "learning:provenance-contract",
+    evidence: evidence("evidence:provenance-contract-two") });
   await evaluation(root, "learning:provenance-contract", { id: "evaluation:provenance-contract" });
   const provenanceState = await loadLearning(root);
   const lineageContract = provenanceState.learning.evaluations.find((item) => item.id === "evaluation:provenance-contract");
   const { digest: _lineageDigest, pairing: _lineagePairing, evaluatorRoots: _lineageRoots,
     initialTrials: _lineageInitial, target: _lineageTarget, completionPolicy: _lineagePolicy,
-    stalenessPolicy: _lineageStaleness, ...v4Payload } = lineageContract;
+    stalenessPolicy: _lineageStaleness, candidateAdmission: _lineageAdmission, ...v4Payload } = lineageContract;
   const v3ContractPayload = { ...v4Payload, schema: "agentspine.learning-evaluation/v3" };
   provenanceState.learning.evaluations = provenanceState.learning.evaluations.map((item) => item.id === lineageContract.id
     ? { ...v3ContractPayload, digest: hash(JSON.stringify(v3ContractPayload)) } : item);
@@ -3282,14 +3390,16 @@ test("0.14 through 0.27 evaluation contracts remain readable while new contracts
 
   await proposeLearning({
     root, id: "learning:lineage-contract", kind: "behavior", claim: "Use the 0.17 synthetic strategy.",
-    scope: scopedTurn, evidence: evidence("evidence:lineage-contract")
+    scope: scopedTurn, evidence: evidence("evidence:lineage-contract-one")
   });
+  await addLearningEvidence({ root, id: "learning:lineage-contract",
+    evidence: evidence("evidence:lineage-contract-two") });
   await evaluation(root, "learning:lineage-contract", { id: "evaluation:lineage-contract" });
   const pairedState = await loadLearning(root);
   const pairedContract = pairedState.learning.evaluations.find((item) => item.id === "evaluation:lineage-contract");
   const { digest: _pairedDigest, pairing: _pairedConfig, evaluatorRoots: _pairedRoots,
     initialTrials: _pairedInitial, target: _pairedTarget, completionPolicy: _pairedPolicy,
-    stalenessPolicy: _pairedStaleness, ...v4ContractPayload } = pairedContract;
+    stalenessPolicy: _pairedStaleness, candidateAdmission: _pairedAdmission, ...v4ContractPayload } = pairedContract;
   const compatibleV4Payload = { ...v4ContractPayload, schema: "agentspine.learning-evaluation/v4" };
   pairedState.learning.evaluations = pairedState.learning.evaluations.map((item) => item.id === pairedContract.id
     ? { ...compatibleV4Payload, digest: hash(JSON.stringify(compatibleV4Payload)) } : item);
@@ -3306,14 +3416,16 @@ test("0.14 through 0.27 evaluation contracts remain readable while new contracts
 
   await proposeLearning({
     root, id: "learning:paired-contract", kind: "behavior", claim: "Use the 0.18 synthetic strategy.",
-    scope: scopedTurn, evidence: evidence("evidence:paired-contract")
+    scope: scopedTurn, evidence: evidence("evidence:paired-contract-one")
   });
+  await addLearningEvidence({ root, id: "learning:paired-contract",
+    evidence: evidence("evidence:paired-contract-two") });
   await evaluation(root, "learning:paired-contract", { id: "evaluation:paired-contract" });
   const legacyPairedState = await loadLearning(root);
   const currentPaired = legacyPairedState.learning.evaluations.find((item) => item.id === "evaluation:paired-contract");
   const { digest: _currentPairedDigest, evaluatorRoots: _currentPairedRoots,
     initialTrials: _currentPairedInitial, target: _currentPairedTarget, completionPolicy: _currentPairedPolicy,
-    stalenessPolicy: _currentPairedStaleness,
+    stalenessPolicy: _currentPairedStaleness, candidateAdmission: _currentPairedAdmission,
     ...v5ContractPayload } = currentPaired;
   const compatibleV5Payload = { ...v5ContractPayload, schema: "agentspine.learning-evaluation/v5" };
   legacyPairedState.learning.evaluations = legacyPairedState.learning.evaluations.map((item) => item.id === currentPaired.id
@@ -3334,14 +3446,17 @@ test("0.14 through 0.27 evaluation contracts remain readable while new contracts
 
   await proposeLearning({
     root, id: "learning:root-contract", kind: "behavior", claim: "Use the 0.19 synthetic strategy.",
-    scope: scopedTurn, evidence: evidence("evidence:root-contract")
+    scope: scopedTurn, evidence: evidence("evidence:root-contract-one")
   });
+  await addLearningEvidence({ root, id: "learning:root-contract",
+    evidence: evidence("evidence:root-contract-two") });
   await evaluation(root, "learning:root-contract", { id: "evaluation:root-contract" });
   const legacyRootState = await loadLearning(root);
   const currentRoot = legacyRootState.learning.evaluations.find((item) => item.id === "evaluation:root-contract");
   const { digest: _currentRootDigest, initialTrials: _currentRootInitial,
     target: _currentRootTarget, completionPolicy: _currentRootPolicy,
-    stalenessPolicy: _currentRootStaleness, ...v6ContractPayload } = currentRoot;
+    stalenessPolicy: _currentRootStaleness, candidateAdmission: _currentRootAdmission,
+    ...v6ContractPayload } = currentRoot;
   const compatibleV6Payload = { ...v6ContractPayload, schema: "agentspine.learning-evaluation/v6" };
   legacyRootState.learning.evaluations = legacyRootState.learning.evaluations.map((item) => item.id === currentRoot.id
     ? { ...compatibleV6Payload, digest: hash(JSON.stringify(compatibleV6Payload)) } : item);
@@ -3361,13 +3476,16 @@ test("0.14 through 0.27 evaluation contracts remain readable while new contracts
 
   await proposeLearning({
     root, id: "learning:initial-contract", kind: "behavior", claim: "Use the 0.26 synthetic strategy.",
-    scope: scopedTurn, evidence: evidence("evidence:initial-contract")
+    scope: scopedTurn, evidence: evidence("evidence:initial-contract-one")
   });
+  await addLearningEvidence({ root, id: "learning:initial-contract",
+    evidence: evidence("evidence:initial-contract-two") });
   await evaluation(root, "learning:initial-contract", { id: "evaluation:initial-contract" });
   const initialState = await loadLearning(root);
   const targetContract = initialState.learning.evaluations.find((item) => item.id === "evaluation:initial-contract");
   const { digest: _targetContractDigest, target: _targetContractTarget,
     completionPolicy: _targetContractPolicy, stalenessPolicy: _targetContractStaleness,
+    candidateAdmission: _targetContractAdmission,
     ...v8ContractPayload } = targetContract;
   const compatibleV8Payload = { ...v8ContractPayload, schema: "agentspine.learning-evaluation/v8" };
   initialState.learning.evaluations = initialState.learning.evaluations.map((item) => item.id === targetContract.id
@@ -3385,13 +3503,16 @@ test("0.14 through 0.27 evaluation contracts remain readable while new contracts
 
   await proposeLearning({
     root, id: "learning:target-contract", kind: "behavior", claim: "Use the 0.27 synthetic strategy.",
-    scope: scopedTurn, evidence: evidence("evidence:target-contract")
+    scope: scopedTurn, evidence: evidence("evidence:target-contract-one")
   });
+  await addLearningEvidence({ root, id: "learning:target-contract",
+    evidence: evidence("evidence:target-contract-two") });
   await evaluation(root, "learning:target-contract", { id: "evaluation:target-contract" });
   const targetState = await loadLearning(root);
   const currentTarget = targetState.learning.evaluations.find((item) => item.id === "evaluation:target-contract");
   const { digest: _currentTargetDigest, completionPolicy: _currentTargetPolicy,
-    stalenessPolicy: _currentTargetStaleness, ...v9ContractPayload } = currentTarget;
+    stalenessPolicy: _currentTargetStaleness, candidateAdmission: _currentTargetAdmission,
+    ...v9ContractPayload } = currentTarget;
   const compatibleV9Payload = { ...v9ContractPayload, schema: "agentspine.learning-evaluation/v9" };
   targetState.learning.evaluations = targetState.learning.evaluations.map((item) => item.id === currentTarget.id
     ? { ...compatibleV9Payload, digest: hash(JSON.stringify(compatibleV9Payload)) } : item);
@@ -3530,9 +3651,14 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
   runCli([
     "learn-propose", "learning:cli-outcome", "--root", root, "--kind", "behavior",
     "--claim", "Check the synthetic invariant.", "--evidence", "A fixed task missed the invariant.",
+    "--evidence-id", "evidence:cli-outcome-one", "--confidence", "0.97",
     "--privacy", "shared", "--persona", "agent:synthetic", "--user", "user:synthetic",
     "--tenant", "tenant:synthetic", "--project", "project:synthetic", "--task", "task:synthetic", "--json"
   ], state);
+  runCli(["learn-evidence", "learning:cli-outcome", "--root", root,
+    "--evidence-id", "evidence:cli-outcome-two", "--type", "test",
+    "--summary", "A second fixed synthetic run confirmed the invariant miss.",
+    "--confidence", "0.97", "--json"], state);
   runCli(["learn-evaluator-register", "evaluator:cli", "--root", root,
     "--principal-digest", hash("root:cli"), "--confirm-local-evaluator", "--json"], state);
   runCli(["learn-evaluator-register", "evaluator:cli-two", "--root", root,
