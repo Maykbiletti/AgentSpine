@@ -1749,11 +1749,44 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
   const retryApplication = await projectedApplication(root, "learning:failure-retry", "failure-retry",
     new Date(retryNow.getTime() + 2000), "active", alphaScope);
   const retryDeadlinePassed = new Date(new Date(retryApplication.deliveryExpiresAt).getTime() + 1);
-  await evaluateLearning({ root, now: retryDeadlinePassed });
+  await Promise.all(Array.from({ length: 6 }, () => evaluateLearning({ root, now: retryDeadlinePassed })));
   const retryFailedState = await loadLearning(root);
   const retryFailure = retryFailedState.learning.trialFailures.find((item) =>
     item.learningId === "learning:failure-retry");
   assert.ok(retryFailure, "the corrective Canary must retain its own terminal failure");
+  assert.equal(retryFailedState.learning.trialRetryExhaustions.length, 1,
+    "parallel reconciliation creates one immutable terminal receipt");
+  const exhaustion = retryFailedState.learning.trialRetryExhaustions[0];
+  assert.equal(exhaustion.schema, "agentspine.learning-trial-retry-exhaustion/v1");
+  assert.equal(exhaustion.learningId, "learning:failure-retry");
+  assert.equal(exhaustion.rootEvaluationId, registered.contract.id);
+  assert.equal(exhaustion.rootEvaluationDigest, registered.contract.digest);
+  assert.equal(exhaustion.correctiveEvaluationId, retryContract.id);
+  assert.equal(exhaustion.correctiveEvaluationDigest, retryContract.digest);
+  assert.equal(exhaustion.trialFailureId, retryFailure.id);
+  assert.equal(exhaustion.trialFailureDigest, retryFailure.digest);
+  assert.equal(exhaustion.targetDigest, retryContract.target.digest);
+  assert.equal(exhaustion.attempt, 2);
+  assert.equal(exhaustion.maxAttempts, 2);
+  assert.equal(exhaustion.terminalPolicy, "no-further-retry");
+  assert.equal(["claim", "evidence", "reason", "summary"].some((field) => field in exhaustion), false,
+    "terminal receipts remain content-free");
+  const exhaustedStatus = await learningOutcomeStatus({ root, scope: alphaScope, now: retryDeadlinePassed });
+  assert.equal(exhaustedStatus.trialRetryExhaustions, 1);
+  assert.equal(exhaustedStatus.records.find((item) => item.id === "learning:failure-retry")
+    .trialRetryExhaustionReceipts, 1);
+  assert.equal(exhaustedStatus.records.find((item) => item.id === "learning:failure-retry")
+    .trialRetryBudgetStatus, "exhausted");
+  const foreignExhaustedStatus = await learningOutcomeStatus({ root,
+    scope: { ...alphaScope, groupId: "group:failure-beta" }, now: retryDeadlinePassed });
+  assert.equal(foreignExhaustedStatus.trialRetryExhaustions, 0,
+    "group-scoped diagnostics do not expose foreign exhaustion counts");
+  const exhaustedDoctor = runCli(["doctor", root, "--json"], state);
+  assert.equal(exhaustedDoctor.learningOutcomes.trialRetryExhaustionReceipts, 1);
+  const exhaustedAudit = runCli(["audit", root, "--json"], state);
+  assert.equal(exhaustedAudit.ok, true);
+  assert.match(exhaustedAudit.gates.find((gate) => gate.name === "Context privacy").detail,
+    /1 terminal retry-exhaustion receipts/);
   const retryRevokedAt = new Date(retryDeadlinePassed.getTime() + 1000);
   await revokeLearningTrialFailure({ root, trialFailureId: retryFailure.id, reasonCode: "clock-invalid",
     reason: "Synthetic corrective-trial clock invalidation.",
@@ -1787,6 +1820,8 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
   compatibleState.learning.trialFailures = compatibleState.learning.trialFailures.filter((item) =>
     item.learningId !== "learning:failure-retry");
   compatibleState.learning.trialFailureRevocations = compatibleState.learning.trialFailureRevocations.filter((item) =>
+    item.learningId !== "learning:failure-retry");
+  compatibleState.learning.trialRetryExhaustions = compatibleState.learning.trialRetryExhaustions.filter((item) =>
     item.learningId !== "learning:failure-retry");
   compatibleState.learning.applications = compatibleState.learning.applications.filter((item) =>
     item.learningId !== "learning:failure-retry");
@@ -1844,7 +1879,17 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
   await writeFile(compatibleState.learningPath, `${compatibleSnapshot}\n`, "utf8");
   const retryState = await loadLearning(root);
   const originalState = JSON.stringify(retryState.learning);
-  const storedRetry = retryState.learning.evaluations.find((item) => item.id === retryContract.id);
+  const storedExhaustion = retryState.learning.trialRetryExhaustions[0];
+  storedExhaustion.rootEvaluationDigest = hash("manipulated synthetic retry root");
+  const exhaustionPayload = { ...storedExhaustion };
+  delete exhaustionPayload.digest;
+  storedExhaustion.digest = hash(JSON.stringify(exhaustionPayload));
+  await writeFile(retryState.learningPath, `${JSON.stringify(retryState.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /trial retry exhaustion state is invalid/,
+    "a rewritten terminal receipt must fail closed after restart");
+  await writeFile(retryState.learningPath, `${originalState}\n`, "utf8");
+  const restoredRetryState = await loadLearning(root);
+  const storedRetry = restoredRetryState.learning.evaluations.find((item) => item.id === retryContract.id);
   storedRetry.retry.attempt = 1;
   const retryPayload = { ...storedRetry.retry };
   delete retryPayload.digest;
@@ -1852,22 +1897,23 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
   const contractPayload = { ...storedRetry };
   delete contractPayload.digest;
   storedRetry.digest = hash(JSON.stringify(contractPayload));
-  const storedBinding = retryState.learning.evaluationBindings.find((item) =>
+  const storedBinding = restoredRetryState.learning.evaluationBindings.find((item) =>
     item.evaluationId === storedRetry.id);
   storedBinding.evaluationDigest = storedRetry.digest;
   const bindingPayload = { ...storedBinding };
   delete bindingPayload.digest;
   storedBinding.digest = hash(JSON.stringify(bindingPayload));
-  await writeFile(retryState.learningPath, `${JSON.stringify(retryState.learning)}\n`, "utf8");
+  await writeFile(restoredRetryState.learningPath, `${JSON.stringify(restoredRetryState.learning)}\n`, "utf8");
   await assert.rejects(loadLearning(root), /evaluation state is invalid|trial retry state is invalid|trial failure state is invalid/,
     "a rewritten retry budget must fail closed after restart");
-  await writeFile(retryState.learningPath, `${originalState}\n`, "utf8");
+  await writeFile(restoredRetryState.learningPath, `${originalState}\n`, "utf8");
   await assert.rejects(deleteLearning({ root, id: "learning:failure-retry" }),
     /purge the shared subject atomically/);
   assert.equal((await purgeLearningBySubject({ root, subjectId: "person:failure-member" })).deleted, 4);
   const deleted = (await loadLearning(root)).learning;
   assert.equal(deleted.trialFailures.length, 0);
   assert.equal(deleted.trialFailureRevocations.length, 0);
+  assert.equal(deleted.trialRetryExhaustions.length, 0);
   assert.equal(deleted.history.some((entry) => entry.value?.learningId === "learning:failure-current"), false);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
@@ -3073,6 +3119,7 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   assert.deepEqual(upgraded.measurementLineage, []);
   assert.deepEqual(upgraded.trialFailures, []);
   assert.deepEqual(upgraded.trialFailureRevocations, []);
+  assert.deepEqual(upgraded.trialRetryExhaustions, []);
   assert.deepEqual(upgraded.evaluationRevocations, []);
   assert.deepEqual(upgraded.validationRevocations, []);
   assert.deepEqual(upgraded.evidenceRevocations, []);

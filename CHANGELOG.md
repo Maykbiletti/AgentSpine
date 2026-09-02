@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-09-02
+
+### Added
+
+- A content-free `agentspine.learning-trial-retry-exhaustion/v1` receipt binds the failed corrective Canary to its root evaluation, exact corrective contract, terminal failure, target, scope and fixed attempt 2-of-2 budget.
+- Scoped status, Doctor and audit expose terminal exhaustion counts and state without disclosing claims, evidence, benchmark content or revocation reasons.
+
+### Changed
+
+- The second failed Canary now records retry exhaustion atomically with rollback. Revoking that timeout leaves the terminal receipt intact and still requires a genuinely new learning lineage.
+
+### Security
+
+- Parallel reconciliation creates exactly one terminal receipt. Root, contract, failure, target, scope and attempt substitution fail closed after restart; foreign groups receive neither the receipt nor its count; subject purge removes the complete lineage atomically.
+
 ## [0.40.0] - 2026-09-02
 
 ### Added

@@ -95,6 +95,7 @@ function emptyLearning(root) {
     validationLeases: [],
     trialFailures: [],
     trialFailureRevocations: [],
+    trialRetryExhaustions: [],
     evaluationRevocations: [],
     validationRevocations: [],
     evidenceRevocations: [],
@@ -123,6 +124,8 @@ function normalizeState(value, root) {
     || (value.trialFailures !== undefined && (!Array.isArray(value.trialFailures) || !value.trialFailures.every((item) => item && typeof item === "object")))
     || (value.trialFailureRevocations !== undefined && (!Array.isArray(value.trialFailureRevocations)
       || !value.trialFailureRevocations.every((item) => item && typeof item === "object")))
+    || (value.trialRetryExhaustions !== undefined && (!Array.isArray(value.trialRetryExhaustions)
+      || !value.trialRetryExhaustions.every((item) => item && typeof item === "object")))
     || (value.evaluationRevocations !== undefined && (!Array.isArray(value.evaluationRevocations)
       || !value.evaluationRevocations.every((item) => item && typeof item === "object")))
     || (value.validationRevocations !== undefined && (!Array.isArray(value.validationRevocations)
@@ -159,6 +162,7 @@ function normalizeState(value, root) {
     validationLeases: value.validationLeases || [],
     trialFailures: value.trialFailures || [],
     trialFailureRevocations: value.trialFailureRevocations || [],
+    trialRetryExhaustions: value.trialRetryExhaustions || [],
     evaluationRevocations: value.evaluationRevocations || [],
     validationRevocations: value.validationRevocations || [],
     evidenceRevocations: value.evidenceRevocations || [],
@@ -236,6 +240,14 @@ function normalizeState(value, root) {
     || new Set(retryContracts.map((contract) => contract.retry.trialFailureRevocationId)).size
       !== retryContracts.length) {
     throw new Error("learning trial retry state is invalid; run the audit before learning");
+  }
+  if (normalized.trialRetryExhaustions.some((receipt) => !storedTrialRetryExhaustionStructure(receipt)
+    || !trialRetryExhaustionMatchesState(normalized, receipt))
+    || new Set(normalized.trialRetryExhaustions.map((entry) => entry.correctiveEvaluationId)).size
+      !== normalized.trialRetryExhaustions.length
+    || new Set(normalized.trialRetryExhaustions.map((entry) => entry.trialFailureId)).size
+      !== normalized.trialRetryExhaustions.length) {
+    throw new Error("learning trial retry exhaustion state is invalid; run the audit before learning");
   }
   if (normalized.evaluationRevocations.some((receipt) => !storedEvaluationRevocationStructure(receipt)
     || !evaluationRevocationMatchesState(normalized, receipt))
@@ -2032,6 +2044,69 @@ function trialRetryMatchesState(state, contract) {
       && !predecessorEvidence.has(evidenceIdentity(entry)));
 }
 
+function trialRetryExhaustionPayload({ id, learningId, rootEvaluationId, rootEvaluationDigest,
+  correctiveEvaluationId, correctiveEvaluationDigest, trialFailureId, trialFailureDigest,
+  targetDigest, scopeDigest, attempt, maxAttempts, exhaustedAt }) {
+  return {
+    schema: "agentspine.learning-trial-retry-exhaustion/v1",
+    id,
+    learningId,
+    rootEvaluationId,
+    rootEvaluationDigest,
+    correctiveEvaluationId,
+    correctiveEvaluationDigest,
+    trialFailureId,
+    trialFailureDigest,
+    targetDigest,
+    scopeDigest,
+    attempt,
+    maxAttempts,
+    exhaustedAt,
+    terminalPolicy: "no-further-retry",
+    authority: "context-only"
+  };
+}
+
+function storedTrialRetryExhaustionStructure(receipt) {
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
+  const payload = trialRetryExhaustionPayload(receipt);
+  return receipt.schema === "agentspine.learning-trial-retry-exhaustion/v1"
+    && Object.keys(receipt).length === 17
+    && Object.keys(receipt).every((field) => ["schema", "id", "learningId", "rootEvaluationId",
+      "rootEvaluationDigest", "correctiveEvaluationId", "correctiveEvaluationDigest",
+      "trialFailureId", "trialFailureDigest", "targetDigest", "scopeDigest", "attempt",
+      "maxAttempts", "exhaustedAt", "terminalPolicy", "authority", "digest"].includes(field))
+    && [receipt.id, receipt.learningId, receipt.rootEvaluationId, receipt.correctiveEvaluationId,
+      receipt.trialFailureId].every((value) => ID_RE.test(value || ""))
+    && [receipt.rootEvaluationDigest, receipt.correctiveEvaluationDigest, receipt.trialFailureDigest,
+      receipt.targetDigest, receipt.scopeDigest].every((value) => DIGEST_RE.test(value || ""))
+    && receipt.attempt === 2 && receipt.maxAttempts === 2
+    && Number.isFinite(new Date(receipt.exhaustedAt).getTime())
+    && receipt.terminalPolicy === "no-further-retry"
+    && receipt.authority === "context-only" && receipt.digest === digest(payload);
+}
+
+function trialRetryExhaustionMatchesState(state, receipt) {
+  const correctiveEvaluation = state.evaluations.find((entry) =>
+    entry.id === receipt.correctiveEvaluationId && entry.digest === receipt.correctiveEvaluationDigest
+      && entry.learningId === receipt.learningId);
+  const rootEvaluation = state.evaluations.find((entry) =>
+    entry.id === receipt.rootEvaluationId && entry.digest === receipt.rootEvaluationDigest);
+  const failure = state.trialFailures.find((entry) => entry.id === receipt.trialFailureId
+    && entry.digest === receipt.trialFailureDigest && entry.learningId === receipt.learningId);
+  const retry = correctiveEvaluation?.retry;
+  return Boolean(correctiveEvaluation && BOUNDED_TRIAL_RETRY_EVALUATIONS.has(correctiveEvaluation.schema)
+    && rootEvaluation && failure && trialFailureMatchesState(state, failure)
+    && failure.evaluationId === correctiveEvaluation.id
+    && failure.evaluationDigest === correctiveEvaluation.digest
+    && retry?.schema === "agentspine.learning-trial-retry/v3"
+    && retry.rootEvaluationId === rootEvaluation.id && retry.rootEvaluationDigest === rootEvaluation.digest
+    && retry.targetDigest === receipt.targetDigest && correctiveEvaluation.target.digest === receipt.targetDigest
+    && retry.scopeDigest === receipt.scopeDigest && digest(correctiveEvaluation.scope) === receipt.scopeDigest
+    && retry.attempt === receipt.attempt && retry.maxAttempts === receipt.maxAttempts
+    && failure.observedAt === receipt.exhaustedAt);
+}
+
 function revalidationAdmissionWindow(state, receipt) {
   const admission = receipt.revalidationAdmission;
   const candidates = [
@@ -2956,6 +3031,10 @@ export async function registerLearningEvaluation({
         entry.id === selected.failure.evaluationId && entry.digest === selected.failure.evaluationDigest);
       if (!predecessorEvaluation) {
         throw new Error("trial retry predecessor evaluation is missing or changed");
+      }
+      if (state.trialRetryExhaustions.some((receipt) => receipt.trialFailureId === selected.failure.id
+        && receipt.trialFailureDigest === selected.failure.digest)) {
+        throw new Error("trial retry budget is exhausted by an immutable terminal receipt");
       }
       if (TRIAL_RETRY_EVALUATIONS.has(predecessorEvaluation.schema)) {
         throw new Error("trial retry budget is exhausted; a failed corrective Canary cannot be retried again");
@@ -4488,6 +4567,42 @@ function recordInitialTrialFailure(state, timeout, timestamp) {
   return receipt;
 }
 
+function recordTrialRetryExhaustion(state, failure) {
+  const evaluation = state.evaluations.find((entry) => entry.id === failure.evaluationId
+    && entry.digest === failure.evaluationDigest && entry.learningId === failure.learningId);
+  if (!evaluation || !BOUNDED_TRIAL_RETRY_EVALUATIONS.has(evaluation.schema)) return null;
+  const retry = evaluation.retry;
+  const id = `trial-retry-exhaustion:${createHash("sha256")
+    .update(`${retry.rootEvaluationId}\0${evaluation.id}\0${failure.id}`).digest("hex").slice(0, 32)}`;
+  const payload = trialRetryExhaustionPayload({
+    id,
+    learningId: failure.learningId,
+    rootEvaluationId: retry.rootEvaluationId,
+    rootEvaluationDigest: retry.rootEvaluationDigest,
+    correctiveEvaluationId: evaluation.id,
+    correctiveEvaluationDigest: evaluation.digest,
+    trialFailureId: failure.id,
+    trialFailureDigest: failure.digest,
+    targetDigest: evaluation.target.digest,
+    scopeDigest: digest(evaluation.scope),
+    attempt: retry.attempt,
+    maxAttempts: retry.maxAttempts,
+    exhaustedAt: failure.observedAt
+  });
+  const receipt = { ...payload, digest: digest(payload) };
+  const existing = state.trialRetryExhaustions.find((entry) => entry.id === id);
+  if (existing) {
+    if (existing.digest !== receipt.digest) throw new Error("learning trial retry exhaustion IDs are immutable");
+    return existing;
+  }
+  if (!trialRetryExhaustionMatchesState(state, receipt)) {
+    throw new Error("learning trial retry exhaustion binding is invalid");
+  }
+  state.trialRetryExhaustions.push(receipt);
+  state.trialRetryExhaustions.sort((a, b) => a.id.localeCompare(b.id));
+  return receipt;
+}
+
 export async function revokeLearningTrialFailure({
   root = process.cwd(), trialFailureId, reasonCode, reason, confirmation, now = new Date()
 }) {
@@ -4620,7 +4735,8 @@ function reconcileCanary(state, candidate, timestamp) {
         ? "initial Canary trial missed its immutable model-turn delivery deadline"
         : "initial Canary trial missed its immutable measured-outcome deadline",
       timestamp, "automatic-incomplete-trial", failureReceipt);
-    return { ...result, decision: "rolled-back", failureReceipt };
+    const retryExhaustionReceipt = recordTrialRetryExhaustion(state, failureReceipt);
+    return { ...result, decision: "rolled-back", failureReceipt, retryExhaustionReceipt };
   }
   if (canary.status === "validated") {
     const validation = validationLeaseState(state, candidate, timestamp);
@@ -5179,6 +5295,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       const evaluations = learning.evaluations.filter((item) => item.learningId === candidate.id);
       const trialFailures = learning.trialFailures.filter((item) => item.learningId === candidate.id);
       const trialFailureRevocations = learning.trialFailureRevocations.filter((item) => item.learningId === candidate.id);
+      const trialRetryExhaustions = learning.trialRetryExhaustions.filter((item) => item.learningId === candidate.id);
       const evaluationRevocations = learning.evaluationRevocations.filter((item) => item.learningId === candidate.id);
       const validationRevocations = learning.validationRevocations.filter((item) => item.learningId === candidate.id);
       const evidenceRevocations = learning.evidenceRevocations.filter((item) => item.learningId === candidate.id);
@@ -5296,6 +5413,10 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           COMPARABLE_TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
         boundedTrialRetryEvaluationContracts: evaluations.filter((contract) =>
           BOUNDED_TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
+        trialRetryExhaustionReceipts: trialRetryExhaustions.length,
+        trialRetryBudgetStatus: trialRetryExhaustions.length > 0 ? "exhausted"
+          : evaluations.some((contract) => BOUNDED_TRIAL_RETRY_EVALUATIONS.has(contract.schema)) ? "bounded"
+          : "not-applicable",
         activeTargetDigest: TARGET_BOUND_EVALUATIONS.has(initialContract?.schema)
           ? initialContract.target.digest : null,
         activeCompletionPolicyDigest: DEADLINE_BOUND_EVALUATIONS.has(initialContract?.schema)
@@ -5414,6 +5535,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       COMPARABLE_TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
     boundedTrialRetryEvaluationContracts: learning.evaluations.filter((contract) =>
       BOUNDED_TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
+    trialRetryExhaustions: records.reduce((sum, record) => sum + record.trialRetryExhaustionReceipts, 0),
     trialFailureRevocations: learning.trialFailureRevocations.length,
     evaluationRevocations: learning.evaluationRevocations.length,
     validationRevocations: learning.validationRevocations.length,
@@ -5491,6 +5613,7 @@ export async function deleteLearning({ root = process.cwd(), id }) {
     state.validationLeases = state.validationLeases.filter((entry) => entry.learningId !== id);
     state.trialFailures = state.trialFailures.filter((entry) => entry.learningId !== id);
     state.trialFailureRevocations = state.trialFailureRevocations.filter((entry) => entry.learningId !== id);
+    state.trialRetryExhaustions = state.trialRetryExhaustions.filter((entry) => entry.learningId !== id);
     state.evaluationRevocations = state.evaluationRevocations.filter((entry) => entry.learningId !== id);
     state.validationRevocations = state.validationRevocations.filter((entry) => entry.learningId !== id);
     state.evidenceRevocations = state.evidenceRevocations.filter((entry) => entry.learningId !== id);
@@ -5519,6 +5642,7 @@ export async function purgeLearningBySubject({ root = process.cwd(), subjectId }
     state.validationLeases = state.validationLeases.filter((entry) => !ids.has(entry.learningId));
     state.trialFailures = state.trialFailures.filter((entry) => !ids.has(entry.learningId));
     state.trialFailureRevocations = state.trialFailureRevocations.filter((entry) => !ids.has(entry.learningId));
+    state.trialRetryExhaustions = state.trialRetryExhaustions.filter((entry) => !ids.has(entry.learningId));
     state.evaluationRevocations = state.evaluationRevocations.filter((entry) => !ids.has(entry.learningId));
     state.validationRevocations = state.validationRevocations.filter((entry) => !ids.has(entry.learningId));
     state.evidenceRevocations = state.evidenceRevocations.filter((entry) => !ids.has(entry.learningId));
@@ -5689,6 +5813,21 @@ export function learningFindings(learning, graph) {
       findings.push(`invalid-trial-retry:${contract.id || "unknown"}`);
     }
     retryRevocationIds.add(contract.retry?.trialFailureRevocationId);
+  }
+  const trialRetryExhaustionIds = new Set();
+  const exhaustedCorrectiveEvaluations = new Set();
+  const exhaustedTrialFailures = new Set();
+  for (const receipt of learning.trialRetryExhaustions || []) {
+    const valid = storedTrialRetryExhaustionStructure(receipt)
+      && trialRetryExhaustionMatchesState(learning, receipt);
+    if (!valid || trialRetryExhaustionIds.has(receipt.id)
+      || exhaustedCorrectiveEvaluations.has(receipt.correctiveEvaluationId)
+      || exhaustedTrialFailures.has(receipt.trialFailureId)) {
+      findings.push(`invalid-trial-retry-exhaustion:${receipt.id || "unknown"}`);
+    }
+    trialRetryExhaustionIds.add(receipt.id);
+    exhaustedCorrectiveEvaluations.add(receipt.correctiveEvaluationId);
+    exhaustedTrialFailures.add(receipt.trialFailureId);
   }
   const evaluationRevocationIds = new Set();
   const revokedEvaluationIds = new Set();
