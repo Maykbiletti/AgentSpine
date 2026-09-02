@@ -4,6 +4,20 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-09-02
+
+### Added
+
+- New initial evaluation v16 and bounded retry v17 contracts freeze the candidate `minConfidence` and `minEvidence` gates before any benchmark outcome is admitted. Scoped status, Doctor, audit and read-only Context MCP diagnostics expose only content-free matching counts and digests.
+
+### Changed
+
+- Automatic behavior promotion and retry-state validation use the contract's frozen candidate gates. Later `learn-config` changes apply only to future contracts; historical v1-v15 contracts remain readable with their original behavior.
+
+### Security
+
+- Lowering mutable confidence or evidence requirements cannot admit a previously ineligible candidate, while raising them cannot invalidate or prolong an already registered experiment. Threshold tampering fails closed, foreign scopes receive zero diagnostics, and user-owned sources remain byte-for-byte unchanged.
+
 ## [0.44.0] - 2026-09-02
 
 ### Changed

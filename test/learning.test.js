@@ -64,13 +64,13 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
 async function recordLearningOutcome(input) {
   const { learning } = await loadLearning(input.root);
   const evaluation = learning.evaluations.find((item) => item.id === input.evaluationId);
-  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15"].includes(evaluation?.schema)) {
+  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17"].includes(evaluation?.schema)) {
     return commitLearningOutcome(input);
   }
-  const initialTrial = ["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15"].includes(evaluation.schema)
+  const initialTrial = ["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17"].includes(evaluation.schema)
     ? evaluation.initialTrials?.[input.phase]?.find((entry) => entry.evaluatorId === input.measurement?.evaluatorId)
     : null;
-  if (["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15"].includes(evaluation.schema) && !initialTrial) {
+  if (["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17"].includes(evaluation.schema) && !initialTrial) {
     return commitLearningOutcome(input);
   }
   const measurementId = `measurement:${input.id}`;
@@ -1226,7 +1226,7 @@ test("staleness policy freezes outcome freshness and Canary lifetime across conf
     id: "evaluation:staleness-old", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
     scope: alphaScope, now: start, expiresAt: "2036-01-20T00:00:00.000Z"
   });
-  assert.equal(staleContract.contract.schema, "agentspine.learning-evaluation/v14");
+  assert.equal(staleContract.contract.schema, "agentspine.learning-evaluation/v16");
   assert.deepEqual(staleContract.contract.stalenessPolicy, {
     schema: "agentspine.learning-staleness-policy/v1",
     outcomeMaxAgeDays: 1,
@@ -1300,6 +1300,109 @@ test("staleness policy freezes outcome freshness and Canary lifetime across conf
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
+test("promotion gates are frozen before evaluation and survive config drift, races, and restart", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2041-01-01T00:00:00.000Z");
+  const alphaScope = { ...scopedTurn, groupId: "group:promotion-alpha", taskId: "task:promotion" };
+  const passingScope = { ...alphaScope, taskId: "task:promotion-pass" };
+  const betaScope = { ...passingScope, groupId: "group:promotion-beta" };
+  await upsertEntity({ root, id: alphaScope.groupId, kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: betaScope.groupId, kind: "group", privacy: "shared" });
+  await configureLearning({ root, config: {
+    autoPromote: true, minConfidence: 0.9, minEvidence: 2,
+    minOutcomeReceipts: 2, canaryReceipts: 2
+  }, now: start });
+
+  await proposeLearning({
+    root, id: "learning:promotion-low", kind: "behavior",
+    claim: "Use the low-confidence synthetic promotion strategy.",
+    privacy: "group", groupId: alphaScope.groupId, scope: alphaScope,
+    evidence: evidence("evidence:promotion-low-one", 0.8), now: start
+  });
+  await addLearningEvidence({ root, id: "learning:promotion-low",
+    evidence: evidence("evidence:promotion-low-two", 0.8), now: start });
+  const lowContract = await evaluation(root, "learning:promotion-low", {
+    id: "evaluation:promotion-low", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    scope: alphaScope, now: start, expiresAt: "2041-02-01T00:00:00.000Z"
+  });
+  assert.equal(lowContract.contract.schema, "agentspine.learning-evaluation/v16");
+  assert.equal(lowContract.contract.thresholds.minConfidence, 0.9);
+  assert.equal(lowContract.contract.thresholds.minEvidence, 2);
+  for (const [index, evaluatorId] of ["evaluator:test-a", "evaluator:test-b"].entries()) {
+    await recordLearningOutcome({ root, learningId: "learning:promotion-low",
+      ...outcome(`outcome:promotion-low-${index}`, "before", 0.4 + index * 0.05, evaluatorId, {
+        evaluationId: lowContract.contract.id, scope: alphaScope, measuredAt: start
+      }), now: start });
+  }
+  await configureLearning({ root, config: { minConfidence: 0.5, minEvidence: 1 },
+    now: new Date(start.getTime() + 1000) });
+  const lowered = await evaluateLearning({ root, now: new Date(start.getTime() + 2000) });
+  assert.equal(lowered.accepted.some((entry) => entry.id === "learning:promotion-low"), false,
+    "lowering mutable config cannot admit a candidate below its frozen confidence gate");
+
+  const passingAt = new Date(start.getTime() + 3000);
+  await configureLearning({ root, config: { minConfidence: 0.9, minEvidence: 2 }, now: passingAt });
+  await proposeLearning({
+    root, id: "learning:promotion-pass", kind: "behavior",
+    claim: "Use the passing synthetic promotion strategy.",
+    privacy: "group", groupId: passingScope.groupId, scope: passingScope,
+    evidence: evidence("evidence:promotion-pass-one", 0.97), now: passingAt
+  });
+  await addLearningEvidence({ root, id: "learning:promotion-pass",
+    evidence: evidence("evidence:promotion-pass-two", 0.97), now: passingAt });
+  const contractInput = {
+    id: "evaluation:promotion-pass", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    scope: passingScope, now: passingAt, expiresAt: "2041-02-01T00:00:00.000Z"
+  };
+  const parallel = await Promise.all(Array.from({ length: 6 }, () =>
+    evaluation(root, "learning:promotion-pass", contractInput)));
+  assert.equal(parallel.filter((entry) => entry.unchanged === false).length, 1,
+    "parallel registration creates exactly one immutable promotion-bound contract");
+  const passingContract = parallel[0].contract;
+  assert.deepEqual({ minConfidence: passingContract.thresholds.minConfidence,
+    minEvidence: passingContract.thresholds.minEvidence }, { minConfidence: 0.9, minEvidence: 2 });
+  await configureLearning({ root, config: { minConfidence: 1, minEvidence: 10 },
+    now: new Date(passingAt.getTime() + 1000) });
+  assert.equal((await loadLearning(root)).learning.evaluations.find((entry) => entry.id === passingContract.id)
+    .thresholds.minEvidence, 2, "raising mutable config does not invalidate the contract after restart");
+  for (const [index, evaluatorId] of ["evaluator:test-a", "evaluator:test-b"].entries()) {
+    await recordLearningOutcome({ root, learningId: "learning:promotion-pass",
+      ...outcome(`outcome:promotion-pass-${index}`, "before", 0.4 + index * 0.05, evaluatorId, {
+        evaluationId: passingContract.id, scope: passingScope, measuredAt: passingAt
+      }), now: passingAt });
+  }
+  const raised = await evaluateLearning({ root, now: new Date(passingAt.getTime() + 2000) });
+  const promoted = raised.accepted.find((entry) => entry.id === "learning:promotion-pass");
+  assert.ok(promoted, JSON.stringify(raised));
+  assert.equal(promoted.promotion.minConfidence, 0.9);
+  assert.equal(promoted.promotion.minEvidence, 2);
+
+  const status = await learningOutcomeStatus({ root, scope: passingScope,
+    now: new Date(passingAt.getTime() + 2001) });
+  assert.equal(status.promotionBoundEvaluationContracts, 1);
+  assert.match(status.records.find((entry) => entry.id === "learning:promotion-pass")
+    .activePromotionThresholdDigest, /^[a-f0-9]{64}$/);
+  const foreign = await learningOutcomeStatus({ root, scope: betaScope,
+    now: new Date(passingAt.getTime() + 2001) });
+  assert.equal(foreign.promotionBoundEvaluationContracts, 0);
+  assert.deepEqual(foreign.records, []);
+  const doctor = runCli(["doctor", root, "--json"], state);
+  assert.equal(doctor.learningOutcomes.promotionBoundEvaluationContracts, 2);
+  const audit = runCli(["audit", root, "--json"], state);
+  assert.equal(audit.ok, true);
+  assert.match(audit.gates.find((gate) => gate.name === "Context privacy").detail,
+    /2 promotion-bound contracts/);
+
+  const clean = await loadLearning(root);
+  const cleanBytes = `${JSON.stringify(clean.learning)}\n`;
+  clean.learning.evaluations.find((entry) => entry.id === passingContract.id).thresholds.minConfidence = 0.5;
+  await writeFile(clean.learningPath, `${JSON.stringify(clean.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /learning evaluation state is invalid/);
+  await writeFile(clean.learningPath, cleanBytes, "utf8");
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
 test("case-bound outcomes reject cherry-picked subsets and dataset drift", async (t) => {
   const { root } = await fixture(t);
   const sourceBytes = await readFile(join(root, "AGENTS.md"));
@@ -1310,7 +1413,7 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
   await addLearningEvidence({ root, id: "learning:coverage", evidence: evidence("evidence:coverage-two", 0.97) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
   const registered = await evaluation(root, "learning:coverage");
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v14");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v16");
   assert.deepEqual(registered.contract.pairing, {
     mode: "same-evaluator", maxOutcomesPerEvaluatorPerPhase: 1,
     matchMeasurementKind: true, matchCaseCount: true, authority: "context-only"
@@ -1412,7 +1515,7 @@ test("initial trials reject favorable reruns and retain the first admitted crash
     id: "evaluation:initial-trials", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"], now: start,
     expiresAt: "2036-02-01T00:00:00.000Z"
   });
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v14");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v16");
   assert.equal(registered.contract.initialTrials.mode, "first-admitted-trials");
   assert.deepEqual(registered.contract.initialTrials.before.map((entry) => entry.slot), [1, 2]);
   await assert.rejects(recordLearningMeasurement({
@@ -1492,7 +1595,7 @@ test("evaluation targets freeze the exact evidence-backed lesson revision across
   const registered = await evaluation(root, "learning:target-lock", {
     id: "evaluation:target-lock", now: start, expiresAt: "2037-02-01T00:00:00.000Z"
   });
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v14");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v16");
   assert.equal(registered.contract.target.schema, "agentspine.learning-target/v1");
   assert.equal(registered.contract.target.learningId, "learning:target-lock");
   assert.deepEqual(Object.keys(registered.contract.target).sort(), ["authority", "claimDigest", "digest",
@@ -1566,7 +1669,7 @@ test("immutable trial deadlines turn missing delivery or outcome into one blocki
       id: evaluationId, evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
       now: base, expiresAt: new Date(base.getTime() + 86400000)
     });
-    assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v14");
+    assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v16");
     assert.equal(registered.contract.completionPolicy.schema, "agentspine.learning-completion-policy/v1");
     assert.equal(registered.contract.completionPolicy.deliveryTimeoutMs, 300000);
     assert.equal(registered.contract.completionPolicy.outcomeTimeoutMs, 300000);
@@ -1829,7 +1932,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
       retryTrialFailureId: failure.id, confirmLocalTrialRetry: true })));
   assert.equal(retryAttempts.filter((result) => result.unchanged === false).length, 1);
   const retryContract = retryAttempts[0].contract;
-  assert.equal(retryContract.schema, "agentspine.learning-evaluation/v15");
+  assert.equal(retryContract.schema, "agentspine.learning-evaluation/v17");
   assert.equal(retryContract.retry.schema, "agentspine.learning-trial-retry/v3");
   assert.equal(retryContract.retry.trialFailureId, failure.id);
   assert.equal(retryContract.retry.trialFailureRevocationId, receipt.id);
@@ -1844,6 +1947,11 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
   assert.equal(retryContract.retry.learningId, "learning:failure-retry");
   assert.equal(retryContract.retry.targetDigest, retryContract.target.digest);
   assert.equal(retryContract.retry.minimumEvidenceObservedAt, receipt.revokedAt);
+  await configureLearning({ root, config: { minEvidence: 10 }, now: retryNow });
+  assert.equal((await loadLearning(root)).learning.evaluations.find((item) => item.id === retryContract.id)
+    .thresholds.minEvidence, 2,
+  "raising mutable evidence requirements cannot invalidate a frozen retry contract after restart");
+  await configureLearning({ root, config: { minEvidence: 2 }, now: retryNow });
   const retryStatus = await learningOutcomeStatus({ root, scope: alphaScope, now: retryNow });
   assert.equal(retryStatus.trialRetryEvaluationContracts, 1);
   assert.equal(retryStatus.comparableTrialRetryEvaluationContracts, 1);
@@ -2220,7 +2328,7 @@ test("evaluator roots prevent alias independence and bind measurements fail clos
       { evaluatorId: "evaluator:root-b", principalDigest: hash("second synthetic evaluator principal") }
     ], now: start, expiresAt: "2026-01-10T00:00:00.000Z"
   });
-  assert.equal(primary.contract.schema, "agentspine.learning-evaluation/v14");
+  assert.equal(primary.contract.schema, "agentspine.learning-evaluation/v16");
   assert.equal(primary.binding.schema, "agentspine.learning-evaluator-binding/v1");
   assert.equal(primary.binding.evaluationDigest, primary.contract.digest);
   assert.deepEqual(primary.contract.evaluatorRoots[0], {
