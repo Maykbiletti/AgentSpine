@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,6 +46,7 @@ test("unreadable directories are skipped by both walkers and never deny PreToolU
   const source = "# Synthetic rules\n\nKeep this source byte-exact.\n";
   await writeFile(sourcePath, source, "utf8");
   await writeFile(join(restricted, "PRIVATE.md"), "# Unreadable synthetic fixture\n", "utf8");
+  const canonicalRestricted = await realpath(restricted);
   const before = hash(await readFile(sourcePath));
 
   let sid = null;
@@ -75,13 +76,13 @@ test("unreadable directories are skipped by both walkers and never deny PreToolU
   });
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.ok(output.sourceSkipped.some((item) => item.path === restricted && ["EPERM", "EACCES"].includes(item.code)),
+  assert.ok(output.sourceSkipped.some((item) => item.path === canonicalRestricted && ["EPERM", "EACCES"].includes(item.code)),
     JSON.stringify(output.sourceSkipped));
-  assert.ok(output.fingerprintSkipped.some((item) => item.path === restricted && ["EPERM", "EACCES"].includes(item.code)),
+  assert.ok(output.fingerprintSkipped.some((item) => item.path === canonicalRestricted && ["EPERM", "EACCES"].includes(item.code)),
     JSON.stringify(output.fingerprintSkipped));
   assert.equal(output.sourceDocuments.some((path) => path.includes("PRIVATE.md")), false);
   assert.equal(output.hook.blocked, false);
   assert.equal(output.hook.scanFailedOpen, true);
-  assert.ok(output.audit.some((item) => item.path === restricted && item.decision === "allow"));
+  assert.ok(output.audit.some((item) => item.path === canonicalRestricted && item.decision === "allow"));
   assert.equal(hash(await readFile(sourcePath)), before);
 });

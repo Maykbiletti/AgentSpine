@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,6 +86,7 @@ test("PreToolUse fails open and audits a source filesystem scan error", async (t
   const profile = join(workspace, "profile");
   await Promise.all([mkdir(join(root, ".git"), { recursive: true }), mkdir(state), mkdir(profile)]);
   await writeFile(join(root, ".claude"), "not a directory\n", "utf8");
+  const canonicalRoot = await realpath(root);
   const previous = { state: process.env.AGENTSPINE_STATE_DIR, profile: process.env.CLAUDE_CONFIG_DIR };
   process.env.AGENTSPINE_STATE_DIR = state;
   process.env.CLAUDE_CONFIG_DIR = profile;
@@ -109,7 +110,7 @@ test("PreToolUse fails open and audits a source filesystem scan error", async (t
   assert.deepEqual(records.map((item) => item.toolName), ["Edit", "Write", "apply_patch", "Bash", "exec_command"]);
   for (const record of records) {
     assert.equal(record.decision, "allow");
-    assert.equal(record.path, join(root, ".claude", "CLAUDE.md"));
+    assert.equal(record.path, join(canonicalRoot, ".claude", "CLAUDE.md"));
     assert.equal(record.code, "ENOTDIR");
   }
 });

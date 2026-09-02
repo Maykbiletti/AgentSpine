@@ -1,11 +1,11 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { runHook } from "../../src/hook.js";
 import { hookScanAuditPath } from "../../src/lib/hook-audit.js";
 import { workspaceFingerprint } from "../../src/lib/selfstarter.js";
 import { resolveHostSourceCatalog } from "../../src/lib/source-roots.js";
 
-const root = resolve(process.argv[2]);
+const root = await realpath(resolve(process.argv[2]));
 const resolved = await resolveHostSourceCatalog({ host: "codex", cwd: root, env: process.env });
 const fingerprint = await workspaceFingerprint(root);
 const hook = await runHook({
