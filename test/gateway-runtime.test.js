@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -59,6 +59,21 @@ async function fixture(t) {
     confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:01.000Z"
   });
   return { root, agentId, before: await readFile(join(root, "SOUL.md"), "utf8") };
+}
+
+async function addSyntheticPersona(root, {
+  bindingId, subjectId, host, profileId, displayName, groupId = "group:alpha", tenantId = "tenant:alpha", now
+}) {
+  if (groupId !== "group:alpha") await upsertEntity({ root, id: groupId, kind: "group", privacy: "shared" });
+  const roster = await applyPersonaRoster({
+    root,
+    bindings: [{
+      id: bindingId, authenticator: "host-manifest", issuer: "host:local", tenantId, host, profileId,
+      subjectId, kind: "agent", displayName, sourceBinding: `.${host}/agents/${subjectId.split(":").at(-1)}.md`, groupId
+    }],
+    confirmation: "local-owner-confirmed", now
+  });
+  return roster.policy.bindings.find((item) => item.id === bindingId).personaId;
 }
 
 async function ingest(root, agentId) {
@@ -360,6 +375,130 @@ test("dependency-bound goal plans resume after a torn write and complete three o
   assert.deepEqual(loaded.policy.goals[0].plan.steps.map((step) => step.status), ["completed", "completed", "completed"]);
   assert.deepEqual(gatewayRuntimeFindings(loaded.policy, loaded.runtime), []);
   assert.equal(await readFile(join(root, "SOUL.md"), "utf8"), before);
+});
+
+test("provider-neutral goal plans hand dependent steps to exact authenticated teammates", async (t) => {
+  const { root, agentId, before } = await fixture(t);
+  const teammateId = await addSyntheticPersona(root, {
+    bindingId: "persona-binding:linnea", subjectId: "subject:linnea", host: "claude",
+    profileId: "profile:linnea", displayName: "Linnea", now: "2032-01-01T00:00:00.750Z"
+  });
+  const steps = [
+    { stepId: "step:observe", agentId, title: "Observe the synthetic input.",
+      successCriterion: "The input digest is recorded.", dependsOn: [] },
+    { stepId: "step:analyze", agentId: teammateId, title: "Analyze the bounded synthetic input.",
+      successCriterion: "The analysis fixture reports green.", dependsOn: ["step:observe"] },
+    { stepId: "step:verify", agentId, title: "Verify the independent synthetic result.",
+      successCriterion: "The independent verification reports green.", dependsOn: ["step:analyze"] }
+  ];
+  await assignGoal({
+    root, goalId: "goal:team-handoff", agentId, ownerSubjectId: "subject:owner", projectId: "project:alpha",
+    groupId: "group:alpha", successCriterion: "Two providers complete three dependent synthetic gates.", steps,
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:01.000Z"
+  });
+
+  // Simulate a torn policy/runtime write before the first team step is claimed.
+  let loaded = await loadGatewayRuntime(root);
+  loaded.runtime.queue = []; loaded.runtime.receipts = [];
+  await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
+  await reconcileGateway({ root, now: "2032-01-01T00:00:01.500Z" });
+  await reconcileGateway({ root, now: "2032-01-01T00:00:01.750Z" });
+
+  const claims = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+    root, workerId: `worker:team:${index}`, now: "2032-01-01T00:00:02.000Z"
+  })));
+  assert.equal(claims.filter((claim) => claim.item).length, 1);
+  const first = claims.find((claim) => claim.item);
+  assert.equal(first.item.agentId, agentId);
+  await completeGatewayRun({ root, queueId: first.item.queueId, workerId: first.item.lease.workerId,
+    result: { checkpoint: { observed: true }, completed: true }, now: "2032-01-01T00:00:03.000Z" });
+
+  const routes = [];
+  const second = await runWorkerTick({ root, workerId: "worker:team:claude", now: "2032-01-01T00:00:04.000Z",
+    hostRunner: async (item) => {
+      routes.push([item.goalStep.stepId, item.agentId, item.host, item.profileId]);
+      return { checkpoint: { analyzed: true }, completed: true };
+    }, adapter: { send: async () => ({ ok: true }) } });
+  assert.equal(second.status, "completed");
+  const third = await runWorkerTick({ root, workerId: "worker:team:codex", now: "2032-01-01T00:00:05.000Z",
+    hostRunner: async (item) => {
+      routes.push([item.goalStep.stepId, item.agentId, item.host, item.profileId]);
+      return { checkpoint: { verified: true }, completed: true };
+    }, adapter: { send: async () => ({ ok: true }) } });
+  assert.equal(third.status, "completed");
+  assert.deepEqual(routes, [
+    ["step:analyze", teammateId, "claude", "profile:linnea"],
+    ["step:verify", agentId, "codex", "profile:alpha"]
+  ]);
+
+  loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals[0].status, "completed");
+  assert.deepEqual(loaded.policy.goals[0].plan.steps.map((step) => step.status), ["completed", "completed", "completed"]);
+  assert.equal((await gatewayContext({ root, agentId: teammateId })).goals[0].goalId, "goal:team-handoff");
+  assert.deepEqual((await gatewayContext({ root, agentId: "agent:foreign" })).goals, []);
+  assert.deepEqual(gatewayRuntimeFindings(loaded.policy, loaded.runtime), []);
+  assert.equal(await readFile(join(root, "SOUL.md"), "utf8"), before);
+
+  loaded.policy.goals[0].plan.steps[1].agentId = agentId;
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+});
+
+test("team plans reject foreign groups and pause safely when an assignee leaves", async (t) => {
+  const { root, agentId } = await fixture(t);
+  const teammateId = await addSyntheticPersona(root, {
+    bindingId: "persona-binding:solveig", subjectId: "subject:solveig", host: "claude",
+    profileId: "profile:solveig", displayName: "Solveig", now: "2032-01-01T00:00:00.700Z"
+  });
+  const outsiderId = await addSyntheticPersona(root, {
+    bindingId: "persona-binding:outsider", subjectId: "subject:outsider", host: "codex",
+    profileId: "profile:outsider", displayName: "Outsider", groupId: "group:beta",
+    now: "2032-01-01T00:00:00.800Z"
+  });
+  const base = {
+    root, agentId, ownerSubjectId: "subject:owner", projectId: "project:alpha", groupId: "group:alpha",
+    successCriterion: "The exact synthetic team completes its assigned gate.", confirmation: "local-owner-confirmed"
+  };
+  await assert.rejects(assignGoal({ ...base, goalId: "goal:foreign-team", steps: [{
+    stepId: "step:foreign", agentId: outsiderId, title: "Run foreign step.", successCriterion: "Foreign step passes.", dependsOn: []
+  }] }), /group does not match/i);
+
+  const teamSteps = [{ stepId: "step:teammate", agentId: teammateId, title: "Run teammate step.",
+    successCriterion: "Teammate step passes.", dependsOn: [] }];
+  await assignGoal({ ...base, goalId: "goal:member-leaves", steps: teamSteps, now: "2032-01-01T00:00:01.000Z" });
+  const personas = await loadPersonaRuntime(root);
+  const binding = personas.policy.bindings.find((item) => item.id === "persona-binding:solveig");
+  await applyPersonaRoster({ root, bindings: [{ ...binding, active: false }],
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:02.000Z" });
+  await reconcileGateway({ root, now: "2032-01-01T00:00:03.000Z" });
+  let loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals[0].status, "blocked");
+  assert.equal(loaded.policy.goals[0].plan.steps[0].status, "blocked");
+  assert.equal(loaded.runtime.queue.filter((item) => ["pending", "leased"].includes(item.status)).length, 0);
+  assert.equal((await claimGatewayWork({ root, workerId: "worker:departed", now: "2032-01-01T00:00:04.000Z" })).item, null);
+  assert.deepEqual(gatewayRuntimeFindings(loaded.policy, loaded.runtime), []);
+});
+
+test("pre-team goal plans retain their lead-agent routing after upgrade", async (t) => {
+  const { root, agentId } = await fixture(t);
+  await assignGoal({
+    root, goalId: "goal:legacy-plan", agentId, ownerSubjectId: "subject:owner", projectId: "project:alpha",
+    groupId: "group:alpha", successCriterion: "The legacy synthetic gate passes.",
+    steps: [{ stepId: "step:legacy", title: "Run legacy step.", successCriterion: "Legacy step passes.", dependsOn: [] }],
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:01.000Z"
+  });
+  const loaded = await loadGatewayRuntime(root);
+  for (const step of loaded.policy.goals[0].plan.steps) delete step.agentId;
+  const definitions = loaded.policy.goals[0].plan.steps.map(({ stepId, title, successCriterion, dependsOn }) => ({
+    stepId, title, successCriterion, dependsOn
+  }));
+  loaded.policy.goals[0].plan.definitionsDigest = createHash("sha256").update(JSON.stringify(definitions)).digest("hex");
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
+  const upgraded = await loadGatewayRuntime(root);
+  assert.deepEqual(gatewayRuntimeFindings(upgraded.policy, upgraded.runtime), []);
+  const claim = await claimGatewayWork({ root, workerId: "worker:legacy", now: "2032-01-01T00:00:02.000Z" });
+  assert.equal(claim.item.agentId, agentId);
+  assert.equal(claim.item.goalStepId, "step:legacy");
 });
 
 test("goal plans reject dependency cycles, definition drift, and stale-step completion", async (t) => {

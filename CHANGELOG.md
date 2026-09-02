@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-09-03
+
+### Added
+
+- Goal-plan steps can be immutably assigned to different authenticated agent personas, enabling provider-neutral Codex-to-Claude-to-Codex handoffs across one dependency graph.
+- Each assignee receives the exact current step, checkpoint and context through its own authenticated host/profile binding; scoped gateway context includes a shared plan for every assigned teammate.
+
+### Security
+
+- Every step assignee must already be active in the lead agent's authenticated tenant and exact project group. The assignment digest, queue, claim and completion all bind the same persona; cross-group and manipulated handoffs fail closed.
+- If a step assignee leaves, reconciliation cancels runnable work and pauses the exact step before host execution. Rejoining still requires the existing local owner-confirmed resume path and never grants tools or authority.
+
+### Changed
+
+- Torn-write recovery recreates exactly one wake for the current step's assignee, per-agent lanes serialize concurrent workers, and historical single-agent plans retain lead-agent routing without migration.
+
 ## [0.54.0] - 2026-09-03
 
 ### Added

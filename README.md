@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.55.0` adds provider-neutral team execution to durable goal plans. Each dependent step can be bound to a different already-authenticated agent in the same tenant and exact project group, so a plan can move from Codex to Claude and back while preserving one immutable dependency graph, checkpoint chain and objective success criteria. Queue creation, claim, host/profile routing and completion all verify the same step assignee. Foreign-group members, identity drift and assignment tampering fail closed; a departed assignee pauses the exact step before host execution. Historical single-agent plans remain compatible, and plan context never grants tools, delegation or policy exceptions.
+
 Version `0.54.0` adds durable, evidence-classified knowledge-gap handling to hierarchical goal plans. A host can pause the exact current step with one bounded question and an objective reason; reconciliation does not ask again, and the step resumes only after an exact locally confirmed answer. Owner input and objective observations remain distinct, objective answers require a SHA-256 source digest, and every answer is context-only. Conflicts, state tampering, secrets and authority-shaped answers fail closed.
 
 Version `0.53.0` adds durable hierarchical goal plans to the optional gateway worker. An owner can precommit a bounded dependency graph of objective steps; the worker leases only the current ready step, advances after its explicit success result, resumes the exact step after restart, and reconstructs one missing wake after a torn write. Cycles, definition drift and stale-step completion fail closed, while the plan remains context-only and cannot grant tools, rights or delegation.
@@ -257,7 +259,7 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine channel-events …` | Inspect the exact-scope durable ingress queue and leases |
 | `agentspine persona-sync …` | Synchronize an explicitly approved external authenticated roster |
 | `agentspine personas …` | Inspect active and historical persona identities and provenance |
-| `agentspine goal-assign …` | Assign one authenticated focused goal or dependency-bound plan to an active agent |
+| `agentspine goal-assign …` | Assign one focused goal or an authenticated multi-agent dependency plan |
 | `agentspine goal-clarify …` | Resolve one exact plan-bound knowledge gap with locally confirmed context |
 | `agentspine gateway-control …` | Enable, stop, or kill-switch the local worker under explicit owner control |
 | `agentspine gateway-status …` | Inspect goals, queue, delivery receipts, and independent health gates |
