@@ -85,7 +85,6 @@ export async function withOwnedFileLock(path, task, {
       handle = await open(path, "wx", 0o600);
       const payload = `${JSON.stringify(lockPayload(token, acquiredAt, staleAfterMs))}\n`;
       await handle.writeFile(payload, "utf8");
-      await handle.sync();
       acquired = true;
       break;
     } catch (error) {

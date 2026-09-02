@@ -9,7 +9,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 ### Added
 
 - Learning mutations use an owner-bound `agentspine.owned-file-lock/v1` lease with a renewable heartbeat and a final ownership assertion before state replacement.
-- A real six-process race test holds each mutation beyond a shortened stale threshold, recovers a synthetic crash remnant and preserves a deliberately substituted foreign lease.
+- A real six-process race test holds the leading mutation beyond a shortened stale threshold, recovers a synthetic crash remnant and preserves a deliberately substituted foreign lease.
 
 ### Changed
 
