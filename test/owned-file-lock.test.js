@@ -9,19 +9,19 @@ import { withOwnedFileLock } from "../src/lib/owned-file-lock.js";
 const helperUrl = new URL("../src/lib/owned-file-lock.js", import.meta.url).href;
 const testLease = { staleAfterMs: 1000, heartbeatIntervalMs: 100, retryDelayMs: 10, maxAttempts: 2000 };
 
-function worker(lockPath, counterPath) {
+function worker(lockPath, counterPath, holdMs = 20) {
   const script = `
     import { readFile, writeFile } from "node:fs/promises";
     import { withOwnedFileLock } from ${JSON.stringify(helperUrl)};
-    const [lockPath, counterPath] = process.argv.slice(1);
+    const [lockPath, counterPath, holdMs] = process.argv.slice(1);
     await withOwnedFileLock(lockPath, async () => {
       const value = Number(await readFile(counterPath, "utf8"));
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setTimeout(resolve, Number(holdMs)));
       await writeFile(counterPath, String(value + 1), "utf8");
     }, ${JSON.stringify(testLease)});
   `;
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--input-type=module", "--eval", script, lockPath, counterPath], {
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", script, lockPath, counterPath, String(holdMs)], {
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stderr = "";
@@ -29,6 +29,18 @@ function worker(lockPath, counterPath) {
     child.once("error", reject);
     child.once("close", (code) => code === 0 ? resolve() : reject(new Error(stderr || `worker exited ${code}`)));
   });
+}
+
+async function waitForLock(path) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    try {
+      if ((await readFile(path, "utf8")).includes("agentspine.owned-file-lock/v1")) return;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("leader did not acquire the synthetic learning lock");
 }
 
 test("owned learning locks survive long mutations, recover crashes, and preserve foreign ownership", async (t) => {
@@ -40,7 +52,9 @@ test("owned learning locks survive long mutations, recover crashes, and preserve
   await Promise.all([writeFile(counterPath, "0", "utf8"), writeFile(sourcePath, source)]);
   t.after(async () => rm(root, { recursive: true, force: true }));
 
-  await Promise.all(Array.from({ length: 6 }, () => worker(lockPath, counterPath)));
+  const leader = worker(lockPath, counterPath, 1200);
+  await waitForLock(lockPath);
+  await Promise.all([leader, ...Array.from({ length: 5 }, () => worker(lockPath, counterPath))]);
   assert.equal(await readFile(counterPath, "utf8"), "6",
     "a mutation longer than the stale threshold must retain exclusive ownership across processes");
   await assert.rejects(readFile(lockPath, "utf8"), /ENOENT/, "the owner releases its completed lease");
