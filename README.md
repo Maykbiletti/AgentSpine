@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.47.0` freezes the exact fresh evidence cohort before a behavior experiment can start. Evaluation v20 and bounded retry v21 exclude stale evidence, reject future observation times and retain only content-free evidence, independence, class and time metadata under a frozen age policy. Cohort manipulation fails closed after restart, configuration drift cannot move the window, and foreign scopes receive zero diagnostics.
+
 Version `0.46.0` requires a candidate to satisfy its frozen confidence and independent-evidence gates before an evaluation contract or measurement lineage can exist. Evaluation v18 and bounded retry v19 embed a content-free candidate-admission receipt bound to the exact target and scope; parallel registration is idempotent, rewritten counts fail closed after restart, and foreign scopes receive zero diagnostics.
 
 Version `0.45.0` freezes minimum confidence and independent-evidence requirements in every new behavior evaluation before any benchmark outcome is admitted. Evaluation v16 and bounded retry v17 use those immutable gates despite later configuration changes; scoped status and Context MCP expose only matching content-free counts and digests, while Doctor and audit remain project-wide.

@@ -4,6 +4,20 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-09-02
+
+### Added
+
+- New initial evaluation v20 and bounded retry v21 contracts embed `agentspine.learning-candidate-admission/v2`. Its content-free evidence cohort freezes one digest, independence digest, evidence class and observation time per fresh candidate proof together with a digested maximum-age policy.
+
+### Changed
+
+- Candidate admission now evaluates confidence and independence only across evidence observed within the contract's frozen age window. Stale evidence is excluded, future-dated evidence rejects registration, and later configuration changes cannot shorten or widen an existing cohort. Historical v1-v19 contracts remain readable.
+
+### Security
+
+- Re-signed cohort, timestamp, independence and policy manipulation fails closed after restart. Six concurrent registrations still converge on one contract, scoped CLI and Context MCP diagnostics expose only matching counts and digests, foreign groups receive zero, and user-owned sources remain byte-for-byte unchanged.
+
 ## [0.46.0] - 2026-09-02
 
 ### Added
