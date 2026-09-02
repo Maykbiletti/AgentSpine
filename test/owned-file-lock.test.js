@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { withOwnedFileLock } from "../src/lib/owned-file-lock.js";
 
 const helperUrl = new URL("../src/lib/owned-file-lock.js", import.meta.url).href;
+const testLease = { staleAfterMs: 1000, heartbeatIntervalMs: 100, retryDelayMs: 10, maxAttempts: 2000 };
 
 function worker(lockPath, counterPath) {
   const script = `
@@ -15,9 +16,9 @@ function worker(lockPath, counterPath) {
     const [lockPath, counterPath] = process.argv.slice(1);
     await withOwnedFileLock(lockPath, async () => {
       const value = Number(await readFile(counterPath, "utf8"));
-      await new Promise((resolve) => setTimeout(resolve, 90));
+      await new Promise((resolve) => setTimeout(resolve, 1200));
       await writeFile(counterPath, String(value + 1), "utf8");
-    }, { staleAfterMs: 80, heartbeatIntervalMs: 20, retryDelayMs: 5, maxAttempts: 500 });
+    }, ${JSON.stringify(testLease)});
   `;
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["--input-type=module", "--eval", script, lockPath, counterPath], {
@@ -48,9 +49,7 @@ test("owned learning locks survive long mutations, recover crashes, and preserve
   const old = new Date(Date.now() - 5000);
   await utimes(lockPath, old, old);
   let recovered = false;
-  await withOwnedFileLock(lockPath, async () => { recovered = true; }, {
-    staleAfterMs: 80, heartbeatIntervalMs: 20, retryDelayMs: 5, maxAttempts: 20
-  });
+  await withOwnedFileLock(lockPath, async () => { recovered = true; }, testLease);
   assert.equal(recovered, true, "an actually stale crash remnant is recoverable");
 
   const foreign = JSON.stringify({ schema: "agentspine.owned-file-lock/v1", token: "foreign-owner",
@@ -58,7 +57,7 @@ test("owned learning locks survive long mutations, recover crashes, and preserve
   await assert.rejects(withOwnedFileLock(lockPath, async () => {
     await unlink(lockPath);
     await writeFile(lockPath, `${foreign}\n`, "utf8");
-  }, { staleAfterMs: 1000, heartbeatIntervalMs: 100, retryDelayMs: 5, maxAttempts: 20 }),
+  }, testLease),
   /ownership was lost/, "a replaced lease aborts before state commit");
   assert.equal((await readFile(lockPath, "utf8")).trim(), foreign,
     "the former owner must not delete a replacement lease during cleanup");
