@@ -64,13 +64,13 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
 async function recordLearningOutcome(input) {
   const { learning } = await loadLearning(input.root);
   const evaluation = learning.evaluations.find((item) => item.id === input.evaluationId);
-  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25"].includes(evaluation?.schema)) {
+  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27"].includes(evaluation?.schema)) {
     return commitLearningOutcome(input);
   }
-  const initialTrial = ["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25"].includes(evaluation.schema)
+  const initialTrial = ["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27"].includes(evaluation.schema)
     ? evaluation.initialTrials?.[input.phase]?.find((entry) => entry.evaluatorId === input.measurement?.evaluatorId)
     : null;
-  if (["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25"].includes(evaluation.schema) && !initialTrial) {
+  if (["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27"].includes(evaluation.schema) && !initialTrial) {
     return commitLearningOutcome(input);
   }
   const measurementId = `measurement:${input.id}`;
@@ -120,7 +120,9 @@ async function evaluation(root, learningId, extra = {}) {
     evaluatorRoots: [...roots].map(([evaluatorId, principalDigest]) => ({ evaluatorId, principalDigest })),
     retryTrialFailureId: extra.retryTrialFailureId || null,
     confirmLocalTrialRetry: extra.confirmLocalTrialRetry || false,
-    expiresAt: extra.expiresAt || null, confirmLocalEvaluation: true, now: extra.now || new Date()
+    expiresAt: extra.expiresAt || null, confirmLocalEvaluation: true,
+    confirmLocalEvidenceSources: extra.confirmLocalEvidenceSources ?? true,
+    now: extra.now || new Date()
   });
 }
 
@@ -1176,7 +1178,8 @@ test("immutable evaluation contracts prevent benchmark drift and freeze promotio
     root, id: "evaluation:planned", learningId: "learning:planned", scope: scopedTurn,
     metric: { name: "fixed-task-success", direction: "higher" },
     benchmark: { taskDigest: hash("changed task"), datasetDigest: hash("fixed data"), protocolDigest: hash("fixed protocol"), minCases: 10 },
-    evaluatorIds: syntheticEvaluators, evaluatorRoots: evaluatorRoots(), expiresAt, now: registeredAt, confirmLocalEvaluation: true
+    evaluatorIds: syntheticEvaluators, evaluatorRoots: evaluatorRoots(), expiresAt, now: registeredAt,
+    confirmLocalEvaluation: true, confirmLocalEvidenceSources: true
   }), /immutable/);
   await assert.rejects(recordLearningOutcome({
     root, learningId: "learning:planned",
@@ -1228,7 +1231,7 @@ test("staleness policy freezes outcome freshness and Canary lifetime across conf
     id: "evaluation:staleness-old", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
     scope: alphaScope, now: start, expiresAt: "2036-01-20T00:00:00.000Z"
   });
-  assert.equal(staleContract.contract.schema, "agentspine.learning-evaluation/v24");
+  assert.equal(staleContract.contract.schema, "agentspine.learning-evaluation/v26");
   assert.deepEqual(staleContract.contract.stalenessPolicy, {
     schema: "agentspine.learning-staleness-policy/v1",
     outcomeMaxAgeDays: 1,
@@ -1364,7 +1367,7 @@ test("promotion gates are frozen before evaluation and survive config drift, rac
     decision: passingContract.candidateAdmission.decision,
     authority: passingContract.candidateAdmission.authority
   }, {
-    schema: "agentspine.learning-candidate-admission/v2",
+    schema: "agentspine.learning-candidate-admission/v3",
     learningId: "learning:promotion-pass",
     targetDigest: passingContract.target.digest,
     minConfidence: 0.9,
@@ -1488,10 +1491,10 @@ test("candidate admission freezes a fresh evidence cohort before measurement und
     evaluation(root, "learning:admission", { ...input, now: new Date(start.getTime() + 3000) })));
   assert.equal(attempts.filter((entry) => entry.unchanged === false).length, 1);
   const contract = attempts[0].contract;
-  assert.equal(contract.schema, "agentspine.learning-evaluation/v24");
+  assert.equal(contract.schema, "agentspine.learning-evaluation/v26");
   assert.equal(contract.candidateAdmission.observedConfidence, 0.97);
   assert.equal(contract.candidateAdmission.evidenceCount, 2);
-  assert.equal(contract.candidateAdmission.schema, "agentspine.learning-candidate-admission/v2");
+  assert.equal(contract.candidateAdmission.schema, "agentspine.learning-candidate-admission/v3");
   assert.equal(contract.candidateAdmission.evidencePolicy.maxAgeDays, 30);
   assert.equal(contract.candidateAdmission.evidenceCohort.length, 2,
     "stale evidence is excluded from the immutable admission cohort");
@@ -1561,7 +1564,8 @@ test("candidate evidence policy survives config drift and historical v18 admissi
   const stored = await loadLearning(root);
   const current = stored.learning.evaluations.find((entry) => entry.id === registered.contract.id);
   const { digest: _admissionDigest, evidencePolicy: _evidencePolicy,
-    evidenceCohort: _evidenceCohort, ...admissionFields } = current.candidateAdmission;
+    evidenceCohort: _evidenceCohort, evidenceSourceAttestations: _evidenceSourceAttestations,
+    ...admissionFields } = current.candidateAdmission;
   const v1AdmissionPayload = {
     ...admissionFields,
     schema: "agentspine.learning-candidate-admission/v1"
@@ -1589,7 +1593,7 @@ test("candidate evidence policy survives config drift and historical v18 admissi
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
-test("evidence-source quorum rejects chat-only cohorts before measurement and survives race and tampering", async (t) => {
+test("locally attested evidence sources reject relabeling before measurement and survive race and tampering", async (t) => {
   const { root, state } = await fixture(t);
   const sourceBytes = await readFile(join(root, "AGENTS.md"));
   const start = new Date("2043-06-01T00:00:00.000Z");
@@ -1616,40 +1620,58 @@ test("evidence-source quorum rejects chat-only cohorts before measurement and su
     "chat-only evidence cannot open a measurement contract");
   await addLearningEvidence({ root, id: "learning:evidence-source",
     evidence: { ...evidence("evidence:source-test-anchor", 0.97), type: "test" }, now: start });
+  await assert.rejects(evaluation(root, "learning:evidence-source", {
+    ...input, confirmLocalEvidenceSources: false
+  }), /qualifying evidence sources require explicit local confirmation/);
+  assert.equal((await loadLearning(root)).learning.evaluations.length, 0,
+    "a self-labeled source cannot open a contract without local attestation");
   const attempts = await Promise.all(Array.from({ length: 6 }, () =>
     evaluation(root, "learning:evidence-source", input)));
   assert.equal(attempts.filter((entry) => entry.unchanged === false).length, 1);
   const contract = attempts[0].contract;
-  assert.equal(contract.schema, "agentspine.learning-evaluation/v24");
+  assert.equal(contract.schema, "agentspine.learning-evaluation/v26");
   assert.deepEqual(contract.evidenceSourcePolicy, {
-    schema: "agentspine.learning-evidence-source-policy/v1",
+    schema: "agentspine.learning-evidence-source-policy/v2",
     qualifyingTypes: ["user-statement", "test"],
     minimumQualifyingEvidence: 1,
     documentOnly: "insufficient",
     interactionOnly: "insufficient",
+    qualifyingEvidence: "explicit-local-attestation-required",
     insufficientCohort: "reject-before-evaluation",
     authority: "context-only",
     digest: contract.evidenceSourcePolicy.digest
   });
+  assert.equal(contract.candidateAdmission.schema, "agentspine.learning-candidate-admission/v3");
+  assert.equal(contract.candidateAdmission.evidenceSourceAttestations.length, 1);
+  assert.equal(contract.candidateAdmission.evidenceSourceAttestations[0].sourceClass, "objective-test");
+  assert.doesNotMatch(JSON.stringify(contract.candidateAdmission.evidenceSourceAttestations),
+    /Synthetic evidence|source-test-anchor/);
   assert.doesNotMatch(JSON.stringify(contract.evidenceSourcePolicy), /Synthetic evidence|source-test-anchor/);
   const status = await learningOutcomeStatus({ root, scope: alphaScope, now: start });
   assert.equal(status.evidenceSourceBoundEvaluationContracts, 1);
+  assert.equal(status.evidenceSourceAttestedEvaluationContracts, 1);
   assert.equal(status.records[0].activeEvidenceSourcePolicyDigest,
     contract.evidenceSourcePolicy.digest);
+  assert.equal(status.records[0].activeEvidenceSourceAttestationDigest,
+    hash(JSON.stringify(contract.candidateAdmission.evidenceSourceAttestations)));
   assert.equal((await learningOutcomeStatus({ root, scope: betaScope, now: start }))
     .evidenceSourceBoundEvaluationContracts, 0);
+  assert.equal((await learningOutcomeStatus({ root, scope: betaScope, now: start }))
+    .evidenceSourceAttestedEvaluationContracts, 0);
   assert.equal(runCli(["doctor", root, "--json"], state)
     .learningOutcomes.evidenceSourceBoundEvaluationContracts, 1);
+  assert.equal(runCli(["doctor", root, "--json"], state)
+    .learningOutcomes.evidenceSourceAttestedEvaluationContracts, 1);
   assert.match(runCli(["audit", root, "--json"], state)
     .gates.find((gate) => gate.name === "Context privacy").detail,
-  /1 evidence-source-bound contracts/);
+  /1 evidence-source-bound contracts, 1 evidence-source-attested contracts/);
 
   const stored = await loadLearning(root);
   const manipulated = stored.learning.evaluations[0];
-  manipulated.evidenceSourcePolicy.qualifyingTypes = ["interaction"];
-  const policyPayload = { ...manipulated.evidenceSourcePolicy };
-  delete policyPayload.digest;
-  manipulated.evidenceSourcePolicy.digest = hash(JSON.stringify(policyPayload));
+  manipulated.candidateAdmission.evidenceSourceAttestations[0].sourceClass = "explicit-user-feedback";
+  const admissionPayload = { ...manipulated.candidateAdmission };
+  delete admissionPayload.digest;
+  manipulated.candidateAdmission.digest = hash(JSON.stringify(admissionPayload));
   const contractPayload = { ...manipulated };
   delete contractPayload.digest;
   manipulated.digest = hash(JSON.stringify(contractPayload));
@@ -1660,7 +1682,7 @@ test("evidence-source quorum rejects chat-only cohorts before measurement and su
   binding.digest = hash(JSON.stringify(bindingPayload));
   await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
   await assert.rejects(loadLearning(root), /evaluation (?:contract structure|state) is invalid/,
-    "a re-signed source-policy weakening fails closed after restart");
+    "a re-signed false source attestation fails closed after restart");
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
@@ -1682,7 +1704,7 @@ test("one frozen baseline blocking defect prevents Canary admission and cannot b
     id: "evaluation:blocking-baseline", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
     now: start, expiresAt: "2044-02-01T00:00:00.000Z"
   });
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v24");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v26");
   assert.equal(registered.contract.blockingDefectPolicy.aggregation, "any-defect-overrides-average");
   assert.equal(registered.contract.blockingDefectPolicy.beforeAction, "block-canary-admission");
   await recordLearningOutcome({ root, learningId: "learning:blocking-baseline",
@@ -1746,7 +1768,7 @@ test("case-bound outcomes reject cherry-picked subsets and dataset drift", async
   await addLearningEvidence({ root, id: "learning:coverage", evidence: evidence("evidence:coverage-two", 0.97) });
   await configureLearning({ root, config: { autoPromote: true, minConfidence: 0.9, minEvidence: 2 } });
   const registered = await evaluation(root, "learning:coverage");
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v24");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v26");
   assert.deepEqual(registered.contract.pairing, {
     mode: "same-evaluator", maxOutcomesPerEvaluatorPerPhase: 1,
     matchMeasurementKind: true, matchCaseCount: true, authority: "context-only"
@@ -1848,7 +1870,7 @@ test("initial trials reject favorable reruns and retain the first admitted crash
     id: "evaluation:initial-trials", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"], now: start,
     expiresAt: "2036-02-01T00:00:00.000Z"
   });
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v24");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v26");
   assert.equal(registered.contract.initialTrials.mode, "first-admitted-trials");
   assert.deepEqual(registered.contract.initialTrials.before.map((entry) => entry.slot), [1, 2]);
   await assert.rejects(recordLearningMeasurement({
@@ -1928,7 +1950,7 @@ test("evaluation targets freeze the exact evidence-backed lesson revision across
   const registered = await evaluation(root, "learning:target-lock", {
     id: "evaluation:target-lock", now: start, expiresAt: "2037-02-01T00:00:00.000Z"
   });
-  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v24");
+  assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v26");
   assert.equal(registered.contract.target.schema, "agentspine.learning-target/v1");
   assert.equal(registered.contract.target.learningId, "learning:target-lock");
   assert.deepEqual(Object.keys(registered.contract.target).sort(), ["authority", "claimDigest", "digest",
@@ -2002,7 +2024,7 @@ test("immutable trial deadlines turn missing delivery or outcome into one blocki
       id: evaluationId, evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
       now: base, expiresAt: new Date(base.getTime() + 86400000)
     });
-    assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v24");
+    assert.equal(registered.contract.schema, "agentspine.learning-evaluation/v26");
     assert.equal(registered.contract.completionPolicy.schema, "agentspine.learning-completion-policy/v1");
     assert.equal(registered.contract.completionPolicy.deliveryTimeoutMs, 300000);
     assert.equal(registered.contract.completionPolicy.outcomeTimeoutMs, 300000);
@@ -2265,7 +2287,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
       retryTrialFailureId: failure.id, confirmLocalTrialRetry: true })));
   assert.equal(retryAttempts.filter((result) => result.unchanged === false).length, 1);
   const retryContract = retryAttempts[0].contract;
-  assert.equal(retryContract.schema, "agentspine.learning-evaluation/v25");
+  assert.equal(retryContract.schema, "agentspine.learning-evaluation/v27");
   assert.equal(retryContract.evidenceSourcePolicy.digest,
     registered.contract.evidenceSourcePolicy.digest);
   assert.equal(retryContract.retry.schema, "agentspine.learning-trial-retry/v3");
@@ -2677,7 +2699,7 @@ test("evaluator roots prevent alias independence and bind measurements fail clos
       { evaluatorId: "evaluator:root-b", principalDigest: hash("second synthetic evaluator principal") }
     ], now: start, expiresAt: "2026-01-10T00:00:00.000Z"
   });
-  assert.equal(primary.contract.schema, "agentspine.learning-evaluation/v24");
+  assert.equal(primary.contract.schema, "agentspine.learning-evaluation/v26");
   assert.equal(primary.binding.schema, "agentspine.learning-evaluator-binding/v1");
   assert.equal(primary.binding.evaluationDigest, primary.contract.digest);
   assert.deepEqual(primary.contract.evaluatorRoots[0], {
@@ -3935,7 +3957,8 @@ test("CLI records content-free outcome receipts and reports scoped canary diagno
     "--min-cases", "8", "--evaluators", "evaluator:cli,evaluator:cli-two",
     "--evaluator-roots", `evaluator:cli=${hash("root:cli")},evaluator:cli-two=${hash("root:cli-two")}`,
     "--persona", "agent:synthetic", "--user", "user:synthetic", "--tenant", "tenant:synthetic",
-    "--project", "project:synthetic", "--task", "task:synthetic", "--confirm-local-evaluation", "--json"
+    "--project", "project:synthetic", "--task", "task:synthetic", "--confirm-local-evaluation",
+    "--confirm-local-evidence-sources", "--json"
   ], state);
   runCli([
     "learn-measurement", "measurement:cli-before", "--root", root, "--learning", "learning:cli-outcome",

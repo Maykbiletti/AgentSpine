@@ -23,17 +23,17 @@ const MAX_STATE_BYTES = 5 * 1024 * 1024;
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret)\s*[:=]\s*\S{8,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i;
 const AUTHORITY_ASSERTION_RE = /\b(?:user|agent|person|they|he|she|i|ich|wir|nutzer|benutzer).{0,60}\b(?:may|can|is allowed|is authorized|has|have|darf|berechtigt|hat|haben).{0,50}\b(?:admin(?:istrator)?|permissions?|rights?|authorization|production access|deploy|billing|spending|policy exception|bypass|zugang|rechte|berechtigung|produktion|abrechnung|ausnahme|umgehen)\b/i;
 const PROTECTED_LESSON_RE = /\b(?:security|safety|identity|authentication|authorization|permissions?|credentials?|secrets?|policy|production|deployment|payments?|billing|tool access|file access|network access|database access|sicherheit|identität|authentifizierung|berechtigungen?|zugang|richtlinie|produktion|zahlungen?)\b/i;
-const EVALUATION_SCHEMAS = new Set(Array.from({ length: 25 }, (_, index) =>
+const EVALUATION_SCHEMAS = new Set(Array.from({ length: 27 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 1}`));
-const COVERAGE_EVALUATIONS = new Set(Array.from({ length: 24 }, (_, index) =>
+const COVERAGE_EVALUATIONS = new Set(Array.from({ length: 26 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 2}`));
-const LINEAGE_EVALUATIONS = new Set(Array.from({ length: 22 }, (_, index) =>
+const LINEAGE_EVALUATIONS = new Set(Array.from({ length: 24 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 4}`));
-const PAIRED_EVALUATIONS = new Set(Array.from({ length: 21 }, (_, index) =>
+const PAIRED_EVALUATIONS = new Set(Array.from({ length: 23 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 5}`));
-const ROOT_BOUND_EVALUATIONS = new Set(Array.from({ length: 20 }, (_, index) =>
+const ROOT_BOUND_EVALUATIONS = new Set(Array.from({ length: 22 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 6}`));
-const REGISTRY_BOUND_EVALUATIONS = new Set(Array.from({ length: 19 }, (_, index) =>
+const REGISTRY_BOUND_EVALUATIONS = new Set(Array.from({ length: 21 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 7}`));
 const INITIAL_TRIAL_EVALUATIONS = new Set(["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9",
   "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12",
@@ -42,7 +42,8 @@ const INITIAL_TRIAL_EVALUATIONS = new Set(["agentspine.learning-evaluation/v8", 
   "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19",
   "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21",
   "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23",
-  "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25",
+  "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27"]);
 const TARGET_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10",
   "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13",
   "agentspine.learning-evaluation/v14", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16",
@@ -50,52 +51,65 @@ const TARGET_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v9", "
   "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20",
   "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22",
   "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24",
-  "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26",
+  "agentspine.learning-evaluation/v27"]);
 const DEADLINE_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11",
   "agentspine.learning-evaluation/v12", "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v14",
   "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17",
   "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19",
   "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21",
   "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23",
-  "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25",
+  "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27"]);
 const TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12",
   "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v17",
   "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v21",
-  "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v25",
+  "agentspine.learning-evaluation/v27"]);
 const COMPARABLE_TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v12",
   "agentspine.learning-evaluation/v13", "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v17",
   "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v21",
-  "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v25",
+  "agentspine.learning-evaluation/v27"]);
 const BOUNDED_TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v13",
   "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v17",
   "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v21",
-  "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v25",
+  "agentspine.learning-evaluation/v27"]);
 const STALENESS_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v14",
   "agentspine.learning-evaluation/v15", "agentspine.learning-evaluation/v16", "agentspine.learning-evaluation/v17",
   "agentspine.learning-evaluation/v18", "agentspine.learning-evaluation/v19",
   "agentspine.learning-evaluation/v20", "agentspine.learning-evaluation/v21",
   "agentspine.learning-evaluation/v22", "agentspine.learning-evaluation/v23",
-  "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v24", "agentspine.learning-evaluation/v25",
+  "agentspine.learning-evaluation/v26", "agentspine.learning-evaluation/v27"]);
 const PROMOTION_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v16",
   "agentspine.learning-evaluation/v17", "agentspine.learning-evaluation/v18",
   "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20",
   "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22",
   "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24",
-  "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26",
+  "agentspine.learning-evaluation/v27"]);
 const CANDIDATE_ADMISSION_EVALUATIONS = new Set(["agentspine.learning-evaluation/v18",
   "agentspine.learning-evaluation/v19", "agentspine.learning-evaluation/v20",
   "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22",
   "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24",
-  "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26",
+  "agentspine.learning-evaluation/v27"]);
 const CANDIDATE_EVIDENCE_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v20",
   "agentspine.learning-evaluation/v21", "agentspine.learning-evaluation/v22",
   "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24",
-  "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26",
+  "agentspine.learning-evaluation/v27"]);
 const BLOCKING_DEFECT_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v22",
   "agentspine.learning-evaluation/v23", "agentspine.learning-evaluation/v24",
-  "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26",
+  "agentspine.learning-evaluation/v27"]);
 const EVIDENCE_SOURCE_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v24",
-  "agentspine.learning-evaluation/v25"]);
+  "agentspine.learning-evaluation/v25", "agentspine.learning-evaluation/v26",
+  "agentspine.learning-evaluation/v27"]);
+const EVIDENCE_SOURCE_ATTESTED_EVALUATIONS = new Set(["agentspine.learning-evaluation/v26",
+  "agentspine.learning-evaluation/v27"]);
 const DELIVERABLE_APPLICATIONS = new Set(Array.from({ length: 6 }, (_, index) =>
   `agentspine.learning-application/v${index + 2}`));
 const INITIAL_TRIAL_APPLICATIONS = new Set(["agentspine.learning-application/v5", "agentspine.learning-application/v6",
@@ -1707,13 +1721,15 @@ function storedBlockingDefectPolicyStructure(policy) {
     && policy.authority === "context-only" && policy.digest === digest(payload);
 }
 
-function evidenceSourcePolicyPayload() {
+function evidenceSourcePolicyPayload(schema = "agentspine.learning-evidence-source-policy/v1") {
   return {
-    schema: "agentspine.learning-evidence-source-policy/v1",
+    schema,
     qualifyingTypes: ["user-statement", "test"],
     minimumQualifyingEvidence: 1,
     documentOnly: "insufficient",
     interactionOnly: "insufficient",
+    ...(schema === "agentspine.learning-evidence-source-policy/v2"
+      ? { qualifyingEvidence: "explicit-local-attestation-required" } : {}),
     insufficientCohort: "reject-before-evaluation",
     authority: "context-only"
   };
@@ -1721,19 +1737,48 @@ function evidenceSourcePolicyPayload() {
 
 function storedEvidenceSourcePolicyStructure(policy) {
   if (!policy || typeof policy !== "object" || Array.isArray(policy)) return false;
-  const payload = evidenceSourcePolicyPayload();
-  return Object.keys(policy).length === 8
+  const payload = evidenceSourcePolicyPayload(policy.schema);
+  const attested = policy.schema === "agentspine.learning-evidence-source-policy/v2";
+  return ["agentspine.learning-evidence-source-policy/v1",
+    "agentspine.learning-evidence-source-policy/v2"].includes(policy.schema)
+    && Object.keys(policy).length === (attested ? 9 : 8)
     && JSON.stringify(policy.qualifyingTypes) === JSON.stringify(payload.qualifyingTypes)
-    && policy.schema === payload.schema
     && policy.minimumQualifyingEvidence === payload.minimumQualifyingEvidence
     && policy.documentOnly === payload.documentOnly && policy.interactionOnly === payload.interactionOnly
+    && (!attested || policy.qualifyingEvidence === payload.qualifyingEvidence)
     && policy.insufficientCohort === payload.insufficientCohort
     && policy.authority === "context-only" && policy.digest === digest(payload);
 }
 
-function qualifyingEvidenceCount(cohort, policy) {
+function qualifyingEvidenceCount(cohort, policy, attestations = []) {
+  if (policy.schema === "agentspine.learning-evidence-source-policy/v2") {
+    return new Set(attestations.map((entry) => entry.independenceDigest)).size;
+  }
   return new Set(cohort.filter((entry) => policy.qualifyingTypes.includes(entry.type))
     .map((entry) => entry.independenceDigest)).size;
+}
+
+function evidenceSourceAttestations(cohort, confirmedAt) {
+  return cohort.filter((entry) => ["user-statement", "test"].includes(entry.type)).map((entry) => ({
+    schema: "agentspine.learning-evidence-source-attestation/v1",
+    evidenceDigest: entry.evidenceDigest,
+    independenceDigest: entry.independenceDigest,
+    sourceClass: entry.type === "test" ? "objective-test" : "explicit-user-feedback",
+    confirmedAt,
+    authority: "context-only"
+  })).sort((left, right) => left.evidenceDigest.localeCompare(right.evidenceDigest));
+}
+
+function storedEvidenceSourceAttestationsStructure(attestations, cohort, confirmedAt) {
+  const expected = evidenceSourceAttestations(cohort, confirmedAt);
+  return Array.isArray(attestations) && attestations.length >= 1
+    && attestations.every((entry) => entry && typeof entry === "object" && !Array.isArray(entry)
+      && Object.keys(entry).length === 6
+      && entry.schema === "agentspine.learning-evidence-source-attestation/v1"
+      && DIGEST_RE.test(entry.evidenceDigest || "") && DIGEST_RE.test(entry.independenceDigest || "")
+      && ["explicit-user-feedback", "objective-test"].includes(entry.sourceClass)
+      && entry.confirmedAt === confirmedAt && entry.authority === "context-only")
+    && digest(attestations) === digest(expected);
 }
 
 function candidateEvidencePolicyPayload({ maxAgeDays, minimumIndependentEvidence }) {
@@ -1793,7 +1838,8 @@ function storedCandidateEvidenceCohortStructure(cohort) {
 }
 
 function candidateAdmissionPayload({ learningId, targetDigest, scopeDigest, minConfidence, minEvidence,
-  observedConfidence, evidenceCount, evidencePolicy, evidenceCohort, admittedAt,
+  observedConfidence, evidenceCount, evidencePolicy, evidenceCohort, evidenceSourceAttestations: attestations,
+  admittedAt,
   schema = "agentspine.learning-candidate-admission/v1" }) {
   return {
     schema,
@@ -1804,8 +1850,10 @@ function candidateAdmissionPayload({ learningId, targetDigest, scopeDigest, minC
     minEvidence,
     observedConfidence,
     evidenceCount,
-    ...(schema === "agentspine.learning-candidate-admission/v2"
+    ...(["agentspine.learning-candidate-admission/v2", "agentspine.learning-candidate-admission/v3"].includes(schema)
       ? { evidencePolicy, evidenceCohort } : {}),
+    ...(schema === "agentspine.learning-candidate-admission/v3"
+      ? { evidenceSourceAttestations: attestations } : {}),
     decision: "eligible",
     admittedAt,
     authority: "context-only"
@@ -1815,13 +1863,16 @@ function candidateAdmissionPayload({ learningId, targetDigest, scopeDigest, minC
 function storedCandidateAdmissionStructure(admission) {
   if (!admission || typeof admission !== "object" || Array.isArray(admission)) return false;
   const payload = candidateAdmissionPayload(admission);
-  const evidenceBound = admission.schema === "agentspine.learning-candidate-admission/v2";
+  const evidenceBound = ["agentspine.learning-candidate-admission/v2",
+    "agentspine.learning-candidate-admission/v3"].includes(admission.schema);
+  const sourceAttested = admission.schema === "agentspine.learning-candidate-admission/v3";
   return ["agentspine.learning-candidate-admission/v1",
-    "agentspine.learning-candidate-admission/v2"].includes(admission.schema)
-    && Object.keys(admission).length === (evidenceBound ? 14 : 12)
+    "agentspine.learning-candidate-admission/v2",
+    "agentspine.learning-candidate-admission/v3"].includes(admission.schema)
+    && Object.keys(admission).length === (sourceAttested ? 15 : evidenceBound ? 14 : 12)
     && Object.keys(admission).every((field) => ["schema", "learningId", "targetDigest", "scopeDigest",
       "minConfidence", "minEvidence", "observedConfidence", "evidenceCount", "evidencePolicy",
-      "evidenceCohort", "decision", "admittedAt", "authority", "digest"].includes(field))
+      "evidenceCohort", "evidenceSourceAttestations", "decision", "admittedAt", "authority", "digest"].includes(field))
     && ID_RE.test(admission.learningId || "") && DIGEST_RE.test(admission.targetDigest || "")
     && DIGEST_RE.test(admission.scopeDigest || "")
     && Number.isFinite(admission.minConfidence) && admission.minConfidence >= 0.5 && admission.minConfidence <= 1
@@ -1841,14 +1892,17 @@ function storedCandidateAdmissionStructure(admission) {
         const admittedTime = new Date(admission.admittedAt).getTime();
         return observedTime <= admittedTime
           && observedTime >= admittedTime - admission.evidencePolicy.maxAgeDays * 86400000;
-      })))
+      })
+      && (!sourceAttested || storedEvidenceSourceAttestationsStructure(
+        admission.evidenceSourceAttestations, admission.evidenceCohort, admission.admittedAt))))
     && Number.isFinite(new Date(admission.admittedAt).getTime())
     && admission.authority === "context-only" && admission.digest === digest(payload);
 }
 
 function candidateAdmissionMatches(contract, candidate) {
   const admission = contract?.candidateAdmission;
-  const evidenceBound = admission?.schema === "agentspine.learning-candidate-admission/v2";
+  const evidenceBound = ["agentspine.learning-candidate-admission/v2",
+    "agentspine.learning-candidate-admission/v3"].includes(admission?.schema);
   const eligibleEvidence = evidenceBound && candidate
     ? eligibleCandidateEvidence(candidate, admission.admittedAt, admission.evidencePolicy.maxAgeDays) : [];
   const eligibleCohort = evidenceBound ? candidateEvidenceCohort(eligibleEvidence) : [];
@@ -1869,7 +1923,8 @@ function candidateAdmissionMatches(contract, candidate) {
       && admission.evidencePolicy.maxAgeDays === contract.stalenessPolicy?.outcomeMaxAgeDays
       && digest(admission.evidenceCohort) === digest(eligibleCohort)
       && (!EVIDENCE_SOURCE_BOUND_EVALUATIONS.has(contract.schema)
-        || qualifyingEvidenceCount(eligibleCohort, contract.evidenceSourcePolicy)
+        || qualifyingEvidenceCount(eligibleCohort, contract.evidenceSourcePolicy,
+          admission.evidenceSourceAttestations)
           >= contract.evidenceSourcePolicy.minimumQualifyingEvidence))));
 }
 
@@ -2028,7 +2083,9 @@ function storedEvaluationStructure(contract) {
       || storedEvidenceSourcePolicyStructure(contract.evidenceSourcePolicy))
     && (!CANDIDATE_ADMISSION_EVALUATIONS.has(contract.schema)
       || (storedCandidateAdmissionStructure(contract.candidateAdmission)
-        && contract.candidateAdmission.schema === (CANDIDATE_EVIDENCE_BOUND_EVALUATIONS.has(contract.schema)
+        && contract.candidateAdmission.schema === (EVIDENCE_SOURCE_ATTESTED_EVALUATIONS.has(contract.schema)
+          ? "agentspine.learning-candidate-admission/v3"
+          : CANDIDATE_EVIDENCE_BOUND_EVALUATIONS.has(contract.schema)
           ? "agentspine.learning-candidate-admission/v2"
           : "agentspine.learning-candidate-admission/v1")
         && contract.candidateAdmission.learningId === contract.learningId
@@ -3205,7 +3262,8 @@ export async function revokeLearningEvaluator({
 export async function registerLearningEvaluation({
   root = process.cwd(), id = `evaluation:${randomUUID()}`, learningId, scope, metric, benchmark,
   evaluatorIds, evaluatorRoots, expiresAt = null, retryTrialFailureId = null,
-  confirmLocalEvaluation = false, confirmLocalTrialRetry = false, now = new Date()
+  confirmLocalEvaluation = false, confirmLocalTrialRetry = false,
+  confirmLocalEvidenceSources = false, now = new Date()
 }) {
   if (!confirmLocalEvaluation) throw new Error("evaluation registration requires explicit local confirmation");
   if (!ID_RE.test(id || "") || !ID_RE.test(learningId || "")) {
@@ -3320,14 +3378,15 @@ export async function registerLearningEvaluation({
       ...blockingDefectPolicyPayloadValue,
       digest: digest(blockingDefectPolicyPayloadValue)
     };
-    const evidenceSourcePolicyPayloadValue = evidenceSourcePolicyPayload();
-    const evidenceSourcePolicy = {
+    const evidenceSourcePolicyPayloadValue = evidenceSourcePolicyPayload(
+      "agentspine.learning-evidence-source-policy/v2");
+    let evidenceSourcePolicy = {
       ...evidenceSourcePolicyPayloadValue,
       digest: digest(evidenceSourcePolicyPayloadValue)
     };
     const retryable = retryableTrialFailures(state, candidate);
     let retry = null;
-    let evaluationSchema = "agentspine.learning-evaluation/v24";
+    let evaluationSchema = "agentspine.learning-evaluation/v26";
     if (retryable.length) {
       if (!confirmLocalTrialRetry) {
         throw new Error("a repeated failed learning requires explicit local trial-retry confirmation");
@@ -3345,6 +3404,10 @@ export async function registerLearningEvaluation({
       if (!predecessorEvaluation) {
         throw new Error("trial retry predecessor evaluation is missing or changed");
       }
+      if (EVIDENCE_SOURCE_BOUND_EVALUATIONS.has(predecessorEvaluation.schema)
+        && !EVIDENCE_SOURCE_ATTESTED_EVALUATIONS.has(predecessorEvaluation.schema)) {
+        evidenceSourcePolicy = predecessorEvaluation.evidenceSourcePolicy;
+      }
       if (state.trialRetryExhaustions.some((receipt) => receipt.trialFailureId === selected.failure.id
         && receipt.trialFailureDigest === selected.failure.digest)) {
         throw new Error("trial retry budget is exhausted by an immutable terminal receipt");
@@ -3352,7 +3415,9 @@ export async function registerLearningEvaluation({
       if (TRIAL_RETRY_EVALUATIONS.has(predecessorEvaluation.schema)) {
         throw new Error("trial retry budget is exhausted; a failed corrective Canary cannot be retried again");
       }
-      evaluationSchema = EVIDENCE_SOURCE_BOUND_EVALUATIONS.has(predecessorEvaluation.schema)
+      evaluationSchema = EVIDENCE_SOURCE_ATTESTED_EVALUATIONS.has(predecessorEvaluation.schema)
+        ? "agentspine.learning-evaluation/v27"
+        : EVIDENCE_SOURCE_BOUND_EVALUATIONS.has(predecessorEvaluation.schema)
         ? "agentspine.learning-evaluation/v25"
         : BLOCKING_DEFECT_BOUND_EVALUATIONS.has(predecessorEvaluation.schema)
           ? "agentspine.learning-evaluation/v23"
@@ -3407,13 +3472,18 @@ export async function registerLearningEvaluation({
     };
     const eligibleEvidence = eligibleCandidateEvidence(candidate, timestamp, evidencePolicy.maxAgeDays);
     const evidenceCohort = candidateEvidenceCohort(eligibleEvidence);
+    if (EVIDENCE_SOURCE_ATTESTED_EVALUATIONS.has(evaluationSchema) && !confirmLocalEvidenceSources) {
+      throw new Error("qualifying evidence sources require explicit local confirmation");
+    }
+    const sourceAttestations = EVIDENCE_SOURCE_ATTESTED_EVALUATIONS.has(evaluationSchema)
+      ? evidenceSourceAttestations(evidenceCohort, timestamp) : [];
     const evidenceCount = new Set(evidenceCohort.map((entry) => entry.independenceDigest)).size;
     const observedConfidence = evidenceConfidence(eligibleEvidence);
     if (candidate.evidence.some((entry) => new Date(entry.observedAt).getTime() > new Date(timestamp).getTime())) {
       throw new Error("evaluation candidate evidence cannot be observed in the future");
     }
     if (EVIDENCE_SOURCE_BOUND_EVALUATIONS.has(evaluationSchema)
-      && qualifyingEvidenceCount(evidenceCohort, evidenceSourcePolicy)
+      && qualifyingEvidenceCount(evidenceCohort, evidenceSourcePolicy, sourceAttestations)
         < evidenceSourcePolicy.minimumQualifyingEvidence) {
       throw new Error("evaluation requires fresh explicit-user or objective-test evidence; interaction- or document-only cohorts are insufficient");
     }
@@ -3421,7 +3491,9 @@ export async function registerLearningEvaluation({
       throw new Error("evaluation requires a candidate that already satisfies the frozen confidence and evidence gates");
     }
     const candidateAdmissionPayloadValue = candidateAdmissionPayload({
-      schema: CANDIDATE_EVIDENCE_BOUND_EVALUATIONS.has(evaluationSchema)
+      schema: EVIDENCE_SOURCE_ATTESTED_EVALUATIONS.has(evaluationSchema)
+        ? "agentspine.learning-candidate-admission/v3"
+        : CANDIDATE_EVIDENCE_BOUND_EVALUATIONS.has(evaluationSchema)
         ? "agentspine.learning-candidate-admission/v2"
         : "agentspine.learning-candidate-admission/v1",
       learningId: candidate.id,
@@ -3433,6 +3505,7 @@ export async function registerLearningEvaluation({
       evidenceCount,
       evidencePolicy,
       evidenceCohort,
+      evidenceSourceAttestations: sourceAttestations,
       admittedAt: timestamp
     });
     const candidateAdmission = {
@@ -5794,6 +5867,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           BLOCKING_DEFECT_BOUND_EVALUATIONS.has(contract.schema)).length,
         evidenceSourceBoundEvaluationContracts: evaluations.filter((contract) =>
           EVIDENCE_SOURCE_BOUND_EVALUATIONS.has(contract.schema)).length,
+        evidenceSourceAttestedEvaluationContracts: evaluations.filter((contract) =>
+          EVIDENCE_SOURCE_ATTESTED_EVALUATIONS.has(contract.schema)).length,
         blockingDefectOutcomeReceipts: outcomes.filter((item) => item.metric.blockingDefects > 0).length,
         activePromotionThresholdDigest: PROMOTION_BOUND_EVALUATIONS.has(initialContract?.schema)
           ? digest({ minConfidence: initialContract.thresholds.minConfidence,
@@ -5808,6 +5883,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           ? initialContract.blockingDefectPolicy.digest : null,
         activeEvidenceSourcePolicyDigest: EVIDENCE_SOURCE_BOUND_EVALUATIONS.has(initialContract?.schema)
           ? initialContract.evidenceSourcePolicy.digest : null,
+        activeEvidenceSourceAttestationDigest: EVIDENCE_SOURCE_ATTESTED_EVALUATIONS.has(initialContract?.schema)
+          ? digest(initialContract.candidateAdmission.evidenceSourceAttestations) : null,
         activeStalenessPolicyDigest: STALENESS_BOUND_EVALUATIONS.has(initialContract?.schema)
           ? initialContract.stalenessPolicy.digest : null,
         trialRetryEvaluationContracts: evaluations.filter((contract) =>
@@ -5957,6 +6034,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
     candidateEvidenceCohortEvaluationContracts: recordTotal("candidateEvidenceCohortEvaluationContracts"),
     blockingDefectBoundEvaluationContracts: recordTotal("blockingDefectBoundEvaluationContracts"),
     evidenceSourceBoundEvaluationContracts: recordTotal("evidenceSourceBoundEvaluationContracts"),
+    evidenceSourceAttestedEvaluationContracts: recordTotal("evidenceSourceAttestedEvaluationContracts"),
     blockingDefectOutcomeReceipts: recordTotal("blockingDefectOutcomeReceipts"),
     trialRetryExhaustions: recordTotal("trialRetryExhaustionReceipts"),
     trialFailureRevocations: recordTotal("trialFailureRevocationReceipts"),

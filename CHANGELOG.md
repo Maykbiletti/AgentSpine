@@ -4,6 +4,20 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-09-02
+
+### Added
+
+- New initial evaluation v26 and bounded retry v27 contracts embed content-free, locally confirmed source attestations for the exact qualifying evidence cohort.
+
+### Changed
+
+- `user-statement` and `test` labels no longer qualify by themselves. Evaluation registration now requires `--confirm-local-evidence-sources`, and the admission binds each qualifying digest to either explicit user feedback or an objective test without storing source content or evidence IDs.
+
+### Security
+
+- Missing confirmation leaves zero contracts. Re-signed source-class manipulation fails closed after restart, six parallel confirmed registrations converge on one contract, foreign scopes receive zero diagnostics, and historical v1-v25 evaluations remain readable.
+
 ## [0.49.0] - 2026-09-02
 
 ### Added

@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.50.0` requires an explicit local attestation of every qualifying user-feedback or objective-test source before a behavior experiment can begin. Evaluation v26 and bounded retry v27 bind content-free source-class attestations to the exact evidence cohort, target, scope and admission time. Self-labeled chat or model claims cannot open a measurement contract without that confirmation; re-signed class manipulation fails closed after restart, parallel registration remains idempotent, and foreign scopes receive zero diagnostics.
+
 Version `0.49.0` prevents chat, memory-like interaction history, or documents alone from opening a behavior experiment. Evaluation v24 and bounded retry v25 freeze a content-free source policy requiring at least one fresh independent explicit-user statement or objective-test anchor before any measurement contract exists. Source-policy manipulation fails closed after restart, parallel registration remains idempotent, and foreign scopes receive zero diagnostics.
 
 Version `0.48.0` makes the blocking-defect rule immutable and phase-complete. Evaluation v22 and bounded retry v23 freeze a content-free policy requiring any eligible blocking defect to override cohort averages: a Before defect prevents Canary admission, while After and revalidation defects retain automatic rollback. Policy manipulation fails closed after restart, favorable replay cannot replace a defective evaluator slot, and foreign scopes receive zero diagnostics.

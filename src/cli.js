@@ -151,7 +151,7 @@ Usage:
   agentspine learn-evaluate [root]
   agentspine learn-evaluator-register <id> --principal-digest sha256 --confirm-local-evaluator
   agentspine learn-evaluator-revoke <id> --reason text --confirm-local-evaluator
-  agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id --evaluator-roots id=sha256,id=sha256 [--expires-at date] [--retry-trial-failure id --confirm-local-trial-retry] --confirm-local-evaluation
+  agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id --evaluator-roots id=sha256,id=sha256 [--expires-at date] [--retry-trial-failure id --confirm-local-trial-retry] --confirm-local-evaluation --confirm-local-evidence-sources
   agentspine learn-evaluation-revoke <evaluation-id> --reason-code benchmark-invalid|protocol-invalid|scope-invalid|threshold-invalid|duplicate|other --reason text --confirm-local-evaluation-revocation
   agentspine learn-validation-revoke <validation-lease-id> --reason-code decision-invalid|cohort-invalid|binding-invalid|scope-invalid|duplicate|other --reason text --confirm-local-validation-revocation
   agentspine learn-trial-failure-revoke <trial-failure-id> --reason-code clock-invalid|host-invalid|receipt-invalid|scope-invalid|duplicate|other --reason text --confirm-local-trial-failure-revocation
@@ -514,6 +514,7 @@ export async function run(argv = process.argv.slice(2)) {
       expiresAt: flags["expires-at"] || null,
       retryTrialFailureId: flags["retry-trial-failure"] || null,
       confirmLocalTrialRetry: booleanFlag(flags["confirm-local-trial-retry"]),
+      confirmLocalEvidenceSources: booleanFlag(flags["confirm-local-evidence-sources"]),
       confirmLocalEvaluation: booleanFlag(flags["confirm-local-evaluation"])
     }), json);
   }
@@ -1271,6 +1272,8 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.promotionBoundEvaluationContracts, 0);
       const candidateAdmissionEvaluationContracts = status.records.reduce((sum, item) =>
         sum + item.candidateAdmissionEvaluationContracts, 0);
+      const evidenceSourceAttestedEvaluationContracts = status.records.reduce((sum, item) =>
+        sum + item.evidenceSourceAttestedEvaluationContracts, 0);
       const candidateEvidenceCohortEvaluationContracts = status.records.reduce((sum, item) =>
         sum + item.candidateEvidenceCohortEvaluationContracts, 0);
       const blockingDefectBoundEvaluationContracts = status.records.reduce((sum, item) =>
@@ -1326,6 +1329,7 @@ export async function run(argv = process.argv.slice(2)) {
         stalenessBoundEvaluationContracts,
         promotionBoundEvaluationContracts,
         candidateAdmissionEvaluationContracts,
+        evidenceSourceAttestedEvaluationContracts,
         candidateEvidenceCohortEvaluationContracts,
         blockingDefectBoundEvaluationContracts,
         evidenceSourceBoundEvaluationContracts,
