@@ -4,6 +4,20 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-09-02
+
+### Added
+
+- `learn-evidence-source-attestation-revoke` records one immutable, content-free local revocation for an exact evidence-source attestation and its evaluation, candidate-admission, target and scope digests.
+
+### Changed
+
+- Revoking a mistaken local source confirmation immediately withholds its active or validated lesson, blocks measurements, projections, deliveries, outcomes and revalidation, and causes the next locked evaluation pass to roll back the complete dependent lineage while restoring a safe predecessor.
+
+### Security
+
+- Explicit local confirmation is mandatory. Six concurrent identical withdrawals converge on one receipt; conflicting replay and re-signed binding manipulation fail closed after restart, foreign scopes receive zero counts or diagnostics, reasons remain digest-only, and user-owned sources remain byte-for-byte unchanged.
+
 ## [0.50.0] - 2026-09-02
 
 ### Added

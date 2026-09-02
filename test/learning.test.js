@@ -13,6 +13,7 @@ import {
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
   registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, revokeLearningEvidence,
   revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningMeasurement, revokeLearningOutcome, revokeLearningTrialFailure, revokeLearningValidation,
+  revokeLearningEvidenceSourceAttestation,
   reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
@@ -159,12 +160,13 @@ async function application(root, learningId, turnId, now = new Date(), outcomeSt
 }
 
 async function establishValidatedLearning(root, {
-  learningId, evaluationId, start, expiresAt, supersedesId = null, subjectId = null
+  learningId, evaluationId, start, expiresAt, supersedesId = null, subjectId = null,
+  scope = scopedTurn, privacy = "shared", groupId = null
 }) {
   const suffix = learningId.split(":").at(-1);
   await proposeLearning({
     root, id: learningId, kind: "behavior", claim: `Use validated synthetic strategy ${suffix}.`,
-    privacy: "shared", scope: scopedTurn, supersedesId, subjectId,
+    privacy, groupId, scope, supersedesId, subjectId,
     evidence: evidence(`evidence:${suffix}-one`, 0.97), now: start
   });
   await addLearningEvidence({ root, id: learningId,
@@ -174,26 +176,28 @@ async function establishValidatedLearning(root, {
     canaryReceipts: 2, minImprovement: 0.1, canaryTtlDays: 30
   }, now: start });
   await evaluation(root, learningId, {
-    id: evaluationId, evaluatorIds: ["evaluator:test-a", "evaluator:test-b"], now: start, expiresAt
+    id: evaluationId, evaluatorIds: ["evaluator:test-a", "evaluator:test-b"], scope, now: start, expiresAt
   });
   await recordLearningOutcome({ root, learningId,
-    ...outcome(`outcome:${suffix}-before-a`, "before", 0.4, "evaluator:test-a", { evaluationId, measuredAt: start }),
+    ...outcome(`outcome:${suffix}-before-a`, "before", 0.4, "evaluator:test-a", { evaluationId, measuredAt: start, scope }),
     now: start });
   await recordLearningOutcome({ root, learningId,
-    ...outcome(`outcome:${suffix}-before-b`, "before", 0.5, "evaluator:test-b", { evaluationId, measuredAt: start }),
+    ...outcome(`outcome:${suffix}-before-b`, "before", 0.5, "evaluator:test-b", { evaluationId, measuredAt: start, scope }),
     now: start });
   await evaluateLearning({ root, now: new Date(start.getTime() + 1000) });
-  const firstApplication = await application(root, learningId, `${suffix}-a`, new Date(start.getTime() + 2000));
+  const firstApplication = await application(root, learningId, `${suffix}-a`,
+    new Date(start.getTime() + 2000), "active", scope);
   await recordLearningOutcome({ root, learningId, applicationId: firstApplication.id,
     deliveryId: firstApplication.deliveryId,
     ...outcome(`outcome:${suffix}-after-a`, "after", 0.8, "evaluator:test-a", {
-      evaluationId, measuredAt: new Date(start.getTime() + 2000)
+      evaluationId, measuredAt: new Date(start.getTime() + 2000), scope
     }), now: new Date(start.getTime() + 2000) });
-  const secondApplication = await application(root, learningId, `${suffix}-b`, new Date(start.getTime() + 3000));
+  const secondApplication = await application(root, learningId, `${suffix}-b`,
+    new Date(start.getTime() + 3000), "active", scope);
   return recordLearningOutcome({ root, learningId, applicationId: secondApplication.id,
     deliveryId: secondApplication.deliveryId,
     ...outcome(`outcome:${suffix}-after-b`, "after", 0.9, "evaluator:test-b", {
-      evaluationId, measuredAt: new Date(start.getTime() + 3000)
+      evaluationId, measuredAt: new Date(start.getTime() + 3000), scope
     }), now: new Date(start.getTime() + 3000) });
 }
 
@@ -1683,6 +1687,117 @@ test("locally attested evidence sources reject relabeling before measurement and
   await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
   await assert.rejects(loadLearning(root), /evaluation (?:contract structure|state) is invalid/,
     "a re-signed false source attestation fails closed after restart");
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("locally revoked evidence source attestations withhold and roll back their complete learning lineage", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2043-09-01T00:00:00.000Z");
+  const alphaScope = { ...scopedTurn, groupId: "group:source-revocation-alpha" };
+  const betaScope = { ...scopedTurn, groupId: "group:source-revocation-beta" };
+  await upsertEntity({ root, id: alphaScope.groupId, kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: betaScope.groupId, kind: "group", privacy: "shared" });
+  await upsertEntity({ root, id: "person:source-revocation-member", kind: "person", privacy: "group" });
+  await linkEntities({ root, from: "person:source-revocation-member", to: alphaScope.groupId,
+    relation: "member-of", privacy: "group" });
+  await proposeLearning({ root, id: "learning:source-revocation-prior", kind: "behavior",
+    claim: "Use the prior synthetic source-confirmation procedure.",
+    subjectId: "person:source-revocation-member", privacy: "group", groupId: alphaScope.groupId,
+    scope: alphaScope,
+    evidence: evidence("evidence:source-revocation-prior", 0.97), now: start });
+  await reviewLearning({ root, id: "learning:source-revocation-prior", decision: "accept",
+    reason: "Synthetic local confirmation.", confirmedByUser: true, now: start });
+  await establishValidatedLearning(root, {
+    learningId: "learning:source-revocation-current",
+    evaluationId: "evaluation:source-revocation-current",
+    start,
+    expiresAt: "2043-10-01T00:00:00.000Z",
+    supersedesId: "learning:source-revocation-prior",
+    subjectId: "person:source-revocation-member",
+    privacy: "group",
+    groupId: alphaScope.groupId,
+    scope: alphaScope
+  });
+  const before = (await loadLearning(root)).learning;
+  const contract = before.evaluations.find((item) => item.id === "evaluation:source-revocation-current");
+  const candidate = before.candidates.find((item) => item.id === "learning:source-revocation-current");
+  const attestation = contract.candidateAdmission.evidenceSourceAttestations[0];
+  const after = before.outcomes.find((item) => item.id === candidate.promotion.canary.afterReceipts[0]);
+  await assert.rejects(revokeLearningEvidenceSourceAttestation({ root, evaluationId: contract.id,
+    evidenceDigest: attestation.evidenceDigest, reasonCode: "source-class-invalid",
+    reason: "Synthetic source classification invalidated." }), /explicit local confirmation/);
+  const input = { root, evaluationId: contract.id, evidenceDigest: attestation.evidenceDigest,
+    reasonCode: "source-class-invalid", reason: "Synthetic source classification invalidated.",
+    confirmation: "local-evidence-source-attestation-revocation-confirmed", now: start };
+  const attempts = await Promise.all(Array.from({ length: 6 }, () =>
+    revokeLearningEvidenceSourceAttestation(input)));
+  assert.equal(attempts.filter((entry) => entry.unchanged === false).length, 1);
+  assert.equal((await revokeLearningEvidenceSourceAttestation({ ...input,
+    now: new Date(start.getTime() + 1000) })).unchanged, true);
+  await assert.rejects(revokeLearningEvidenceSourceAttestation({ ...input, reasonCode: "confirmation-invalid",
+    reason: "Synthetic conflicting reason." }), /immutable/);
+  const stored = await loadLearning(root);
+  assert.equal(stored.learning.evidenceSourceAttestationRevocations.length, 1);
+  const receipt = stored.learning.evidenceSourceAttestationRevocations[0];
+  assert.equal(receipt.evaluationDigest, contract.digest);
+  assert.equal(receipt.candidateAdmissionDigest, contract.candidateAdmission.digest);
+  assert.equal(receipt.independenceDigest, attestation.independenceDigest);
+  assert.equal(receipt.sourceClass, attestation.sourceClass);
+  assert.equal(receipt.targetDigest, contract.target.digest);
+  assert.equal(JSON.stringify(receipt).includes("Synthetic source classification invalidated"), false);
+  assert.deepEqual((await learningContext({ root, groupId: alphaScope.groupId, scope: alphaScope,
+    now: new Date(start.getTime() + 2000) })).diagnostics,
+  ["revoked-learning-evidence-source-attestation:learning:source-revocation-current"]);
+  assert.deepEqual((await learningContext({ root, groupId: betaScope.groupId, scope: betaScope,
+    now: new Date(start.getTime() + 2000) })).diagnostics, []);
+  const status = await learningOutcomeStatus({ root, scope: alphaScope,
+    now: new Date(start.getTime() + 2000) });
+  assert.equal(status.evidenceSourceAttestationRevocations, 1);
+  assert.equal(status.records.find((item) => item.id === candidate.id).canaryStatus,
+    "revoked-evidence-source-attestation");
+  assert.equal((await learningOutcomeStatus({ root,
+    scope: betaScope,
+    now: new Date(start.getTime() + 2000) })).evidenceSourceAttestationRevocations, 0);
+  const cli = runCli(["learn-evidence-source-attestation-revoke", contract.id, "--root", root,
+    "--evidence-digest", attestation.evidenceDigest, "--reason-code", "source-class-invalid",
+    "--reason", "Synthetic source classification invalidated.",
+    "--confirm-local-evidence-source-attestation-revocation", "--json"], state);
+  assert.equal(cli.receipt.schema, "agentspine.learning-evidence-source-attestation-revocation/v1");
+  assert.equal(runCli(["doctor", root, "--json"], state)
+    .learningOutcomes.evidenceSourceAttestationRevocationReceipts, 1);
+  await assert.rejects(recordLearningMeasurement({ root, id: "measurement:source-revocation-replay",
+    learningId: candidate.id, evaluationId: contract.id, phase: "after", scope: alphaScope,
+    metric: { name: contract.metric.name, direction: contract.metric.direction, value: 0.9 },
+    measurement: { kind: "objective", evaluatorId: "evaluator:test-a",
+      runId: "run:source-revocation-replay", sourceDigest: hash("source-revocation-replay") },
+    coverage: { datasetDigest: contract.benchmark.datasetDigest, caseCount: contract.benchmark.minCases },
+    confirmLocalMeasurement: true, now: new Date(start.getTime() + 2000) }),
+  /evidence source attestation was explicitly revoked/);
+  await assert.rejects(commitLearningOutcome({ root, id: "outcome:source-revocation-replay",
+    learningId: candidate.id, evaluationId: contract.id, measurementReceiptId: after.measurementReceiptId,
+    applicationId: after.applicationId, deliveryId: after.deliveryId,
+    now: new Date(start.getTime() + 2000) }), /evidence source attestation was explicitly revoked/);
+  const original = JSON.stringify(stored.learning);
+  stored.learning.evidenceSourceAttestationRevocations[0].independenceDigest = hash("redirected attestation");
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /evidence source attestation revocation state is invalid/);
+  await writeFile(stored.learningPath, `${original}\n`, "utf8");
+  const reconciliations = await Promise.all(Array.from({ length: 6 }, () =>
+    evaluateLearning({ root, now: new Date(start.getTime() + 3000) })));
+  assert.equal(reconciliations.flatMap((result) => result.reconciled)
+    .filter((item) => item.id === candidate.id && item.decision === "rolled-back").length, 1);
+  const rolledBack = (await loadLearning(root)).learning.candidates.find((item) => item.id === candidate.id);
+  assert.equal(rolledBack.rollback.mode, "automatic-evidence-source-attestation-revocation");
+  assert.equal(runCli(["audit", root, "--json"], state)
+    .learningDiagnostics.evidenceSourceAttestationRevocations, 1);
+  assert.deepEqual((await learningContext({ root, groupId: alphaScope.groupId, scope: alphaScope,
+    now: new Date(start.getTime() + 4000) })).items.map((item) => item.id),
+  ["learning:source-revocation-prior"]);
+  await deleteLearning({ root, id: candidate.id });
+  assert.equal((await loadLearning(root)).learning.evidenceSourceAttestationRevocations.length, 0);
+  assert.equal((await purgeLearningBySubject({ root,
+    subjectId: "person:source-revocation-member" })).deleted, 1);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 

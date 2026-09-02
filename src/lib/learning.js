@@ -122,6 +122,9 @@ const DELIVERY_REVOCATION_REASONS = new Set(["host-invalid", "session-invalid", 
 const OUTCOME_REVOCATION_REASONS = new Set(["binding-invalid", "phase-invalid", "scope-invalid", "duplicate", "other"]);
 const APPLICATION_REVOCATION_REASONS = new Set(["preflight-invalid", "scope-invalid", "projection-invalid", "duplicate", "other"]);
 const EVALUATION_REVOCATION_REASONS = new Set(["benchmark-invalid", "protocol-invalid", "scope-invalid", "threshold-invalid", "duplicate", "other"]);
+const EVIDENCE_SOURCE_ATTESTATION_REVOCATION_REASONS = new Set([
+  "source-class-invalid", "confirmation-invalid", "scope-invalid", "duplicate", "other"
+]);
 const VALIDATION_REVOCATION_REASONS = new Set(["decision-invalid", "cohort-invalid", "binding-invalid", "scope-invalid", "duplicate", "other"]);
 const TRIAL_FAILURE_REVOCATION_REASONS = new Set(["clock-invalid", "host-invalid", "receipt-invalid", "scope-invalid", "duplicate", "other"]);
 
@@ -160,6 +163,7 @@ function emptyLearning(root) {
     trialFailureRevocations: [],
     trialRetryExhaustions: [],
     evaluationRevocations: [],
+    evidenceSourceAttestationRevocations: [],
     validationRevocations: [],
     evidenceRevocations: [],
     measurementRevocations: [],
@@ -191,6 +195,9 @@ function normalizeState(value, root) {
       || !value.trialRetryExhaustions.every((item) => item && typeof item === "object")))
     || (value.evaluationRevocations !== undefined && (!Array.isArray(value.evaluationRevocations)
       || !value.evaluationRevocations.every((item) => item && typeof item === "object")))
+    || (value.evidenceSourceAttestationRevocations !== undefined
+      && (!Array.isArray(value.evidenceSourceAttestationRevocations)
+        || !value.evidenceSourceAttestationRevocations.every((item) => item && typeof item === "object")))
     || (value.validationRevocations !== undefined && (!Array.isArray(value.validationRevocations)
       || !value.validationRevocations.every((item) => item && typeof item === "object")))
     || (value.evidenceRevocations !== undefined && (!Array.isArray(value.evidenceRevocations)
@@ -227,6 +234,7 @@ function normalizeState(value, root) {
     trialFailureRevocations: value.trialFailureRevocations || [],
     trialRetryExhaustions: value.trialRetryExhaustions || [],
     evaluationRevocations: value.evaluationRevocations || [],
+    evidenceSourceAttestationRevocations: value.evidenceSourceAttestationRevocations || [],
     validationRevocations: value.validationRevocations || [],
     evidenceRevocations: value.evidenceRevocations || [],
     measurementRevocations: value.measurementRevocations || [],
@@ -322,6 +330,14 @@ function normalizeState(value, root) {
     || new Set(normalized.evaluationRevocations.map((entry) => entry.evaluationId)).size
       !== normalized.evaluationRevocations.length) {
     throw new Error("learning evaluation revocation state is invalid; run the audit before learning");
+  }
+  if (normalized.evidenceSourceAttestationRevocations.some((receipt) =>
+    !storedEvidenceSourceAttestationRevocationStructure(receipt)
+    || !evidenceSourceAttestationRevocationMatchesState(normalized, receipt))
+    || new Set(normalized.evidenceSourceAttestationRevocations.map((entry) =>
+      `${entry.evaluationId}\0${entry.evidenceDigest}`)).size
+      !== normalized.evidenceSourceAttestationRevocations.length) {
+    throw new Error("learning evidence source attestation revocation state is invalid; run the audit before learning");
   }
   if (normalized.validationRevocations.some((receipt) => !storedValidationRevocationStructure(receipt)
     || !validationRevocationMatchesState(normalized, receipt))
@@ -1467,6 +1483,9 @@ function validationLeaseState(state, candidate, timestamp) {
   if (revokedEvaluation(state, evaluation.id)) {
     return { status: "revoked-evaluation", lease: null, evaluation };
   }
+  if (revokedEvidenceSourceAttestation(state, evaluation.id)) {
+    return { status: "revoked-evidence-source-attestation", lease: null, evaluation };
+  }
   if (!REGISTRY_BOUND_EVALUATIONS.has(evaluation.schema)) {
     return new Date(canary.expiresAt).getTime() < new Date(timestamp).getTime()
       ? { status: "expired", lease: null, evaluation }
@@ -1520,6 +1539,11 @@ function canaryValidity(state, candidate, timestamp) {
   const evaluationRevocation = revokedEvaluationForCandidate(state, candidate);
   if (candidate?.status === "accepted" && evaluationRevocation) {
     return { status: "revoked-evaluation", canary, evaluation: null, lease: null, evaluationRevocation };
+  }
+  const evidenceSourceAttestationRevocation = revokedEvidenceSourceAttestationForCandidate(state, candidate);
+  if (candidate?.status === "accepted" && evidenceSourceAttestationRevocation) {
+    return { status: "revoked-evidence-source-attestation", canary, evaluation: null, lease: null,
+      evidenceSourceAttestationRevocation };
   }
   const validationRevocation = revokedValidationForCandidate(state, candidate);
   if (candidate?.status === "accepted" && validationRevocation) {
@@ -1779,6 +1803,76 @@ function storedEvidenceSourceAttestationsStructure(attestations, cohort, confirm
       && ["explicit-user-feedback", "objective-test"].includes(entry.sourceClass)
       && entry.confirmedAt === confirmedAt && entry.authority === "context-only")
     && digest(attestations) === digest(expected);
+}
+
+function evidenceSourceAttestationRevocationPayload({ id, learningId, evaluationId, evaluationDigest,
+  candidateAdmissionDigest, evidenceDigest, independenceDigest, sourceClass, targetDigest, scopeDigest,
+  reasonCode, reasonDigest, revokedAt }) {
+  return {
+    schema: "agentspine.learning-evidence-source-attestation-revocation/v1",
+    id,
+    learningId,
+    evaluationId,
+    evaluationDigest,
+    candidateAdmissionDigest,
+    evidenceDigest,
+    independenceDigest,
+    sourceClass,
+    targetDigest,
+    scopeDigest,
+    reasonCode,
+    reasonDigest,
+    revokedAt,
+    authority: "context-only"
+  };
+}
+
+function storedEvidenceSourceAttestationRevocationStructure(receipt) {
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
+  const payload = evidenceSourceAttestationRevocationPayload(receipt);
+  return receipt.schema === "agentspine.learning-evidence-source-attestation-revocation/v1"
+    && Object.keys(receipt).length === 16
+    && Object.keys(receipt).every((field) => ["schema", "id", "learningId", "evaluationId",
+      "evaluationDigest", "candidateAdmissionDigest", "evidenceDigest", "independenceDigest",
+      "sourceClass", "targetDigest", "scopeDigest", "reasonCode", "reasonDigest", "revokedAt",
+      "authority", "digest"].includes(field))
+    && ID_RE.test(receipt.id || "") && ID_RE.test(receipt.learningId || "")
+    && ID_RE.test(receipt.evaluationId || "") && DIGEST_RE.test(receipt.evaluationDigest || "")
+    && DIGEST_RE.test(receipt.candidateAdmissionDigest || "") && DIGEST_RE.test(receipt.evidenceDigest || "")
+    && DIGEST_RE.test(receipt.independenceDigest || "")
+    && ["explicit-user-feedback", "objective-test"].includes(receipt.sourceClass)
+    && DIGEST_RE.test(receipt.targetDigest || "") && DIGEST_RE.test(receipt.scopeDigest || "")
+    && EVIDENCE_SOURCE_ATTESTATION_REVOCATION_REASONS.has(receipt.reasonCode)
+    && DIGEST_RE.test(receipt.reasonDigest || "") && Number.isFinite(new Date(receipt.revokedAt).getTime())
+    && receipt.authority === "context-only" && receipt.digest === digest(payload);
+}
+
+function evidenceSourceAttestationRevocationMatchesState(state, receipt) {
+  const candidate = state.candidates.find((entry) => entry.id === receipt.learningId);
+  const evaluation = state.evaluations.find((entry) => entry.id === receipt.evaluationId
+    && entry.learningId === receipt.learningId && entry.digest === receipt.evaluationDigest);
+  const attestation = evaluation?.candidateAdmission?.evidenceSourceAttestations?.find((entry) =>
+    entry.evidenceDigest === receipt.evidenceDigest && entry.independenceDigest === receipt.independenceDigest
+    && entry.sourceClass === receipt.sourceClass);
+  return Boolean(candidate && evaluation && EVIDENCE_SOURCE_ATTESTED_EVALUATIONS.has(evaluation.schema)
+    && evaluation.candidateAdmission.digest === receipt.candidateAdmissionDigest
+    && attestation && learningTargetForCandidate(candidate).digest === receipt.targetDigest
+    && digest(evaluation.scope) === receipt.scopeDigest);
+}
+
+function revokedEvidenceSourceAttestation(state, evaluationId, evidenceDigest = null) {
+  return state.evidenceSourceAttestationRevocations.find((receipt) => receipt.evaluationId === evaluationId
+    && (evidenceDigest === null || receipt.evidenceDigest === evidenceDigest)) || null;
+}
+
+function revokedEvidenceSourceAttestationForCandidate(state, candidate) {
+  const canary = candidate?.promotion?.mode === "outcome-canary" ? candidate.promotion.canary : null;
+  if (canary?.evaluationId) {
+    return state.evidenceSourceAttestationRevocations.find((receipt) => receipt.learningId === candidate.id
+      && receipt.evaluationId === canary.evaluationId && receipt.evaluationDigest === canary.evaluationDigest) || null;
+  }
+  return state.evidenceSourceAttestationRevocations.find((receipt) =>
+    receipt.learningId === candidate?.id) || null;
 }
 
 function candidateEvidencePolicyPayload({ maxAgeDays, minimumIndependentEvidence }) {
@@ -3632,6 +3726,69 @@ export async function revokeLearningEvaluation({
   });
 }
 
+export async function revokeLearningEvidenceSourceAttestation({
+  root = process.cwd(), evaluationId, evidenceDigest, reasonCode, reason, confirmation, now = new Date()
+}) {
+  if (confirmation !== "local-evidence-source-attestation-revocation-confirmed") {
+    throw new Error("evidence source attestation revocation requires explicit local confirmation");
+  }
+  if (!ID_RE.test(evaluationId || "")) throw new Error("evaluationId must be a stable identifier");
+  if (!DIGEST_RE.test(evidenceDigest || "")) throw new Error("evidenceDigest must be one SHA-256 digest");
+  if (!EVIDENCE_SOURCE_ATTESTATION_REVOCATION_REASONS.has(reasonCode)) {
+    throw new Error("reasonCode must be source-class-invalid, confirmation-invalid, scope-invalid, duplicate, or other");
+  }
+  const revokeReason = safeText(reason, "reason", 500);
+  const timestamp = date(now, "now");
+  return mutation(root, (state, _catalog, learningPath) => {
+    const evaluation = state.evaluations.find((entry) => entry.id === evaluationId);
+    if (!evaluation || !EVIDENCE_SOURCE_ATTESTED_EVALUATIONS.has(evaluation.schema)) {
+      throw new Error(`unknown source-attested learning evaluation: ${evaluationId}`);
+    }
+    const candidate = state.candidates.find((entry) => entry.id === evaluation.learningId);
+    const attestation = evaluation.candidateAdmission.evidenceSourceAttestations.find((entry) =>
+      entry.evidenceDigest === evidenceDigest);
+    if (!candidate || !attestation) {
+      throw new Error("source attestation revocation requires its exact immutable candidate and evidence binding");
+    }
+    const targetDigest = learningTargetForCandidate(candidate).digest;
+    const scopeDigest = digest(evaluation.scope);
+    const reasonDigest = digest(revokeReason);
+    const existing = revokedEvidenceSourceAttestation(state, evaluationId, evidenceDigest);
+    if (existing) {
+      if (existing.reasonCode !== reasonCode || existing.reasonDigest !== reasonDigest
+        || existing.learningId !== candidate.id || existing.evaluationDigest !== evaluation.digest
+        || existing.candidateAdmissionDigest !== evaluation.candidateAdmission.digest
+        || existing.independenceDigest !== attestation.independenceDigest
+        || existing.sourceClass !== attestation.sourceClass || existing.targetDigest !== targetDigest
+        || existing.scopeDigest !== scopeDigest) {
+        throw new Error("learning evidence source attestation revocations are immutable");
+      }
+      return { receipt: existing, learningPath, unchanged: true, authority: "context-only" };
+    }
+    const id = `evidence-source-attestation-revocation:${createHash("sha256")
+      .update(`${evaluation.id}\0${evaluation.digest}\0${evidenceDigest}`).digest("hex").slice(0, 32)}`;
+    const payload = evidenceSourceAttestationRevocationPayload({
+      id,
+      learningId: candidate.id,
+      evaluationId: evaluation.id,
+      evaluationDigest: evaluation.digest,
+      candidateAdmissionDigest: evaluation.candidateAdmission.digest,
+      evidenceDigest,
+      independenceDigest: attestation.independenceDigest,
+      sourceClass: attestation.sourceClass,
+      targetDigest,
+      scopeDigest,
+      reasonCode,
+      reasonDigest,
+      revokedAt: timestamp
+    });
+    const receipt = { ...payload, digest: digest(payload) };
+    state.evidenceSourceAttestationRevocations.push(receipt);
+    state.evidenceSourceAttestationRevocations.sort((a, b) => a.id.localeCompare(b.id));
+    return { receipt, learningPath, unchanged: false, authority: "context-only" };
+  });
+}
+
 export async function revokeLearningValidation({
   root = process.cwd(), validationLeaseId, reasonCode, reason, confirmation, now = new Date()
 }) {
@@ -3708,6 +3865,9 @@ export async function beginLearningRevalidation({
     const candidate = state.candidates.find((entry) => entry.id === learningId);
     if (revokedEvaluationForCandidate(state, candidate)) {
       throw new Error("revalidation baseline contains an explicitly revoked evaluation contract");
+    }
+    if (revokedEvidenceSourceAttestationForCandidate(state, candidate)) {
+      throw new Error("revalidation baseline contains an explicitly revoked evidence source attestation");
     }
     if (revokedApplicationForCandidate(state, candidate)) {
       throw new Error("revalidation baseline contains an explicitly revoked application");
@@ -3804,6 +3964,9 @@ export async function renewLearningValidation({
     const candidate = state.candidates.find((entry) => entry.id === learningId);
     if (revokedEvaluationForCandidate(state, candidate)) {
       throw new Error("validation renewal baseline contains an explicitly revoked evaluation contract");
+    }
+    if (revokedEvidenceSourceAttestationForCandidate(state, candidate)) {
+      throw new Error("validation renewal baseline contains an explicitly revoked evidence source attestation");
     }
     if (revokedApplicationForCandidate(state, candidate)) {
       throw new Error("validation renewal baseline contains an explicitly revoked application");
@@ -4070,6 +4233,9 @@ export async function recordLearningMeasurement({
     }
     if (revokedEvaluation(state, evaluation.id)) {
       throw new Error("learning evaluation contract was explicitly revoked and cannot accept measurements");
+    }
+    if (revokedEvidenceSourceAttestation(state, evaluation.id)) {
+      throw new Error("learning evidence source attestation was explicitly revoked and cannot support measurements");
     }
     if (REGISTRY_BOUND_EVALUATIONS.has(evaluation.schema)
       && !activeEvaluationBinding(state, evaluation)) {
@@ -4486,6 +4652,7 @@ export async function recordLearningApplications({
       const revalidating = item.outcomeStatus === "revalidating";
       if (!candidate || candidate.status !== "accepted" || candidate.promotion?.mode !== "outcome-canary"
         || revokedEvaluationForCandidate(state, candidate)
+        || revokedEvidenceSourceAttestationForCandidate(state, candidate)
         || revokedValidationForCandidate(state, candidate)
         || revokedApplicationForCandidate(state, candidate)
         || (revalidating ? canary?.status !== "validated" || canary.revalidation?.status !== "active"
@@ -4680,6 +4847,10 @@ export async function recordLearningDeliveries({
       const candidate = state.candidates.find((entry) => entry.id === application.learningId);
       return revokedEvaluationForCandidate(state, candidate);
     })) throw new Error("learning evaluation contract was explicitly revoked and cannot produce a delivery");
+    if (candidates.some((application) => {
+      const candidate = state.candidates.find((entry) => entry.id === application.learningId);
+      return revokedEvidenceSourceAttestationForCandidate(state, candidate);
+    })) throw new Error("learning evidence source attestation was explicitly revoked and cannot produce a delivery");
     if (candidates.some((application) => {
       const candidate = state.candidates.find((entry) => entry.id === application.learningId);
       return revokedValidationForCandidate(state, candidate);
@@ -4917,6 +5088,7 @@ function outcomeMatchesInitialTrial(state, receipt, contract) {
 function promotableReceipts(state, candidate, timestamp) {
   const contracts = state.evaluations.filter((contract) => contract.learningId === candidate.id
     && !revokedEvaluation(state, contract.id)
+    && !revokedEvidenceSourceAttestation(state, contract.id)
     && new Date(contract.expiresAt).getTime() >= new Date(timestamp).getTime()
     && (!REGISTRY_BOUND_EVALUATIONS.has(contract.schema)
       || activeEvaluationBinding(state, contract)));
@@ -5131,6 +5303,12 @@ function reconcileCanary(state, candidate, timestamp) {
       timestamp, "automatic-evaluation-revocation");
     return { ...result, decision: "rolled-back", evaluationRevocation };
   }
+  const evidenceSourceAttestationRevocation = revokedEvidenceSourceAttestationForCandidate(state, candidate);
+  if (evidenceSourceAttestationRevocation) {
+    const result = rollbackCandidate(state, candidate, "learning evidence source attestation was explicitly revoked",
+      timestamp, "automatic-evidence-source-attestation-revocation");
+    return { ...result, decision: "rolled-back", evidenceSourceAttestationRevocation };
+  }
   const validationRevocation = revokedValidationForCandidate(state, candidate);
   if (validationRevocation) {
     const result = rollbackCandidate(state, candidate, "learning validation decision was explicitly revoked",
@@ -5315,6 +5493,9 @@ export async function recordLearningOutcome({ root = process.cwd(), id, learning
     const evaluation = state.evaluations.find((item) => item.id === evaluationId);
     if (revokedEvaluation(state, evaluationId)) {
       throw new Error("learning evaluation contract was explicitly revoked and cannot support an outcome");
+    }
+    if (revokedEvidenceSourceAttestation(state, evaluationId)) {
+      throw new Error("learning evidence source attestation was explicitly revoked and cannot support an outcome");
     }
     if (REGISTRY_BOUND_EVALUATIONS.has(evaluation?.schema)
       && !activeEvaluationBinding(state, evaluation)) {
@@ -5714,6 +5895,7 @@ export async function learningContext({
       "unproven-validated": "missing-validation-lease",
       "failed-initial-trial": "blocking-initial-trial-timeout",
       "revoked-evaluation": "revoked-learning-evaluation",
+      "revoked-evidence-source-attestation": "revoked-learning-evidence-source-attestation",
       "revoked-validation": "revoked-learning-validation",
       "revoked-evidence": "revoked-learning-evidence",
       "revoked-measurement": "revoked-learning-measurement",
@@ -5745,6 +5927,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
       const trialFailureRevocations = learning.trialFailureRevocations.filter((item) => item.learningId === candidate.id);
       const trialRetryExhaustions = learning.trialRetryExhaustions.filter((item) => item.learningId === candidate.id);
       const evaluationRevocations = learning.evaluationRevocations.filter((item) => item.learningId === candidate.id);
+      const evidenceSourceAttestationRevocations = learning.evidenceSourceAttestationRevocations
+        .filter((item) => item.learningId === candidate.id);
       const validationRevocations = learning.validationRevocations.filter((item) => item.learningId === candidate.id);
       const evidenceRevocations = learning.evidenceRevocations.filter((item) => item.learningId === candidate.id);
       const measurementRevocations = learning.measurementRevocations.filter((item) => item.learningId === candidate.id);
@@ -5916,6 +6100,9 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
         revokedTrialFailureIds: trialFailureRevocations.map((receipt) => receipt.trialFailureId).sort(),
         evaluationRevocationReceipts: evaluationRevocations.length,
         revokedEvaluationIds: evaluationRevocations.map((receipt) => receipt.evaluationId).sort(),
+        evidenceSourceAttestationRevocationReceipts: evidenceSourceAttestationRevocations.length,
+        revokedEvidenceSourceAttestationDigests: evidenceSourceAttestationRevocations
+          .map((receipt) => receipt.evidenceDigest).sort(),
         validationRevocationReceipts: validationRevocations.length,
         revokedValidationLeaseIds: validationRevocations.map((receipt) => receipt.validationLeaseId).sort(),
         evidenceRevocationReceipts: evidenceRevocations.length,
@@ -5957,6 +6144,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
         canaryStatus: canaryValidityStatus.status === "not-applicable" ? "not-applicable"
           : canaryValidityStatus.status === "failed-initial-trial" ? "failed-trial"
           : canaryValidityStatus.status === "revoked-evaluation" ? "revoked-evaluation"
+          : canaryValidityStatus.status === "revoked-evidence-source-attestation"
+            ? "revoked-evidence-source-attestation"
           : canaryValidityStatus.status === "revoked-validation" ? "revoked-validation"
           : canaryValidityStatus.status === "revoked-evidence" ? "revoked-evidence"
           : canaryValidityStatus.status === "revoked-measurement" ? "revoked-measurement"
@@ -6039,6 +6228,7 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
     trialRetryExhaustions: recordTotal("trialRetryExhaustionReceipts"),
     trialFailureRevocations: recordTotal("trialFailureRevocationReceipts"),
     evaluationRevocations: recordTotal("evaluationRevocationReceipts"),
+    evidenceSourceAttestationRevocations: recordTotal("evidenceSourceAttestationRevocationReceipts"),
     validationRevocations: recordTotal("validationRevocationReceipts"),
     evidenceRevocations: recordTotal("evidenceRevocationReceipts"),
     measurementRevocations: recordTotal("measurementRevocationReceipts"),
@@ -6116,6 +6306,8 @@ export async function deleteLearning({ root = process.cwd(), id }) {
     state.trialFailureRevocations = state.trialFailureRevocations.filter((entry) => entry.learningId !== id);
     state.trialRetryExhaustions = state.trialRetryExhaustions.filter((entry) => entry.learningId !== id);
     state.evaluationRevocations = state.evaluationRevocations.filter((entry) => entry.learningId !== id);
+    state.evidenceSourceAttestationRevocations = state.evidenceSourceAttestationRevocations
+      .filter((entry) => entry.learningId !== id);
     state.validationRevocations = state.validationRevocations.filter((entry) => entry.learningId !== id);
     state.evidenceRevocations = state.evidenceRevocations.filter((entry) => entry.learningId !== id);
     state.measurementRevocations = state.measurementRevocations.filter((entry) => entry.learningId !== id);
@@ -6145,6 +6337,8 @@ export async function purgeLearningBySubject({ root = process.cwd(), subjectId }
     state.trialFailureRevocations = state.trialFailureRevocations.filter((entry) => !ids.has(entry.learningId));
     state.trialRetryExhaustions = state.trialRetryExhaustions.filter((entry) => !ids.has(entry.learningId));
     state.evaluationRevocations = state.evaluationRevocations.filter((entry) => !ids.has(entry.learningId));
+    state.evidenceSourceAttestationRevocations = state.evidenceSourceAttestationRevocations
+      .filter((entry) => !ids.has(entry.learningId));
     state.validationRevocations = state.validationRevocations.filter((entry) => !ids.has(entry.learningId));
     state.evidenceRevocations = state.evidenceRevocations.filter((entry) => !ids.has(entry.learningId));
     state.measurementRevocations = state.measurementRevocations.filter((entry) => !ids.has(entry.learningId));
@@ -6226,6 +6420,9 @@ export function learningFindings(learning, graph) {
         && REGISTRY_BOUND_EVALUATIONS.has(canaryEvaluation?.schema)
         && !activeEvaluationBinding(learning, canaryEvaluation)) findings.push(`inactive-evaluator-canary:${candidate.id}`);
       if (revokedEvaluationForCandidate(learning, candidate)) findings.push(`revoked-evaluation:${candidate.id}`);
+      if (revokedEvidenceSourceAttestationForCandidate(learning, candidate)) {
+        findings.push(`revoked-evidence-source-attestation:${candidate.id}`);
+      }
       if (revokedValidationForCandidate(learning, candidate)) findings.push(`revoked-validation:${candidate.id}`);
       if (candidate.promotion?.mode === "outcome-canary" && candidate.promotion?.canary?.status === "validated"
         && REGISTRY_BOUND_EVALUATIONS.has(canaryEvaluation?.schema)
@@ -6341,6 +6538,19 @@ export function learningFindings(learning, graph) {
     }
     evaluationRevocationIds.add(receipt.id);
     revokedEvaluationIds.add(receipt.evaluationId);
+  }
+  const evidenceSourceAttestationRevocationIds = new Set();
+  const revokedEvidenceSourceAttestations = new Set();
+  for (const receipt of learning.evidenceSourceAttestationRevocations || []) {
+    const key = `${receipt.evaluationId}\0${receipt.evidenceDigest}`;
+    const valid = storedEvidenceSourceAttestationRevocationStructure(receipt)
+      && evidenceSourceAttestationRevocationMatchesState(learning, receipt);
+    if (!valid || evidenceSourceAttestationRevocationIds.has(receipt.id)
+      || revokedEvidenceSourceAttestations.has(key)) {
+      findings.push(`invalid-evidence-source-attestation-revocation:${receipt.id || "unknown"}`);
+    }
+    evidenceSourceAttestationRevocationIds.add(receipt.id);
+    revokedEvidenceSourceAttestations.add(key);
   }
   const validationRevocationIds = new Set();
   const revokedValidationLeaseIds = new Set();

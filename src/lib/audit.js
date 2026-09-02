@@ -59,6 +59,7 @@ function authorityViolations(graph, attention, learning, continuity, coordinatio
     ...(learning.trialFailureRevocations || []),
     ...(learning.trialRetryExhaustions || []),
     ...(learning.evaluationRevocations || []),
+    ...(learning.evidenceSourceAttestationRevocations || []),
     ...(learning.validationRevocations || []),
     ...(learning.evidenceRevocations || []),
     ...(learning.measurementRevocations || []),
@@ -336,6 +337,11 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
     trustPath,
     registryPath,
     feedStatePath,
+    learningDiagnostics: {
+      evidenceSourceAttestationRevocations:
+        (learning.evidenceSourceAttestationRevocations || []).length,
+      authority: "context-only"
+    },
     sourceResolution,
     preflight
   };
