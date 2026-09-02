@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-09-02
+
+### Added
+
+- `agentspine.learning-evaluation/v12` embeds `agentspine.learning-trial-retry/v2`, binding each retry to the exact objective comparison contract of its failed predecessor.
+- Scoped status and Doctor distinguish comparison-bound retry contracts without exposing claims, benchmark content, evidence or revocation reasons; audit validates the complete comparison lineage.
+
+### Changed
+
+- A retry must preserve the predecessor metric, benchmark digests and case floor, evaluator identities and roots, pairing rules, and promotion thresholds. A corrected completion timeout remains possible without moving the measurement goalposts.
+
+### Security
+
+- Dataset, protocol, metric, threshold and evaluator drift after a revoked timeout fail closed. Digest redirection, concurrent duplicate admission, cross-group diagnostics and delete/replay windows remain blocked.
+
 ## [0.37.0] - 2026-09-02
 
 ### Added

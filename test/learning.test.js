@@ -64,13 +64,13 @@ function outcome(id, phase, value, evaluatorId, extra = {}) {
 async function recordLearningOutcome(input) {
   const { learning } = await loadLearning(input.root);
   const evaluation = learning.evaluations.find((item) => item.id === input.evaluationId);
-  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11"].includes(evaluation?.schema)) {
+  if (!["agentspine.learning-evaluation/v4", "agentspine.learning-evaluation/v5", "agentspine.learning-evaluation/v6", "agentspine.learning-evaluation/v7", "agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12"].includes(evaluation?.schema)) {
     return commitLearningOutcome(input);
   }
-  const initialTrial = ["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11"].includes(evaluation.schema)
+  const initialTrial = ["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12"].includes(evaluation.schema)
     ? evaluation.initialTrials?.[input.phase]?.find((entry) => entry.evaluatorId === input.measurement?.evaluatorId)
     : null;
-  if (["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11"].includes(evaluation.schema) && !initialTrial) {
+  if (["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12"].includes(evaluation.schema) && !initialTrial) {
     return commitLearningOutcome(input);
   }
   const measurementId = `measurement:${input.id}`;
@@ -111,8 +111,8 @@ async function evaluation(root, learningId, extra = {}) {
   }
   return registerLearningEvaluation({
     root, id: extra.id || "evaluation:fixed", learningId, scope: extra.scope || scopedTurn,
-    metric: { name: "fixed-task-success", direction: "higher" },
-    benchmark: {
+    metric: extra.metric || { name: "fixed-task-success", direction: "higher" },
+    benchmark: extra.benchmark || {
       taskDigest: hash(`task:${learningId}`), datasetDigest: syntheticDatasetDigest,
       protocolDigest: hash(`protocol:${learningId}`), minCases: 12
     },
@@ -1641,6 +1641,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
     evidence: { ...evidence("evidence:failure-retry-stale", 0.97), observedAt: start }, now: retryBase });
   await assert.rejects(evaluation(root, "learning:failure-retry-stale", {
     id: "evaluation:failure-retry-stale", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    benchmark: registered.contract.benchmark,
     scope: alphaScope, retryTrialFailureId: failure.id, confirmLocalTrialRetry: true,
     now: retryBase, expiresAt: new Date(retryBase.getTime() + 86400000)
   }), /fresh candidate and independently observed evidence/);
@@ -1652,6 +1653,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
     evidence: evidence("evidence:failure-current-one", 0.97), now: new Date(retryBase.getTime() + 1000) });
   await assert.rejects(evaluation(root, "learning:failure-retry-reused", {
     id: "evaluation:failure-retry-reused", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    benchmark: registered.contract.benchmark,
     scope: alphaScope, retryTrialFailureId: failure.id, confirmLocalTrialRetry: true,
     now: new Date(retryBase.getTime() + 1000), expiresAt: new Date(retryBase.getTime() + 86400000)
   }), /fresh candidate and independently observed evidence/);
@@ -1666,35 +1668,92 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
   const retryNow = new Date(retryBase.getTime() + 4000);
   const retryExtra = {
     id: "evaluation:failure-retry", evaluatorIds: ["evaluator:test-a", "evaluator:test-b"],
+    benchmark: registered.contract.benchmark,
     scope: alphaScope, now: retryNow, expiresAt: new Date(retryNow.getTime() + 86400000)
   };
   await assert.rejects(evaluation(root, "learning:failure-retry", retryExtra),
     /explicit local trial-retry confirmation/);
+  await assert.rejects(evaluation(root, "learning:failure-retry", {
+    ...retryExtra,
+    benchmark: { ...registered.contract.benchmark, datasetDigest: hash("drifted synthetic dataset") },
+    retryTrialFailureId: failure.id, confirmLocalTrialRetry: true
+  }), /objective contract drift/, "a retry cannot move to a different dataset");
+  await assert.rejects(evaluation(root, "learning:failure-retry", {
+    ...retryExtra,
+    metric: { name: "different-success-metric", direction: "higher" },
+    retryTrialFailureId: failure.id, confirmLocalTrialRetry: true
+  }), /objective contract drift/, "a retry cannot change its metric");
+  await assert.rejects(evaluation(root, "learning:failure-retry", {
+    ...retryExtra,
+    evaluatorIds: ["evaluator:test-c", "evaluator:user-b"],
+    retryTrialFailureId: failure.id, confirmLocalTrialRetry: true
+  }), /objective contract drift/, "a retry cannot replace its evaluator roots");
+  await configureLearning({ root, config: { minImprovement: 0.01 }, now: retryNow });
+  await assert.rejects(evaluation(root, "learning:failure-retry", {
+    ...retryExtra, retryTrialFailureId: failure.id, confirmLocalTrialRetry: true
+  }), /objective contract drift/, "a retry cannot lower its promotion threshold");
+  await configureLearning({ root, config: { minImprovement: registered.contract.thresholds.minImprovement },
+    now: retryNow });
+  await configureLearning({ root, config: { minConfidence: 0.5 }, now: retryNow });
+  await assert.rejects(evaluation(root, "learning:failure-retry", {
+    ...retryExtra, retryTrialFailureId: failure.id, confirmLocalTrialRetry: true
+  }), /objective contract drift/, "a retry cannot lower its candidate confidence gate");
+  await configureLearning({ root, config: { minConfidence: 0.9 }, now: retryNow });
   const retryAttempts = await Promise.all(Array.from({ length: 6 }, () =>
     evaluation(root, "learning:failure-retry", { ...retryExtra,
       retryTrialFailureId: failure.id, confirmLocalTrialRetry: true })));
   assert.equal(retryAttempts.filter((result) => result.unchanged === false).length, 1);
   const retryContract = retryAttempts[0].contract;
-  assert.equal(retryContract.schema, "agentspine.learning-evaluation/v11");
+  assert.equal(retryContract.schema, "agentspine.learning-evaluation/v12");
+  assert.equal(retryContract.retry.schema, "agentspine.learning-trial-retry/v2");
   assert.equal(retryContract.retry.trialFailureId, failure.id);
   assert.equal(retryContract.retry.trialFailureRevocationId, receipt.id);
   assert.equal(retryContract.retry.predecessorLearningId, "learning:failure-current");
+  assert.equal(retryContract.retry.predecessorEvaluationId, registered.contract.id);
+  assert.equal(retryContract.retry.predecessorEvaluationDigest, registered.contract.digest);
+  assert.match(retryContract.retry.comparisonDigest, /^[a-f0-9]{64}$/);
   assert.equal(retryContract.retry.learningId, "learning:failure-retry");
   assert.equal(retryContract.retry.targetDigest, retryContract.target.digest);
   assert.equal(retryContract.retry.minimumEvidenceObservedAt, receipt.revokedAt);
   const retryStatus = await learningOutcomeStatus({ root, scope: alphaScope, now: retryNow });
   assert.equal(retryStatus.trialRetryEvaluationContracts, 1);
+  assert.equal(retryStatus.comparableTrialRetryEvaluationContracts, 1);
   assert.equal(retryStatus.records.find((item) => item.id === "learning:failure-retry")
     .trialRetryEvaluationContracts, 1);
+  assert.equal(retryStatus.records.find((item) => item.id === "learning:failure-retry")
+    .comparableTrialRetryEvaluationContracts, 1);
   assert.deepEqual((await learningOutcomeStatus({ root,
     scope: { ...alphaScope, groupId: "group:failure-beta" }, now: retryNow })).records, []);
   const retryDoctor = runCli(["doctor", root, "--json"], state);
   assert.equal(retryDoctor.learningOutcomes.trialRetryEvaluationContracts, 1);
+  assert.equal(retryDoctor.learningOutcomes.comparableTrialRetryEvaluationContracts, 1);
   await assert.rejects(deleteLearning({ root, id: "learning:failure-current" }), /dependent trial-retry/);
+  const compatibleState = await loadLearning(root);
+  const compatibleSnapshot = JSON.stringify(compatibleState.learning);
+  const legacyContract = compatibleState.learning.evaluations.find((item) => item.id === retryContract.id);
+  const { predecessorEvaluationId: _predecessorEvaluationId,
+    predecessorEvaluationDigest: _predecessorEvaluationDigest,
+    comparisonDigest: _comparisonDigest, digest: _retryDigest, ...legacyRetryFields } = legacyContract.retry;
+  const legacyRetryPayload = { ...legacyRetryFields, schema: "agentspine.learning-trial-retry/v1" };
+  legacyContract.retry = { ...legacyRetryPayload, digest: hash(JSON.stringify(legacyRetryPayload)) };
+  const { digest: _legacyContractDigest, ...legacyContractFields } = legacyContract;
+  const legacyContractPayload = { ...legacyContractFields, schema: "agentspine.learning-evaluation/v11" };
+  Object.assign(legacyContract, legacyContractPayload, { digest: hash(JSON.stringify(legacyContractPayload)) });
+  const legacyBinding = compatibleState.learning.evaluationBindings.find((item) =>
+    item.evaluationId === legacyContract.id);
+  const { digest: _legacyBindingDigest, ...legacyBindingFields } = legacyBinding;
+  Object.assign(legacyBinding, { ...legacyBindingFields, evaluationDigest: legacyContract.digest });
+  const legacyBindingPayload = { ...legacyBinding };
+  delete legacyBindingPayload.digest;
+  legacyBinding.digest = hash(JSON.stringify(legacyBindingPayload));
+  await writeFile(compatibleState.learningPath, `${JSON.stringify(compatibleState.learning)}\n`, "utf8");
+  assert.equal((await loadLearning(root)).learning.evaluations.find((item) => item.id === retryContract.id).schema,
+    "agentspine.learning-evaluation/v11", "historical v11 retry contracts remain readable");
+  await writeFile(compatibleState.learningPath, `${compatibleSnapshot}\n`, "utf8");
   const retryState = await loadLearning(root);
   const originalState = JSON.stringify(retryState.learning);
   const storedRetry = retryState.learning.evaluations.find((item) => item.id === retryContract.id);
-  storedRetry.retry.trialFailureRevocationDigest = hash("redirected revocation");
+  storedRetry.retry.comparisonDigest = hash("drifted comparison contract");
   const retryPayload = { ...storedRetry.retry };
   delete retryPayload.digest;
   storedRetry.retry.digest = hash(JSON.stringify(retryPayload));

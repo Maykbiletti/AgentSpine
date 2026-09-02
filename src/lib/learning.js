@@ -23,24 +23,26 @@ const MAX_STATE_BYTES = 5 * 1024 * 1024;
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret)\s*[:=]\s*\S{8,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i;
 const AUTHORITY_ASSERTION_RE = /\b(?:user|agent|person|they|he|she|i|ich|wir|nutzer|benutzer).{0,60}\b(?:may|can|is allowed|is authorized|has|have|darf|berechtigt|hat|haben).{0,50}\b(?:admin(?:istrator)?|permissions?|rights?|authorization|production access|deploy|billing|spending|policy exception|bypass|zugang|rechte|berechtigung|produktion|abrechnung|ausnahme|umgehen)\b/i;
 const PROTECTED_LESSON_RE = /\b(?:security|safety|identity|authentication|authorization|permissions?|credentials?|secrets?|policy|production|deployment|payments?|billing|tool access|file access|network access|database access|sicherheit|identität|authentifizierung|berechtigungen?|zugang|richtlinie|produktion|zahlungen?)\b/i;
-const EVALUATION_SCHEMAS = new Set(Array.from({ length: 11 }, (_, index) =>
+const EVALUATION_SCHEMAS = new Set(Array.from({ length: 12 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 1}`));
-const COVERAGE_EVALUATIONS = new Set(Array.from({ length: 10 }, (_, index) =>
+const COVERAGE_EVALUATIONS = new Set(Array.from({ length: 11 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 2}`));
-const LINEAGE_EVALUATIONS = new Set(Array.from({ length: 8 }, (_, index) =>
+const LINEAGE_EVALUATIONS = new Set(Array.from({ length: 9 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 4}`));
-const PAIRED_EVALUATIONS = new Set(Array.from({ length: 7 }, (_, index) =>
+const PAIRED_EVALUATIONS = new Set(Array.from({ length: 8 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 5}`));
-const ROOT_BOUND_EVALUATIONS = new Set(Array.from({ length: 6 }, (_, index) =>
+const ROOT_BOUND_EVALUATIONS = new Set(Array.from({ length: 7 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 6}`));
-const REGISTRY_BOUND_EVALUATIONS = new Set(Array.from({ length: 5 }, (_, index) =>
+const REGISTRY_BOUND_EVALUATIONS = new Set(Array.from({ length: 6 }, (_, index) =>
   `agentspine.learning-evaluation/v${index + 7}`));
 const INITIAL_TRIAL_EVALUATIONS = new Set(["agentspine.learning-evaluation/v8", "agentspine.learning-evaluation/v9",
-  "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11"]);
+  "agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12"]);
 const TARGET_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v9", "agentspine.learning-evaluation/v10",
-  "agentspine.learning-evaluation/v11"]);
-const DEADLINE_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11"]);
-const TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v11"]);
+  "agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12"]);
+const DEADLINE_BOUND_EVALUATIONS = new Set(["agentspine.learning-evaluation/v10", "agentspine.learning-evaluation/v11",
+  "agentspine.learning-evaluation/v12"]);
+const TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v11", "agentspine.learning-evaluation/v12"]);
+const COMPARABLE_TRIAL_RETRY_EVALUATIONS = new Set(["agentspine.learning-evaluation/v12"]);
 const DELIVERABLE_APPLICATIONS = new Set(Array.from({ length: 6 }, (_, index) =>
   `agentspine.learning-application/v${index + 2}`));
 const INITIAL_TRIAL_APPLICATIONS = new Set(["agentspine.learning-application/v5", "agentspine.learning-application/v6",
@@ -1581,16 +1583,36 @@ function storedCompletionPolicyStructure(policy) {
     && policy.authority === "context-only" && policy.digest === digest(payload);
 }
 
+function trialComparisonDigest(contract, candidateGate = null) {
+  const thresholds = {
+    ...contract.thresholds,
+    minConfidence: contract.thresholds?.minConfidence ?? candidateGate?.minConfidence,
+    minEvidence: contract.thresholds?.minEvidence ?? candidateGate?.minEvidence
+  };
+  return digest({
+    schema: "agentspine.learning-trial-comparison/v1",
+    metric: contract.metric,
+    benchmark: contract.benchmark,
+    evaluatorRoots: contract.evaluatorRoots,
+    thresholds,
+    pairing: contract.pairing,
+    authority: "context-only"
+  });
+}
+
 function trialRetryPayload({ trialFailureId, trialFailureDigest, trialFailureRevocationId,
-  trialFailureRevocationDigest, predecessorLearningId, learningId, targetDigest, scopeDigest,
-  minimumEvidenceObservedAt, admittedAt }) {
+  trialFailureRevocationDigest, predecessorLearningId, predecessorEvaluationId,
+  predecessorEvaluationDigest, comparisonDigest, learningId, targetDigest, scopeDigest,
+  minimumEvidenceObservedAt, admittedAt, schema = "agentspine.learning-trial-retry/v1" }) {
   return {
-    schema: "agentspine.learning-trial-retry/v1",
+    schema,
     trialFailureId,
     trialFailureDigest,
     trialFailureRevocationId,
     trialFailureRevocationDigest,
     predecessorLearningId,
+    ...(schema === "agentspine.learning-trial-retry/v2"
+      ? { predecessorEvaluationId, predecessorEvaluationDigest, comparisonDigest } : {}),
     learningId,
     targetDigest,
     scopeDigest,
@@ -1603,14 +1625,18 @@ function trialRetryPayload({ trialFailureId, trialFailureDigest, trialFailureRev
 function storedTrialRetryStructure(retry) {
   if (!retry || typeof retry !== "object" || Array.isArray(retry)) return false;
   const payload = trialRetryPayload(retry);
-  return retry.schema === "agentspine.learning-trial-retry/v1"
-    && Object.keys(retry).length === 13
+  const comparable = retry.schema === "agentspine.learning-trial-retry/v2";
+  return ["agentspine.learning-trial-retry/v1", "agentspine.learning-trial-retry/v2"].includes(retry.schema)
+    && Object.keys(retry).length === (comparable ? 16 : 13)
     && Object.keys(retry).every((field) => ["schema", "trialFailureId", "trialFailureDigest",
       "trialFailureRevocationId", "trialFailureRevocationDigest", "predecessorLearningId", "learningId",
-      "targetDigest", "scopeDigest", "minimumEvidenceObservedAt", "admittedAt", "authority", "digest"].includes(field))
-    && [retry.trialFailureId, retry.trialFailureRevocationId, retry.predecessorLearningId, retry.learningId]
+      "predecessorEvaluationId", "predecessorEvaluationDigest", "comparisonDigest", "targetDigest", "scopeDigest",
+      "minimumEvidenceObservedAt", "admittedAt", "authority", "digest"].includes(field))
+    && [retry.trialFailureId, retry.trialFailureRevocationId, retry.predecessorLearningId, retry.learningId,
+      ...(comparable ? [retry.predecessorEvaluationId] : [])]
       .every((value) => ID_RE.test(value || ""))
-    && [retry.trialFailureDigest, retry.trialFailureRevocationDigest, retry.targetDigest, retry.scopeDigest]
+    && [retry.trialFailureDigest, retry.trialFailureRevocationDigest, retry.targetDigest, retry.scopeDigest,
+      ...(comparable ? [retry.predecessorEvaluationDigest, retry.comparisonDigest] : [])]
       .every((value) => DIGEST_RE.test(value || ""))
     && Number.isFinite(new Date(retry.minimumEvidenceObservedAt).getTime())
     && Number.isFinite(new Date(retry.admittedAt).getTime())
@@ -1655,6 +1681,11 @@ function storedEvaluationStructure(contract) {
     && contract.thresholds.regressionTolerance <= 1
     && Number.isInteger(contract.thresholds?.beforeReceipts) && contract.thresholds.beforeReceipts >= 2
     && Number.isInteger(contract.thresholds?.afterReceipts) && contract.thresholds.afterReceipts >= 1
+    && (!COMPARABLE_TRIAL_RETRY_EVALUATIONS.has(contract.schema)
+      || (Number.isFinite(contract.thresholds?.minConfidence)
+        && contract.thresholds.minConfidence >= 0.5 && contract.thresholds.minConfidence <= 1
+        && Number.isInteger(contract.thresholds?.minEvidence)
+        && contract.thresholds.minEvidence >= 2 && contract.thresholds.minEvidence <= 10))
     && (!ROOT_BOUND_EVALUATIONS.has(contract.schema)
       || (Array.isArray(contract.evaluatorRoots)
         && contract.evaluatorRoots.length === contract.evaluatorIds.length
@@ -1952,6 +1983,8 @@ function trialRetryMatchesState(state, contract) {
     && entry.digest === retry.trialFailureRevocationDigest && entry.trialFailureId === retry.trialFailureId);
   const predecessor = state.candidates.find((entry) => entry.id === retry.predecessorLearningId);
   const candidate = state.candidates.find((entry) => entry.id === retry.learningId);
+  const predecessorEvaluation = state.evaluations.find((entry) => entry.id === failure?.evaluationId
+    && entry.digest === failure?.evaluationDigest);
   if (!failure || !revocation || !predecessor || !candidate
     || !trialFailureRevocationMatchesState(state, revocation)
     || predecessor.id !== failure.learningId || predecessor.status !== "rolled-back"
@@ -1963,6 +1996,13 @@ function trialRetryMatchesState(state, contract) {
     || retry.scopeDigest !== digest(candidate.scope)
     || retry.minimumEvidenceObservedAt !== revocation.revokedAt
     || new Date(candidate.createdAt).getTime() <= new Date(revocation.revokedAt).getTime()) return false;
+  if (COMPARABLE_TRIAL_RETRY_EVALUATIONS.has(contract.schema)
+    && (!predecessorEvaluation
+      || retry.schema !== "agentspine.learning-trial-retry/v2"
+      || retry.predecessorEvaluationId !== predecessorEvaluation.id
+      || retry.predecessorEvaluationDigest !== predecessorEvaluation.digest
+      || retry.comparisonDigest !== trialComparisonDigest(predecessorEvaluation, predecessor.promotion)
+      || retry.comparisonDigest !== trialComparisonDigest(contract))) return false;
   const predecessorEvidence = new Set(predecessor.evidence.map(evidenceIdentity));
   const candidateEvidence = candidate.evidence.map(evidenceIdentity);
   return candidate.evidence.length >= Math.max(2, state.config.minEvidence)
@@ -2864,6 +2904,19 @@ export async function registerLearningEvaluation({
       after: trialsForPhase("after"),
       authority: "context-only"
     };
+    let thresholds = {
+      minImprovement: state.config.minImprovement,
+      regressionTolerance: state.config.regressionTolerance,
+      beforeReceipts: requiredEvaluators,
+      afterReceipts: requiredEvaluators
+    };
+    const pairing = {
+      mode: "same-evaluator",
+      maxOutcomesPerEvaluatorPerPhase: 1,
+      matchMeasurementKind: true,
+      matchCaseCount: true,
+      authority: "context-only"
+    };
     const target = learningTargetForCandidate(candidate);
     const retryable = retryableTrialFailures(state, candidate);
     let retry = null;
@@ -2879,12 +2932,36 @@ export async function registerLearningEvaluation({
       if (!selected || selected.revocation.id !== latest.revocation.id) {
         throw new Error("trial retry must bind the latest matching revoked failure");
       }
+      const predecessorEvaluation = state.evaluations.find((entry) =>
+        entry.id === selected.failure.evaluationId && entry.digest === selected.failure.evaluationDigest);
+      if (!predecessorEvaluation) {
+        throw new Error("trial retry predecessor evaluation is missing or changed");
+      }
+      thresholds = {
+        ...thresholds,
+        minConfidence: state.config.minConfidence,
+        minEvidence: state.config.minEvidence
+      };
+      const comparisonDigest = trialComparisonDigest({
+        metric: normalizedMetric,
+        benchmark: normalizedBenchmark,
+        evaluatorRoots: normalizedRoots,
+        thresholds,
+        pairing
+      });
+      if (comparisonDigest !== trialComparisonDigest(predecessorEvaluation, selected.predecessor.promotion)) {
+        throw new Error("trial retry objective contract drift is not allowed");
+      }
       const retryPayload = trialRetryPayload({
+        schema: "agentspine.learning-trial-retry/v2",
         trialFailureId: selected.failure.id,
         trialFailureDigest: selected.failure.digest,
         trialFailureRevocationId: selected.revocation.id,
         trialFailureRevocationDigest: selected.revocation.digest,
         predecessorLearningId: selected.predecessor.id,
+        predecessorEvaluationId: predecessorEvaluation.id,
+        predecessorEvaluationDigest: predecessorEvaluation.digest,
+        comparisonDigest,
         learningId: candidate.id,
         targetDigest: target.digest,
         scopeDigest: digest(candidate.scope),
@@ -2904,24 +2981,13 @@ export async function registerLearningEvaluation({
       digest: digest(completionPolicyPayloadValue)
     };
     const payload = evaluationPayload({
-      schema: retry ? "agentspine.learning-evaluation/v11" : "agentspine.learning-evaluation/v10",
+      schema: retry ? "agentspine.learning-evaluation/v12" : "agentspine.learning-evaluation/v10",
       id, learningId, scope: normalizedScope, metric: normalizedMetric,
       benchmark: normalizedBenchmark,
       evaluatorIds: normalizedEvaluators,
       evaluatorRoots: normalizedRoots,
-      thresholds: {
-        minImprovement: state.config.minImprovement,
-        regressionTolerance: state.config.regressionTolerance,
-        beforeReceipts: requiredEvaluators,
-        afterReceipts: requiredEvaluators
-      },
-      pairing: {
-        mode: "same-evaluator",
-        maxOutcomesPerEvaluatorPerPhase: 1,
-        matchMeasurementKind: true,
-        matchCaseCount: true,
-        authority: "context-only"
-      },
+      thresholds,
+      pairing,
       initialTrials,
       target,
       completionPolicy,
@@ -4789,8 +4855,6 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
         if (state.measurementRevocations.some((receipt) => receipt.learningId === candidate.id)) continue;
         if (state.applicationRevocations.some((receipt) => receipt.learningId === candidate.id)) continue;
         if (state.outcomeRevocations.some((receipt) => receipt.learningId === candidate.id)) continue;
-        if (candidate.confidence < state.config.minConfidence) continue;
-        if (distinctEvidence(candidate) < state.config.minEvidence) continue;
         if (candidate.conflictsWith?.some((id) => state.candidates.some((entry) => entry.id === id && ["candidate", "accepted"].includes(entry.status)))) continue;
         if (OUTCOME_AUTO_KINDS.has(candidate.kind)) {
           if (SCOPE_FIELDS.every((field) => candidate.scope?.[field] === null)) continue;
@@ -4798,11 +4862,16 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
           const planned = promotableReceipts(state, candidate, timestamp);
           if (!planned) continue;
           const { contract, receipts } = planned;
+          const minConfidence = COMPARABLE_TRIAL_RETRY_EVALUATIONS.has(contract.schema)
+            ? contract.thresholds.minConfidence : state.config.minConfidence;
+          const minEvidence = COMPARABLE_TRIAL_RETRY_EVALUATIONS.has(contract.schema)
+            ? contract.thresholds.minEvidence : state.config.minEvidence;
+          if (candidate.confidence < minConfidence || distinctEvidence(candidate) < minEvidence) continue;
           const baseline = receipts.reduce((sum, item) => sum + item.metric.value, 0) / receipts.length;
           accepted.push(acceptCandidate(state, candidate, timestamp, true, {
             mode: "outcome-canary",
-            minConfidence: state.config.minConfidence,
-            minEvidence: state.config.minEvidence,
+            minConfidence,
+            minEvidence,
             evidenceCount: distinctEvidence(candidate),
             evaluatedAt: timestamp,
             canary: {
@@ -4836,6 +4905,8 @@ export async function evaluateLearning({ root = process.cwd(), now = new Date() 
           continue;
         }
         if (AUTO_KINDS.has(candidate.kind)) {
+          if (candidate.confidence < state.config.minConfidence) continue;
+          if (distinctEvidence(candidate) < state.config.minEvidence) continue;
           accepted.push(acceptCandidate(state, candidate, timestamp, true, {
             mode: "automatic-low-risk",
             minConfidence: state.config.minConfidence,
@@ -5194,6 +5265,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
           DEADLINE_BOUND_EVALUATIONS.has(contract.schema)).length,
         trialRetryEvaluationContracts: evaluations.filter((contract) =>
           TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
+        comparableTrialRetryEvaluationContracts: evaluations.filter((contract) =>
+          COMPARABLE_TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
         activeTargetDigest: TARGET_BOUND_EVALUATIONS.has(initialContract?.schema)
           ? initialContract.target.digest : null,
         activeCompletionPolicyDigest: DEADLINE_BOUND_EVALUATIONS.has(initialContract?.schema)
@@ -5308,6 +5381,8 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
     },
     trialRetryEvaluationContracts: learning.evaluations.filter((contract) =>
       TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
+    comparableTrialRetryEvaluationContracts: learning.evaluations.filter((contract) =>
+      COMPARABLE_TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
     trialFailureRevocations: learning.trialFailureRevocations.length,
     evaluationRevocations: learning.evaluationRevocations.length,
     validationRevocations: learning.validationRevocations.length,
