@@ -4,6 +4,20 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-09-02
+
+### Added
+
+- New initial evaluation v24 and bounded retry v25 contracts embed a content-free, digested `agentspine.learning-evidence-source-policy/v1`. It freezes an admission quorum requiring at least one fresh independent explicit-user or objective-test anchor before measurement.
+
+### Changed
+
+- Interaction-only and document-only evidence cohorts can no longer open a behavior evaluation contract, even when their confidence and independent-evidence counts pass. Historical v1-v23 contracts remain readable, and retry comparison v4 binds the same source policy across corrective trials.
+
+### Security
+
+- Re-signed source-class or quorum weakening fails closed after restart. Six concurrent eligible registrations still converge on one contract, exact-scope diagnostics expose only matching counts and a policy digest, foreign groups receive zero, and user-owned sources remain byte-for-byte unchanged.
+
 ## [0.48.0] - 2026-09-02
 
 ### Added

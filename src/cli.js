@@ -1275,6 +1275,8 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.candidateEvidenceCohortEvaluationContracts, 0);
       const blockingDefectBoundEvaluationContracts = status.records.reduce((sum, item) =>
         sum + item.blockingDefectBoundEvaluationContracts, 0);
+      const evidenceSourceBoundEvaluationContracts = status.records.reduce((sum, item) =>
+        sum + item.evidenceSourceBoundEvaluationContracts, 0);
       const blockingDefectOutcomeReceipts = status.records.reduce((sum, item) =>
         sum + item.blockingDefectOutcomeReceipts, 0);
       const deadlineBoundApplications = status.records.reduce((sum, item) =>
@@ -1326,6 +1328,7 @@ export async function run(argv = process.argv.slice(2)) {
         candidateAdmissionEvaluationContracts,
         candidateEvidenceCohortEvaluationContracts,
         blockingDefectBoundEvaluationContracts,
+        evidenceSourceBoundEvaluationContracts,
         blockingDefectOutcomeReceipts,
         deadlineBoundApplications,
         trialRetryEvaluationContracts,
