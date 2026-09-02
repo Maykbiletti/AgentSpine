@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.42.0` protects learning mutations with an owner-bound renewable file lease. A live process keeps its lock beyond the stale threshold, a crashed owner can be recovered, and a process that loses ownership aborts before replacing learning state or deleting the successor's lock.
+
 Version `0.41.0` makes the fixed corrective-trial budget independently auditable. A failed attempt 2-of-2 atomically creates one content-free terminal receipt bound to the root evaluation, exact corrective contract, failure, target and scope. Timeout revocation cannot erase the exhausted budget, and foreign groups receive neither the receipt nor its count.
 Version `0.40.0` makes large image reads quiet: an oversized optional PostToolUse payload is drained and skipped with exit 0, no output and no partial state. Mandatory prompt, source-protection, compaction and completion hooks keep the strict 64 KiB fail-closed boundary.
 

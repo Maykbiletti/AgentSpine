@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCatalog } from "./catalog.js";
-import { isFileLockContention, isTransientLockMetadataError } from "./filesystem-retry.js";
 import { loadGraph } from "./graph.js";
+import { withOwnedFileLock } from "./owned-file-lock.js";
 import { projectStateDir } from "./paths.js";
 
 const KINDS = new Set(["preference", "no-go", "goal", "correction", "personal-fact", "project-fact", "reference", "behavior"]);
@@ -2546,7 +2546,7 @@ export async function inspectLearning(root = process.cwd(), providedCatalog = nu
   }
 }
 
-async function saveState(state, path) {
+async function saveState(state, path, beforeReplace = null) {
   const content = `${JSON.stringify(state, null, 2)}\n`;
   if (Buffer.byteLength(content) > MAX_STATE_BYTES) throw new Error("learning state exceeds 5 MiB; reject or delete old candidates first");
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
@@ -2554,6 +2554,7 @@ async function saveState(state, path) {
   try {
     for (let attempt = 0; ; attempt += 1) {
       try {
+        await beforeReplace?.();
         await rename(temporary, path);
         break;
       } catch (error) {
@@ -2573,33 +2574,18 @@ async function saveState(state, path) {
 
 async function withLock(path, root, task) {
   const lockPath = `${path}.lock`;
-  let handle;
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    try {
-      handle = await open(lockPath, "wx", 0o600);
-      break;
-    } catch (error) {
-      if (!isFileLockContention(error)) throw error;
-      try {
-        const metadata = await stat(lockPath);
-        if (Date.now() - metadata.mtimeMs > 15000) await unlink(lockPath);
-      } catch (lockError) {
-        if (!isTransientLockMetadataError(lockError)) throw lockError;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
-  if (!handle) throw new Error("learning state is busy; retry shortly");
-  try {
+  return withOwnedFileLock(lockPath, async ({ assertOwned }) => {
     const state = await readState(path, root);
     if (!validConfig(state.config)) throw new Error("learning configuration is invalid; run the audit before learning");
     const result = await task(state);
-    await saveState(state, path);
+    await saveState(state, path, assertOwned);
     return result;
-  } finally {
-    await handle.close();
-    await unlink(lockPath).catch((error) => { if (error.code !== "ENOENT") throw error; });
-  }
+  }).catch((error) => {
+    if (error.message === "state is busy; retry shortly") {
+      throw new Error("learning state is busy; retry shortly");
+    }
+    throw error;
+  });
 }
 
 async function mutation(root, operation, providedCatalog = null) {

@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-09-02
+
+### Added
+
+- Learning mutations use an owner-bound `agentspine.owned-file-lock/v1` lease with a renewable heartbeat and a final ownership assertion before state replacement.
+- A real six-process race test holds each mutation beyond a shortened stale threshold, recovers a synthetic crash remnant and preserves a deliberately substituted foreign lease.
+
+### Changed
+
+- Stale learning-lock takeover now rechecks file identity before removal. Successful cleanup deletes only the exact token still owned by the completing process.
+
+### Security
+
+- A long evaluation can no longer be mistaken for a crashed writer and overwritten. Lost or manipulated ownership aborts before state commit; the former owner cannot delete its successor's lock, and user sources remain byte-for-byte unchanged.
+
 ## [0.41.0] - 2026-09-02
 
 ### Added
