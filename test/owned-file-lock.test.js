@@ -4,10 +4,9 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { withOwnedFileLock } from "../src/lib/owned-file-lock.js";
 
-const helperUrl = pathToFileURL(new URL("../src/lib/owned-file-lock.js", import.meta.url).pathname).href;
+const helperUrl = new URL("../src/lib/owned-file-lock.js", import.meta.url).href;
 
 function worker(lockPath, counterPath) {
   const script = `
