@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-09-02
+
+### Added
+
+- A locally confirmed `agentspine.learning-evaluation-revocation/v1` receipt binds one exact evaluation contract to its candidate target and immutable evaluator-registry binding while retaining the explanation only as a digest.
+- `learn-evaluation-revoke` plus scoped status, Doctor, audit and read-only Context MCP diagnostics expose content-free contract-withdrawal state.
+
+### Changed
+
+- Revoking an invalid benchmark, protocol, scope or threshold contract immediately withholds every dependent active or validated lesson and atomically restores a safe superseded predecessor.
+- Revoked contracts cannot accept measurements, projections, deliveries, outcomes, promotion or validation renewal. Their existing immutable evidence is not rewritten or over-revoked.
+
+### Security
+
+- Contract withdrawal is fail-closed: candidate, target, contract and evaluator-binding substitution fail on load; six concurrent retries create one receipt; conflicting retries are rejected; and foreign scopes receive no diagnostics.
+
 ## [0.33.0] - 2026-09-02
 
 ### Added

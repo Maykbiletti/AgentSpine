@@ -12,7 +12,7 @@ import {
   purgeLearningBySubject, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
   registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, revokeLearningEvidence,
-  revokeLearningApplication, revokeLearningDelivery, revokeLearningMeasurement, revokeLearningOutcome,
+  revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningMeasurement, revokeLearningOutcome,
   reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
@@ -827,6 +827,87 @@ test("application revocation withdraws the exact projection and blocks every dow
   assert.equal((await loadLearning(root)).learning.applications.some((item) => item.id === pending.id), true,
     "stale cleanup must retain an application referenced by a revocation");
   assert.equal((await loadLearning(root)).learning.applicationRevocations.length, 1);
+  assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
+});
+
+test("evaluation revocation withdraws the exact contract and blocks its complete outcome lineage", async (t) => {
+  const { root, state } = await fixture(t);
+  const sourceBytes = await readFile(join(root, "AGENTS.md"));
+  const start = new Date("2040-01-01T00:00:00.000Z");
+  await upsertEntity({ root, id: "person:evaluation-member", kind: "person", privacy: "shared" });
+  await proposeLearning({ root, id: "learning:evaluation-prior", kind: "behavior",
+    claim: "Use the prior synthetic evaluation procedure.", subjectId: "person:evaluation-member",
+    privacy: "shared", scope: scopedTurn, evidence: evidence("evidence:evaluation-prior", 0.97), now: start });
+  await reviewLearning({ root, id: "learning:evaluation-prior", decision: "accept",
+    reason: "Synthetic local confirmation.", confirmedByUser: true, now: start });
+  await establishValidatedLearning(root, {
+    learningId: "learning:evaluation-current", evaluationId: "evaluation:evaluation-current", start,
+    expiresAt: "2040-03-01T00:00:00.000Z", supersedesId: "learning:evaluation-prior",
+    subjectId: "person:evaluation-member"
+  });
+  const before = (await loadLearning(root)).learning;
+  const contract = before.evaluations.find((item) => item.id === "evaluation:evaluation-current");
+  const binding = before.evaluationBindings.find((item) => item.evaluationId === contract.id);
+  const candidate = before.candidates.find((item) => item.id === "learning:evaluation-current");
+  const after = before.outcomes.find((item) => item.id === candidate.promotion.canary.afterReceipts[0]);
+  await assert.rejects(revokeLearningEvaluation({ root, evaluationId: contract.id,
+    reasonCode: "protocol-invalid", reason: "Synthetic protocol invalidation." }), /explicit local confirmation/);
+  const input = { root, evaluationId: contract.id, reasonCode: "protocol-invalid",
+    reason: "Synthetic protocol invalidation.", confirmation: "local-evaluation-revocation-confirmed", now: start };
+  const attempts = await Promise.all(Array.from({ length: 6 }, () => revokeLearningEvaluation(input)));
+  assert.equal(attempts.filter((result) => result.unchanged === false).length, 1);
+  assert.equal((await revokeLearningEvaluation({ ...input, now: new Date(start.getTime() + 1000) })).unchanged, true);
+  await assert.rejects(revokeLearningEvaluation({ ...input, reasonCode: "scope-invalid",
+    reason: "Synthetic conflicting reason." }), /immutable/);
+  const stored = await loadLearning(root);
+  assert.equal(stored.learning.evaluationRevocations.length, 1);
+  assert.equal(JSON.stringify(stored.learning.evaluationRevocations).includes("Synthetic protocol invalidation"), false);
+  const receipt = stored.learning.evaluationRevocations[0];
+  assert.equal(receipt.evaluationDigest, contract.digest);
+  assert.equal(receipt.evaluatorBindingDigest, binding.digest);
+  assert.equal(receipt.targetDigest, contract.target.digest);
+  assert.deepEqual((await learningContext({ root, scope: scopedTurn,
+    now: new Date(start.getTime() + 2000) })).diagnostics,
+  ["revoked-learning-evaluation:learning:evaluation-current"]);
+  assert.deepEqual((await learningContext({ root, scope: { ...scopedTurn, projectId: "project:foreign" },
+    now: new Date(start.getTime() + 2000) })).diagnostics, []);
+  const status = await learningOutcomeStatus({ root, scope: scopedTurn, now: new Date(start.getTime() + 2000) });
+  assert.equal(status.evaluationRevocations, 1);
+  assert.equal(status.records.find((item) => item.id === candidate.id).canaryStatus, "revoked-evaluation");
+  const cli = runCli(["learn-evaluation-revoke", contract.id, "--root", root,
+    "--reason-code", "protocol-invalid", "--reason", "Synthetic protocol invalidation.",
+    "--confirm-local-evaluation-revocation", "--json"], state);
+  assert.equal(cli.receipt.schema, "agentspine.learning-evaluation-revocation/v1");
+  const doctor = runCli(["doctor", root, "--json"], state);
+  assert.equal(doctor.learningOutcomes.status, "degraded");
+  assert.equal(doctor.learningOutcomes.evaluationRevocationReceipts, 1);
+  await assert.rejects(recordLearningMeasurement({ root, id: "measurement:evaluation-replay",
+    learningId: candidate.id, evaluationId: contract.id, phase: "after", scope: scopedTurn,
+    metric: { name: contract.metric.name, direction: contract.metric.direction, value: 0.9 },
+    measurement: { kind: "objective", evaluatorId: "evaluator:test-a", runId: "run:evaluation-replay",
+      sourceDigest: hash("measurement:evaluation-replay") },
+    coverage: { datasetDigest: contract.benchmark.datasetDigest, caseCount: contract.benchmark.minCases },
+    confirmLocalMeasurement: true, now: new Date(start.getTime() + 2000) }), /evaluation contract was explicitly revoked/);
+  await assert.rejects(commitLearningOutcome({ root, id: "outcome:evaluation-replay", learningId: candidate.id,
+    evaluationId: contract.id, measurementReceiptId: after.measurementReceiptId,
+    applicationId: after.applicationId, deliveryId: after.deliveryId,
+    now: new Date(start.getTime() + 2000) }), /evaluation contract was explicitly revoked/);
+  const original = JSON.stringify(stored.learning);
+  stored.learning.evaluationRevocations[0].evaluationDigest = hash("redirected evaluation");
+  await writeFile(stored.learningPath, `${JSON.stringify(stored.learning)}\n`, "utf8");
+  await assert.rejects(loadLearning(root), /evaluation revocation state is invalid/);
+  await writeFile(stored.learningPath, `${original}\n`, "utf8");
+  const reconciliations = await Promise.all(Array.from({ length: 6 }, () =>
+    evaluateLearning({ root, now: new Date(start.getTime() + 3000) })));
+  assert.equal(reconciliations.flatMap((result) => result.reconciled)
+    .filter((item) => item.id === candidate.id && item.decision === "rolled-back").length, 1);
+  const rolledBack = (await loadLearning(root)).learning.candidates.find((item) => item.id === candidate.id);
+  assert.equal(rolledBack.rollback.mode, "automatic-evaluation-revocation");
+  assert.deepEqual((await learningContext({ root, scope: scopedTurn,
+    now: new Date(start.getTime() + 4000) })).items.map((item) => item.id), ["learning:evaluation-prior"]);
+  await deleteLearning({ root, id: candidate.id });
+  assert.equal((await loadLearning(root)).learning.evaluationRevocations.length, 0);
+  assert.equal((await purgeLearningBySubject({ root, subjectId: "person:evaluation-member" })).deleted, 1);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 
@@ -2554,6 +2635,7 @@ test("0.10 learning state upgrades in place and corrupt outcome receipts fail cl
   assert.deepEqual(upgraded.measurements, []);
   assert.deepEqual(upgraded.measurementLineage, []);
   assert.deepEqual(upgraded.trialFailures, []);
+  assert.deepEqual(upgraded.evaluationRevocations, []);
   assert.deepEqual(upgraded.evidenceRevocations, []);
   assert.deepEqual(upgraded.measurementRevocations, []);
   assert.deepEqual(upgraded.applicationRevocations, []);
