@@ -57,6 +57,7 @@ function authorityViolations(graph, attention, learning, continuity, coordinatio
     ...(learning.validationLeases || []),
     ...(learning.trialFailures || []),
     ...(learning.evaluationRevocations || []),
+    ...(learning.validationRevocations || []),
     ...(learning.evidenceRevocations || []),
     ...(learning.measurementRevocations || []),
     ...(learning.applicationRevocations || []),

@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-09-02
+
+### Added
+
+- A locally confirmed `agentspine.learning-validation-revocation/v1` receipt binds one exact validation lease to its candidate target, scope, evaluation and immutable evaluator-registry binding while retaining the explanation only as a digest.
+- `learn-validation-revoke` plus scoped status, Doctor, audit and read-only Context MCP diagnostics expose content-free validation-withdrawal state.
+
+### Changed
+
+- Revoking an invalid validation decision immediately withholds its dependent lesson and atomically restores a safe superseded predecessor without changing the underlying evaluation, measurements or outcomes.
+- Renewal cannot hide an invalid predecessor: revocation traverses the active lease's immutable predecessor chain, and revoked validation cannot accept later projections, deliveries, renewal measurements or another renewal.
+
+### Security
+
+- Validation withdrawal is fail-closed: candidate, target, scope, lease, contract and evaluator-binding substitution fail on load; six concurrent retries create one receipt; conflicting retries are rejected; and foreign scopes receive no diagnostics.
+
 ## [0.34.0] - 2026-09-02
 
 ### Added

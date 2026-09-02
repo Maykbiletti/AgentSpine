@@ -12,7 +12,7 @@ import {
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
   purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningMeasurement,
   recordLearningOutcome, registerLearningEvaluation, registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator,
-  reviewLearning, revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningEvidence, revokeLearningMeasurement, revokeLearningOutcome,
+  reviewLearning, revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningEvidence, revokeLearningMeasurement, revokeLearningOutcome, revokeLearningValidation,
   rollbackLearning
 } from "./lib/learning.js";
 import { configureContinuity, loadContinuity, purgeContinuity } from "./lib/continuity.js";
@@ -153,6 +153,7 @@ Usage:
   agentspine learn-evaluator-revoke <id> --reason text --confirm-local-evaluator
   agentspine learn-evaluation <id> --learning id --metric name --direction higher|lower --task-digest sha256 --dataset-digest sha256 --protocol-digest sha256 --min-cases n --evaluators id,id --evaluator-roots id=sha256,id=sha256 [--expires-at date] --confirm-local-evaluation
   agentspine learn-evaluation-revoke <evaluation-id> --reason-code benchmark-invalid|protocol-invalid|scope-invalid|threshold-invalid|duplicate|other --reason text --confirm-local-evaluation-revocation
+  agentspine learn-validation-revoke <validation-lease-id> --reason-code decision-invalid|cohort-invalid|binding-invalid|scope-invalid|duplicate|other --reason text --confirm-local-validation-revocation
   agentspine learn-revalidation-start <learning-id> --confirm-local-validation
   agentspine learn-revalidate <learning-id> --measurements id,id --applications id,id --deliveries id,id --confirm-local-validation
   agentspine learn-measurement <id> --learning id --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --measurement objective|user-feedback|model-suggestion --evaluator id --run id --source-digest sha256 --dataset-digest sha256 --case-count n --confirm-local-measurement
@@ -569,6 +570,15 @@ export async function run(argv = process.argv.slice(2)) {
       reason: flags.reason,
       confirmation: booleanFlag(flags["confirm-local-evaluation-revocation"])
         ? "local-evaluation-revocation-confirmed" : null
+    }), json);
+  }
+
+  if (command === "learn-validation-revoke") {
+    return output(await revokeLearningValidation({
+      root: flags.root || process.cwd(), validationLeaseId: positional[0], reasonCode: flags["reason-code"],
+      reason: flags.reason,
+      confirmation: booleanFlag(flags["confirm-local-validation-revocation"])
+        ? "local-validation-revocation-confirmed" : null
     }), json);
   }
 
@@ -1247,6 +1257,7 @@ export async function run(argv = process.argv.slice(2)) {
         sum + item.deadlineBoundApplications, 0);
       const trialFailureReceipts = status.records.reduce((sum, item) => sum + item.trialFailureReceipts, 0);
       const evaluationRevocationReceipts = status.records.reduce((sum, item) => sum + item.evaluationRevocationReceipts, 0);
+      const validationRevocationReceipts = status.records.reduce((sum, item) => sum + item.validationRevocationReceipts, 0);
       const evidenceRevocationReceipts = status.records.reduce((sum, item) => sum + item.evidenceRevocationReceipts, 0);
       const measurementRevocationReceipts = status.records.reduce((sum, item) => sum + item.measurementRevocationReceipts, 0);
       const applicationRevocationReceipts = status.records.reduce((sum, item) => sum + item.applicationRevocationReceipts, 0);
@@ -1258,7 +1269,7 @@ export async function run(argv = process.argv.slice(2)) {
       const staleInitialOutcomes = status.records.reduce((sum, item) => sum + item.staleInitialOutcomes, 0);
       const unplannedOutcomeReceipts = totalOutcomeReceipts - plannedOutcomeReceipts;
       learningOutcomes = {
-        status: status.records.some((item) => ["stale", "revoked", "revoked-evaluation", "revoked-evidence", "revoked-measurement", "revoked-application", "revoked-delivery", "revoked-outcome", "unproven", "failed-trial"].includes(item.canaryStatus))
+        status: status.records.some((item) => ["stale", "revoked", "revoked-evaluation", "revoked-validation", "revoked-evidence", "revoked-measurement", "revoked-application", "revoked-delivery", "revoked-outcome", "unproven", "failed-trial"].includes(item.canaryStatus))
           || unboundAfterReceipts > 0 || undeliveredAfterReceipts > 0 || unplannedOutcomeReceipts > 0
           || stalePendingApplications > 0 || staleUnconsumedMeasurements > 0
           || inactiveEvaluatorRegistryContracts > 0 || staleRevalidations > 0
@@ -1279,6 +1290,7 @@ export async function run(argv = process.argv.slice(2)) {
         deadlineBoundApplications,
         trialFailureReceipts,
         evaluationRevocationReceipts,
+        validationRevocationReceipts,
         evidenceRevocationReceipts,
         measurementRevocationReceipts,
         applicationRevocationReceipts,
