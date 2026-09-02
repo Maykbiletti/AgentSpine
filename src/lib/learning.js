@@ -5574,33 +5574,45 @@ export async function learningOutcomeStatus({ root = process.cwd(), scope = null
         authority: "context-only"
       };
     });
+  const visibleCandidateIds = new Set(records.map((record) => record.id));
+  const visibleEvaluations = runtimeScope === null ? learning.evaluations
+    : learning.evaluations.filter((contract) => visibleCandidateIds.has(contract.learningId));
+  const visibleEvaluationIds = new Set(visibleEvaluations.map((contract) => contract.id));
+  const visibleEvaluatorIds = new Set(visibleEvaluations.flatMap((contract) => [
+    ...(contract.evaluatorIds || []),
+    ...(contract.evaluatorRoots || []).map((entry) => entry.evaluatorId)
+  ]));
+  const visibleEvaluatorRegistry = runtimeScope === null ? learning.evaluatorRegistry
+    : learning.evaluatorRegistry.filter((record) => visibleEvaluatorIds.has(record.id));
+  const visibleEvaluationBindings = runtimeScope === null ? learning.evaluationBindings
+    : learning.evaluationBindings.filter((binding) => visibleEvaluationIds.has(binding.evaluationId));
+  const visibleValidationLeases = runtimeScope === null ? learning.validationLeases
+    : learning.validationLeases.filter((lease) => visibleCandidateIds.has(lease.learningId)
+      && visibleEvaluationIds.has(lease.evaluationId));
+  const recordTotal = (field) => records.reduce((sum, record) => sum + record[field], 0);
   return {
     schema: "agentspine.learning-outcome-status/v1",
     root: learning.root,
     evaluatorRegistry: {
-      active: learning.evaluatorRegistry.filter((record) => record.status === "active").length,
-      revoked: learning.evaluatorRegistry.filter((record) => record.status === "revoked").length,
-      bindings: learning.evaluationBindings.length,
-      validationLeases: learning.validationLeases.length,
+      active: visibleEvaluatorRegistry.filter((record) => record.status === "active").length,
+      revoked: visibleEvaluatorRegistry.filter((record) => record.status === "revoked").length,
+      bindings: visibleEvaluationBindings.length,
+      validationLeases: visibleValidationLeases.length,
       authority: "context-only"
     },
-    trialRetryEvaluationContracts: learning.evaluations.filter((contract) =>
-      TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
-    comparableTrialRetryEvaluationContracts: learning.evaluations.filter((contract) =>
-      COMPARABLE_TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
-    boundedTrialRetryEvaluationContracts: learning.evaluations.filter((contract) =>
-      BOUNDED_TRIAL_RETRY_EVALUATIONS.has(contract.schema)).length,
-    stalenessBoundEvaluationContracts: records.reduce((sum, record) =>
-      sum + record.stalenessBoundEvaluationContracts, 0),
-    trialRetryExhaustions: records.reduce((sum, record) => sum + record.trialRetryExhaustionReceipts, 0),
-    trialFailureRevocations: learning.trialFailureRevocations.length,
-    evaluationRevocations: learning.evaluationRevocations.length,
-    validationRevocations: learning.validationRevocations.length,
-    evidenceRevocations: learning.evidenceRevocations.length,
-    measurementRevocations: learning.measurementRevocations.length,
-    applicationRevocations: learning.applicationRevocations.length,
-    deliveryRevocations: learning.deliveryRevocations.length,
-    outcomeRevocations: learning.outcomeRevocations.length,
+    trialRetryEvaluationContracts: recordTotal("trialRetryEvaluationContracts"),
+    comparableTrialRetryEvaluationContracts: recordTotal("comparableTrialRetryEvaluationContracts"),
+    boundedTrialRetryEvaluationContracts: recordTotal("boundedTrialRetryEvaluationContracts"),
+    stalenessBoundEvaluationContracts: recordTotal("stalenessBoundEvaluationContracts"),
+    trialRetryExhaustions: recordTotal("trialRetryExhaustionReceipts"),
+    trialFailureRevocations: recordTotal("trialFailureRevocationReceipts"),
+    evaluationRevocations: recordTotal("evaluationRevocationReceipts"),
+    validationRevocations: recordTotal("validationRevocationReceipts"),
+    evidenceRevocations: recordTotal("evidenceRevocationReceipts"),
+    measurementRevocations: recordTotal("measurementRevocationReceipts"),
+    applicationRevocations: recordTotal("applicationRevocationReceipts"),
+    deliveryRevocations: recordTotal("deliveryRevocationReceipts"),
+    outcomeRevocations: recordTotal("outcomeRevocationReceipts"),
     records,
     learningPath,
     authority: "context-only",

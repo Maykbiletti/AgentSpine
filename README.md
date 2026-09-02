@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.44.0` makes scoped learning diagnostics fully group-isolated. Every top-level evaluator, binding, lease, retry, exhaustion, staleness and revocation count returned by `learn-status` or the read-only Context MCP is now derived only from candidate records visible to that exact scope; foreign scopes receive zeros without learning whether protected state exists. Unscoped Doctor and audit remain project-wide for local operators.
+
 Version `0.43.0` freezes outcome freshness and Canary lifetime in each new evaluation contract. Evaluation v14 and bounded retry v15 carry a digested, content-free staleness policy; later configuration changes affect only future contracts and cannot revive old evidence or extend a registered Canary. Retry comparisons include the policy digest, while scoped status, Doctor and audit expose only counts and digests.
 
 Version `0.42.0` protects learning mutations with an owner-bound renewable file lease. A live process keeps its lock beyond the stale threshold, a crashed owner can be recovered, and a process that loses ownership aborts before replacing learning state or deleting the successor's lock.

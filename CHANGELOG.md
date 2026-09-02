@@ -4,6 +4,16 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-09-02
+
+### Changed
+
+- Scoped `learn-status` and read-only `learning_outcome_status` now derive every top-level evaluator, binding, lease, retry, exhaustion, staleness and revocation aggregate from the candidate records visible to that exact scope. Unscoped Doctor and audit remain project-wide.
+
+### Security
+
+- A foreign group or project can no longer infer whether another scope has registered or revoked evaluator roots, evaluation bindings, validation leases, retry contracts, terminal exhaustion, or any proof-revocation class. Exact-scope records, claims, identifiers and user-source bytes remain unchanged.
+
 ## [0.43.0] - 2026-09-02
 
 ### Added

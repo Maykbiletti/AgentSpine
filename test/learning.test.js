@@ -371,6 +371,8 @@ test("evidence revocation is immutable, immediately withheld, group-isolated, an
   const status = await learningOutcomeStatus({ root, scope: alphaScope });
   assert.equal(status.evidenceRevocations, 1);
   assert.equal(status.records.find((item) => item.id === "learning:revocation-new").canaryStatus, "revoked-evidence");
+  assert.equal((await learningOutcomeStatus({ root,
+    scope: { ...alphaScope, groupId: "group:revocation-beta" } })).evidenceRevocations, 0);
 
   const originalState = JSON.stringify(stored.learning);
   stored.learning.evidenceRevocations[0].evidenceDigest = hash("redirected evidence");
@@ -478,6 +480,9 @@ test("measurement revocation is immutable, immediately withheld, group-isolated,
   assert.equal(status.measurementRevocations, 1);
   assert.equal(status.records.find((item) => item.id === "learning:measurement-new").canaryStatus,
     "revoked-measurement");
+  assert.equal((await learningOutcomeStatus({ root,
+    scope: { ...alphaScope, groupId: "group:measurement-beta" },
+    now: new Date(start.getTime() + 4000) })).measurementRevocations, 0);
   const cliReceipt = runCli(["learn-measurement-revoke", "measurement:outcome:measurement-before-a", "--root", root,
     "--reason-code", "evaluator-invalid", "--reason", "Synthetic evaluator invalidated.",
     "--confirm-local-measurement-revocation", "--json"], state);
@@ -612,6 +617,9 @@ test("delivery revocation invalidates turn proof, withholds context, and rolls b
   assert.equal(status.deliveryRevocations, 1);
   assert.equal(status.records.find((item) => item.id === "learning:delivery-new").canaryStatus,
     "revoked-delivery");
+  assert.equal((await learningOutcomeStatus({ root,
+    scope: { ...alphaScope, groupId: "group:delivery-beta" },
+    now: new Date(start.getTime() + 4000) })).deliveryRevocations, 0);
   const cliReceipt = runCli(["learn-delivery-revoke", applied.deliveryId, "--root", root,
     "--reason-code", "hook-invalid", "--reason", "Synthetic hook evidence invalidated.",
     "--confirm-local-delivery-revocation", "--json"], state);
@@ -746,6 +754,8 @@ test("application revocation withdraws the exact projection and blocks every dow
   assert.equal(status.applicationRevocations, 1);
   assert.equal(status.records.find((item) => item.id === "learning:application-current")
     .canaryStatus, "revoked-application");
+  assert.equal((await learningOutcomeStatus({ root, scope: { ...scopedTurn, projectId: "project:foreign" },
+    now: new Date(start.getTime() + 5000) })).applicationRevocations, 0);
   const cli = runCli(["learn-application-revoke", applicationReceipt.id, "--root", root,
     "--reason-code", "projection-invalid", "--reason", "Synthetic projection binding invalidated.",
     "--confirm-local-application-revocation", "--json"], state);
@@ -876,6 +886,11 @@ test("evaluation revocation withdraws the exact contract and blocks its complete
   const status = await learningOutcomeStatus({ root, scope: scopedTurn, now: new Date(start.getTime() + 2000) });
   assert.equal(status.evaluationRevocations, 1);
   assert.equal(status.records.find((item) => item.id === candidate.id).canaryStatus, "revoked-evaluation");
+  const foreignStatus = await learningOutcomeStatus({ root,
+    scope: { ...scopedTurn, projectId: "project:foreign" }, now: new Date(start.getTime() + 2000) });
+  assert.equal(foreignStatus.evaluationRevocations, 0);
+  assert.deepEqual(foreignStatus.evaluatorRegistry,
+    { active: 0, revoked: 0, bindings: 0, validationLeases: 0, authority: "context-only" });
   const cli = runCli(["learn-evaluation-revoke", contract.id, "--root", root,
     "--reason-code", "protocol-invalid", "--reason", "Synthetic protocol invalidation.",
     "--confirm-local-evaluation-revocation", "--json"], state);
@@ -979,6 +994,8 @@ test("validation revocation withdraws an exact decision through its immutable re
   assert.equal(status.validationRevocations, 1);
   assert.equal(status.records.find((item) => item.id === "learning:validation-current").canaryStatus,
     "revoked-validation");
+  assert.equal((await learningOutcomeStatus({ root, scope: { ...scopedTurn, projectId: "project:foreign" },
+    now: new Date(renewalAt.getTime() + 8000) })).validationRevocations, 0);
   const cli = runCli(["learn-validation-revoke", initial.id, "--root", root,
     "--reason-code", "decision-invalid", "--reason", "Synthetic validation decision invalidated.",
     "--confirm-local-validation-revocation", "--json"], state);
@@ -1065,6 +1082,8 @@ test("outcome revocation withdraws only the exact result and rolls back its vali
   const status = await learningOutcomeStatus({ root, scope: scopedTurn, now: new Date(start.getTime() + 5000) });
   assert.equal(status.outcomeRevocations, 1);
   assert.equal(status.records.find((item) => item.id === "learning:outcome-current").canaryStatus, "revoked-outcome");
+  assert.equal((await learningOutcomeStatus({ root, scope: { ...scopedTurn, projectId: "project:foreign" },
+    now: new Date(start.getTime() + 5000) })).outcomeRevocations, 0);
   const cli = runCli(["learn-outcome-revoke", outcomeId, "--root", root, "--reason-code", "binding-invalid",
     "--reason", "Synthetic outcome binding invalidated.", "--confirm-local-outcome-revocation", "--json"], state);
   assert.equal(cli.receipt.schema, "agentspine.learning-outcome-revocation/v1");
@@ -1271,6 +1290,8 @@ test("staleness policy freezes outcome freshness and Canary lifetime across conf
   const foreignStatus = await learningOutcomeStatus({ root, scope: betaScope, now: promotedAt });
   assert.equal(foreignStatus.stalenessBoundEvaluationContracts, 0);
   assert.deepEqual(foreignStatus.records, []);
+  assert.deepEqual(foreignStatus.evaluatorRegistry,
+    { active: 0, revoked: 0, bindings: 0, validationLeases: 0, authority: "context-only" });
   const saved = await loadLearning(root);
   const tampered = saved.learning.evaluations.find((entry) => entry.id === canaryContract.contract.id);
   tampered.stalenessPolicy.canaryTtlDays = 90;
@@ -1719,6 +1740,9 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
   assert.equal(record.trialFailureRevocationReceipts, 1);
   assert.deepEqual(record.revokedTrialFailureIds, [failure.id]);
   assert.equal(record.status, "rolled-back", "revocation must never resurrect a failed Canary");
+  assert.equal((await learningOutcomeStatus({ root,
+    scope: { ...alphaScope, groupId: "group:failure-beta" },
+    now: new Date(deadlinePassed.getTime() + 3000) })).trialFailureRevocations, 0);
   const cli = runCli(["learn-trial-failure-revoke", failure.id, "--root", root,
     "--reason-code", "clock-invalid", "--reason", "Synthetic local clock invalidation.",
     "--confirm-local-trial-failure-revocation", "--json"], state);
@@ -1830,8 +1854,12 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
     .comparableTrialRetryEvaluationContracts, 1);
   assert.equal(retryStatus.records.find((item) => item.id === "learning:failure-retry")
     .boundedTrialRetryEvaluationContracts, 1);
-  assert.deepEqual((await learningOutcomeStatus({ root,
-    scope: { ...alphaScope, groupId: "group:failure-beta" }, now: retryNow })).records, []);
+  const foreignRetryStatus = await learningOutcomeStatus({ root,
+    scope: { ...alphaScope, groupId: "group:failure-beta" }, now: retryNow });
+  assert.deepEqual(foreignRetryStatus.records, []);
+  assert.equal(foreignRetryStatus.trialRetryEvaluationContracts, 0);
+  assert.equal(foreignRetryStatus.comparableTrialRetryEvaluationContracts, 0);
+  assert.equal(foreignRetryStatus.boundedTrialRetryEvaluationContracts, 0);
   const retryDoctor = runCli(["doctor", root, "--json"], state);
   assert.equal(retryDoctor.learningOutcomes.trialRetryEvaluationContracts, 1);
   assert.equal(retryDoctor.learningOutcomes.comparableTrialRetryEvaluationContracts, 1);
