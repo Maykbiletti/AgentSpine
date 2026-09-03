@@ -32,7 +32,7 @@ async function fenceBeforePolicyWrite(root, claim) {
   const { policy } = await loadGatewayRuntime(root);
   const goal = policy.goals.find((item) => item.goalId === claim.item.goalId);
   const step = goal.plan.steps.find((item) => item.stepId === claim.item.goalStepId);
-  return reviewGoalPremortem({ root, goal, step, item: claim.item, checkpoint: null,
+  return reviewGoalPremortem({ root: policy.root, goal, step, item: claim.item, checkpoint: null,
     completedAt: "2032-02-01T00:00:03.000Z", host: "codex", readOnly: true });
 }
 

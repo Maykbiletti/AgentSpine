@@ -15,6 +15,7 @@ import {
 import {
   closedPremortemForGoal, inspectDeliveryPremortems, recordDeliveryPremortem
 } from "../src/lib/delivery-premortem.js";
+import { canonicalPath } from "../src/lib/paths.js";
 
 const HOOK_PATH = fileURLToPath(new URL("../src/hook.js", import.meta.url));
 const PROJECT_ID = "project:write-intent";
@@ -344,7 +345,8 @@ test("PreToolUse blocks when premortem state conflicts after its initial verific
     sessionId: deliveryActorSession(identity), scope: { projectId: PROJECT_ID } });
   const lock = `${verification}.lock`;
   await writeFile(lock, "synthetic race barrier\n", "utf8");
-  const project = createHash("sha256").update(root).digest("hex").slice(0, 32);
+  const canonicalRoot = await canonicalPath(root);
+  const project = createHash("sha256").update(canonicalRoot).digest("hex").slice(0, 32);
   const pending = join(state, "identifier-guard", project, "pending",
     `${createHash("sha256").update(target).digest("hex")}.${createHash("sha256")
       .update(tool.tool_use_id).digest("hex")}.json`);

@@ -5,6 +5,7 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { loadGatewayRuntime } from "../src/lib/gateway-runtime.js";
 import { GOAL_PREMORTEM_CONTRACT, planDefinitionMaterial } from "../src/lib/gateway-premortem.js";
+import { canonicalPath } from "../src/lib/paths.js";
 import { assignPremortemPlan as assignPlan,
   premortemGoalFixture as fixture } from "./goal-premortem-fixture.js";
 import { markLegacyGatewayPolicy } from "./legacy-goal-fixture.js";
@@ -21,8 +22,9 @@ function digest(value) {
 }
 
 async function writeProvenance(policyPath, root, state, previousPolicyDigest, nextPolicyDigest) {
+  const canonicalRoot = await canonicalPath(root);
   const material = { schema: "agentspine.gateway-policy-provenance/v1",
-    projectRootDigest: digest(root), policySchema: "agentspine.gateway-policy/v2",
+    projectRootDigest: digest(canonicalRoot), policySchema: "agentspine.gateway-policy/v2",
     contract: GOAL_PREMORTEM_CONTRACT, state, previousPolicyDigest, nextPolicyDigest,
     authority: "context-only-contract-provenance" };
   const value = { ...material, digest: digest(material) };
