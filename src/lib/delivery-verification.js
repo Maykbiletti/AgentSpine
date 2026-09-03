@@ -3,7 +3,7 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { replaceFileWithRetry } from "./filesystem-retry.js";
 import { withOwnedFileLock } from "./owned-file-lock.js";
-import { projectStateDir } from "./paths.js";
+import { canonicalPath, projectStateDir } from "./paths.js";
 
 export const DELIVERY_VERIFICATION_SCHEMA = "agentspine.delivery-verification/v1";
 const DIGEST_RE = /^[a-f0-9]{64}$/;
@@ -167,7 +167,7 @@ function eventIdentity(input, actions, success) {
 }
 
 async function statePaths(root, laneDigest) {
-  const directory = join(await projectStateDir(root), "delivery-verification");
+  const directory = join(await projectStateDir(await canonicalPath(root)), "delivery-verification");
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, `${laneDigest}.json`);
   return { path, lockPath: `${path}.lock` };
