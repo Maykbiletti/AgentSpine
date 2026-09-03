@@ -253,8 +253,8 @@ function sessionId(input) {
 async function startSelfstarter(input, event, root, scope, sourceDiagnostics) {
   if (!SELFSTART_EVENTS.has(event)) return null;
   const requested = selfstarterInput(input);
-  if (["skipped-unmarked-home", "skipped-home-root"].includes(sourceDiagnostics?.projectTreeScan)) {
-    if (requested) throw new Error("self-starter cannot use a user home as its workspace root");
+  if (selfstarterRootSkipped(sourceDiagnostics)) {
+    if (requested) throw new Error("self-starter cannot use a user home or host profile as its workspace root");
     return null;
   }
   const session = sessionId(input);
@@ -267,6 +267,11 @@ async function startSelfstarter(input, event, root, scope, sourceDiagnostics) {
     taskId: scope.currentTaskId, jobId: boundedId(requested?.job_id ?? requested?.jobId, "jobId"),
     host: scope.host, sessionId: session, now: input.timestamp || new Date()
   });
+}
+
+function selfstarterRootSkipped(sourceDiagnostics) {
+  return ["skipped-unmarked-home", "skipped-home-root", "skipped-profile-root"]
+    .includes(sourceDiagnostics?.projectTreeScan);
 }
 
 async function startChannelEvent(input, event, root, scope, catalog) {
@@ -480,6 +485,11 @@ function filesystemScanError(error) {
   return Boolean(error && (error.code === "AGENTSPINE_SCAN_INCOMPLETE" || error.agentSpineScan === true));
 }
 
+function hookScanFailureFailsOpen(error) {
+  return filesystemScanError(error) || (["EPERM", "EACCES"].includes(error?.code)
+    && ["opendir", "readdir", "scandir"].includes(error?.syscall));
+}
+
 async function auditSkippedScans(input, phase, skipped = []) {
   const item = skipped[0];
   if (!item) return;
@@ -491,11 +501,19 @@ async function auditSkippedScans(input, phase, skipped = []) {
 }
 
 async function allowScanFailure(input, phase, error) {
+  const event = input.hook_event_name || input.event_name || "unknown";
   await recordHookScanAudit({
-    event: "PreToolUse", toolName: input.tool_name || null, phase, error,
+    event, toolName: input.tool_name || null, phase, error,
     path: error?.path || input.cwd || process.cwd(), now: input.timestamp || new Date()
   });
-  return { blocked: false, scanFailedOpen: true, phase, error: error.message };
+  return { blocked: false, scanFailedOpen: true, event, phase, error: error.message };
+}
+
+async function finishScanFailure(input, payload, phase, error) {
+  const allowed = await allowScanFailure(input, phase, error);
+  if (payload) return allowed;
+  process.stdout.write("{}\n");
+  return undefined;
 }
 
 function stringValues(value, output = []) {
@@ -540,9 +558,7 @@ function blockPrompt(reason) {
   })}\n`);
 }
 
-export async function runHook(payload = null, options = {}) {
-  const input = payload || await readStdin(options);
-  if (input === SILENT_OVERSIZE_POST_TOOL_USE) return;
+async function runHookCore(input, payload) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("hook input must be one JSON object");
   const event = input.hook_event_name || input.event_name || "";
   if (!KNOWN_EVENTS.has(event)) throw new Error(`unsupported hook event: ${event || "missing"}`);
@@ -572,11 +588,8 @@ export async function runHook(payload = null, options = {}) {
   try {
     resolvedSources = await resolveHostSourceCatalog({ host: instructionHost, cwd, input });
   } catch (error) {
-    if (event === "PreToolUse" && isScanFailOpenTool(input.tool_name) && filesystemScanError(error)) {
-      const allowed = await allowScanFailure(input, "source-resolution", error);
-      if (payload) return allowed;
-      process.stdout.write("{}\n");
-      return;
+    if (hookScanFailureFailsOpen(error)) {
+      return finishScanFailure(input, payload, "source-resolution", error);
     }
     const reason = `AgentSpine source resolution failed closed: ${error.message}`;
     if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
@@ -650,7 +663,7 @@ export async function runHook(payload = null, options = {}) {
     }
   }
 
-  if (event === "PreToolUse") {
+  if (event === "PreToolUse" && !selfstarterRootSkipped(resolvedSources.diagnostics)) {
     try {
       scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
       const exact = await selfstarterScope(input, scope, root, "effect");
@@ -661,11 +674,8 @@ export async function runHook(payload = null, options = {}) {
         });
       }
     } catch (error) {
-      if (isScanFailOpenTool(input.tool_name) && filesystemScanError(error)) {
-        const allowed = await allowScanFailure(input, "self-starter", error);
-        if (payload) return allowed;
-        process.stdout.write("{}\n");
-        return;
+      if (isScanFailOpenTool(input.tool_name) && hookScanFailureFailsOpen(error)) {
+        return finishScanFailure(input, payload, "self-starter", error);
       }
       const reason = `AgentSpine self-starter denied this effect: ${error.message}`;
       if (payload) return { blocked: true, reason, selfstarter: { allowed: false, reason: error.message } };
@@ -680,7 +690,7 @@ export async function runHook(payload = null, options = {}) {
     attentionEvent = await captureAttentionLifecycle(input, event, root, scope, catalog);
   }
 
-  if (event === "PostToolUse") {
+  if (event === "PostToolUse" && !selfstarterRootSkipped(resolvedSources.diagnostics)) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     const exact = await selfstarterScope(input, scope, root, "effect");
     if (exact) {
@@ -693,7 +703,8 @@ export async function runHook(payload = null, options = {}) {
 
   if (["Stop", "SubagentStop"].includes(event)) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
-    const exact = await selfstarterScope(input, scope, root, "resume");
+    const exact = selfstarterRootSkipped(resolvedSources.diagnostics)
+      ? null : await selfstarterScope(input, scope, root, "resume");
     if (exact && !scope.currentTaskId) scope.currentTaskId = exact.taskId;
     try {
       learningDelivery = await recordLearningDeliveries({
@@ -815,6 +826,9 @@ export async function runHook(payload = null, options = {}) {
       process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
       return;
     } catch (error) {
+      if (hookScanFailureFailsOpen(error)) {
+        return finishScanFailure(input, payload, "context-lifecycle", error);
+      }
       if (event === "UserPromptSubmit") {
         await recordPreflightFailure({ receiptId: preflight?.receipt?.id || null, input, host,
           error, now: input.timestamp || new Date(), env: process.env }).catch(() => {});
@@ -839,6 +853,18 @@ export async function runHook(payload = null, options = {}) {
 
   if (payload) return { blocked: false, attentionEvent, selfstarter, learningDelivery };
   process.stdout.write("{}\n");
+}
+
+export async function runHook(payload = null, options = {}) {
+  let input = payload;
+  try {
+    input ||= await readStdin(options);
+    if (input === SILENT_OVERSIZE_POST_TOOL_USE) return;
+    return await runHookCore(input, payload);
+  } catch (error) {
+    if (!hookScanFailureFailsOpen(error) || input === SILENT_OVERSIZE_POST_TOOL_USE) throw error;
+    return finishScanFailure(input, payload, "lifecycle", error);
+  }
 }
 
 if (isMainModule(import.meta.url)) {

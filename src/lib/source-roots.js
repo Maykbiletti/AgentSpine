@@ -473,8 +473,9 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   }
   const knownHomeRoots = await homeRoots(env);
   const skippedHomeTree = knownHomeRoots.some((root) => samePath(root, projectRoot));
+  const skippedProfileTree = samePath(hostHome, projectRoot);
   const skippedFallbackHomeTree = skippedHomeTree && rootResolution === "cwd-fallback";
-  if (!skippedHomeTree) {
+  if (!skippedHomeTree && !skippedProfileTree) {
     sources.push(...await boundedMarkdownTree(projectRoot, "agentspine:project", host, "project", 3000, deadline,
       { projectBoundary: true, maxFiles: MAX_PROJECT_FILES, maxDirectoryEntries: MAX_PROJECT_DIRECTORY_ENTRIES, skipped }));
   }
@@ -504,7 +505,7 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     reason: documents.length ? null : "No regular, non-symlink host-native Markdown source exists in the checked scope.",
     personalContinuityLoaded: documents.some((item) => item.sourceScope === "user") || Boolean(activeUserState),
     broadHomeScan: false, projectTreeScan: skippedFallbackHomeTree ? "skipped-unmarked-home"
-      : skippedHomeTree ? "skipped-home-root" : "bounded",
+      : skippedHomeTree ? "skipped-home-root" : skippedProfileTree ? "skipped-profile-root" : "bounded",
     skipped: skipped.sort((a, b) => a.path.localeCompare(b.path) || a.operation.localeCompare(b.operation)),
     rootResolution, registryRevision: registry.revision,
     ...(host === "claude" ? {

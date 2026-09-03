@@ -86,3 +86,7 @@ Execution-policy mutation and job administration are absent from MCP. Hooks cann
 - Job state, policy, locks, and receipts stay in AgentSpine's external per-project state directory. Existing source Markdown is never used as checkpoint storage and is never modified or removed by uninstall.
 
 AgentSpine does not authenticate a shell user, bypass host prompts, or guarantee that an arbitrary tool is sandboxed. Host and operating-system permissions remain authoritative. A grant authorizes only the listed AgentSpine lifecycle effects for one exact job; it creates no broader file, network, production, payment, deployment, or messaging right.
+
+The exact configured Claude, Codex, or BLUN profile directory is never accepted as a self-starter workspace root. This check occurs before source catalog construction and before workspace fingerprinting, preventing a console started inside its profile root from recursively treating host state as a project. The exclusion is exact: a marked project below the profile root is scanned and governed normally.
+
+Filesystem traversal availability is separate from execution authority. If a bounded scan encounters an inaccessible directory, lifecycle hooks skip or audit the scan failure and return successfully; they do not grant a job, capability, tool, identity, or permission. Ordinary self-starter scope and policy violations remain fail closed.

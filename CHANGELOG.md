@@ -4,6 +4,18 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.59.1] - 2026-09-03
+
+### Fixed
+
+- Raw `EPERM` and `EACCES` directory-enumeration failures, plus scanner-tagged incomplete traversals, now fail open for every native hook event. In particular, `PostToolUse`, `Stop`, and `SubagentStop` return successfully instead of terminating the host lifecycle with exit code 2.
+- Every fail-open hook scan records the actual event, phase, error code, and affected path in the local audit log. Policy, identity, grant, scope, and protected-source violations remain fail closed.
+- When the console starts at the exact configured Claude, Codex, or BLUN profile root, project-source discovery and self-starter fingerprinting no longer recurse through the profile tree. Nested project roots remain bounded and fully enforced.
+
+### Tests
+
+- The unprivileged Windows lane creates a real ACL-denied directory with `icacls` and verifies direct and installed-entrypoint `PostToolUse` and `Stop` success, audit evidence, skipped traversal, and unchanged source bytes. The macOS lane repeats the denial with mode `000`.
+
 ## [0.59.0] - 2026-09-03
 
 ### Added

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,6 +81,53 @@ async function authorize(root, session, toolUseId, timestamp, extra = {}) {
     tool_input: { file_path: join(root, "artifact.txt"), content: "synthetic" }, ...scope, ...extra
   });
 }
+
+test("an exact host profile root is never fingerprinted as a self-starter workspace", async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "agentspine-profile-root-"));
+  const profile = join(workspace, "synthetic-codex-profile");
+  const stateRoot = join(workspace, "state");
+  const nested = join(profile, "ElevatedDiagnostics");
+  const project = join(profile, "synthetic-project");
+  await Promise.all([
+    mkdir(join(profile, ".git"), { recursive: true }), mkdir(stateRoot), mkdir(nested, { recursive: true }),
+    mkdir(join(project, ".git"), { recursive: true })
+  ]);
+  const source = "# Synthetic profile rules\n\nKeep this source byte-exact.\n";
+  await writeFile(join(profile, "AGENTS.md"), source, "utf8");
+  await writeFile(join(nested, "PRIVATE.md"), "# Synthetic profile-private material\n", "utf8");
+  await writeFile(join(project, "AGENTS.md"), "# Synthetic nested project rules\n", "utf8");
+  const previous = Object.fromEntries(["AGENTSPINE_STATE_DIR", "CODEX_HOME", "BLUN_HOME", "HOME", "USERPROFILE"]
+    .map((key) => [key, process.env[key]]));
+  process.env.AGENTSPINE_STATE_DIR = stateRoot;
+  process.env.CODEX_HOME = profile;
+  delete process.env.BLUN_HOME;
+  process.env.HOME = join(workspace, "separate-home");
+  process.env.USERPROFILE = join(workspace, "separate-user-profile");
+  t.after(async () => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  const started = packet(await runHook({
+    hook_event_name: "SessionStart", host: "codex", cwd: profile,
+    session_id: "session:profile-root"
+  }));
+  assert.equal(started.sourceResolution.projectTreeScan, "skipped-profile-root");
+  assert.equal(started.selfstarter, null);
+  assert.equal(JSON.stringify(started).includes("profile-private material"), false);
+  await assert.rejects(workspaceFingerprint(profile), /cannot fingerprint a host profile root/i);
+
+  const nestedProject = packet(await runHook({
+    hook_event_name: "SessionStart", host: "codex", cwd: project,
+    session_id: "session:nested-project"
+  }));
+  assert.equal(nestedProject.sourceResolution.projectTreeScan, "bounded");
+  assert.equal(JSON.stringify(nestedProject).includes("Synthetic nested project rules"), true);
+  assert.equal((await workspaceFingerprint(project)).files >= 1, true);
+  assert.equal(await readFile(join(profile, "AGENTS.md"), "utf8"), source);
+});
 
 async function checkpoint(root, session, toolUseId, timestamp, success = true) {
   return runHook({

@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, open, opendir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { buildCatalog } from "./catalog.js";
 import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { loadCoordination } from "./coordination.js";
 import { loadGraph } from "./graph.js";
-import { projectStateDir } from "./paths.js";
+import { comparablePath, projectStateDir } from "./paths.js";
 
 const POLICY_SCHEMA = "agentspine.execution-policy/v1";
 const JOB_SCHEMA = "agentspine.selfstarter/v1";
@@ -23,6 +24,18 @@ const EXCLUDED_NAMES = new Set([".git", "node_modules", ".DS_Store"]);
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}|\bBearer\s+[A-Za-z0-9._~+/-]{20,}|\b(?:api[-_ ]?key|token|password|secret)\s*[:=]\s*\S{8,}/i;
 
 function workspaceScanError(error) { error.agentSpineScan = true; return error; }
+
+function configuredHostProfileRoots(env = process.env) {
+  return [env.CODEX_HOME, env.BLUN_HOME, env.CLAUDE_CONFIG_DIR, join(homedir(), ".codex"), join(homedir(), ".claude")]
+    .filter((value) => typeof value === "string" && value)
+    .map((value) => comparablePath(value));
+}
+
+function isConfiguredHostProfileRoot(root, env = process.env) {
+  const target = comparablePath(root);
+  return configuredHostProfileRoots(env).some((profile) => process.platform === "win32"
+    ? profile.toLowerCase() === target.toLowerCase() : profile === target);
+}
 
 function emptyPolicy(root) {
   return { schema: POLICY_SCHEMA, root, revision: 0, grants: [], history: [] };
@@ -140,6 +153,9 @@ async function withLock(path, read, operation, save = true) {
 }
 
 async function pathsFor(root, providedCatalog = null) {
+  if (isConfiguredHostProfileRoot(root)) {
+    throw new Error("self-starter cannot use a host profile as its workspace root");
+  }
   let catalog = providedCatalog;
   if (!catalog) {
     try {
@@ -224,6 +240,9 @@ export async function collectWorkspaceFiles(root) {
 
 export async function workspaceFingerprint(inputRoot = process.cwd()) {
   const root = resolve(inputRoot);
+  if (isConfiguredHostProfileRoot(root)) {
+    throw new Error("self-starter cannot fingerprint a host profile root");
+  }
   const collected = await collectWorkspaceFiles(root);
   const files = [];
   const skipped = [...collected.skipped];

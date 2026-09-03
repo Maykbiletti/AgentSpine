@@ -19,6 +19,20 @@ for (const toolName of ["Edit", "Write", "apply_patch", "Bash", "exec_command"])
     })
   });
 }
+const lifecycle = [];
+for (const event of ["PostToolUse", "Stop"]) {
+  lifecycle.push({
+    event,
+    result: await runHook({
+      hook_event_name: event, host: "codex", cwd: root,
+      session_id: "session:permission-probe", event_id: `event:permission-probe:${event}`,
+      ...(event === "PostToolUse" ? {
+        tool_use_id: "tool:permission-probe:post", tool_name: "Write",
+        tool_input: { file_path: "allowed-output.txt" }, tool_response: { ok: true }
+      } : {})
+    })
+  });
+}
 let audit = [];
 try {
   audit = (await readFile(hookScanAuditPath(), "utf8")).trim().split("\n").filter(Boolean).map(JSON.parse);
@@ -30,5 +44,6 @@ process.stdout.write(`${JSON.stringify({
   sourceDocuments: resolved.catalog.documents.map((item) => item.relativePath),
   fingerprintSkipped: fingerprint.skipped,
   hooks,
+  lifecycle,
   audit
 })}\n`);
