@@ -14,6 +14,7 @@ import {
 } from "../src/lib/delivery-premortem.js";
 import { hookScanAuditPath } from "../src/lib/hook-audit.js";
 import { premortemBinding } from "../src/lib/hook-premortem.js";
+import { canonicalPath } from "../src/lib/paths.js";
 
 const PROJECT_ID = "project:premortem-hook";
 const HOOK_PATH = fileURLToPath(new URL("../src/hook.js", import.meta.url));
@@ -425,6 +426,7 @@ test("selfstarter task discovery cannot change the session premortem lane", asyn
 
 test("normal and condensed BLUN prompt context expose the exact requirement", async (t) => {
   const { root } = await fixture(t);
+  const canonicalRoot = await canonicalPath(root);
   const result = await prepare(root, "session:visibility");
   const detailed = JSON.parse(result.context);
   assert.equal(detailed.preflight.premortem.requirementId,
@@ -432,19 +434,20 @@ test("normal and condensed BLUN prompt context expose the exact requirement", as
   assert.match(detailed.preflight.premortem.instruction,
     /- <category> <checkId>: PASS — <nonempty result>/);
   assert.deepEqual(detailed.preflight.premortem.registration, {
-    tool: "record_delivery_premortem", root,
+    tool: "record_delivery_premortem", root: canonicalRoot,
     requirementId: result.preflight.premortem.requirementId
   });
   const compact = blunRuntimeMessage(result.context);
   assert.match(compact, /Before the first Write\/Edit\/apply_patch/);
   assert.match(compact, new RegExp(result.preflight.premortem.requirementId));
-  assert.equal(compact.includes(`root ${JSON.stringify(root)}`), true);
+  assert.equal(compact.includes(`root ${JSON.stringify(canonicalRoot)}`), true);
   assert.deepEqual(JSON.parse(blunRuntimeContext(result.context)).premortem.registration,
     detailed.preflight.premortem.registration);
 });
 
 test("nested cwd receives the project root needed to register and retry", async (t) => {
   const { root } = await fixture(t);
+  const canonicalRoot = await canonicalPath(root);
   const nested = join(root, "packages", "synthetic");
   await mkdir(nested, { recursive: true });
   const session = "session:nested-cwd";
@@ -454,7 +457,7 @@ test("nested cwd receives the project root needed to register and retry", async 
   });
   const registration = prompted.preflight.premortem.registration;
   assert.deepEqual(registration, {
-    tool: "record_delivery_premortem", root,
+    tool: "record_delivery_premortem", root: canonicalRoot,
     requirementId: prompted.preflight.premortem.requirementId
   });
   const recorded = await recordDeliveryPremortem({
