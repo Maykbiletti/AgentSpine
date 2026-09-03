@@ -136,7 +136,8 @@ An agent without a queued message or an owner-assigned goal reports `idle/needs-
           { "strategyId": "strategy:write-and-inspect", "capabilities": ["capability:inspect", "capability:write"], "risk": 40, "cost": 10 },
           { "strategyId": "strategy:read-only", "capabilities": ["capability:inspect"], "risk": 5, "cost": 20 }
         ],
-        "verification": { "evaluatorId": "evaluator:synthetic", "metric": "metric:quality", "operator": "gte", "threshold": 0.9, "minCases": 12 }
+        "verification": { "evaluatorId": "evaluator:synthetic", "metric": "metric:quality", "operator": "gte", "threshold": 0.9, "minCases": 12 },
+        "transfer": { "transferKey": "transfer:synthetic-inspection", "maxAgeDays": 30 }
       }
     },
     { "stepId": "step:verify", "agentId": "agent:synthetic-codex", "resources": [], "title": "Verify the outcome.", "successCriterion": "The independent check passes.", "dependsOn": ["step:act"] }
@@ -168,6 +169,10 @@ While a step is leased, another ready step with an intersecting resource set wai
 
 An optional execution decision precommits one or more required capability classes, two to eight candidate strategies, and an objective verification gate. AgentSpine filters out strategies that do not cover every requirement, then selects the lowest risk, lowest cost and lexicographically first strategy in that order. These are planning labels, not tool grants: the separately approved host and its native policy remain the only source of actual tool access.
 
+An optional transfer key lets a later scope-matching task reuse an objectively successful strategy. Eligibility requires at least two completed source goals in the exact project and group, distinct objective source digests, the same strategy definition and verification contract, and completion within the precommitted 1-90 day evidence window. Transfer can prefer a proven strategy over a cheaper unproven candidate only inside the same lowest-risk sufficient class. The selected task freezes up to eight content-free source references into its immutable plan digest, so restart or compaction cannot change the decision.
+
+A single matching failed outcome or blocking defect disables that strategy for every subsequently assigned task in the scope. Expired evidence and foreign-group evidence are ignored. The normal risk, cost and stable-ID order resumes automatically; prior plans retain their frozen decision. Recomputing local digests cannot fabricate a source because policy validation resolves every proof back to its exact completed goal, step and objective outcome.
+
 For an execution-bound step, `completed: true` is insufficient. The runner must return the selected strategy, capability classes actually used and one content-free objective outcome:
 
 ```json
@@ -190,9 +195,9 @@ For an execution-bound step, `completed: true` is insufficient. The runner must 
 }
 ```
 
-The selected strategy, evaluator, metric, threshold and case floor are covered by the immutable plan definition. Missing or mismatched evidence blocks the exact step. A blocking defect always fails even when the numeric metric passes; an owner-confirmed retry preserves earlier outcomes. A passing outcome advances the dependency graph once, and restart reconciliation reconstructs one lost wake without duplicating completion.
+The selected strategy, optional transfer proof, evaluator, metric, threshold and case floor are covered by the immutable plan definition. Missing or mismatched evidence blocks the exact step. A blocking defect always fails even when the numeric metric passes; an owner-confirmed retry preserves earlier outcomes and withdraws a regressed transfer from future tasks. A passing outcome advances the dependency graph once, and restart reconciliation reconstructs one lost wake without duplicating completion.
 
-A generically blocked step retains its checkpoint and requires the owner to repeat the same confirmed assignment before it becomes runnable again. If an assignee leaves, reconciliation cancels runnable work and pauses the exact step before host execution. A step with an open knowledge gap cannot use the generic resume shortcut: it resumes only through `goal-clarify`, and the resolved context is included in the next exact host request. Restart reconciliation recreates exactly one missing runnable step after a torn policy/runtime write but never duplicates an open question. Cycles, unknown dependencies, assignment, resource, execution-decision or definition drift, stale leases, out-of-order completion, weak answer provenance and altered gap bindings fail closed. Plans, resources, capability labels, gaps, answers and checkpoints remain context-only: they cannot choose or grant an actual tool, route, identity, delegation, payment, production right or policy exception.
+A generically blocked step retains its checkpoint and requires the owner to repeat the same confirmed assignment before it becomes runnable again. If an assignee leaves, reconciliation cancels runnable work and pauses the exact step before host execution. A step with an open knowledge gap cannot use the generic resume shortcut: it resumes only through `goal-clarify`, and the resolved context is included in the next exact host request. Restart reconciliation recreates exactly one missing runnable step after a torn policy/runtime write but never duplicates an open question. Cycles, unknown dependencies, assignment, resource, execution-decision, transfer-proof or definition drift, stale leases, out-of-order completion, weak answer provenance and altered gap bindings fail closed. Plans, resources, capability labels, transfer proofs, gaps, answers and checkpoints remain context-only: they cannot choose or grant an actual tool, route, identity, delegation, payment, production right or policy exception.
 
 Promise, resolved-blocker, deadline, assignment, follow-up, and direct-message wakes share bounded per-agent lanes. Each effect rechecks current policy, identity, group, route, current plan step, and kill-switch state.
 

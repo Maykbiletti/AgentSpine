@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-09-03
+
+### Added
+
+- Owner-confirmed execution decisions can declare a bounded transfer key and evidence lifetime. Two independent successful goals with distinct objective source digests make the exact strategy reusable by a new matching task in the same project and group.
+- Every applied transfer freezes a content-free proof lineage containing only source goal, step and outcome IDs, completion times and SHA-256 digests.
+
+### Security
+
+- Transfer never leaves the lowest-risk sufficient strategy class, never crosses project or group scope, and never grants a tool or permission. Stale evidence, mismatched evaluator contracts and fabricated proof lineages are rejected.
+- One matching failed outcome or blocking defect overrides all prior successes and withdraws the strategy from future tasks; no average score can keep it active.
+
+### Changed
+
+- Strategy selection prefers an eligible proven strategy over a cheaper unproven alternative only when their declared risk is equal. The ordinary deterministic risk/cost/ID order remains the fallback after expiry or regression.
+
 ## [0.57.0] - 2026-09-03
 
 ### Added

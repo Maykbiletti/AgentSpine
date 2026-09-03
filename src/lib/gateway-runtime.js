@@ -18,6 +18,7 @@ export const GATEWAY_EVENT_SCHEMA = "agentspine.gateway-event/v1";
 export const GOAL_PLAN_SCHEMA = "agentspine.goal-plan/v1";
 export const KNOWLEDGE_GAP_SCHEMA = "agentspine.knowledge-gap/v1";
 export const EXECUTION_OUTCOME_SCHEMA = "agentspine.execution-outcome/v1";
+export const STRATEGY_TRANSFER_PROOF_SCHEMA = "agentspine.strategy-transfer-proof/v1";
 
 const CONFIRMATION = "local-owner-confirmed";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -142,16 +143,125 @@ function executionDecisionMaterial(execution) {
   return {
     requiredCapabilities: execution.requiredCapabilities, strategies: execution.strategies,
     verification: execution.verification, selectedStrategyId: execution.selectedStrategyId,
+    ...(execution.transferKey === undefined ? {} : {
+      transferKey: execution.transferKey, transferMaxAgeDays: execution.transferMaxAgeDays,
+      transferProof: execution.transferProof
+    }),
     authority: "context-only-decision"
   };
 }
 
 function selectedExecutionStrategy(execution) {
   const required = new Set(execution.requiredCapabilities);
-  return execution.strategies.filter((strategy) => strategy.capabilities.every((capability) => ID_RE.test(capability))
+  const sufficient = execution.strategies.filter((strategy) => strategy.capabilities.every((capability) => ID_RE.test(capability))
     && [...required].every((capability) => strategy.capabilities.includes(capability)))
     .sort((left, right) => left.risk - right.risk || left.cost - right.cost
-      || left.strategyId.localeCompare(right.strategyId))[0] || null;
+      || left.strategyId.localeCompare(right.strategyId));
+  const minimumRisk = sufficient[0]?.risk;
+  const transferred = execution.transferProof && sufficient.find((strategy) =>
+    strategy.strategyId === execution.transferProof.strategyId && strategy.risk === minimumRisk);
+  return transferred || sufficient[0] || null;
+}
+
+function strategyTransferProofMaterial(proof) {
+  return {
+    transferKey: proof.transferKey, strategyId: proof.strategyId, maxAgeDays: proof.maxAgeDays,
+    evidence: proof.evidence, authority: "context-only-transfer"
+  };
+}
+
+function validStrategyTransferProof(proof) {
+  if (!(proof && proof.schema === STRATEGY_TRANSFER_PROOF_SCHEMA
+    && ID_RE.test(proof.proofId || "") && ID_RE.test(proof.transferKey || "")
+    && ID_RE.test(proof.strategyId || "") && Number.isInteger(proof.maxAgeDays)
+    && proof.maxAgeDays >= 1 && proof.maxAgeDays <= 90 && Array.isArray(proof.evidence)
+    && proof.evidence.length >= 2 && proof.evidence.length <= 8
+    && new Set(proof.evidence.map((item) => item.sourceGoalId)).size === proof.evidence.length
+    && new Set(proof.evidence.map((item) => item.sourceDigest)).size === proof.evidence.length
+    && proof.evidence.every((item) => item && ID_RE.test(item.sourceGoalId || "")
+      && ID_RE.test(item.sourceStepId || "") && ID_RE.test(item.outcomeId || "")
+      && /^[a-f0-9]{64}$/.test(item.outcomeDigest || "")
+      && /^[a-f0-9]{64}$/.test(item.sourceDigest || "")
+      && Number.isFinite(new Date(item.completedAt).getTime()))
+    && /^[a-f0-9]{64}$/.test(proof.proofDigest || "")
+    && proof.authority === "context-only-transfer")) return false;
+  const digest = sha256(JSON.stringify(strategyTransferProofMaterial(proof)));
+  return proof.proofDigest === digest && proof.proofId === "strategy-transfer:" + digest.slice(0, 32);
+}
+
+function sameStrategy(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sameVerification(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function collectStrategyTransferEvidence(goals, execution, strategy, scope) {
+  if (!execution.transferKey) return { evidence: [], regressed: false };
+  const before = new Date(scope.before);
+  const cutoff = new Date(before.getTime() - execution.transferMaxAgeDays * 86400000);
+  const evidence = []; let regressed = false;
+  for (const goal of goals) {
+    if (goal.goalId === scope.goalId || goal.projectId !== scope.projectId || goal.groupId !== scope.groupId || !goal.plan) continue;
+    for (const step of goal.plan.steps) {
+      const prior = step.execution;
+      const completedAt = step.completedAt && new Date(step.completedAt);
+      const updatedAt = new Date(step.updatedAt);
+      if (!prior || prior.transferKey !== execution.transferKey || prior.selectedStrategyId !== strategy.strategyId
+        || !sameVerification(prior.verification, execution.verification)
+        || !sameStrategy(prior.strategies.find((item) => item.strategyId === strategy.strategyId), strategy)
+        || updatedAt > before) continue;
+      for (const outcome of step.executionOutcomes || []) {
+        if (outcome.strategyId !== strategy.strategyId) continue;
+        const observedAt = new Date(outcome.observedAt);
+        if (observedAt < cutoff || observedAt > before || observedAt < new Date(goal.createdAt)) continue;
+        if (!outcome.passed || outcome.blockingDefect) { regressed = true; continue; }
+        if (step.status !== "completed" || !completedAt || completedAt < cutoff || completedAt > before
+          || observedAt > completedAt) continue;
+        evidence.push({ sourceGoalId: goal.goalId, sourceStepId: step.stepId, outcomeId: outcome.outcomeId,
+          outcomeDigest: outcome.digest, sourceDigest: outcome.sourceDigest, completedAt: step.completedAt });
+      }
+    }
+  }
+  const unique = [];
+  for (const item of evidence.sort((left, right) => left.completedAt.localeCompare(right.completedAt)
+    || left.outcomeId.localeCompare(right.outcomeId))) {
+    if (!unique.some((entry) => entry.sourceGoalId === item.sourceGoalId || entry.sourceDigest === item.sourceDigest)) unique.push(item);
+  }
+  return { evidence: unique.slice(-8), regressed };
+}
+
+function createStrategyTransferProof(goals, execution, scope) {
+  if (!execution.transferKey) return null;
+  const required = new Set(execution.requiredCapabilities);
+  const sufficient = execution.strategies.filter((strategy) =>
+    [...required].every((capability) => strategy.capabilities.includes(capability)));
+  const minimumRisk = Math.min(...sufficient.map((strategy) => strategy.risk));
+  const proven = sufficient.filter((strategy) => strategy.risk === minimumRisk).map((strategy) => ({
+    strategy, ...collectStrategyTransferEvidence(goals, execution, strategy, scope)
+  })).filter((item) => !item.regressed && item.evidence.length >= 2)
+    .sort((left, right) => right.evidence.length - left.evidence.length
+      || left.strategy.cost - right.strategy.cost || left.strategy.strategyId.localeCompare(right.strategy.strategyId));
+  if (!proven.length) return null;
+  const proof = { schema: STRATEGY_TRANSFER_PROOF_SCHEMA, proofId: null,
+    transferKey: execution.transferKey, strategyId: proven[0].strategy.strategyId,
+    maxAgeDays: execution.transferMaxAgeDays, evidence: proven[0].evidence,
+    proofDigest: null, authority: "context-only-transfer" };
+  proof.proofDigest = sha256(JSON.stringify(strategyTransferProofMaterial(proof)));
+  proof.proofId = "strategy-transfer:" + proof.proofDigest.slice(0, 32);
+  return proof;
+}
+
+function validGoalTransferProofs(goal, goals) {
+  if (!goal.plan) return true;
+  return goal.plan.steps.every((step) => {
+    if (!step.execution?.transferProof) return true;
+    const expected = createStrategyTransferProof(goals, step.execution, {
+      goalId: goal.goalId, projectId: goal.projectId, groupId: goal.groupId, before: goal.createdAt
+    });
+    return JSON.stringify(expected) === JSON.stringify(step.execution.transferProof);
+  });
 }
 
 function validExecutionDecision(execution) {
@@ -173,13 +283,19 @@ function validExecutionDecision(execution) {
     && Number.isFinite(execution.verification.threshold)
     && Number.isInteger(execution.verification.minCases) && execution.verification.minCases >= 1
     && execution.verification.minCases <= 100000 && ID_RE.test(execution.selectedStrategyId || "")
+    && (execution.transferKey === undefined || (ID_RE.test(execution.transferKey || "")
+      && Number.isInteger(execution.transferMaxAgeDays) && execution.transferMaxAgeDays >= 1
+      && execution.transferMaxAgeDays <= 90
+      && (execution.transferProof === null || (validStrategyTransferProof(execution.transferProof)
+        && execution.transferProof.transferKey === execution.transferKey
+        && execution.transferProof.maxAgeDays === execution.transferMaxAgeDays))))
     && /^[a-f0-9]{64}$/.test(execution.decisionDigest || ""))) return false;
   const selected = selectedExecutionStrategy(execution);
   return selected?.strategyId === execution.selectedStrategyId
     && execution.decisionDigest === sha256(JSON.stringify(executionDecisionMaterial(execution)));
 }
 
-function createExecutionDecision(value, field) {
+function createExecutionDecision(value, field, transferContext) {
   if (value === null || value === undefined) return null;
   const execution = {
     requiredCapabilities: Array.isArray(value.requiredCapabilities)
@@ -198,6 +314,12 @@ function createExecutionDecision(value, field) {
     },
     selectedStrategyId: null, decisionDigest: null, authority: "context-only-decision"
   };
+  if (value.transfer !== undefined && value.transfer !== null) {
+    execution.transferKey = exactId(value.transfer?.transferKey, `${field}.transfer.transferKey`);
+    execution.transferMaxAgeDays = Number(value.transfer?.maxAgeDays);
+    execution.transferProof = null;
+    execution.transferProof = createStrategyTransferProof(transferContext.goals, execution, transferContext.scope);
+  }
   execution.selectedStrategyId = selectedExecutionStrategy(execution)?.strategyId || null;
   execution.decisionDigest = sha256(JSON.stringify(executionDecisionMaterial(execution)));
   if (!validExecutionDecision(execution)) {
@@ -353,14 +475,14 @@ function activateNextPlanStep(plan, now) {
   return next;
 }
 
-function createGoalPlan(steps, now, defaultAgentId) {
+function createGoalPlan(steps, now, defaultAgentId, transferContext) {
   if (!Array.isArray(steps) || steps.length === 0 || steps.length > 32) throw new Error("goal plan requires 1-32 steps");
   const normalized = steps.map((step, index) => ({
     stepId: exactId(step?.stepId ?? step?.id, `steps[${index}].stepId`),
     agentId: exactId(step?.agentId ?? defaultAgentId, `steps[${index}].agentId`),
     resources: Array.isArray(step?.resources)
       ? step.resources.map((resource) => exactId(resource, `steps[${index}].resources`)) : [],
-    execution: createExecutionDecision(step?.execution, `steps[${index}].execution`),
+    execution: createExecutionDecision(step?.execution, `steps[${index}].execution`, transferContext),
     title: safeText(step?.title, `steps[${index}].title`, 500),
     successCriterion: safeText(step?.successCriterion, `steps[${index}].successCriterion`),
     dependsOn: Array.isArray(step?.dependsOn) ? step.dependsOn.map((dependency) => exactId(dependency, `steps[${index}].dependsOn`)) : [],
@@ -532,6 +654,7 @@ function normalizePolicy(value, root) {
   if (!value || value.schema !== GATEWAY_POLICY_SCHEMA || value.root !== root
     || !Number.isInteger(value.revision) || typeof value.enabled !== "boolean" || typeof value.killSwitch !== "boolean"
     || !Array.isArray(value.goals) || !Array.isArray(value.history) || value.goals.some((item) => !validGoal(item))
+    || value.goals.some((item) => !validGoalTransferProofs(item, value.goals))
     || value.history.some((item) => !validPolicyHistory(item))) {
     throw new Error("gateway policy is invalid; autonomous runtime is disabled");
   }
@@ -658,12 +781,15 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
       readJson(paths.gatewayRuntimePath, paths.catalog.root, normalizeRuntime, emptyRuntime),
       loadPersonaRuntime(paths.catalog.root, paths.catalog)
     ]);
-    agentId = exactId(agentId, "agentId"); projectId = exactId(projectId, "projectId"); groupId = exactId(groupId, "groupId", true);
+    goalId = exactId(goalId, "goalId"); agentId = exactId(agentId, "agentId");
+    projectId = exactId(projectId, "projectId"); groupId = exactId(groupId, "groupId", true);
     const leadIdentity = assertActivePersona(personas.policy, personas.runtime, agentId, projectId, groupId);
     const createdAt = timestamp(now);
     const active = policy.goals.find((item) => item.agentId === agentId && item.status === "active" && item.goalId !== goalId);
     if (active) throw new Error("an agent may have only one active focused goal");
-    const plan = steps === null ? null : createGoalPlan(steps, createdAt, agentId);
+    const plan = steps === null ? null : createGoalPlan(steps, createdAt, agentId, {
+      goals: policy.goals, scope: { goalId, projectId, groupId, before: createdAt }
+    });
     if (plan) {
       for (const stepAgentId of new Set(plan.steps.map((step) => step.agentId))) {
         const stepIdentity = assertActivePersona(personas.policy, personas.runtime, stepAgentId, projectId, groupId);
@@ -673,7 +799,7 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
       }
     }
     const firstStep = plan ? plan.steps.find((step) => step.stepId === plan.currentStepId) : null;
-    const goal = { goalId: exactId(goalId, "goalId"), agentId, ownerSubjectId: exactId(ownerSubjectId, "ownerSubjectId"),
+    const goal = { goalId, agentId, ownerSubjectId: exactId(ownerSubjectId, "ownerSubjectId"),
       projectId, groupId, priority: Number(priority), successCriterion: safeText(successCriterion, "successCriterion"),
       nextSafeStep: safeText(firstStep?.title || nextSafeStep, "nextSafeStep"), deadline: deadline === null ? null : timestamp(deadline),
       status: "active", checkpoint: null, heartbeatAt: null, blocker: null, createdAt, updatedAt: createdAt,
@@ -1294,6 +1420,7 @@ export function gatewayRuntimeFindings(policy, runtime) {
   const goalIds = new Set();
   for (const goal of policy.goals) {
     if (!validGoal(goal)) findings.push("invalid-goal:" + (goal?.goalId || "unknown"));
+    else if (!validGoalTransferProofs(goal, policy.goals)) findings.push("invalid-strategy-transfer:" + goal.goalId);
     if (goalIds.has(goal.goalId)) findings.push("duplicate-goal:" + goal.goalId);
     goalIds.add(goal.goalId);
     if (goal.status === "active" && active.has(goal.agentId)) findings.push("multiple-active-goals:" + goal.agentId);
