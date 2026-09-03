@@ -61,9 +61,11 @@ export {
 } from "./lib/preflight.js";
 export { runWorker, runWorkerTick } from "./worker.js";
 export {
-  createKnowledgeGap, createSelfHelpReport, createSelfHelpResolution, KNOWLEDGE_GAP_SCHEMA,
-  resolveKnowledgeGapCandidate, sameKnowledgeGapResolution, SELF_HELP_REPORT_SCHEMA, selfHelpPolicyForWorkItem,
-  validKnowledgeGap, validSelfHelpReport
+  createKnowledgeGap, createSelfHelpReport, createSelfHelpRequirement, createSelfHelpResolution,
+  KNOWLEDGE_GAP_SCHEMA, pendingSelfHelpRequirement, resolveKnowledgeGapCandidate,
+  sameKnowledgeGapResolution, SELF_HELP_REPORT_SCHEMA, SELF_HELP_REQUIREMENT_SCHEMA,
+  selfHelpPolicyForWorkItem, validKnowledgeGap, validSelfHelpReport, validSelfHelpRequirement,
+  validStepKnowledgeState
 } from "./lib/knowledge-evidence.js";
 export {
   configureSharing, deleteShared, initDirectoryAdapter, inspectSharing, loadSharing,

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 export const KNOWLEDGE_GAP_SCHEMA = "agentspine.knowledge-gap/v1";
 export const SELF_HELP_REPORT_SCHEMA = "agentspine.self-help-report/v1";
+export const SELF_HELP_REQUIREMENT_SCHEMA = "agentspine.self-help-requirement/v1";
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/+~-]{0,255}$/;
 const DIGEST_RE = /^[a-f0-9]{64}$/;
@@ -61,6 +62,13 @@ function knowledgeGapResolutionMaterial(gap) {
     sourceDigest: gap.sourceDigest, resolvedAt: gap.resolvedAt,
     resolvedBySubjectId: gap.resolvedBySubjectId, authority: "context-only"
   };
+}
+
+function selfHelpRequirementMaterial(requirement) {
+  return { goalId: requirement.goalId, goalStepId: requirement.goalStepId,
+    planDefinitionsDigest: requirement.planDefinitionsDigest, question: requirement.question,
+    reason: requirement.reason, requestedAt: requirement.requestedAt,
+    requestedByQueueId: requirement.requestedByQueueId, authority: "context-only-research" };
 }
 
 export function validKnowledgeGap(gap) {
@@ -138,6 +146,65 @@ export function sameKnowledgeGapResolution(gap, resolution) {
   const repeated = resolveKnowledgeGapCandidate(gap, { ...resolution,
     resolvedAt: gap.resolvedAt, resolvedBySubjectId: gap.resolvedBySubjectId });
   return gap.resolutionDigest === repeated.resolutionDigest;
+}
+
+export function createSelfHelpRequirement(goal, step, queueId, request, now) {
+  if (request?.requiredEvidence !== "objective-observation") {
+    throw new Error("self-help requirements only replace objective-observation questions");
+  }
+  const result = { schema: SELF_HELP_REQUIREMENT_SCHEMA, requirementId: null,
+    goalId: exactId(goal.goalId, "goalId"), goalStepId: exactId(step.stepId, "goalStepId"),
+    planDefinitionsDigest: goal.plan.definitionsDigest,
+    question: safeKnowledgeText(request?.question, "knowledgeGap.question", 500),
+    reason: safeKnowledgeText(request?.reason, "knowledgeGap.reason", 500),
+    requestedAt: timestamp(now), requestedByQueueId: exactId(queueId, "requestedByQueueId"),
+    requirementDigest: null, authority: "context-only-research" };
+  result.requirementDigest = sha256(JSON.stringify(selfHelpRequirementMaterial(result)));
+  result.requirementId = "self-help-requirement:" + result.requirementDigest.slice(0, 32);
+  if (!validSelfHelpRequirement(result)) throw new Error("self-help requirement is invalid");
+  return result;
+}
+
+export function validSelfHelpRequirement(requirement) {
+  if (!(requirement && requirement.schema === SELF_HELP_REQUIREMENT_SCHEMA
+    && ID_RE.test(requirement.requirementId || "") && ID_RE.test(requirement.goalId || "")
+    && ID_RE.test(requirement.goalStepId || "") && DIGEST_RE.test(requirement.planDefinitionsDigest || "")
+    && ID_RE.test(requirement.requestedByQueueId || "")
+    && Number.isFinite(new Date(requirement.requestedAt).getTime())
+    && DIGEST_RE.test(requirement.requirementDigest || "")
+    && requirement.authority === "context-only-research")) return false;
+  try {
+    if (safeKnowledgeText(requirement.question, "knowledgeGap.question", 500) !== requirement.question
+      || safeKnowledgeText(requirement.reason, "knowledgeGap.reason", 500) !== requirement.reason) return false;
+  } catch { return false; }
+  return requirement.requirementDigest === sha256(JSON.stringify(selfHelpRequirementMaterial(requirement)))
+    && requirement.requirementId === "self-help-requirement:" + requirement.requirementDigest.slice(0, 32);
+}
+
+export function pendingSelfHelpRequirement(step) {
+  const reports = step.selfHelpReports || [];
+  return [...(step.selfHelpRequirements || [])].reverse().find((requirement) =>
+    !reports.some((report) => report.question === requirement.question && report.reason === requirement.reason)) || null;
+}
+
+export function validStepKnowledgeState(step, planDefinitionsDigest) {
+  const gaps = step.knowledgeGaps;
+  const reports = step.selfHelpReports;
+  const requirements = step.selfHelpRequirements;
+  return (gaps === undefined || (Array.isArray(gaps) && gaps.length <= 16
+    && new Set(gaps.map((gap) => gap.gapId)).size === gaps.length
+    && gaps.every((gap) => validKnowledgeGap(gap) && gap.goalStepId === step.stepId
+      && gap.planDefinitionsDigest === planDefinitionsDigest)))
+    && (reports === undefined || (Array.isArray(reports) && reports.length <= 16
+      && new Set(reports.map((report) => report.reportId)).size === reports.length
+      && reports.every((report) => validSelfHelpReport(report) && report.goalStepId === step.stepId
+        && report.planDefinitionsDigest === planDefinitionsDigest)))
+    && (requirements === undefined || (Array.isArray(requirements) && requirements.length <= 16
+      && new Set(requirements.map((item) => item.requirementId)).size === requirements.length
+      && requirements.every((item) => validSelfHelpRequirement(item) && item.goalStepId === step.stepId
+        && item.planDefinitionsDigest === planDefinitionsDigest)
+      && requirements.filter((item) => !reports?.some((report) => report.question === item.question
+        && report.reason === item.reason)).length <= 1));
 }
 
 function safeRelativePath(value, field) {
@@ -254,6 +321,10 @@ export function createSelfHelpReport({ goal, step, report, now }) {
 
 export function createSelfHelpResolution({ goal, step, queueId, report, agentId, now }) {
   const evidence = createSelfHelpReport({ goal, step, report, now });
+  const requirement = pendingSelfHelpRequirement(step);
+  if (requirement && (requirement.question !== evidence.question || requirement.reason !== evidence.reason)) {
+    throw new Error("self-help report does not answer the pending repository-first requirement");
+  }
   const gap = createKnowledgeGap(goal, step, queueId, { question: evidence.question,
     reason: evidence.reason, requiredEvidence: "objective-observation" }, now);
   return { report: evidence, gap: resolveKnowledgeGapCandidate(gap, {
@@ -262,7 +333,8 @@ export function createSelfHelpResolution({ goal, step, queueId, report, agentId,
   }) };
 }
 
-export function selfHelpPolicyForWorkItem() {
+export function selfHelpPolicyForWorkItem(step = null) {
+  const pending = step && pendingSelfHelpRequirement(step);
   return { schema: "agentspine.self-help-policy/v1", order: ["repository", "public-primary-sources"],
     repositoryFirst: true, externalOnlyWhenRepositoryInsufficient: true, maxRepositorySources: 16,
     maxExternalSources: 8, externalContentTrust: "untrusted", reportSchema: SELF_HELP_REPORT_SCHEMA,
@@ -270,5 +342,6 @@ export function selfHelpPolicyForWorkItem() {
     repositorySourceFields: ["kind", "path", "commit", "sourceDigest", "observedAt", "relevance"],
     externalSourceFields: ["kind", "url", "version", "license", "sourceDigest", "observedAt", "relevance"],
     repositoryKinds: [...REPOSITORY_KINDS], externalKinds: [...EXTERNAL_KINDS],
+    objectiveQuestionRequiresSelfHelp: true, pendingRequirement: pending ? structuredClone(pending) : null,
     mayGrantAuthority: false, authority: "context-only-research" };
 }

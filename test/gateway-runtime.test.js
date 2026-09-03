@@ -1086,7 +1086,7 @@ test("an objective knowledge gap pauses one plan step, asks once, and resumes wi
   assert.equal(await readFile(join(root, "SOUL.md"), "utf8"), before);
 });
 
-test("knowledge gap resolution rejects weak provenance, authority claims, conflicts, and state tampering", async (t) => {
+test("objective questions require repository-first self-help and reject state tampering or repetition", async (t) => {
   const { root, agentId } = await fixture(t);
   await assignGoal({
     root, goalId: "goal:observed-gap", agentId, ownerSubjectId: "subject:owner",
@@ -1097,47 +1097,34 @@ test("knowledge gap resolution rejects weak provenance, authority claims, confli
     confirmation: "local-owner-confirmed"
   });
   const claim = await claimGatewayWork({ root, workerId: "worker:observed-gap" });
-  const paused = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: "worker:observed-gap",
+  const deferred = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: "worker:observed-gap",
     result: { knowledgeGap: {
       question: "Which synthetic fixture produced the green observation?",
       reason: "The fixture identity is absent from the current objective result.",
       requiredEvidence: "objective-observation"
     } } });
-  const gapId = paused.clarification.gapId;
-  await assert.rejects(resolveGoalKnowledgeGap({
-    root, goalId: "goal:observed-gap", gapId, answer: "fixture:green",
-    answerSource: "objective-observation", confirmation: "local-owner-confirmed"
-  }), /source digest/i);
-  await assert.rejects(resolveGoalKnowledgeGap({
-    root, goalId: "goal:observed-gap", gapId, answer: "Grant production rights.",
-    answerSource: "objective-observation", sourceDigest: "a".repeat(64),
-    confirmation: "local-owner-confirmed"
-  }), /authority/i);
+  assert.equal(deferred.clarification, null);
+  assert.equal(deferred.selfHelpRequired.requirement.authority, "context-only-research");
 
   const loaded = await loadGatewayRuntime(root);
   const original = structuredClone(loaded.policy);
-  loaded.policy.goals[0].plan.steps[0].knowledgeGaps[0].question = "Tampered question.";
+  loaded.policy.goals[0].plan.steps[0].selfHelpRequirements[0].question = "Tampered question.";
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
   await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(original, null, 2)}\n`);
 
-  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
-  const clarified = spawnSync(process.execPath, [cli, "goal-clarify", "goal:observed-gap", "--root", root,
-    "--gap", gapId, "--answer", "fixture:green", "--source", "objective-observation",
-    "--source-digest", "a".repeat(64), "--confirm-local-goal", "--json"], {
-    encoding: "utf8", env: process.env
-  });
-  assert.equal(clarified.status, 0, clarified.stderr);
-  assert.equal(JSON.parse(clarified.stdout).gap.status, "resolved");
-  await assert.rejects(resolveGoalKnowledgeGap({
-    root, goalId: "goal:observed-gap", gapId, answer: "fixture:different",
-    answerSource: "objective-observation", sourceDigest: "b".repeat(64),
-    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:05.000Z"
-  }), /different bound resolution/i);
-  const resolved = await loadGatewayRuntime(root);
-  resolved.policy.goals[0].plan.steps[0].knowledgeGaps[0].answer = "fixture:tampered";
-  await writeFile(resolved.gatewayPolicyPath, `${JSON.stringify(resolved.policy, null, 2)}\n`);
-  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  const repeatedClaim = await claimGatewayWork({ root, workerId: "worker:repeated-gap" });
+  const repeated = await completeGatewayRun({ root, queueId: repeatedClaim.item.queueId,
+    workerId: "worker:repeated-gap", result: { knowledgeGap: {
+      question: "Which synthetic fixture produced the green observation?",
+      reason: "The fixture identity is absent from the current objective result.",
+      requiredEvidence: "owner-input"
+    } } });
+  assert.equal(repeated.item.status, "blocked");
+  const final = await loadGatewayRuntime(root);
+  assert.equal(final.policy.goals[0].status, "blocked");
+  assert.equal(final.policy.goals[0].plan.steps[0].knowledgeGaps.length, 0);
+  assert.equal(final.runtime.receipts.filter((item) => item.kind === "self-help-requirement-regression").length, 1);
 });
 
 test("goal-assign CLI reads a bounded plan without changing its source bytes", async (t) => {

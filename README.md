@@ -92,7 +92,7 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
-Version `0.60.0` adds bounded repository-first self-help for objective knowledge gaps. A goal-plan worker inspects exact-commit local evidence before consulting fresh public primary sources, stores only provenance and digests, and resumes without asking the user when the evidence resolves the gap. External content remains untrusted and cannot grant authority. The `0.59.1` lifecycle scan protections remain unchanged: inaccessible directories fail open for hooks, while genuine security decisions remain fail closed.
+Version `0.61.0` makes bounded repository-first self-help enforceable. An objective knowledge gap creates one durable research obligation instead of a user question; restart restores one lost continuation, and the worker receives the exact pending obligation. Repeating or relabeling the question as owner input before valid research now blocks as a regression. Genuine owner decisions still pause once for explicit input. External content remains untrusted and cannot grant authority.
 
 Version `0.59.0` adds bounded, outcome-driven exploration to durable plan execution. An owner-confirmed step can freeze two to four attempts; after an objectively measured non-blocking failure, AgentSpine tries exactly one remaining sufficient strategy from the same minimum-risk class. The host receives an immutable attempt number, strategy, budget and previous-outcome digest. Missing or reused evidence, a blocking defect, budget exhaustion and any attempt to enter a higher-risk class stop fail closed. Exploration remains context only and cannot grant tools, permissions or policy exceptions.
 

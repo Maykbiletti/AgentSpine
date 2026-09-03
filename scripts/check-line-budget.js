@@ -13,7 +13,7 @@ const LEGACY_LIMITS = new Map(Object.entries({
   "src/lib/authentication.js": 515,
   "src/lib/channel-runtime.js": 665,
   "src/lib/coordination.js": 577,
-  "src/lib/gateway-runtime.js": 1569,
+  "src/lib/gateway-runtime.js": 1520,
   "src/lib/learning.js": 6923,
   "src/lib/persona-runtime.js": 581,
   "src/lib/preflight.js": 702,
@@ -22,7 +22,7 @@ const LEGACY_LIMITS = new Map(Object.entries({
   "src/lib/source-roots.js": 530,
   "src/lib/sqlite-transport.js": 501,
   "src/mcp.js": 572,
-  "test/gateway-runtime.test.js": 1339,
+  "test/gateway-runtime.test.js": 1326,
   "test/learning.test.js": 4250
 }));
 

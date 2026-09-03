@@ -69,38 +69,58 @@ function report(overrides = {}) {
 
 test("repository-first self-help resolves objective uncertainty without asking the user", async (t) => {
   const { root, source, agentId } = await fixture(t);
+  const question = { question: report().question, reason: report().reason,
+    requiredEvidence: "objective-observation" };
+  const deferred = await runWorkerTick({ root, workerId: "worker:self-help-gap",
+    now: "2032-02-01T00:02:00.000Z", adapter: { send: async () => ({ ok: true }) },
+    hostRunner: async () => ({ checkpoint: { phase: "knowledge-gap" }, knowledgeGap: question }) });
+  assert.equal(deferred.status, "self-help-required");
+  assert.equal(deferred.selfHelpRequired.requirement.question, question.question);
+
+  let loaded = await loadGatewayRuntime(root);
+  const requirementQueueId = deferred.selfHelpRequired.queueId;
+  assert.equal(loaded.runtime.receipts.filter((item) => item.kind === "self-help-required").length, 1);
+  loaded.runtime.queue = loaded.runtime.queue.filter((item) => item.queueId !== requirementQueueId);
+  loaded.runtime.receipts = loaded.runtime.receipts.filter((item) => item.objectId !== requirementQueueId);
+  await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
+  await reconcileGateway({ root, now: "2032-02-01T00:02:00.250Z" });
+  await reconcileGateway({ root, now: "2032-02-01T00:02:00.500Z" });
+  loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.runtime.queue.filter((item) => item.status === "pending").length, 1);
+
   let policy;
   const researched = await runWorkerTick({ root, workerId: "worker:self-help",
-    now: "2032-02-01T00:02:00.000Z", adapter: { send: async () => ({ ok: true }) },
-    hostRunner: async (item) => {
-      policy = item.selfHelpPolicy;
-      return { checkpoint: { phase: "evidence-collected" }, selfHelp: report() };
-    } });
+    now: "2032-02-01T00:02:01.000Z", adapter: { send: async () => ({ ok: true }) },
+    hostRunner: async (item) => { policy = item.selfHelpPolicy;
+      return { checkpoint: { phase: "evidence-collected" }, selfHelp: report() }; } });
   assert.equal(researched.status, "self-help-resolved");
   assert.deepEqual(policy.order, ["repository", "public-primary-sources"]);
   assert.equal(policy.externalContentTrust, "untrusted");
   assert.equal(policy.mayGrantAuthority, false);
+  assert.equal(policy.pendingRequirement.requirementId,
+    deferred.selfHelpRequired.requirement.requirementId);
 
-  let loaded = await loadGatewayRuntime(root);
+  loaded = await loadGatewayRuntime(root);
   const step = loaded.policy.goals[0].plan.steps[0];
   assert.equal(step.status, "active");
   assert.equal(step.knowledgeGaps[0].status, "resolved");
   assert.equal(step.knowledgeGaps[0].resolvedBySubjectId, agentId);
   assert.equal(step.selfHelpReports[0].externalSources.every((sourceItem) => sourceItem.untrusted), true);
   assert.equal(step.selfHelpReports[0].externalSources.some((sourceItem) => "content" in sourceItem), false);
+  assert.equal(step.selfHelpRequirements.length, 1);
   assert.equal(loaded.runtime.receipts.filter((item) => item.kind === "self-help-research-resolved").length, 1);
 
   const lostQueueIds = new Set(loaded.runtime.queue.filter((item) => item.status === "pending").map((item) => item.queueId));
   loaded.runtime.queue = loaded.runtime.queue.filter((item) => !lostQueueIds.has(item.queueId));
   loaded.runtime.receipts = loaded.runtime.receipts.filter((item) => !lostQueueIds.has(item.objectId));
   await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
-  await reconcileGateway({ root, now: "2032-02-01T00:02:00.500Z" });
-  await reconcileGateway({ root, now: "2032-02-01T00:02:00.750Z" });
+  await reconcileGateway({ root, now: "2032-02-01T00:02:01.500Z" });
+  await reconcileGateway({ root, now: "2032-02-01T00:02:01.750Z" });
   loaded = await loadGatewayRuntime(root);
   assert.equal(loaded.runtime.queue.filter((item) => item.status === "pending").length, 1);
 
   const claims = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
-    root, workerId: `worker:self-help:${index}`, now: "2032-02-01T00:02:01.000Z"
+    root, workerId: `worker:self-help:${index}`, now: "2032-02-01T00:02:02.000Z"
   })));
   assert.equal(claims.filter((claim) => claim.item).length, 1);
   const winner = claims.find((claim) => claim.item);

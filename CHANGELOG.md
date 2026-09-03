@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-09-03
+
+### Added
+
+- Objective goal-plan knowledge gaps now create one digest-bound repository-first self-help requirement instead of immediately asking the user. The exact pending question and reason are injected into the next provider-neutral work item and survive restart reconciliation.
+- Successful bounded research resolves the matching requirement and continues the same plan. Genuine owner decisions retain the existing one-question, locally confirmed clarification path.
+
+### Security
+
+- A host cannot bypass required self-help by repeating the objective question, changing it, or relabeling it as owner input. These regressions block the exact step and are recorded without exposing another project group.
+- Requirement identity, plan binding, request queue, timestamp and content are integrity-bound. External material remains untrusted context and cannot grant rights, tools, identity or policy exceptions.
+
+### Changed
+
+- Goal knowledge transitions moved behind a focused 101-line module. The oversized gateway runtime shrank from 1,569 to 1,520 physical lines, and its reduced line budget is now enforced.
+
 ## [0.60.0] - 2026-09-03
 
 ### Added

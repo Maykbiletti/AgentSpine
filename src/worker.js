@@ -106,7 +106,7 @@ async function hostWorkItem(root, item) {
     goal: goal ? structuredClone(goal) : null,
     goalStep: goalStep ? { ...structuredClone(goalStep),
       ...(executionAttempt === null ? {} : { executionAttempt }) } : null,
-    selfHelpPolicy: goalStep ? selfHelpPolicyForWorkItem() : null,
+    selfHelpPolicy: goalStep ? selfHelpPolicyForWorkItem(goalStep) : null,
     hostEnvironment: {
       AGENTSPINE_GATEWAY_CONTEXT: "agentspine.gateway-start/v1",
       AGENTSPINE_ENTITY_ID: item.agentId,
@@ -165,11 +165,13 @@ export async function runWorkerTick({ root = process.cwd(), workerId = "gateway-
   const completed = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId, result, now });
   if (!completed.outbox) return {
     status: completed.clarification ? "needs-clarification"
-      : completed.exploration ? "exploring" : completed.selfHelp ? "self-help-resolved" : completed.item.status,
+      : completed.exploration ? "exploring" : completed.selfHelp ? "self-help-resolved"
+        : completed.selfHelpRequired ? "self-help-required" : completed.item.status,
     processed: true, queueId: completed.item.queueId,
     ...(completed.clarification ? { clarification: completed.clarification } : {}),
     ...(completed.exploration ? { exploration: completed.exploration } : {}),
-    ...(completed.selfHelp ? { selfHelp: completed.selfHelp } : {})
+    ...(completed.selfHelp ? { selfHelp: completed.selfHelp } : {}),
+    ...(completed.selfHelpRequired ? { selfHelpRequired: completed.selfHelpRequired } : {})
   };
   const delivery = await deliverPrepared({ root, outboxId: completed.outbox.outboxId,
     adapter: deliveryAdapter, now });
