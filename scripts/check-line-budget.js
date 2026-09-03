@@ -8,7 +8,6 @@ const DEFAULT_LIMIT = 500;
 const LEGACY_LIMITS = new Map(Object.entries({
   "scripts/check-install.js": 569,
   "src/cli.js": 1488,
-  "src/hook.js": 881,
   "src/lib/attention.js": 755,
   "src/lib/authentication.js": 515,
   "src/lib/channel-runtime.js": 665,

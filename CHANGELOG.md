@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-09-03
+
+### Changed
+
+- The host hook lifecycle is split into bounded context/lifecycle and source-protection modules. The installed entrypoint, public runtime exports, payload schemas, event ordering and persisted state formats remain unchanged.
+- `src/hook.js` is reduced from 865 to fewer than 500 physical lines, and its legacy line-budget exception is removed. Each new module is independently subject to the ordinary 500-line ceiling.
+- `PreToolUse` verifies an explicitly stated assignment baseline against `.blun-snapshot-stand.json` before direct writes. `PostToolUse` reports undeclared JavaScript calls with exact file and line locations, including support for a bounded project allowlist. `Stop` and `SubagentStop` verify explicitly claimed exchange artifacts and digest prefixes after the existing test-evidence gate.
+
+### Security
+
+- Filesystem and parser uncertainty in the new guards is audited and fails open. Only a verified baseline mismatch, undeclared call, missing claimed artifact or mismatching claimed digest blocks; protected-source mutations, delivery verification, self-starter authorization, pre-answer recall and learning gates remain fail closed.
+
+### Tests
+
+- Before/After tests prove that a baseline mismatch blocks while a prefix match passes, an undeclared call is reported while a multi-line variable declaration is accepted, and a missing claimed artifact blocks while a matching digest prefix passes. The complete hook suite verifies installed Claude and Codex entrypoints, bounded overflow, protected writes and shell mutations, ordinary writes and reads, and generic-host preflight after the split.
+
 ## [0.63.0] - 2026-09-03
 
 ### Added
