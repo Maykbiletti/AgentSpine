@@ -162,12 +162,13 @@ test("native hooks start, authorize, checkpoint, stop, and resume one exact job 
     hook_event_name: "Stop", cwd: root, host: "claude", session_id: "session:one",
     timestamp: "2029-01-01T00:00:06.000Z", ...scope
   });
+  assert.equal(stopped.deliveryVerification.status, "paused-job", JSON.stringify(stopped.deliveryVerification));
   assert.equal(stopped.selfstarter.job.status, "waiting");
   const stoppedAgain = await runHook({
     hook_event_name: "Stop", cwd: root, host: "claude", session_id: "session:one",
     timestamp: "2029-01-01T00:00:06.000Z", ...scope
   });
-  assert.equal(stoppedAgain.selfstarter, null);
+  assert.equal(stoppedAgain.selfstarter, null, JSON.stringify(stoppedAgain));
 
   const resumed = packet(await start(root, "session:two", "2029-01-01T00:00:07.000Z"));
   assert.equal(resumed.selfstarter.action, "resume");

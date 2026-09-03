@@ -3,6 +3,16 @@ import {
   pendingSelfHelpRequirement
 } from "./knowledge-evidence.js";
 
+function blockKnowledgeLimit({ goal, step, item, runtime, current, appendReceipt }, kind) {
+  const reason = `Goal step reached the bounded limit of 16 ${kind}; local review is required.`;
+  item.status = "blocked"; item.lastError = reason; item.completedAt = current;
+  step.status = "blocked"; step.blocker = reason; step.updatedAt = current;
+  goal.status = "blocked"; goal.blocker = reason; goal.updatedAt = current;
+  appendReceipt(runtime, "self-help-limit-exhausted", item.queueId, current,
+    { goalStepId: step.stepId, limit: 16, category: kind });
+  return null;
+}
+
 function resolvedSelfHelp({ goal, step, item, runtime, current, request,
   appendReceipt, newGoalQueue, planQueueKey }) {
   if (!Array.isArray(step.knowledgeGaps)) step.knowledgeGaps = [];
@@ -18,7 +28,8 @@ function resolvedSelfHelp({ goal, step, item, runtime, current, request,
     return null;
   }
   if (step.knowledgeGaps.length >= 16 || step.selfHelpReports.length >= 16) {
-    throw new Error("goal step exceeds 16 self-help research resolutions");
+    return blockKnowledgeLimit({ goal, step, item, runtime, current, appendReceipt },
+      "self-help research resolutions");
   }
   step.knowledgeGaps.push(resolved.gap); step.selfHelpReports.push(resolved.report);
   if (resolved.status === "needs-owner-input") {
@@ -55,7 +66,10 @@ function requireSelfHelp({ goal, step, item, runtime, current, request,
       { goalStepId: step.stepId, requirementId: pending.requirementId, repeated: same });
     return null;
   }
-  if (step.selfHelpRequirements.length >= 16) throw new Error("goal step exceeds 16 self-help requirements");
+  if (step.selfHelpRequirements.length >= 16) {
+    return blockKnowledgeLimit({ goal, step, item, runtime, current, appendReceipt },
+      "self-help requirements");
+  }
   const requirement = createSelfHelpRequirement(goal, step, item.queueId, request, current);
   step.selfHelpRequirements.push(requirement); item.status = "completed";
   step.status = "active"; step.blocker = null; goal.status = "active"; goal.blocker = null;
@@ -81,7 +95,9 @@ function openOwnerGap({ goal, step, item, runtime, current, request, appendRecei
   if (!Array.isArray(step.knowledgeGaps)) step.knowledgeGaps = [];
   const proposed = createKnowledgeGap(goal, step, item.queueId, request, current);
   const existing = step.knowledgeGaps.find((gap) => gap.gapId === proposed.gapId);
-  if (!existing && step.knowledgeGaps.length >= 16) throw new Error("goal step exceeds 16 knowledge gaps");
+  if (!existing && step.knowledgeGaps.length >= 16) {
+    return blockKnowledgeLimit({ goal, step, item, runtime, current, appendReceipt }, "knowledge gaps");
+  }
   if (existing?.status === "resolved") {
     goal.blocker = "The host repeated an already resolved knowledge gap.";
     step.status = "blocked"; step.blocker = goal.blocker; goal.status = "blocked";

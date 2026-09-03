@@ -252,3 +252,37 @@ test("conflicting primary evidence permits one durable owner decision only after
   assert.deepEqual((await gatewayContext({ root, agentId: "agent:foreign" })).goals, []);
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
 });
+
+test("the worker blocks a seventeenth self-help requirement without throwing", async (t) => {
+  const { root, source } = await fixture(t);
+  const adapter = { send: async () => ({ ok: true }) };
+  for (let index = 0; index < 16; index += 1) {
+    const question = `Which synthetic fixture variant ${index} satisfies the current contract?`;
+    const reason = `The current plan lacks objective evidence for fixture variant ${index}.`;
+    const required = await runWorkerTick({ root, workerId: `worker:limit-gap:${index}`,
+      now: new Date(Date.UTC(2032, 1, 1, 0, 2, index * 2)), adapter,
+      hostRunner: async () => ({ checkpoint: { index, phase: "knowledge-gap" },
+        knowledgeGap: { question, reason, requiredEvidence: "objective-observation" } }) });
+    assert.equal(required.status, "self-help-required");
+    const resolved = await runWorkerTick({ root, workerId: `worker:limit-help:${index}`,
+      now: new Date(Date.UTC(2032, 1, 1, 0, 2, index * 2 + 1)), adapter,
+      hostRunner: async () => ({ checkpoint: { index, phase: "researched" },
+        selfHelp: report({ question, reason,
+          conclusion: `Use synthetic fixture variant ${index} for the bounded check.` }) }) });
+    assert.equal(resolved.status, "self-help-resolved");
+  }
+
+  const blocked = await runWorkerTick({ root, workerId: "worker:limit-seventeen",
+    now: "2032-02-01T00:03:00.000Z", adapter,
+    hostRunner: async () => ({ checkpoint: { phase: "seventeenth-gap" }, knowledgeGap: {
+      question: "Which seventeenth synthetic fixture satisfies the current contract?",
+      reason: "Sixteen bounded research cycles did not settle the new fixture.",
+      requiredEvidence: "objective-observation"
+    } }) });
+  assert.equal(blocked.status, "blocked");
+  const loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals[0].status, "blocked");
+  assert.match(loaded.policy.goals[0].blocker, /bounded limit of 16 self-help requirements/i);
+  assert.equal(loaded.runtime.receipts.filter((item) => item.kind === "self-help-limit-exhausted").length, 1);
+  assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
+});

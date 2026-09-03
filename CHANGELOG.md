@@ -4,6 +4,26 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-09-03
+
+### Added
+
+- `Stop` and `SubagentStop` now require a successful `node --test`, `npm test`, `npm run check`, or `pytest` command after the latest observed write before accepting a completed delivery. The verification lane survives restart and remains bound to the exact task when available.
+
+### Changed
+
+- Reaching the bounded limit of 16 self-help requirements, research resolutions, or knowledge gaps now blocks the exact plan step for local review instead of throwing and terminating the worker tick.
+- Hook output formatting moved to a focused module, reducing the oversized hook lifecycle file without changing its public exports or host payloads.
+
+### Security
+
+- Test evidence is outcome-bound and rejects failed commands, test-before-write ordering, conflicting tool delivery IDs, tampered state, shell pipelines, failure-masking operators, and commands that merely print a test name. Read-only tools do not invalidate a valid post-write test.
+- Active jobs paused as waiting remain resumable and do not masquerade as completed deliveries. Corrupt verification state blocks completion cleanly without modifying user sources.
+
+### Tests
+
+- Synthetic Before/After coverage proves an untested write changes from accepted to blocked, six concurrent duplicate reports converge, restart preserves task verification, and a seventeenth full self-help cycle becomes a durable blocker without killing the worker.
+
 ## [0.62.0] - 2026-09-03
 
 ### Added

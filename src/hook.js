@@ -17,6 +17,12 @@ import { syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
 import { captureMustRememberPrompt, recordPreflightFailure, runPreflight, verifyPreflightReceipt } from "./lib/preflight.js";
 import { isMainModule } from "./lib/runtime.js";
 import { recordHookScanAudit } from "./lib/hook-audit.js";
+import {
+  recordDeliveryPause, recordDeliveryToolUse, verifyDeliveryStop
+} from "./lib/delivery-verification.js";
+import { blunRuntimeContext, blunRuntimeMessage, hookOutput } from "./lib/hook-output.js";
+
+export { blunRuntimeContext, blunRuntimeMessage } from "./lib/hook-output.js";
 
 const MAX_STDIN_BYTES = 64 * 1024;
 const STANDARD_HOST_CONTEXT_BYTES = 9500;
@@ -396,66 +402,6 @@ async function captureAttentionLifecycle(input, event, root, scope, catalog) {
   });
 }
 
-export function blunRuntimeContext(context) {
-  const detailed = JSON.parse(context);
-  const sourceResolution = detailed.sourceResolution ? {
-    status: detailed.sourceResolution.status || null,
-    reason: detailed.sourceResolution.reason || null
-  } : null;
-  const runtime = {
-    schema: "agentspine.blun-runtime-context/v1",
-    event: detailed.event,
-    loaded: Boolean(detailed.loaded),
-    failedClosed: detailed.failedClosed ? true : undefined,
-    indexedSources: detailed.indexedSources || 0,
-    sourceResolution,
-    instruction: detailed.loaded
-      ? "Detailed AgentSpine context is available on demand through session_briefing. Load it only when the current request needs continuity."
-      : detailed.instruction,
-    authority: "context-only"
-  };
-  if (detailed.signal && (detailed.signal.captured || detailed.signal.accepted || detailed.signal.reason)) {
-    runtime.signal = detailed.signal;
-  }
-  if (detailed.attentionEvent
-    && (detailed.attentionEvent.captured || detailed.attentionEvent.duplicate || detailed.attentionEvent.reason)) {
-    runtime.attentionEvent = detailed.attentionEvent;
-  }
-  if (detailed.selfstarter && (detailed.selfstarter.active || detailed.selfstarter.blocked)) {
-    runtime.selfstarter = detailed.selfstarter;
-  }
-  if (detailed.channelEvent?.active) runtime.channelEvent = detailed.channelEvent;
-  return JSON.stringify(runtime);
-}
-
-export function blunRuntimeMessage(context) {
-  const runtime = JSON.parse(blunRuntimeContext(context));
-  const base = runtime.loaded
-    ? `AgentSpine ready: ${runtime.indexedSources} sources indexed. Load detailed continuity only on demand through session_briefing.`
-    : `AgentSpine unavailable${runtime.sourceResolution?.reason ? `: ${runtime.sourceResolution.reason}` : ""}. ${runtime.instruction}`;
-  const active = {};
-  if (runtime.signal && (runtime.signal.captured || runtime.signal.accepted
-    || String(runtime.signal.reason || "").startsWith("rejected:"))) {
-    active.signal = runtime.signal;
-  }
-  if (runtime.attentionEvent && (runtime.attentionEvent.captured || runtime.attentionEvent.duplicate
-    || String(runtime.attentionEvent.reason || "").startsWith("rejected:"))) {
-    active.attentionEvent = runtime.attentionEvent;
-  }
-  if (runtime.selfstarter) active.selfstarter = runtime.selfstarter;
-  if (runtime.channelEvent) active.channelEvent = runtime.channelEvent;
-  return Object.keys(active).length === 0
-    ? base
-    : `${base}\nActive AgentSpine runtime data: ${JSON.stringify(active)}`;
-}
-
-function hookOutput(event, context) {
-  if (process.env.BLUN_PLUGIN_ROOT) {
-    return { hookSpecificOutput: { hookEventName: event, message: blunRuntimeMessage(context) } };
-  }
-  return { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
-}
-
 function candidatePaths(value, output = []) {
   if (!value) return output;
   if (typeof value === "string") {
@@ -558,6 +504,11 @@ function blockPrompt(reason) {
   })}\n`);
 }
 
+function blockStop(event, reason) {
+  process.stdout.write(`${JSON.stringify({ decision: "block", reason,
+    hookSpecificOutput: { hookEventName: event, decision: "block", reason } })}\n`);
+}
+
 async function runHookCore(input, payload) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("hook input must be one JSON object");
   const event = input.hook_event_name || input.event_name || "";
@@ -620,6 +571,7 @@ async function runHookCore(input, payload) {
   let selfstarter = null;
   let channelEvent = null;
   let learningDelivery = null;
+  let deliveryVerification = null;
 
   if (event === "PreToolUse" && isScanFailOpenTool(input.tool_name) && resolvedSources.diagnostics.skipped?.length) {
     await auditSkippedScans(input, "source-resolution", resolvedSources.diagnostics.skipped);
@@ -681,6 +633,38 @@ async function runHookCore(input, payload) {
       if (payload) return { blocked: true, reason, selfstarter: { allowed: false, reason: error.message } };
       deny(reason);
       return;
+    }
+  }
+
+  if (["PostToolUse", "Stop", "SubagentStop"].includes(event)) {
+    scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
+    const deliveryScope = {
+      entityId: scope.entityId, tenantId: scope.tenantId, groupId: scope.groupId,
+      projectId: scope.projectId, currentTaskId: scope.currentTaskId
+    };
+    if (event === "PostToolUse") {
+      deliveryVerification = await recordDeliveryToolUse({
+        root, host: scope.host, sessionId: sessionId(input), scope: deliveryScope,
+        input, success: toolSucceeded(input)
+      });
+    } else {
+      const activeJob = selfstarterRootSkipped(resolvedSources.diagnostics)
+        ? null : await selfstarterScope(input, scope, root, "resume");
+      const requestedStatus = selfstarterInput(input)?.status || null;
+      deliveryVerification = activeJob && requestedStatus !== "completed"
+        ? await recordDeliveryPause({
+          root, host: scope.host, sessionId: sessionId(input), scope: deliveryScope,
+          eventId: input.event_id ?? input.hook_event_id ?? null
+        })
+        : await verifyDeliveryStop({
+          root, host: scope.host, sessionId: sessionId(input), scope: deliveryScope,
+          eventId: input.event_id ?? input.hook_event_id ?? null
+        });
+      if (deliveryVerification.blocked) {
+        if (payload) return { blocked: true, reason: deliveryVerification.reason, deliveryVerification };
+        blockStop(event, deliveryVerification.reason);
+        return;
+      }
     }
   }
 
@@ -851,7 +835,7 @@ async function runHookCore(input, payload) {
     }
   }
 
-  if (payload) return { blocked: false, attentionEvent, selfstarter, learningDelivery };
+  if (payload) return { blocked: false, attentionEvent, selfstarter, learningDelivery, deliveryVerification };
   process.stdout.write("{}\n");
 }
 
