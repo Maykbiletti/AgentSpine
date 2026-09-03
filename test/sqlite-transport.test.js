@@ -284,11 +284,12 @@ test("concurrent CLI publishers serialize into distinct retained revisions", sql
 });
 
 test("SQLite transport administration stays absent from MCP and hooks", async () => {
-  const [mcp, hook] = await Promise.all([
+  const [mcp, mcpRuntime, hook] = await Promise.all([
     readFile(new URL("../src/mcp.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/mcp-runtime.js", import.meta.url), "utf8"),
     readFile(new URL("../src/hook.js", import.meta.url), "utf8")
   ]);
-  for (const content of [mcp, hook]) {
+  for (const content of [mcp, mcpRuntime, hook]) {
     assert.equal(/Sqlite|SQLite|share-sqlite|sqlite-transport/.test(content), false);
   }
 });

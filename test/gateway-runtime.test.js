@@ -18,10 +18,12 @@ import {
   gatewayContext, gatewayHealthFindings, gatewayRuntimeFindings, loadGatewayRuntime, reconcileGateway,
   resolveGoalKnowledgeGap, setGatewayControl
 } from "../src/lib/gateway-runtime.js";
+import { planDefinitionMaterial } from "../src/lib/gateway-premortem.js";
+import { claimReadOnlyGatewayWork, markTestGatewayHostStarted } from "./gateway-claim-fixture.js";
+import { persistLegacyGoalPolicy, writeLegacyGatewayPolicy } from "./legacy-goal-fixture.js";
 import { createTelegramAdapter } from "../src/lib/telegram-adapter.js";
 import { runWorkerTick, waitForGatewayWake } from "../src/worker.js";
 import { runAudit } from "../src/lib/audit.js";
-
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "agentspine-gateway-"));
   const state = await mkdtemp(join(tmpdir(), "agentspine-gateway-state-"));
@@ -60,7 +62,6 @@ async function fixture(t) {
   });
   return { root, agentId, before: await readFile(join(root, "SOUL.md"), "utf8") };
 }
-
 async function addSyntheticPersona(root, {
   bindingId, subjectId, host, profileId, displayName, groupId = "group:alpha", tenantId = "tenant:alpha", now
 }) {
@@ -75,7 +76,6 @@ async function addSyntheticPersona(root, {
   });
   return roster.policy.bindings.find((item) => item.id === bindingId).personaId;
 }
-
 async function ingest(root, agentId) {
   const event = {
     schema: "agentspine.channel-event/v1", eventId: "telegram:update:1001", provider: "telegram",
@@ -88,15 +88,14 @@ async function ingest(root, agentId) {
   await ingestChannelEvent({ root, event, signature, env: { AGENTSPINE_TEST_INGRESS: secret }, now: "2032-01-01T00:00:03.000Z" });
   return { event, agentId };
 }
-
 async function prepareDelivery(root, agentId, workerId = "worker:delivery") {
   await ingest(root, agentId);
   await reconcileGateway({ root, now: "2032-01-01T00:00:04.000Z" });
   const claim = await claimGatewayWork({ root, workerId, now: "2032-01-01T00:00:05.000Z" });
-  return completeGatewayRun({ root, queueId: claim.item.queueId, workerId,
+  await markTestGatewayHostStarted(root, claim, "2032-01-01T00:00:05.500Z");
+  return completeGatewayRun({ root, queueId: claim.item.queueId, workerId, claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts,
     result: { text: "Die Antwort bleibt exakt gebunden." }, now: "2032-01-01T00:00:06.000Z" });
 }
-
 async function leavePersona(root, now) {
   const { policy } = await loadPersonaRuntime(root);
   const binding = policy.bindings[0];
@@ -115,12 +114,13 @@ test("authenticated Telegram event wakes one agent lane and returns exactly one 
   const claimed = await claimGatewayWork({ root, workerId: "worker:one", now: "2032-01-01T00:00:05.000Z" });
   assert.equal(claimed.item.kind, "direct-message");
   assert.equal(claimed.item.agentId, agentId);
+  await markTestGatewayHostStarted(root, claimed, "2032-01-01T00:00:05.250Z");
   await assert.rejects(completeGatewayRun({
-    root, queueId: claimed.item.queueId, workerId: "worker:one",
+    root, queueId: claimed.item.queueId, workerId: "worker:one", claimedAt: claimed.item.lease.claimedAt, attempt: claimed.item.attempts,
     result: { text: "Ich liebe dich und ich habe Gefühle." }, now: "2032-01-01T00:00:05.500Z"
   }), /prohibited attachment or consciousness/i);
   const completed = await completeGatewayRun({
-    root, queueId: claimed.item.queueId, workerId: "worker:one",
+    root, queueId: claimed.item.queueId, workerId: "worker:one", claimedAt: claimed.item.lease.claimedAt, attempt: claimed.item.attempts,
     result: { text: "Ja, ich kümmere mich darum." }, now: "2032-01-01T00:00:06.000Z"
   });
   let sends = 0;
@@ -144,7 +144,6 @@ test("authenticated Telegram event wakes one agent lane and returns exactly one 
   assert.equal(sends, 1);
   assert.equal(await readFile(join(root, "SOUL.md"), "utf8"), before);
 });
-
 test("worker tick reconciles, runs, delivers, and acknowledges one pending channel event", async (t) => {
   const { root, agentId } = await fixture(t);
   await ingest(root, agentId);
@@ -159,6 +158,9 @@ test("worker tick reconciles, runs, delivers, and acknowledges one pending chann
         AGENTSPINE_GATEWAY_CONTEXT: "agentspine.gateway-start/v1",
         AGENTSPINE_ENTITY_ID: agentId,
         AGENTSPINE_PROJECT_ID: "project:alpha",
+        AGENTSPINE_HOST: "codex",
+        AGENTSPINE_GATEWAY_QUEUE_ID: item.queueId,
+        AGENTSPINE_GATEWAY_ATTEMPT: "1",
         AGENTSPINE_GROUP_ID: "group:alpha",
         AGENTSPINE_CHANNEL_EVENT_ID: "telegram:update:1001",
         AGENTSPINE_CHANNEL_PROVIDER: "telegram"
@@ -174,7 +176,6 @@ test("worker tick reconciles, runs, delivers, and acknowledges one pending chann
   const gateway = await loadGatewayRuntime(root);
   assert.equal(gateway.runtime.queue[0].status, "completed");
 });
-
 test("disabled and killed gateways never poll, run, or send", async (t) => {
   const { root } = await fixture(t);
   let effects = 0;
@@ -188,21 +189,19 @@ test("disabled and killed gateways never poll, run, or send", async (t) => {
   }, hostRunner: async () => { effects += 1; } }), { status: "stopped", processed: false });
   assert.equal(effects, 0);
 });
-
-test("host failure persists a bounded retry instead of losing an unanswered message", async (t) => {
+test("host failure after invocation blocks an ambiguous unanswered message", async (t) => {
   const { root, agentId } = await fixture(t);
   await ingest(root, agentId);
   const result = await runWorkerTick({ root, workerId: "worker:offline", now: "2032-01-01T00:00:04.000Z",
     hostRunner: async () => { throw new Error("synthetic host unavailable"); },
     adapter: { send: async () => { throw new Error("must not send"); } } });
-  assert.equal(result.status, "pending");
+  assert.equal(result.status, "blocked");
   const { runtime } = await loadGatewayRuntime(root);
-  assert.equal(runtime.queue[0].status, "pending");
-  assert.match(runtime.queue[0].lastError, /Host runtime unavailable/);
+  assert.equal(runtime.queue[0].status, "blocked");
+  assert.match(runtime.queue[0].lastError, /manual owner review/);
   assert.equal(runtime.queue[0].lease, null);
   assert.equal(runtime.outbox.length, 0);
 });
-
 test("prepared delivery survives restart and effect-none failures retry with backoff", async (t) => {
   const { root, agentId } = await fixture(t);
   const completed = await prepareDelivery(root, agentId);
@@ -222,7 +221,6 @@ test("prepared delivery survives restart and effect-none failures retry with bac
   assert.equal(delivered.recoveredDelivery, true);
   assert.equal(sends, 2);
 });
-
 test("ambiguous send remains delivery-unknown without a duplicate effect", async (t) => {
   const { root, agentId } = await fixture(t);
   const completed = await prepareDelivery(root, agentId);
@@ -272,7 +270,7 @@ test("persona leave cancels queued work before host execution", async (t) => {
   await ingest(root, agentId);
   await reconcileGateway({ root, now: "2032-01-01T00:00:04.000Z" });
   await leavePersona(root, "2032-01-01T00:00:04.500Z");
-  const claim = await claimGatewayWork({ root, workerId: "worker:revoked", now: "2032-01-01T00:00:05.000Z" });
+  const claim = await claimReadOnlyGatewayWork({ root, workerId: "worker:revoked", now: "2032-01-01T00:00:05.000Z" });
   assert.equal(claim.item, null);
   assert.equal((await loadGatewayRuntime(root)).runtime.queue[0].status, "cancelled");
 });
@@ -291,16 +289,16 @@ test("persona leave blocks an already prepared channel effect", async (t) => {
 
 test("authenticated goal assignment remains idle-safe without a goal and checkpointed with one", async (t) => {
   const { root, agentId } = await fixture(t);
-  assert.equal((await claimGatewayWork({ root, workerId: "worker:idle" })).reason, "idle/needs-goal");
+  assert.equal((await claimReadOnlyGatewayWork({ root, workerId: "worker:idle" })).reason, "idle/needs-goal");
   await assignGoal({
     root, goalId: "goal:alpha", agentId, ownerSubjectId: "subject:owner", projectId: "project:alpha",
     groupId: "group:alpha", successCriterion: "Synthetic acceptance is green.", nextSafeStep: "Run the synthetic check.",
     confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:01.000Z"
   });
-  const claim = await claimGatewayWork({ root, workerId: "worker:goal", now: "2032-01-01T00:00:02.000Z" });
+  const claim = await claimReadOnlyGatewayWork({ root, workerId: "worker:goal", now: "2032-01-01T00:00:02.000Z" });
   await completeGatewayRun({
-    root, queueId: claim.item.queueId, workerId: "worker:goal",
-    result: { checkpoint: { gate: 1 }, completed: false }, now: "2032-01-01T00:00:03.000Z"
+    root, queueId: claim.item.queueId, workerId: "worker:goal", claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts,
+    result: { checkpoint: { gate: 1 }, completed: false, readOnly: true }, now: "2032-01-01T00:00:03.000Z"
   });
   const { policy, runtime } = await loadGatewayRuntime(root);
   assert.deepEqual(policy.goals[0].checkpoint, { gate: 1 });
@@ -334,22 +332,22 @@ test("dependency-bound goal plans resume after a torn write and complete three o
   loaded = await loadGatewayRuntime(root);
   assert.equal(loaded.runtime.queue.filter((item) => item.goalStepId === "step:observe" && item.status === "pending").length, 1);
 
-  const claims = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+  const claims = await Promise.all(Array.from({ length: 6 }, (_, index) => claimReadOnlyGatewayWork({
     root, workerId: `worker:plan:${index}`, now: "2032-01-01T00:00:03.000Z"
   })));
   assert.equal(claims.filter((claim) => claim.item).length, 1);
   const observe = claims.find((claim) => claim.item);
   assert.equal(observe.item.goalStepId, "step:observe");
-  await completeGatewayRun({ root, queueId: observe.item.queueId, workerId: observe.item.lease.workerId,
-    result: { checkpoint: { observed: true }, completed: true }, now: "2032-01-01T00:00:04.000Z" });
+  await completeGatewayRun({ root, queueId: observe.item.queueId, workerId: observe.item.lease.workerId, claimedAt: observe.item.lease.claimedAt, attempt: observe.item.attempts,
+    result: { checkpoint: { observed: true }, completed: true, readOnly: true }, now: "2032-01-01T00:00:04.000Z" });
   loaded = await loadGatewayRuntime(root);
   assert.deepEqual(loaded.policy.goals[0].plan.steps.map((step) => step.status), ["completed", "active", "pending"]);
   assert.equal(loaded.policy.goals[0].status, "active");
 
-  const act = await claimGatewayWork({ root, workerId: "worker:plan:act", now: "2032-01-01T00:00:05.000Z" });
+  const act = await claimReadOnlyGatewayWork({ root, workerId: "worker:plan:act", now: "2032-01-01T00:00:05.000Z" });
   assert.equal(act.item.goalStepId, "step:act");
-  await completeGatewayRun({ root, queueId: act.item.queueId, workerId: "worker:plan:act",
-    result: { checkpoint: { dependency: "offline" }, blocked: true, blocker: "Synthetic dependency is unavailable." },
+  await completeGatewayRun({ root, queueId: act.item.queueId, workerId: "worker:plan:act", claimedAt: act.item.lease.claimedAt, attempt: act.item.attempts,
+    result: { checkpoint: { dependency: "offline" }, blocked: true, blocker: "Synthetic dependency is unavailable.", readOnly: true },
     now: "2032-01-01T00:00:05.500Z" });
   loaded = await loadGatewayRuntime(root);
   assert.equal(loaded.policy.goals[0].status, "blocked");
@@ -359,17 +357,17 @@ test("dependency-bound goal plans resume after a torn write and complete three o
     steps: planSteps, confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:05.750Z"
   });
   assert.equal(resumed.resumed, true);
-  const resumedAct = await claimGatewayWork({ root, workerId: "worker:plan:act-resumed", now: "2032-01-01T00:00:05.900Z" });
+  const resumedAct = await claimReadOnlyGatewayWork({ root, workerId: "worker:plan:act-resumed", now: "2032-01-01T00:00:05.900Z" });
   assert.equal(resumedAct.item.goalStepId, "step:act");
-  await completeGatewayRun({ root, queueId: resumedAct.item.queueId, workerId: "worker:plan:act-resumed",
-    result: { checkpoint: { acted: true }, completed: true }, now: "2032-01-01T00:00:06.000Z" });
+  await completeGatewayRun({ root, queueId: resumedAct.item.queueId, workerId: "worker:plan:act-resumed", claimedAt: resumedAct.item.lease.claimedAt, attempt: resumedAct.item.attempts,
+    result: { checkpoint: { acted: true }, completed: true, readOnly: true }, now: "2032-01-01T00:00:06.000Z" });
   loaded = await loadGatewayRuntime(root);
   assert.deepEqual(loaded.policy.goals[0].plan.steps.map((step) => step.status), ["completed", "completed", "active"]);
 
-  const verify = await claimGatewayWork({ root, workerId: "worker:plan:verify", now: "2032-01-01T00:00:07.000Z" });
+  const verify = await claimReadOnlyGatewayWork({ root, workerId: "worker:plan:verify", now: "2032-01-01T00:00:07.000Z" });
   assert.equal(verify.item.goalStepId, "step:verify");
-  await completeGatewayRun({ root, queueId: verify.item.queueId, workerId: "worker:plan:verify",
-    result: { checkpoint: { verified: true }, completed: true }, now: "2032-01-01T00:00:08.000Z" });
+  await completeGatewayRun({ root, queueId: verify.item.queueId, workerId: "worker:plan:verify", claimedAt: verify.item.lease.claimedAt, attempt: verify.item.attempts,
+    result: { checkpoint: { verified: true }, completed: true, readOnly: true }, now: "2032-01-01T00:00:08.000Z" });
   loaded = await loadGatewayRuntime(root);
   assert.equal(loaded.policy.goals[0].status, "completed");
   assert.deepEqual(loaded.policy.goals[0].plan.steps.map((step) => step.status), ["completed", "completed", "completed"]);
@@ -404,26 +402,26 @@ test("provider-neutral goal plans hand dependent steps to exact authenticated te
   await reconcileGateway({ root, now: "2032-01-01T00:00:01.500Z" });
   await reconcileGateway({ root, now: "2032-01-01T00:00:01.750Z" });
 
-  const claims = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+  const claims = await Promise.all(Array.from({ length: 6 }, (_, index) => claimReadOnlyGatewayWork({
     root, workerId: `worker:team:${index}`, now: "2032-01-01T00:00:02.000Z"
   })));
   assert.equal(claims.filter((claim) => claim.item).length, 1);
   const first = claims.find((claim) => claim.item);
   assert.equal(first.item.agentId, agentId);
-  await completeGatewayRun({ root, queueId: first.item.queueId, workerId: first.item.lease.workerId,
-    result: { checkpoint: { observed: true }, completed: true }, now: "2032-01-01T00:00:03.000Z" });
+  await completeGatewayRun({ root, queueId: first.item.queueId, workerId: first.item.lease.workerId, claimedAt: first.item.lease.claimedAt, attempt: first.item.attempts,
+    result: { checkpoint: { observed: true }, completed: true, readOnly: true }, now: "2032-01-01T00:00:03.000Z" });
 
   const routes = [];
   const second = await runWorkerTick({ root, workerId: "worker:team:claude", now: "2032-01-01T00:00:04.000Z",
     hostRunner: async (item) => {
       routes.push([item.goalStep.stepId, item.agentId, item.host, item.profileId]);
-      return { checkpoint: { analyzed: true }, completed: true };
+      return { checkpoint: { analyzed: true }, completed: true, readOnly: true };
     }, adapter: { send: async () => ({ ok: true }) } });
   assert.equal(second.status, "completed");
   const third = await runWorkerTick({ root, workerId: "worker:team:codex", now: "2032-01-01T00:00:05.000Z",
     hostRunner: async (item) => {
       routes.push([item.goalStep.stepId, item.agentId, item.host, item.profileId]);
-      return { checkpoint: { verified: true }, completed: true };
+      return { checkpoint: { verified: true }, completed: true, readOnly: true };
     }, adapter: { send: async () => ({ ok: true }) } });
   assert.equal(third.status, "completed");
   assert.deepEqual(routes, [
@@ -443,7 +441,7 @@ test("provider-neutral goal plans hand dependent steps to exact authenticated te
 
   loaded.policy.goals[0].plan.steps[1].agentId = agentId;
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
-  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy/i);
 });
 
 test("team plans reject foreign groups and pause safely when an assignee leaves", async (t) => {
@@ -477,7 +475,7 @@ test("team plans reject foreign groups and pause safely when an assignee leaves"
   assert.equal(loaded.policy.goals[0].status, "blocked");
   assert.equal(loaded.policy.goals[0].plan.steps[0].status, "blocked");
   assert.equal(loaded.runtime.queue.filter((item) => ["pending", "leased"].includes(item.status)).length, 0);
-  assert.equal((await claimGatewayWork({ root, workerId: "worker:departed", now: "2032-01-01T00:00:04.000Z" })).item, null);
+  assert.equal((await claimReadOnlyGatewayWork({ root, workerId: "worker:departed", now: "2032-01-01T00:00:04.000Z" })).item, null);
   assert.deepEqual(gatewayRuntimeFindings(loaded.policy, loaded.runtime), []);
 });
 
@@ -515,7 +513,8 @@ test("shared plan resources serialize conflicting agents by immutable goal prior
   loaded.runtime.queue.find((item) => item.goalId === "goal:resource-high").priority = 0;
   await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
   const raced = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
-    root, workerId: `worker:resource:${index}`, leaseSeconds: 15, now: "2032-01-01T00:00:02.000Z"
+    root, workerId: `worker:resource:${index}`, leaseSeconds: 15, executionMode: "read-only",
+    now: "2032-01-01T00:00:02.000Z"
   })));
   assert.equal(raced.filter((claim) => claim.item).length, 1);
   const firstHigh = raced.find((claim) => claim.item);
@@ -526,7 +525,7 @@ test("shared plan resources serialize conflicting agents by immutable goal prior
 
   // Simulate a worker crash. Expiry releases the resource without duplicating either wake.
   await reconcileGateway({ root, now: "2032-01-01T00:00:17.000Z" });
-  const reraced = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+  const reraced = await Promise.all(Array.from({ length: 6 }, (_, index) => claimReadOnlyGatewayWork({
     root, workerId: `worker:resource:retry:${index}`, leaseSeconds: 15, now: "2032-01-01T00:00:18.000Z"
   })));
   assert.equal(reraced.filter((claim) => claim.item).length, 1);
@@ -539,18 +538,18 @@ test("shared plan resources serialize conflicting agents by immutable goal prior
     resource: "resource:synthetic-ledger", now: "2032-01-01T00:00:20.000Z" });
   assert.deepEqual((await gatewayContext({ root, agentId: foreignAgentId })).resourceWaits, []);
 
-  const foreign = await claimGatewayWork({ root, workerId: "worker:resource:foreign", now: "2032-01-01T00:00:21.000Z" });
+  const foreign = await claimReadOnlyGatewayWork({ root, workerId: "worker:resource:foreign", now: "2032-01-01T00:00:21.000Z" });
   assert.equal(foreign.item.goalId, "goal:resource-foreign");
-  const independent = await claimGatewayWork({ root, workerId: "worker:resource:independent", now: "2032-01-01T00:00:22.000Z" });
+  const independent = await claimReadOnlyGatewayWork({ root, workerId: "worker:resource:independent", now: "2032-01-01T00:00:22.000Z" });
   assert.equal(independent.item.goalId, "goal:resource-independent");
-  await completeGatewayRun({ root, queueId: high.item.queueId, workerId: high.item.lease.workerId,
-    result: { checkpoint: { high: true }, completed: true }, now: "2032-01-01T00:00:23.000Z" });
-  const low = await claimGatewayWork({ root, workerId: "worker:resource:low", now: "2032-01-01T00:00:24.000Z" });
+  await completeGatewayRun({ root, queueId: high.item.queueId, workerId: high.item.lease.workerId, claimedAt: high.item.lease.claimedAt, attempt: high.item.attempts,
+    result: { checkpoint: { high: true }, completed: true, readOnly: true }, now: "2032-01-01T00:00:23.000Z" });
+  const low = await claimReadOnlyGatewayWork({ root, workerId: "worker:resource:low", now: "2032-01-01T00:00:24.000Z" });
   assert.equal(low.item.goalId, "goal:resource-low");
 
   for (const claim of [foreign, independent, low]) {
-    await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: claim.item.lease.workerId,
-      result: { checkpoint: { completed: claim.item.goalId }, completed: true }, now: "2032-01-01T00:00:25.000Z" });
+    await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: claim.item.lease.workerId, claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts,
+      result: { checkpoint: { completed: claim.item.goalId }, completed: true, readOnly: true }, now: "2032-01-01T00:00:25.000Z" });
   }
   loaded = await loadGatewayRuntime(root);
   assert.equal(loaded.policy.goals.filter((goal) => goal.status === "completed").length, 4);
@@ -559,7 +558,7 @@ test("shared plan resources serialize conflicting agents by immutable goal prior
 
   loaded.policy.goals.find((goal) => goal.goalId === "goal:resource-low").plan.steps[0].resources = ["resource:tampered"];
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
-  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy/i);
 });
 
 test("plan steps choose the safest sufficient strategy and require an objective post-action gate", async (t) => {
@@ -588,7 +587,7 @@ test("plan steps choose the safest sufficient strategy and require an objective 
   const unsupportedSelfReport = await runWorkerTick({ root, workerId: "worker:reflection:missing",
     now: "2032-01-01T00:00:02.000Z", hostRunner: async (item) => {
       seenDecision = item.goalStep.execution;
-      return { checkpoint: { inspected: true }, completed: true };
+      return { checkpoint: { inspected: true }, completed: true, readOnly: true };
     }, adapter: { send: async () => ({ ok: true }) } });
   assert.equal(seenDecision.selectedStrategyId, "strategy:read-only");
   assert.equal(unsupportedSelfReport.status, "blocked");
@@ -601,7 +600,7 @@ test("plan steps choose the safest sufficient strategy and require an objective 
     successCriterion: "The safest sufficient strategy passes objective verification.", steps,
     confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:03.000Z" });
   const failedGate = await runWorkerTick({ root, workerId: "worker:reflection:defect",
-    now: "2032-01-01T00:00:04.000Z", hostRunner: async () => ({ checkpoint: { inspected: true }, completed: true,
+    now: "2032-01-01T00:00:04.000Z", hostRunner: async () => ({ checkpoint: { inspected: true }, completed: true, readOnly: true,
       execution: { strategyId: "strategy:read-only", capabilitiesUsed: ["capability:inspect"], outcome: {
         evaluatorId: "evaluator:synthetic-fixture", metric: "metric:quality", value: 0.98, cases: 12,
         blockingDefect: true, sourceDigest: "a".repeat(64), observedAt: "2032-01-01T00:00:03.900Z"
@@ -623,14 +622,14 @@ test("plan steps choose the safest sufficient strategy and require an objective 
   await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
   await reconcileGateway({ root, now: "2032-01-01T00:00:05.500Z" });
   await reconcileGateway({ root, now: "2032-01-01T00:00:05.750Z" });
-  const raced = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+  const raced = await Promise.all(Array.from({ length: 6 }, (_, index) => claimReadOnlyGatewayWork({
     root, workerId: `worker:reflection:pass:${index}`, now: "2032-01-01T00:00:06.000Z"
   })));
   assert.equal(raced.filter((claim) => claim.item).length, 1);
   const claim = raced.find((entry) => entry.item);
   const completed = await completeGatewayRun({ root, queueId: claim.item.queueId,
-    workerId: claim.item.lease.workerId, now: "2032-01-01T00:00:07.000Z",
-    result: { checkpoint: { verified: true }, completed: true,
+    workerId: claim.item.lease.workerId, claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts, now: "2032-01-01T00:00:07.000Z",
+    result: { checkpoint: { verified: true }, completed: true, readOnly: true,
       execution: { strategyId: "strategy:read-only", capabilitiesUsed: ["capability:inspect"], outcome: {
         evaluatorId: "evaluator:synthetic-fixture", metric: "metric:quality", value: 0.93, cases: 12,
         blockingDefect: false, sourceDigest: "b".repeat(64), observedAt: "2032-01-01T00:00:06.900Z"
@@ -649,7 +648,7 @@ test("plan steps choose the safest sufficient strategy and require an objective 
 
   loaded.policy.goals[0].plan.steps[0].execution.strategies[1].risk = 99;
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
-  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy/i);
 });
 
 test("a bounded reflection explores one equally safe alternative and stops on defects or budget exhaustion", async (t) => {
@@ -682,7 +681,7 @@ test("a bounded reflection explores one equally safe alternative and stops on de
     root, workerId: "worker:exploration:first", now: "2032-01-01T00:00:02.000Z",
     hostRunner: async (item) => {
       attempts.push(item.goalStep.executionAttempt);
-      return { completed: true, execution: {
+      return { completed: true, readOnly: true, execution: {
         strategyId: item.goalStep.executionAttempt.strategyId,
         capabilitiesUsed: ["capability:inspect"], outcome: {
           ...verification, value: 0.4, cases: 10, blockingDefect: false,
@@ -721,7 +720,7 @@ test("a bounded reflection explores one equally safe alternative and stops on de
     root, workerId: "worker:exploration:second", now: "2032-01-01T00:00:03.000Z",
     hostRunner: async (item) => {
       attempts.push(item.goalStep.executionAttempt);
-      return { completed: true, execution: {
+      return { completed: true, readOnly: true, execution: {
         strategyId: item.goalStep.executionAttempt.strategyId,
         capabilitiesUsed: ["capability:inspect"], outcome: {
           ...verification, value: 0.94, cases: 10, blockingDefect: false,
@@ -744,7 +743,7 @@ test("a bounded reflection explores one equally safe alternative and stops on de
   await assign("goal:blocking-exploration", "2032-01-01T00:00:04.000Z");
   const defect = await runWorkerTick({
     root, workerId: "worker:exploration:defect", now: "2032-01-01T00:00:05.000Z",
-    hostRunner: async (item) => ({ completed: true, execution: {
+    hostRunner: async (item) => ({ completed: true, readOnly: true, execution: {
       strategyId: item.goalStep.executionAttempt.strategyId,
       capabilitiesUsed: ["capability:inspect"], outcome: {
         ...verification, value: 0.99, cases: 10, blockingDefect: true,
@@ -768,7 +767,7 @@ test("a bounded reflection explores one equally safe alternative and stops on de
       now: `2032-01-01T00:00:0${8 + index}.000Z`,
       hostRunner: async (item) => {
         budgetAttempts.push(item.goalStep.executionAttempt.strategyId);
-        return { completed: true, execution: {
+        return { completed: true, readOnly: true, execution: {
           strategyId: item.goalStep.executionAttempt.strategyId,
           capabilitiesUsed: ["capability:inspect"], outcome: {
             ...verification, value: 0.5 + index / 10, cases: 10, blockingDefect: false,
@@ -809,7 +808,7 @@ test("a bounded reflection explores one equally safe alternative and stops on de
     stepId, agentId: assignedAgent, resources, execution: exactExecution, title, successCriterion, dependsOn
   })));
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
-  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy/i);
 });
 
 test("objective strategy evidence transfers to a matching task and rolls back after one regression", async (t) => {
@@ -852,11 +851,11 @@ test("objective strategy evidence transfers to a matching task and rolls back af
   });
   const finishSource = async (goalId, now, digest) => {
     await assign({ goalId, lead: agentId, execution: sourceExecution, now });
-    const claim = await claimGatewayWork({ root, workerId: `worker:${goalId}`, now: new Date(new Date(now).getTime() + 1000) });
+    const claim = await claimReadOnlyGatewayWork({ root, workerId: `worker:${goalId}`, now: new Date(new Date(now).getTime() + 1000) });
     assert.equal(claim.item.goalId, goalId);
     const completedAt = new Date(new Date(now).getTime() + 2000).toISOString();
-    await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: claim.item.lease.workerId, now: completedAt,
-      result: { checkpoint: { verified: goalId }, completed: true, execution: {
+    await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: claim.item.lease.workerId, claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts, now: completedAt,
+      result: { checkpoint: { verified: goalId }, completed: true, readOnly: true, execution: {
         strategyId: transferred.strategyId, capabilitiesUsed: ["capability:inspect"], outcome: {
           ...verification, value: 0.94, cases: 10, blockingDefect: false,
           sourceDigest: digest, observedAt: new Date(new Date(now).getTime() + 1500).toISOString()
@@ -872,10 +871,10 @@ test("objective strategy evidence transfers to a matching task and rolls back af
   const beforeEvidence = control.policy.goals.find((goal) => goal.goalId === "goal:transfer-before-evidence");
   assert.equal(beforeEvidence.plan.steps[0].execution.selectedStrategyId, "strategy:cheap-unproven");
   assert.equal(beforeEvidence.plan.steps[0].execution.transferProof, null);
-  const controlClaim = await claimGatewayWork({ root, workerId: "worker:transfer:before",
+  const controlClaim = await claimReadOnlyGatewayWork({ root, workerId: "worker:transfer:before",
     now: "2032-01-01T00:00:03.500Z" });
-  await completeGatewayRun({ root, queueId: controlClaim.item.queueId, workerId: controlClaim.item.lease.workerId,
-    now: "2032-01-01T00:00:03.750Z", result: { completed: true, execution: {
+  await completeGatewayRun({ root, queueId: controlClaim.item.queueId, workerId: controlClaim.item.lease.workerId, claimedAt: controlClaim.item.lease.claimedAt, attempt: controlClaim.item.attempts,
+    now: "2032-01-01T00:00:03.750Z", result: { completed: true, readOnly: true, execution: {
       strategyId: "strategy:cheap-unproven", capabilitiesUsed: ["capability:inspect"], outcome: {
         ...verification, value: 0.92, cases: 10, blockingDefect: false,
         sourceDigest: "d".repeat(64), observedAt: "2032-01-01T00:00:03.700Z"
@@ -902,7 +901,7 @@ test("objective strategy evidence transfers to a matching task and rolls back af
   await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
   await reconcileGateway({ root, now: "2032-01-02T00:00:00.250Z" });
   await reconcileGateway({ root, now: "2032-01-02T00:00:00.500Z" });
-  const raced = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+  const raced = await Promise.all(Array.from({ length: 6 }, (_, index) => claimReadOnlyGatewayWork({
     root, workerId: `worker:transfer:${index}`, now: "2032-01-02T00:00:01.000Z"
   })));
   assert.equal(raced.filter((entry) => entry.item).length, 1);
@@ -922,8 +921,8 @@ test("objective strategy evidence transfers to a matching task and rolls back af
   }
 
   // One blocking defect overrides both earlier successes and removes transfer from every future matching task.
-  await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: claim.item.lease.workerId,
-    now: "2032-01-02T00:00:02.000Z", result: { checkpoint: { inspected: true }, completed: true, execution: {
+  await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: claim.item.lease.workerId, claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts,
+    now: "2032-01-02T00:00:02.000Z", result: { checkpoint: { inspected: true }, completed: true, readOnly: true, execution: {
       strategyId: transferred.strategyId, capabilitiesUsed: ["capability:inspect"], outcome: {
         ...verification, value: 0.99, cases: 10, blockingDefect: true,
         sourceDigest: "c".repeat(64), observedAt: "2032-01-02T00:00:01.900Z"
@@ -958,7 +957,7 @@ test("objective strategy evidence transfers to a matching task and rolls back af
     title, successCriterion, dependsOn }) => ({ stepId, agentId, resources, execution: decision,
     title, successCriterion, dependsOn })));
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
-  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy/i);
 });
 
 test("pre-team goal plans retain their lead-agent routing after upgrade", async (t) => {
@@ -969,15 +968,16 @@ test("pre-team goal plans retain their lead-agent routing after upgrade", async 
     steps: [{ stepId: "step:legacy", title: "Run legacy step.", successCriterion: "Legacy step passes.", dependsOn: [] }],
     confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:01.000Z"
   });
+  await persistLegacyGoalPolicy(root, "goal:legacy-plan");
   const loaded = await loadGatewayRuntime(root);
   for (const step of loaded.policy.goals[0].plan.steps) {
-    delete step.resources; delete step.execution; delete step.executionOutcomes;
+    delete step.resources; delete step.execution; delete step.executionOutcomes; delete step.premortemContractVersion;
   }
   let definitions = loaded.policy.goals[0].plan.steps.map(({ stepId, agentId, title, successCriterion, dependsOn }) => ({
     stepId, agentId, title, successCriterion, dependsOn
   }));
   loaded.policy.goals[0].plan.definitionsDigest = createHash("sha256").update(JSON.stringify(definitions)).digest("hex");
-  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
+  await writeLegacyGatewayPolicy(loaded.gatewayPolicyPath, loaded.policy);
   assert.deepEqual(gatewayRuntimeFindings((await loadGatewayRuntime(root)).policy, loaded.runtime), []);
 
   for (const step of loaded.policy.goals[0].plan.steps) delete step.agentId;
@@ -985,14 +985,13 @@ test("pre-team goal plans retain their lead-agent routing after upgrade", async 
     stepId, title, successCriterion, dependsOn
   }));
   loaded.policy.goals[0].plan.definitionsDigest = createHash("sha256").update(JSON.stringify(definitions)).digest("hex");
-  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
+  await writeLegacyGatewayPolicy(loaded.gatewayPolicyPath, loaded.policy);
   const upgraded = await loadGatewayRuntime(root);
   assert.deepEqual(gatewayRuntimeFindings(upgraded.policy, upgraded.runtime), []);
-  const claim = await claimGatewayWork({ root, workerId: "worker:legacy", now: "2032-01-01T00:00:02.000Z" });
+  const claim = await claimReadOnlyGatewayWork({ root, workerId: "worker:legacy", now: "2032-01-01T00:00:02.000Z" });
   assert.equal(claim.item.agentId, agentId);
   assert.equal(claim.item.goalStepId, "step:legacy");
 });
-
 test("goal plans reject dependency cycles, definition drift, and stale-step completion", async (t) => {
   const { root, agentId } = await fixture(t);
   const base = {
@@ -1003,12 +1002,12 @@ test("goal plans reject dependency cycles, definition drift, and stale-step comp
     { stepId: "step:a", title: "Step A.", successCriterion: "A passes.", dependsOn: ["step:b"] },
     { stepId: "step:b", title: "Step B.", successCriterion: "B passes.", dependsOn: ["step:a"] }
   ] }), /acyclic dependency graph/i);
-
   await assignGoal({ ...base, goalId: "goal:bound", steps: [
     { stepId: "step:first", title: "First bounded step.", successCriterion: "First passes.", dependsOn: [] },
     { stepId: "step:second", title: "Second bounded step.", successCriterion: "Second passes.", dependsOn: ["step:first"] }
   ], now: "2032-01-01T00:00:01.000Z" });
-  const claim = await claimGatewayWork({ root, workerId: "worker:stale", now: "2032-01-01T00:00:02.000Z" });
+  const claim = await claimReadOnlyGatewayWork({ root, workerId: "worker:stale", now: "2032-01-01T00:00:02.000Z" });
+  await persistLegacyGoalPolicy(root, "goal:bound");
   const loaded = await loadGatewayRuntime(root);
   const originalPolicy = structuredClone(loaded.policy);
   const goal = loaded.policy.goals[0];
@@ -1016,13 +1015,13 @@ test("goal plans reject dependency cycles, definition drift, and stale-step comp
   goal.plan.steps[0].completedByQueueId = claim.item.queueId;
   goal.plan.steps[1].status = "active"; goal.plan.steps[1].updatedAt = "2032-01-01T00:00:02.500Z";
   goal.plan.currentStepId = "step:second"; goal.nextSafeStep = goal.plan.steps[1].title; goal.updatedAt = "2032-01-01T00:00:02.500Z";
-  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
-  await assert.rejects(completeGatewayRun({ root, queueId: claim.item.queueId, workerId: "worker:stale",
-    result: { completed: true }, now: "2032-01-01T00:00:03.000Z" }), /not bound to the current active goal step/i);
+  await writeLegacyGatewayPolicy(loaded.gatewayPolicyPath, loaded.policy);
+  await assert.rejects(completeGatewayRun({ root, queueId: claim.item.queueId, workerId: "worker:stale", claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts,
+    result: { completed: true, readOnly: true }, now: "2032-01-01T00:00:03.000Z" }), /not bound to the current active goal step/i);
 
   originalPolicy.goals[0].plan.steps[0].title = "Drifted definition.";
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(originalPolicy, null, 2)}\n`);
-  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy/i);
 });
 
 test("an objective knowledge gap pauses one plan step, asks once, and resumes with bound owner context", async (t) => {
@@ -1074,7 +1073,7 @@ test("an objective knowledge gap pauses one plan step, asks once, and resumes wi
   const resumed = await runWorkerTick({ root, workerId: "worker:gap-resumed", now: "2032-01-01T00:00:04.000Z",
     hostRunner: async (item) => {
       observedGap = item.goalStep.knowledgeGaps[0];
-      return { checkpoint: { regionChecked: true }, completed: true };
+      return { checkpoint: { regionChecked: true }, completed: true, readOnly: true };
     }, adapter: { send: async () => ({ ok: true }) } });
   assert.equal(resumed.status, "completed");
   assert.equal(observedGap.answer, "Use synthetic-region-west.");
@@ -1096,9 +1095,9 @@ test("objective questions require repository-first self-help and reject state ta
       successCriterion: "The input is bound to an objective observation.", dependsOn: [] }],
     confirmation: "local-owner-confirmed"
   });
-  const claim = await claimGatewayWork({ root, workerId: "worker:observed-gap" });
-  const deferred = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: "worker:observed-gap",
-    result: { knowledgeGap: {
+  const claim = await claimReadOnlyGatewayWork({ root, workerId: "worker:observed-gap" });
+  const deferred = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: "worker:observed-gap", claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts,
+    result: { readOnly: true, knowledgeGap: {
       question: "Which synthetic fixture produced the green observation?",
       reason: "The fixture identity is absent from the current objective result.",
       requiredEvidence: "objective-observation"
@@ -1110,12 +1109,12 @@ test("objective questions require repository-first self-help and reject state ta
   const original = structuredClone(loaded.policy);
   loaded.policy.goals[0].plan.steps[0].selfHelpRequirements[0].question = "Tampered question.";
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
-  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy/i);
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(original, null, 2)}\n`);
 
-  const repeatedClaim = await claimGatewayWork({ root, workerId: "worker:repeated-gap" });
+  const repeatedClaim = await claimReadOnlyGatewayWork({ root, workerId: "worker:repeated-gap" });
   const repeated = await completeGatewayRun({ root, queueId: repeatedClaim.item.queueId,
-    workerId: "worker:repeated-gap", result: { knowledgeGap: {
+    workerId: "worker:repeated-gap", claimedAt: repeatedClaim.item.lease.claimedAt, attempt: repeatedClaim.item.attempts, result: { readOnly: true, knowledgeGap: {
       question: "Which synthetic fixture produced the green observation?",
       reason: "The fixture identity is absent from the current objective result.",
       requiredEvidence: "owner-input"
@@ -1166,7 +1165,7 @@ test("startup reconciliation creates one deadline wake and health detects a sile
   assert.equal(loaded.runtime.queue.filter((item) => item.kind === "deadline").length, 1);
   assert.match(gatewayHealthFindings(loaded.policy, loaded.runtime, { now: "2032-01-01T00:00:03.500Z" }).join(","), /worker-not-healthy/);
   await runWorkerTick({ root, workerId: "worker:health", now: "2032-01-01T00:00:04.000Z",
-    hostRunner: async () => ({ checkpoint: { deadline: true }, completed: true }), adapter: { send: async () => ({ ok: true }) } });
+    hostRunner: async () => ({ checkpoint: { deadline: true }, completed: true, readOnly: true }), adapter: { send: async () => ({ ok: true }) } });
   loaded = await loadGatewayRuntime(root);
   assert.deepEqual(gatewayHealthFindings(loaded.policy, loaded.runtime, { now: "2032-01-01T00:00:04.000Z" }), []);
   assert.match(gatewayHealthFindings(loaded.policy, loaded.runtime, { now: "2032-01-01T00:04:00.001Z" }).join(","), /heartbeat-stale/);
@@ -1295,10 +1294,10 @@ test("gateway receipts and checkpoints reject tampering, secrets, and authority 
     groupId: "group:alpha", successCriterion: "Synthetic security gate passes.",
     nextSafeStep: "Run one bounded step.", confirmation: "local-owner-confirmed"
   });
-  const claim = await claimGatewayWork({ root, workerId: "worker:secure" });
+  const claim = await claimReadOnlyGatewayWork({ root, workerId: "worker:secure" });
   await assert.rejects(completeGatewayRun({
-    root, queueId: claim.item.queueId, workerId: "worker:secure",
-    result: { checkpoint: { token: "abcdefghijklmnopqrstuvwxyz1234567890" } }
+    root, queueId: claim.item.queueId, workerId: "worker:secure", claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts,
+    result: { checkpoint: { token: "abcdefghijklmnopqrstuvwxyz1234567890" }, readOnly: true }
   }), /secret- or authority-shaped/i);
   const { policy, runtime } = await loadGatewayRuntime(root);
   const forged = structuredClone(runtime);

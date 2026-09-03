@@ -4,6 +4,39 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-09-03
+
+### Added
+
+- Before the first write-class mutation in a session, including `Write`, `Edit`, `apply_patch` and recognized common shell-mediated mutations, and separately for each active goal-plan step, the hook now requires exactly three context-only premortem statements: baseline/environment, contract/tests and delivery path, each paired with one concrete check.
+- The MCP registration receipt derives immutable check IDs, binds the premortem to the exact session and step, and stores it in isolated AgentSpine state. Closed goal work carries the premortem text, digest and three check results in a separate checkpoint and outcome receipt without changing the caller-owned checkpoint.
+
+### Security
+
+- A verified missing, late or conflicting premortem blocks direct mutations and recognized common shell-mediated mutations at the first attempted write. After the existing post-write test gate, `Stop` and `SubagentStop` block a written delivery until all three original checks are reported as passed against the exact artifact digest and latest observed mutation digest; any later mutation invalidates the earlier closure.
+- Durable `PreToolUse` mutation intents keep oversized `PostToolUse` payloads from being mistaken for read-only work. Ambiguous Codex test output is not accepted as success: the hook requires structured success evidence or a parser-bound terminal success marker and returns the portable proof command when evidence is missing.
+- Delivery verification follows an exact authenticated queue attempt across host-session restarts and is otherwise session-bound. Host `Stop` events that omit `turn_id` still resolve the preceding session writes instead of opening a false read-only lane.
+- Read-only sessions remain unrestricted. Parser, filesystem and local-state uncertainty is audited and fails open; premortem records are context only and cannot grant identity, permissions, tools or policy exceptions. Durable goal receipts retain only session and binding digests, not raw session identifiers.
+- Project-scan truncation changes context completeness only. Protected-source, policy, identity, permission, execution-grant, aggregate-byte and mandatory-source violations keep their existing fail-closed behavior.
+- Waiting-job pauses are scoped to the current stop event and cannot become reusable completion bypasses. Shell mutation detection unwraps bounded `sudo`, `env`, `command`, `builtin` and `exec` prefixes, and goal completion recovers verified state files whose index write was interrupted.
+- Once an external host runner has been invoked, any thrown or invalid outcome is recorded as ambiguous and blocks its queue item and bound goal for owner review rather than replaying a possibly completed effect.
+- A host-effect (including legacy unknown-effect) lease cannot complete until the exact durable `markGatewayHostStarted` marker exists. Leased lanes must also match the queue lease's worker, claim time and expiry exactly; an orphaned or stale generation is a failed-closed runtime finding.
+- Recovering a stale premortem scope lock now writes a durable fenced finalization before any read-only conclusion. A delayed writer cannot turn that recovered scope into a clean completion.
+
+### Changed
+
+- MCP dispatch moved into bounded runtime modules, reducing `src/mcp.js` below 500 physical lines and removing its legacy line-budget exception. Existing tools and wire semantics remain unchanged while the new `record_delivery_premortem` tool registers the context-only artifact.
+- The Codex plugin manifest now selects `hooks/codex.json` explicitly, preventing Codex's default plugin discovery from loading the Claude-specific bundle. Installed-package checks exercise Codex with both documented compatibility root variables and retain its strict top-level blocking protocol.
+- Optional project Markdown discovery now retains at most 240 files and stops at its directory-entry or time budget. Required host instructions keep priority; excess files are deterministically skipped with a visible, audited incomplete-context warning instead of disabling every tool in a large workspace.
+- Goal-runtime policy changes now use an ownership-fenced, digest-bound paired transaction, and host execution records an exact lease before invoking an external runner. Restart recovery rolls a prepared pair forward once and treats a crash after the external effect as ambiguous instead of replaying it.
+
+### Tests
+
+- Before/After tests cover a write without a premortem, a correctly registered and closed delivery, late registration, a read-only session, session and gateway-attempt isolation, closure invalidation after later writes, goal-step receipt binding, concurrency, conflicting registration, tamper visibility and source byte preservation.
+- Availability and crash tests cover 241 project Markdown files, more than 8,192 flat directory entries, deadline truncation, native-source priority, visible hook warnings, stale lock ownership, torn policy/runtime commits and a hard process exit after one external effect.
+- Adversarial regressions cover a stale pause marker, option-bearing shell wrappers, a state/index crash gap and a caught host error after one observable effect.
+- Gateway and premortem race regressions prove that an unmarked host-effect completion is rejected, a mismatched lane generation is visible to audit, and stale scope-lock recovery remains blocked before and after a delayed writer resumes.
+
 ## [0.65.0] - 2026-09-03
 
 ### Changed
@@ -1249,7 +1282,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - Dual Claude Code and Codex plugin manifests
 - Cross-platform preservation, hook, graph, and MCP tests
 
-[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/Maykbiletti/AgentSpine/compare/v0.66.0...HEAD
+[0.66.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.65.0...v0.66.0
 [0.29.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Maykbiletti/AgentSpine/compare/v0.26.0...v0.27.0

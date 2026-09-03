@@ -278,7 +278,10 @@ test("tokens stay environment-only and feed administration stays outside MCP", a
   assert.equal(value.service.state.captures.every((item) => (
     item.headers.authorization === "Bearer synthetic-feed-token-value"
   )), true);
-  const mcp = await readFile(new URL("../src/mcp.js", import.meta.url), "utf8");
+  const mcp = (await Promise.all([
+    readFile(new URL("../src/mcp.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/mcp-runtime.js", import.meta.url), "utf8")
+  ])).join("\n");
   assert.equal(/publishHttpsFeed|pullHttpsFeed|fetchHttpsFeed|feed_token/i.test(mcp), false);
 });
 

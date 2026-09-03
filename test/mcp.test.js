@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { startMcpServer } from "../src/mcp.js";
 import { grantDelegation } from "../src/lib/coordination.js";
+import { preparePremortemRequirement } from "../src/lib/delivery-premortem.js";
 import { upsertEntity } from "../src/lib/graph.js";
 import { proposeLearning, reviewLearning } from "../src/lib/learning.js";
 import { initDirectoryAdapter, publishLearning, pullShared, reviewShared } from "../src/lib/sharing.js";
@@ -43,8 +44,32 @@ test("MCP server initializes and lists its read and graph tools", async () => {
     "add_learning_evidence", "review_learning", "learning_context",
     "learning_outcome_status", "evaluate_learning", "rollback_learning", "configure_learning",
     "delete_learning", "check_delegation", "create_task", "update_task",
-    "task_context", "shared_context", "audit"
+    "task_context", "shared_context", "audit", "record_delivery_premortem"
   ]);
+  const premortem = messages[1].result.tools.at(-1);
+  assert.deepEqual(premortem.inputSchema.required, ["root", "requirementId", "items"]);
+  assert.equal(premortem.inputSchema.properties.root.type, "string");
+  assert.equal(premortem.inputSchema.properties.root.minLength, 1);
+  assert.equal(
+    premortem.inputSchema.properties.requirementId.pattern,
+    "^premortem-requirement:[a-f0-9]{64}:[a-f0-9]{64}$"
+  );
+  assert.equal(premortem.inputSchema.properties.items.minItems, 3);
+  assert.equal(premortem.inputSchema.properties.items.maxItems, 3);
+  const itemSchemas = premortem.inputSchema.properties.items.items.oneOf;
+  assert.deepEqual(
+    itemSchemas.map((item) => item.properties.category.const),
+    ["baseline-environment", "contract-tests", "delivery-path"]
+  );
+  for (const item of itemSchemas) {
+    assert.deepEqual(item.required, ["category", "failure", "check"]);
+    assert.equal(item.additionalProperties, false);
+    assert.equal(item.properties.failure.minLength, 29);
+    assert.equal(item.properties.failure.maxLength, 500);
+    assert.equal(item.properties.failure.pattern, "^this delivery fails because\\s+\\S");
+    assert.equal(item.properties.check.minLength, 1);
+    assert.equal(item.properties.check.maxLength, 500);
+  }
   assert.equal(names.includes("grant_delegation"), false);
   assert.equal(names.includes("revoke_delegation"), false);
   assert.equal(names.includes("publish_learning"), false);
@@ -80,6 +105,93 @@ test("MCP server initializes and lists its read and graph tools", async () => {
     "enqueue_gateway_wake", "claim_gateway_work", "complete_gateway_run", "deliver_gateway_reply",
     "poll_telegram", "send_telegram", "start_worker"
   ]) assert.equal(names.includes(forbidden), false, `${forbidden} must remain outside MCP`);
+});
+
+test("MCP accepts reordered items and records a canonical context-only premortem receipt", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-mcp-premortem-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-mcp-premortem-state-"));
+  const previousState = process.env.AGENTSPINE_STATE_DIR;
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => {
+    if (previousState === undefined) delete process.env.AGENTSPINE_STATE_DIR;
+    else process.env.AGENTSPINE_STATE_DIR = previousState;
+    await rm(root, { recursive: true });
+    await rm(state, { recursive: true });
+  });
+  const sourcePath = join(root, "AGENTS.md");
+  const sourceBefore = Buffer.from("# Synthetic premortem rules\n", "utf8");
+  await writeFile(sourcePath, sourceBefore);
+  const nested = join(root, "packages", "synthetic-worker");
+  await mkdir(nested, { recursive: true });
+  const prepared = await preparePremortemRequirement({
+    root,
+    binding: { host: "codex", sessionId: "session:mcp-premortem", projectId: "project:mcp-premortem" }
+  });
+  assert.equal(prepared.status, "required");
+  const server = fileURLToPath(new URL("../src/mcp.js", import.meta.url));
+  const child = spawn(process.execPath, [server], {
+    cwd: nested,
+    env: { ...process.env, AGENTSPINE_STATE_DIR: state },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  t.after(() => child.kill());
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0", id: 3, method: "tools/call",
+    params: {
+      name: "record_delivery_premortem",
+      arguments: {
+        root,
+        requirementId: prepared.requirementId,
+        items: [
+          {
+            category: "delivery-path",
+            failure: "this delivery fails because the artifact is reported from the wrong path",
+            check: "Resolve and hash the final artifact beneath the configured project root."
+          },
+          {
+            category: "baseline-environment",
+            failure: "this delivery fails because the baseline differs from the assigned tree",
+            check: "Compare the assigned and current tree digests before writing."
+          },
+          {
+            category: "contract-tests",
+            failure: "this delivery fails because the contract lacks a behavioral regression test",
+            check: "Run the focused MCP and premortem tests after the change."
+          }
+        ]
+      }
+    }
+  })}\n`);
+  const response = await new Promise((resolve, reject) => {
+    let buffer = "";
+    const timeout = setTimeout(() => reject(new Error("MCP premortem response timeout")), 2000);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      buffer += chunk;
+      const newline = buffer.indexOf("\n");
+      if (newline >= 0) {
+        clearTimeout(timeout);
+        resolve(buffer.slice(0, newline));
+      }
+    });
+    child.once("error", reject);
+  });
+  const message = JSON.parse(response);
+  const receipt = JSON.parse(message.result.content[0].text);
+  assert.equal(message.result.isError, false);
+  assert.equal(receipt.status, "recorded");
+  assert.equal(receipt.blocked, false);
+  assert.equal(receipt.requirementId, prepared.requirementId);
+  assert.match(receipt.digest, /^[a-f0-9]{64}$/);
+  assert.equal(receipt.digest, receipt.artifact.digest);
+  assert.equal(receipt.artifact.schema, "agentspine.delivery-premortem-artifact/v1");
+  assert.equal(receipt.artifact.authority, "context-only");
+  assert.deepEqual(receipt.artifact.items.map((item) => item.category), [
+    "baseline-environment", "contract-tests", "delivery-path"
+  ]);
+  assert.equal(receipt.artifact.items.every((item) => /^check-[a-f0-9]{20}$/.test(item.checkId)), true);
+  assert.equal(new Set(receipt.artifact.items.map((item) => item.checkId)).size, 3);
+  assert.deepEqual(await readFile(sourcePath), sourceBefore);
 });
 
 test("agentspine mcp CLI launches the stdio server", async (t) => {

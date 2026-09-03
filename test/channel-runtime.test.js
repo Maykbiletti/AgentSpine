@@ -158,6 +158,7 @@ test("a stock host SessionStart receives exact gateway scope through the worker 
   await ingestChannelEvent({ root, event: input, signature: sign(input), env, now: "2032-01-01T00:00:02.000Z" });
   const keys = {
     AGENTSPINE_GATEWAY_CONTEXT: "agentspine.gateway-start/v1",
+    AGENTSPINE_HOST: "codex",
     AGENTSPINE_ENTITY_ID: "agent:franz",
     AGENTSPINE_PROJECT_ID: "project:synthetic",
     AGENTSPINE_GROUP_ID: "group:synthetic",

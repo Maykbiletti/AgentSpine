@@ -21,7 +21,7 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
-Version `0.65.0` replaces the `0.64.0` plugin cache identity.
+Version `0.66.0` replaces the `0.65.0` plugin cache identity.
 
 Version `0.39.0` replaces the `0.38.0` plugin cache identity.
 
@@ -29,7 +29,7 @@ Version `0.38.0` replaces the `0.37.0` plugin cache identity.
 
 Version `0.36.0` replaces the `0.35.0` plugin cache identity.
 
-The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Codex keeps its host-specific adapter in `hooks/codex.json`, while `.codex-plugin/plugin.json` omits the unsupported `hooks` field and passes the official plugin validator. Version `0.35.0` replaces the `0.34.0` plugin cache identity. The hook definitions contain only portable documented fields; `hooks/version.json` carries the separately validated bundle release and preflight contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise staged clean install, previous-version cache rejection, upgrade, host-native source resolution, indexed and lazy Claude memory, automatic multilingual briefing, pre-answer recall, authenticated persona graph reconciliation, attention, exact job start, tool checkpoint, new-session resume, purge, and uninstall preservation:
+The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Codex selects its host-specific `hooks/codex.json` adapter through `.codex-plugin/plugin.json`. Version `0.35.0` replaces the `0.34.0` plugin cache identity. The hook definitions contain only portable documented fields; `hooks/version.json` carries the separately validated bundle release and preflight contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise staged clean install, previous-version cache rejection, upgrade, host-native source resolution, indexed and lazy Claude memory, automatic multilingual briefing, pre-answer recall, authenticated persona graph reconciliation, attention, exact job start, tool checkpoint, new-session resume, purge, and uninstall preservation:
 
 ```bash
 npm run host:check
@@ -60,7 +60,7 @@ Open `/mcp` in the new interactive session and approve or reconnect `agent-spine
 | MCP | Manifest `mcpServers` | Read-only source tools plus external overlay workflows |
 | Hooks | `hooks/codex.json` | Manifest-selected lifecycle guardrails |
 
-Open `/plugins` in Codex CLI after configuring a marketplace that contains AgentSpine, then start a new session. Codex presents a startup review when a new or changed hook definition needs trust; there is no `/hooks` slash command. Codex records trust against the exact hook-definition hash, so an installed, updated, or previously untrusted bundle is skipped until that current definition is reviewed and trusted. This follows the official [Codex hooks trust and plugin discovery contract](https://developers.openai.com/codex/hooks).
+Open `/plugins` in Codex CLI after configuring a marketplace that contains AgentSpine, then start a new session. Review the installed hook source and trust state with `/hooks`; Codex also presents a startup warning when a new or changed hook definition needs trust. Codex records trust against the exact hook-definition hash, so an installed, updated, or previously untrusted bundle is skipped until that current definition is reviewed and trusted. This follows the official [Codex hooks trust and plugin discovery contract](https://developers.openai.com/codex/hooks).
 
 Codex loads `hooks/codex.json` through the explicit plugin-manifest entry. It contains only Codex-documented lifecycle events; Claude Code's additional `InstructionsLoaded` event remains confined to `hooks/hooks.json`. Both files deliberately contain only the documented top-level `description` and `hooks` fields. Cache identity remains in `.codex-plugin/plugin.json`, while Codex records hook trust against the current definition hash. The Codex hook and MCP registrations use the host-native `PLUGIN_ROOT` expansion.
 
@@ -68,6 +68,7 @@ Verify the live host in a newly started Codex CLI session:
 
 ```text
 /plugins
+/hooks
 Trust all and continue
 ```
 
@@ -128,12 +129,12 @@ Identity and audience come from explicit hook scope fields or the locally config
 
 Hook stdin is JSON-only and limited to 64 KiB. State transitions use external atomic files and locks. Hook stdout contains only host protocol JSON; diagnostics are bounded to stderr by the host process. Hooks do not expose transport, key, trust, database, network, message, payment, production, delegation, or policy administration.
 
-The first executable-component trust approval remains mandatory. AgentSpine cannot approve itself. After approval and the one-time continuity opt-in, no per-session enablement or voluntary tool call is required.
+The first executable-component trust approval remains mandatory. AgentSpine cannot approve itself. After approval and the one-time continuity opt-in, read-only briefing and recall require no per-session enablement or voluntary tool call. A writing delivery must still make the hook-issued `record_delivery_premortem` registration before its first mutation.
 
 ## Optional gateway worker
 
 The package also registers exactly one `agentspine-worker` entrypoint. It is separate from MCP and lifecycle hooks. When an owner runs it under a service manager, it synchronizes the configured authenticated persona roster, polls current Telegram bindings, prepares exact Claude/Codex start data, invokes only the absolute executable in `AGENTSPINE_HOST_RUNNER` without a shell, and returns one idempotent reply to the bound origin.
 
-The host runner is responsible for starting the selected host with the supplied scope and `agent_spine_channel_event` fields. Codex still refuses the injected context until the current hook hash has been reviewed in `/hooks`; the worker cannot bypass or manufacture that trust. Setup and the stdin/stdout contract are documented in [durable gateway worker](gateway-runtime.md).
+The host runner is responsible for starting the selected host with the supplied scope and `agent_spine_channel_event` fields. Codex skips an untrusted hook definition until the user accepts its current hash in the startup warning or `/hooks`; the worker cannot bypass or manufacture that trust. Setup and the stdin/stdout contract are documented in [durable gateway worker](gateway-runtime.md).
 
 The visible acceptance runner invokes the same production lifecycle adapter with new synthetic people, separated groups, Swedish and Spanish prompts, restarts, compaction, correction, rollback, purge, current-rights checks, and durable checkpoints. It prints one reproducible receipt per gate and proves `mcpCalls: 0`. See [visible cross-host acceptance](acceptance.md).

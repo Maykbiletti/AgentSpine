@@ -16,9 +16,11 @@ export function isTransientLockMetadataError(error, platform = process.platform)
 export async function replaceFileWithRetry(temporary, target, options = {}) {
   const renameFile = options.renameFile || rename;
   const wait = options.wait || delay;
+  const beforeAttempt = options.beforeAttempt || null;
   const platform = options.platform || process.platform;
   const maxRetries = options.maxRetries ?? 7;
   for (let attempt = 0; ; attempt += 1) {
+    await beforeAttempt?.(attempt);
     try {
       await renameFile(temporary, target);
       return;

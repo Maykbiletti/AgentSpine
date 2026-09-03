@@ -9,6 +9,7 @@ import { createTask } from "./coordination.js";
 import { linkEntities, upsertEntity } from "./graph.js";
 import { loadLearning, rollbackLearning } from "./learning.js";
 import { configurePreflightPolicy } from "./preflight.js";
+import { recordDeliveryPremortem } from "./delivery-premortem.js";
 import {
   grantExecution, loadSelfstarter, registerJob
 } from "./selfstarter.js";
@@ -53,6 +54,26 @@ function styleClaims(context) {
 
 function attentionKinds(context) {
   return context.briefing.attention.items.map((item) => item.kind);
+}
+
+function acceptancePremortemItems() {
+  return [
+    {
+      category: "baseline-environment",
+      failure: "this delivery fails because the synthetic workspace baseline changed",
+      check: "Compare the current self-starter checkpoint workspace digest before authorization."
+    },
+    {
+      category: "contract-tests",
+      failure: "this delivery fails because the exact granted Write contract regressed",
+      check: "Confirm the hook permits only the granted Write and checkpoints its successful result."
+    },
+    {
+      category: "delivery-path",
+      failure: "this delivery fails because the synthetic artifact is written outside its delivery path",
+      check: "Read back acceptance-output.txt under the exact synthetic project root."
+    }
+  ];
 }
 
 export function renderAcceptanceReport(report) {
@@ -248,18 +269,42 @@ process.stdin.on("end", () => {
       ...executionScope, hook_event_name: "SessionStart", session_id: "session:job:one", timestamp: "2031-04-05T09:10:02.000Z"
     }));
     requireCondition(started.selfstarter?.action === "start", "authorized job did not start");
+    const deliveryPrompt = await runHook({
+      ...executionScope, hook_event_name: "UserPromptSubmit", session_id: "session:job:one",
+      event_id: "prompt:job:one", timestamp: "2031-04-05T09:10:02.500Z",
+      prompt: "Create the exact authorized synthetic acceptance artifact and verify its checkpoint."
+    });
+    const premortemRequirement = deliveryPrompt.preflight?.premortem;
+    requireCondition(!deliveryPrompt.blocked && premortemRequirement?.status === "required",
+      "authorized delivery did not receive its exact premortem requirement");
+    const deliveryPremortem = await recordDeliveryPremortem({
+      root: projectRoot, requirementId: premortemRequirement.requirementId,
+      items: acceptancePremortemItems(), now: "2031-04-05T09:10:02.750Z"
+    });
+    requireCondition(deliveryPremortem.status === "recorded" && !deliveryPremortem.blocked,
+      "authorized delivery did not record its premortem before the first write");
+    const authorizedWriteInput = {
+      file_path: join(projectRoot, "acceptance-output.txt"), content: "checkpointed\n"
+    };
     const authorized = await runHook({
       ...executionScope, hook_event_name: "PreToolUse", session_id: "session:job:one",
       tool_name: "Write", tool_use_id: "tool:acceptance:one", timestamp: "2031-04-05T09:10:03.000Z",
-      tool_input: { file_path: join(projectRoot, "acceptance-output.txt"), content: "checkpointed\n" }
+      tool_input: authorizedWriteInput
     });
-    requireCondition(!authorized.blocked && authorized.selfstarter?.allowed, "current exact effect was denied");
+    requireCondition(!authorized.blocked && authorized.selfstarter?.allowed
+      && authorized.premortem?.status === "verified"
+      && authorized.premortem?.writeIntent === "write-intent-recorded",
+    "current exact effect or its pre-write premortem proof was denied");
     await writeFile(join(projectRoot, "acceptance-output.txt"), "checkpointed\n", "utf8");
-    await runHook({
+    const checkpointed = await runHook({
       ...executionScope, hook_event_name: "PostToolUse", session_id: "session:job:one",
       tool_name: "Write", tool_use_id: "tool:acceptance:one", timestamp: "2031-04-05T09:10:04.000Z",
-      success: true, tool_result: { ok: true }
+      tool_input: authorizedWriteInput, success: true, tool_result: { ok: true }
     });
+    requireCondition(checkpointed.premortem?.status === "write-recorded"
+      && checkpointed.premortem?.writeDigest === authorized.premortem.writeDigest
+      && checkpointed.deliveryVerification?.status === "write-recorded",
+    "successful Write did not retain the exact pre-write premortem and verification receipts");
     await runHook({
       ...executionScope, hook_event_name: "Stop", session_id: "session:job:one", event_id: "stop:job:one",
       timestamp: "2031-04-05T09:10:05.000Z"
@@ -268,6 +313,21 @@ process.stdin.on("end", () => {
       ...executionScope, hook_event_name: "SessionStart", session_id: "session:job:two", timestamp: "2031-04-05T09:10:06.000Z"
     }));
     requireCondition(resumed.selfstarter?.action === "resume" && resumed.selfstarter.checkpointSequence === 1, "durable checkpoint did not resume");
+    const deniedPrompt = await runHook({
+      ...executionScope, hook_event_name: "UserPromptSubmit",
+      session_id: "session:job:two", event_id: "prompt:job:two:foreign",
+      timestamp: "2031-04-05T09:10:06.250Z",
+      prompt: "Verify that the synthetic delivery premortem cannot grant another actor this lease."
+    });
+    const deniedRequirement = deniedPrompt.preflight?.premortem;
+    requireCondition(!deniedPrompt.blocked && deniedRequirement?.status === "required",
+      "resumed delivery did not receive an isolated premortem requirement");
+    const deniedPremortem = await recordDeliveryPremortem({
+      root: projectRoot, requirementId: deniedRequirement.requirementId,
+      items: acceptancePremortemItems(), now: "2031-04-05T09:10:06.500Z"
+    });
+    requireCondition(deniedPremortem.status === "recorded" && !deniedPremortem.blocked,
+      "foreign delivery premortem was not recorded before its attempted write");
     const denied = await runHook({
       ...executionScope, hook_event_name: "PreToolUse", entity_id: "person:lucia", session_id: "session:job:two",
       tool_name: "Write", tool_use_id: "tool:acceptance:denied", timestamp: "2031-04-05T09:10:07.000Z",
@@ -281,8 +341,13 @@ process.stdin.on("end", () => {
     const durable = (await loadSelfstarter(projectRoot)).state;
     const job = durable.jobs.find((item) => item.id === "job:acceptance");
     requireCondition(job.checkpoint.sequence === 1 && durable.receipts.some((item) => item.event === "effect-succeeded"), "checkpoint receipt was not durable");
-    addCheck(checks, "authorized-resume", "Berechtigtes Resume", "Der zweite Claude-Hoststart nahm Checkpoint 1 ohne MCP-Aufruf wieder auf.", [resumed.selfstarter.receiptId, job.checkpoint.workspaceDigest]);
-    addCheck(checks, "denied-resume", "Verweigerte Fremdwirkung", "Lucía konnte Frejas laufende Lease trotz bekannter Aufgabe nicht verwenden.", denied.reason);
+    addCheck(checks, "authorized-resume", "Berechtigtes Resume",
+      "Ein exakt gebundenes Premortem lag vor dem ersten Write; der zweite Claude-Hoststart nahm Checkpoint 1 ohne MCP-Aufruf wieder auf.",
+      [deliveryPremortem.digest, checkpointed.premortem.writeDigest,
+        resumed.selfstarter.receiptId, job.checkpoint.workspaceDigest]);
+    addCheck(checks, "denied-resume", "Verweigerte Fremdwirkung",
+      "Das sitzungsgebundene Premortem verlieh Lucía keine Berechtigung für Frejas laufende Lease.",
+      [deniedPremortem.digest, denied.reason]);
     addCheck(checks, "checkpoint", "Dauerhaftes Checkpointing", "Effekt, Ergebnis-Digest, Stop und Resume besitzen idempotente externe Receipts.", durable.receipts.map((item) => [item.id, item.event, item.digest]));
 
     await purgeContinuity({ root: projectRoot, subjectId: "person:lucia", confirmation: "local-user-confirmed", now: "2031-04-05T09:11:00.000Z" });

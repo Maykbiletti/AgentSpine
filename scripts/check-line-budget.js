@@ -5,23 +5,21 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DEFAULT_LIMIT = 500;
+const JAVASCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".cjs"]);
 const LEGACY_LIMITS = new Map(Object.entries({
-  "scripts/check-install.js": 569,
   "src/cli.js": 1488,
   "src/lib/attention.js": 755,
   "src/lib/authentication.js": 515,
   "src/lib/channel-runtime.js": 665,
   "src/lib/coordination.js": 577,
-  "src/lib/gateway-runtime.js": 1520,
+  "src/lib/gateway-runtime.js": 1485,
   "src/lib/learning.js": 6923,
   "src/lib/persona-runtime.js": 581,
   "src/lib/preflight.js": 702,
   "src/lib/selfstarter.js": 911,
   "src/lib/sharing.js": 969,
-  "src/lib/source-roots.js": 530,
   "src/lib/sqlite-transport.js": 501,
-  "src/mcp.js": 572,
-  "test/gateway-runtime.test.js": 1326,
+  "test/gateway-runtime.test.js": 1325,
   "test/learning.test.js": 4250
 }));
 
@@ -30,7 +28,7 @@ async function javascriptFiles(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...await javascriptFiles(path));
-    else if (entry.isFile() && extname(entry.name) === ".js") files.push(path);
+    else if (entry.isFile() && JAVASCRIPT_EXTENSIONS.has(extname(entry.name))) files.push(path);
   }
   return files;
 }
@@ -42,7 +40,8 @@ function physicalLines(content) {
 }
 
 export async function checkLineBudget(root = ROOT) {
-  const files = (await Promise.all(["src", "test", "scripts"].map((name) => javascriptFiles(join(root, name))))).flat();
+  const files = (await Promise.all(["bin", "src", "test", "scripts"]
+    .map((name) => javascriptFiles(join(root, name))))).flat();
   const measurements = await Promise.all(files.map(async (path) => {
     const name = relative(root, path).replaceAll("\\", "/");
     const lines = physicalLines(await readFile(path, "utf8"));

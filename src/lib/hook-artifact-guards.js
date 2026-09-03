@@ -5,6 +5,8 @@ import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "no
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { canonicalPath, stateRoot } from "./paths.js";
 import { undeclaredCalls } from "./identifier-analysis.js";
+import { resolveFinalAssistantMessage } from "./hook-final-message.js";
+import { auditGuard } from "./hook-protection.js";
 
 const STAND_SCHEMA = "blun.snapshot-stand/v1";
 const ALLOWLIST_SCHEMA = "agentspine.identifier-allowlist/v1";
@@ -283,13 +285,6 @@ export async function inspectWrittenJavaScript({ input, cwd, root }) {
   };
 }
 
-function assistantMessage(input) {
-  for (const key of ["last_assistant_message", "assistant_message", "final_assistant_message", "final_message", "response"]) {
-    if (typeof input[key] === "string") return input[key];
-  }
-  return "";
-}
-
 function claimedArtifacts(message) {
   const claims = [];
   for (const line of message.split(/\r?\n/)) {
@@ -319,7 +314,14 @@ export async function verifyDeliveredArtifacts({ input, cwd }) {
   if (!["Stop", "SubagentStop"].includes(input.hook_event_name || input.event_name)) {
     return { status: "not-applicable", blocked: false, mismatches: [] };
   }
-  const claims = claimedArtifacts(assistantMessage(input));
+  const message = resolveFinalAssistantMessage(input);
+  if (["conflict", "malformed"].includes(message.status)) {
+    const result = { status: "degraded", blocked: false, mismatches: [], path: cwd,
+      reason: `AgentSpine delivery ${message.reason}` };
+    await auditGuard(input, "delivery-artifact-guard", result);
+    return result;
+  }
+  const claims = claimedArtifacts(message.text);
   if (!claims.length) return { status: "no-claims", blocked: false, mismatches: [] };
   const configured = configuredExchange(input, cwd);
   if (!configured) return { status: "unconfigured", blocked: false, mismatches: [] };

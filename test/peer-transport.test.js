@@ -264,11 +264,12 @@ test("peer command execution disables the shell and strips unrelated environment
 });
 
 test("peer transport and process execution stay absent from MCP and hooks", async () => {
-  const [mcp, hook] = await Promise.all([
+  const [mcp, mcpRuntime, hook] = await Promise.all([
     readFile(new URL("../src/mcp.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/mcp-runtime.js", import.meta.url), "utf8"),
     readFile(new URL("../src/hook.js", import.meta.url), "utf8")
   ]);
-  for (const content of [mcp, hook]) {
+  for (const content of [mcp, mcpRuntime, hook]) {
     assert.equal(/pullPeerCommand|servePeerOnce|share-peer|peer-stdio/.test(content), false);
   }
 });

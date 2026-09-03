@@ -7,10 +7,13 @@ import { upsertEntity } from "../src/lib/graph.js";
 import { applyPersonaRoster } from "../src/lib/persona-runtime.js";
 import {
   assignGoal, claimGatewayWork, completeGatewayRun, gatewayContext, gatewayRuntimeFindings,
-  loadGatewayRuntime, reconcileGateway, resolveGoalKnowledgeGap, setGatewayControl
+  loadGatewayRuntime, markGatewayHostStarted, reconcileGateway, resolveGoalKnowledgeGap, setGatewayControl
 } from "../src/lib/gateway-runtime.js";
 import { createSelfHelpReport, validSelfHelpReport } from "../src/lib/knowledge-evidence.js";
 import { runWorkerTick } from "../src/worker.js";
+import {
+  closeGoalPremortem, premortemGoalBinding
+} from "./goal-premortem-fixture.js";
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "agentspine-self-help-"));
@@ -135,11 +138,19 @@ test("repository-first self-help resolves objective uncertainty without asking t
   })));
   assert.equal(claims.filter((claim) => claim.item).length, 1);
   const winner = claims.find((claim) => claim.item);
-  await completeGatewayRun({ root, queueId: winner.item.queueId, workerId: winner.item.lease.workerId,
+  const goalWork = { ...winner.item, host: "codex",
+    planDefinitionsDigest: loaded.policy.goals[0].plan.definitionsDigest };
+  await closeGoalPremortem(root, premortemGoalBinding(goalWork,
+    "session:self-help:resolved"), ":self-help:resolved");
+  await markGatewayHostStarted({ root, queueId: winner.item.queueId,
+    workerId: winner.item.lease.workerId, claimedAt: winner.item.lease.claimedAt,
+    attempt: winner.item.attempts, now: "2032-02-01T00:02:02.500Z" });
+  const completion = await completeGatewayRun({ root, queueId: winner.item.queueId,
+    workerId: winner.item.lease.workerId, claimedAt: winner.item.lease.claimedAt, attempt: winner.item.attempts,
     result: { checkpoint: { phase: "fixture-verified" }, completed: true },
     now: "2032-02-01T00:02:03.000Z" });
   loaded = await loadGatewayRuntime(root);
-  assert.equal(loaded.policy.goals[0].status, "completed");
+  assert.equal(loaded.policy.goals[0].status, "completed", JSON.stringify(completion));
   assert.deepEqual(gatewayRuntimeFindings(loaded.policy, loaded.runtime), []);
   assert.deepEqual((await gatewayContext({ root, agentId: "agent:foreign" })).goals, []);
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
@@ -176,9 +187,10 @@ test("self-help rejects premature, stale, unsafe, or forged external research", 
   assert.equal(validSelfHelpReport(valid), false);
 
   const claim = await claimGatewayWork({ root, workerId: "worker:premature-self-help",
-    now: "2032-02-01T00:02:01.000Z" });
+    executionMode: "read-only", now: "2032-02-01T00:02:01.000Z" });
   await assert.rejects(completeGatewayRun({ root, queueId: claim.item.queueId,
-    workerId: claim.item.lease.workerId, result: { selfHelp: report() },
+    workerId: claim.item.lease.workerId, claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts,
+    result: { selfHelp: report(), readOnly: true },
     now: "2032-02-01T00:02:02.000Z" }), /pending repository-first requirement/i);
 });
 
@@ -218,7 +230,8 @@ test("conflicting primary evidence permits one durable owner decision only after
   const originalPolicy = structuredClone(loaded.policy);
   step.selfHelpReports[0].conflictSourceDigests[0] = "e".repeat(64);
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
-  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  await assert.rejects(loadGatewayRuntime(root),
+    /gateway policy (?:is invalid|does not match its persisted provenance)/i);
   await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(originalPolicy, null, 2)}\n`);
 
   const answers = await Promise.all(Array.from({ length: 6 }, () => resolveGoalKnowledgeGap({
@@ -237,17 +250,26 @@ test("conflicting primary evidence permits one durable owner decision only after
   await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
   await reconcileGateway({ root, now: "2032-02-01T00:02:02.250Z" });
   await reconcileGateway({ root, now: "2032-02-01T00:02:02.500Z" });
+  loaded = await loadGatewayRuntime(root);
   const claims = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
     root, workerId: `worker:conflict:${index}`, now: "2032-02-01T00:02:03.000Z"
   })));
   assert.equal(claims.filter((claim) => claim.item).length, 1);
   const winner = claims.find((claim) => claim.item);
-  await completeGatewayRun({ root, queueId: winner.item.queueId, workerId: winner.item.lease.workerId,
+  const goalWork = { ...winner.item, host: "codex",
+    planDefinitionsDigest: loaded.policy.goals[0].plan.definitionsDigest };
+  await closeGoalPremortem(root, premortemGoalBinding(goalWork,
+    "session:self-help:decision"), ":self-help:decision");
+  await markGatewayHostStarted({ root, queueId: winner.item.queueId,
+    workerId: winner.item.lease.workerId, claimedAt: winner.item.lease.claimedAt,
+    attempt: winner.item.attempts, now: "2032-02-01T00:02:03.500Z" });
+  const completion = await completeGatewayRun({ root, queueId: winner.item.queueId,
+    workerId: winner.item.lease.workerId, claimedAt: winner.item.lease.claimedAt, attempt: winner.item.attempts,
     result: { checkpoint: { phase: "decision-applied" }, completed: true },
     now: "2032-02-01T00:02:04.000Z" });
   loaded = await loadGatewayRuntime(root);
   step = loaded.policy.goals[0].plan.steps[0];
-  assert.equal(loaded.policy.goals[0].status, "completed");
+  assert.equal(loaded.policy.goals[0].status, "completed", JSON.stringify(completion));
   assert.equal(step.knowledgeGaps[0].answer, "Follow documented contract A.");
   assert.deepEqual((await gatewayContext({ root, agentId: "agent:foreign" })).goals, []);
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);

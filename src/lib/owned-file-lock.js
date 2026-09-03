@@ -78,7 +78,7 @@ export async function withOwnedFileLock(path, task, {
   }
   const token = randomUUID();
   const acquiredAt = new Date().toISOString();
-  let acquired = false;
+  let acquired = false; let recovered = false;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     let handle;
     try {
@@ -98,7 +98,7 @@ export async function withOwnedFileLock(path, task, {
         }
         throw error;
       }
-      await removeStaleLock(path, staleAfterMs);
+      recovered ||= await removeStaleLock(path, staleAfterMs);
       if (attempt + 1 < maxAttempts) await delay(retryDelayMs);
     } finally {
       await handle?.close();
@@ -127,7 +127,7 @@ export async function withOwnedFileLock(path, task, {
   timer.unref?.();
 
   try {
-    const result = await task({ token, acquiredAt, assertOwned });
+    const result = await task({ token, acquiredAt, recovered, assertOwned });
     await assertOwned();
     return result;
   } finally {

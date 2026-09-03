@@ -1,4 +1,5 @@
 import { isAbsolute, relative } from "node:path";
+import { deliveryToolActions } from "./delivery-command-actions.js";
 import { recordHookScanAudit } from "./hook-audit.js";
 
 export function candidatePaths(value, output = []) {
@@ -19,11 +20,11 @@ export function candidatePaths(value, output = []) {
 }
 
 export function isMutationTool(name = "") {
-  return /(^|__)(apply_patch|edit|write|delete|move|rename|bash|exec_command|shell)(_|$)/i.test(name);
+  return /(^|__)(apply_patch|edit|write|delete|move|rename|bash|exec_command|shell|powershell|pwsh)(_|$)/i.test(name);
 }
 
 export function isScanFailOpenTool(name = "") {
-  return /(^|__)(apply_patch|edit|write|bash|exec_command)(_|$)/i.test(name);
+  return /(^|__)(apply_patch|edit|write|bash|exec_command|shell|powershell|pwsh)(_|$)/i.test(name);
 }
 
 function filesystemScanError(error) {
@@ -36,11 +37,11 @@ export function hookScanFailureFailsOpen(error) {
 }
 
 export async function auditSkippedScans(input, phase, skipped = []) {
-  const item = skipped[0];
+  const item = skipped.find((entry) => entry.code === "AGENTSPINE_SCAN_INCOMPLETE") || skipped[0];
   if (!item) return;
   await recordHookScanAudit({
     event: "PreToolUse", toolName: input.tool_name || null, phase,
-    error: { code: item.code, message: `${item.code}: ${item.operation} skipped ${item.path}` },
+    error: { code: item.code, message: item.message || `${item.code}: ${item.operation} skipped ${item.path}` },
     path: item.path, operation: item.operation, now: input.timestamp || new Date()
   });
 }
@@ -79,9 +80,9 @@ function stringValues(value, output = []) {
 }
 
 export function shellTargetsProtected(input, documents, cwd, root) {
-  if (!/(bash|exec_command|shell)/i.test(input.tool_name || "")) return null;
+  if (!/(bash|exec_command|shell|powershell|pwsh)/i.test(input.tool_name || "")) return null;
   const command = stringValues(input.tool_input || input.tool_args).join("\n").replaceAll("\\", "/");
-  if (!/(?:^|[;&|\s])(?:rm|mv|cp|truncate|tee|sed\s+-i|perl\s+-i)\b|(?:^|[^>])>{1,2}(?!>)/i.test(command)) return null;
+  if (!deliveryToolActions(input).some((item) => item.kind === "write")) return null;
   for (const document of documents) {
     const forms = new Set([document.path.replaceAll("\\", "/"), document.relativePath]);
     for (const base of [cwd, root]) {

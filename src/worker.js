@@ -5,7 +5,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import {
   claimGatewayWork, completeGatewayRun, deliverPrepared, executionAttemptForStep,
-  failGatewayRun, loadGatewayRuntime, reconcileGateway, updateGatewayHealth
+  failGatewayRun, loadGatewayRuntime, markGatewayHostStarted, reconcileGateway, updateGatewayHealth
 } from "./lib/gateway-runtime.js";
 import { createTelegramAdapter } from "./lib/telegram-adapter.js";
 import { acknowledgeChannelDelivery, loadChannelRuntime } from "./lib/channel-runtime.js";
@@ -111,7 +111,15 @@ async function hostWorkItem(root, item) {
       AGENTSPINE_GATEWAY_CONTEXT: "agentspine.gateway-start/v1",
       AGENTSPINE_ENTITY_ID: item.agentId,
       AGENTSPINE_PROJECT_ID: item.projectId,
+      AGENTSPINE_HOST: identity.host,
+      AGENTSPINE_GATEWAY_QUEUE_ID: item.queueId,
+      AGENTSPINE_GATEWAY_ATTEMPT: String(item.attempts),
       ...(item.groupId === null ? {} : { AGENTSPINE_GROUP_ID: item.groupId }),
+      ...(goalStep ? {
+        AGENTSPINE_GOAL_ID: goal.goalId,
+        AGENTSPINE_GOAL_STEP_ID: goalStep.stepId,
+        AGENTSPINE_PLAN_DEFINITIONS_DIGEST: goal.plan.definitionsDigest
+      } : {}),
       ...(event ? {
         AGENTSPINE_CHANNEL_EVENT_ID: event.eventId,
         AGENTSPINE_CHANNEL_PROVIDER: event.provider
@@ -153,16 +161,20 @@ export async function runWorkerTick({ root = process.cwd(), workerId = "gateway-
     return { status: delivery.outbox.status, processed: true, outboxId: delivery.outbox.outboxId,
       recoveredDelivery: true };
   }
-  const claim = await claimGatewayWork({ root, workerId, now });
+  const claim = await claimGatewayWork({ root, workerId, executionMode: "host-effect", now });
   if (!claim.item) return { status: claim.reason, processed: false };
+  await markGatewayHostStarted({ root, queueId: claim.item.queueId, workerId,
+    claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts, now });
   let result;
   try { result = await hostRunner(await hostWorkItem(root, claim.item), { env }); }
   catch (error) {
     const failed = await failGatewayRun({ root, queueId: claim.item.queueId, workerId,
+      claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts,
       error: "Host runtime unavailable: " + String(error.message).slice(0, 400), now });
     return { status: failed.item.status, processed: true, queueId: failed.item.queueId, retryAt: failed.item.availableAt };
   }
-  const completed = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId, result, now });
+  const completed = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId,
+    claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts, result, now });
   if (!completed.outbox) return {
     status: completed.clarification ? "needs-clarification"
       : completed.exploration ? "exploring" : completed.selfHelp ? "self-help-resolved"

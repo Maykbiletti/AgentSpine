@@ -85,6 +85,14 @@ The runner returns one bounded JSON result:
 }
 ```
 
+### Public gateway integration contract
+
+An integration using the public `claimGatewayWork` API receives a durable `host-effect` reservation by default. That reservation records `effectMayStartAt` before the claim is returned. Immediately before its first host or other external effect, the integration **must** call the exported `markGatewayHostStarted` with the exact queue ID, worker ID, claim time, and attempt from that claim; only then may it invoke the host and later call `completeGatewayRun` or `failGatewayRun` with that same lease identity. `completeGatewayRun` rejects an unmarked possible-effect lease, and the lane must match the queue lease's worker, claim time and expiry exactly. A stale, partial, or reused result is rejected rather than applied to a newer lease.
+
+If a normal reservation fails or expires without a terminal result, AgentSpine treats the outcome as ambiguous and blocks it for manual local owner review rather than replaying it. This remains true when the host-start marker is absent, including a lease retained from an older installation: the missing marker is not evidence that no effect occurred. A blocked goal needs the existing locally confirmed owner re-assignment before a fresh host-effect lease can run; only a later marked host-effect terminal run restores current host health, while the immutable ambiguity receipt remains available for audit. The marker makes the exact start auditable; it does not grant a host, tool, permission, route, or policy exception.
+
+An integration that can prove it performs no host or external effect may instead claim with `executionMode: "read-only"`. Its completion must include `result.readOnly: true`; only that exact lease type can expire into the bounded no-effect retry path. A read-only lease cannot be marked as host-started.
+
 For a dependency-bound goal step, the runner may instead report one concrete missing input before acting:
 
 ```json
@@ -113,7 +121,7 @@ agentspine-worker --root /path/to/project \
   --persona-roster /absolute/path/to/roster.json --once
 ```
 
-Remove `--once` under a service manager for continuous operation. AgentSpine does not silently install a daemon, persist provider tokens, or approve Codex/Claude executable hooks. Codex still requires the current hook definition to be visible and trusted in `/hooks`.
+Remove `--once` under a service manager for continuous operation. AgentSpine does not silently install a daemon, persist provider tokens, or approve Codex/Claude executable hooks. Codex still requires the plugin to be visible in `/plugins` and its current hook definition to be accepted through the startup warning or `/hooks`.
 
 ## Goals, attention, and recovery
 

@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runHook } from "../src/hook.js";
 import {
-  deliveryToolActions, deliveryVerificationPath, recordDeliveryToolUse, verifyDeliveryStop
+  deliveryToolActions, deliveryVerificationPath, recordDeliveryPause,
+  recordDeliveryToolUse, recordDeliveryWriteIntent, verifyDeliveryStop
 } from "../src/lib/delivery-verification.js";
 
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -77,10 +78,46 @@ test("Stop blocks delivery until a successful test follows the latest write", as
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
 });
 
+test("a paused Stop cannot bypass a later completion check", async (t) => {
+  const { root } = await fixture(t);
+  const sessionId = "session:pause-is-not-proof";
+  await post(root, sessionId, "Write", { file_path: "artifact.txt", content: "synthetic\n" },
+    true, "tool:pause-write");
+  const paused = await recordDeliveryPause({ root, host: "codex", sessionId, scope: {}, eventId: null });
+  assert.equal(paused.status, "paused-job");
+  const completed = await verifyDeliveryStop({ root, host: "codex", sessionId, scope: {}, eventId: null });
+  assert.equal(completed.blocked, true);
+  assert.match(completed.reason, /successful test after the latest write/);
+});
+
+test("a same-event pause is idempotent but a later write intent revokes it", async (t) => {
+  const { root } = await fixture(t);
+  const sessionId = "session:pause-write-intent";
+  const eventId = "stop:pause-write-intent";
+  const argumentsForStop = { root, host: "codex", sessionId, scope: {}, eventId };
+
+  assert.equal((await recordDeliveryPause(argumentsForStop)).status, "paused-job");
+  assert.equal((await recordDeliveryPause(argumentsForStop)).status, "paused-job",
+    "repeating the exact pause event remains idempotent");
+  assert.equal((await verifyDeliveryStop(argumentsForStop)).status, "paused-job");
+
+  const intent = await recordDeliveryWriteIntent({ root, host: "codex", sessionId, scope: {},
+    input: { tool_name: "Write", tool_use_id: "tool:pause-write-intent",
+      tool_input: { file_path: "artifact.txt", content: "synthetic\\n" } } });
+  assert.equal(intent.status, "intent-recorded");
+
+  const completion = await verifyDeliveryStop(argumentsForStop);
+  assert.equal(completion.blocked, true);
+  assert.match(completion.reason, /write intent\(s\).*no auditable PostToolUse result/);
+  assert.notEqual(completion.status, "paused-job");
+});
+
 test("compound shell order, task restart, and concurrent duplicate delivery stay exact", async (t) => {
   const { root, source } = await fixture(t);
   const scope = { entityId: "agent:synthetic", tenantId: "tenant:synthetic", groupId: "group:synthetic",
-    projectId: "project:synthetic", currentTaskId: "task:synthetic" };
+    projectId: "project:synthetic", currentTaskId: "task:synthetic", queueId: "queue:synthetic",
+    gatewayAttempt: 3, goalId: "goal:synthetic", goalStepId: "step:synthetic",
+    planDefinitionsDigest: "a".repeat(64) };
   const input = { tool_name: "Bash", tool_input: { command: "sed -i s/a/b/ artifact.css && npm test" },
     tool_use_id: "tool:compound:one", timestamp: "2033-01-01T00:00:00.000Z" };
   const results = await Promise.all(Array.from({ length: 6 }, () => recordDeliveryToolUse({
@@ -88,6 +125,10 @@ test("compound shell order, task restart, and concurrent duplicate delivery stay
   })));
   assert.equal(results.filter((result) => result.status === "write-recorded").length, 1);
   assert.equal(results.filter((result) => result.status === "duplicate").length, 5);
+  assert.equal(
+    await deliveryVerificationPath({ root, host: "claude", sessionId: "session:before-restart", scope }),
+    await deliveryVerificationPath({ root, host: "claude", sessionId: "session:after-restart", scope })
+  );
   const resumed = await verifyDeliveryStop({ root, host: "claude",
     sessionId: "session:after-restart", scope });
   assert.equal(resumed.blocked, false);
@@ -99,6 +140,12 @@ test("compound shell order, task restart, and concurrent duplicate delivery stay
     scope, input: reversed, success: true });
   assert.equal((await verifyDeliveryStop({ root, host: "claude",
     sessionId: "session:third", scope })).blocked, true);
+  assert.equal((await verifyDeliveryStop({ root, host: "claude", sessionId: "session:third",
+    scope: { ...scope, gatewayAttempt: 4 } })).status, "no-write",
+  "a different queue attempt must not inherit an earlier delivery");
+  assert.equal((await verifyDeliveryStop({ root, host: "claude", sessionId: "session:third",
+    scope: { ...scope, groupId: "group:foreign" } })).status, "no-write",
+  "a foreign group must not inherit an exact delivery attempt");
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
 });
 

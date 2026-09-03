@@ -1,14 +1,21 @@
-import { createHash, randomUUID } from "node:crypto";
-import { open, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { buildCatalog } from "./catalog.js";
-import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { attentionFindings, loadAttention } from "./attention.js";
 import {
   channelRuntimeFindings, loadChannelPolicy, loadChannelRuntime
 } from "./channel-runtime.js";
 import { loadGraph } from "./graph.js";
+import { assertGatewayCompletionMode, exactGatewayLeaseGeneration, expireGatewayLane, failGatewayLane, gatewayHostHealthFindings,
+  markHostStarted, matchesGatewayLaneLease, newGatewayLease, normalizeGatewayExecutionMode, requireExactGatewayLease,
+  requireExactHostLease, validGatewayLeaseExecution } from "./gateway-host-lifecycle.js";
 import { handlePlanKnowledge } from "./gateway-knowledge.js";
+import { assertActivePersona, currentLane, exactReplyBinding } from "./gateway-runtime-identity.js";
+import { appendReceipt, preserve } from "./gateway-runtime-records.js";
+import * as goalPremortem from "./gateway-premortem.js";
+import {
+  readGatewayStateJson, withGatewayStateLock, writeGatewayStateJson, writeGatewayStatePair
+} from "./gateway-state-transaction.js";
 import {
   KNOWLEDGE_GAP_SCHEMA, resolveKnowledgeGapCandidate, sameKnowledgeGapResolution, validStepKnowledgeState
 } from "./knowledge-evidence.js";
@@ -16,7 +23,7 @@ import { projectStateDir } from "./paths.js";
 import { loadPersonaRuntime, personaRuntimeFindings } from "./persona-runtime.js";
 import { evaluateVoiceOutput } from "./voice-runtime.js";
 
-export const GATEWAY_POLICY_SCHEMA = "agentspine.gateway-policy/v1";
+export const GATEWAY_POLICY_SCHEMA = "agentspine.gateway-policy/v2";
 export const GATEWAY_RUNTIME_SCHEMA = "agentspine.gateway-runtime/v1";
 export const GATEWAY_EVENT_SCHEMA = "agentspine.gateway-event/v1";
 export const GOAL_PLAN_SCHEMA = "agentspine.goal-plan/v1";
@@ -26,7 +33,6 @@ export const EXECUTION_ATTEMPT_SCHEMA = "agentspine.execution-attempt/v1";
 export const STRATEGY_TRANSFER_PROOF_SCHEMA = "agentspine.strategy-transfer-proof/v1";
 
 const CONFIRMATION = "local-owner-confirmed";
-const MAX_BYTES = 8 * 1024 * 1024;
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/+~-]{0,255}$/;
 const ROUTE_RE = /^-?[A-Za-z0-9][A-Za-z0-9:_.@/+~-]{0,255}$/;
 const GOAL_STATUSES = new Set(["active", "blocked", "completed", "cancelled"]);
@@ -42,7 +48,8 @@ const HEALTH_VALUES = new Set(["stopped", "running", "unknown", "healthy", "degr
 const METRIC_OPERATORS = new Set(["gte", "lte", "eq"]);
 
 function emptyPolicy(root) {
-  return { schema: GATEWAY_POLICY_SCHEMA, root, revision: 0, enabled: false, killSwitch: false, goals: [], history: [] };
+  return { schema: GATEWAY_POLICY_SCHEMA, root, revision: 0, enabled: false, killSwitch: false, goals: [], history: [],
+    premortemContractRegistry: goalPremortem.emptyGoalPremortemRegistry(root) };
 }
 
 function emptyRuntime(root) {
@@ -427,20 +434,12 @@ function reviewExecutionResult(execution, priorOutcomes, queueId, report, now) {
   return { passed: outcome.passed, outcome, nextAttempt,
     reason: outcome.passed ? null : "The objective execution gate did not pass." };
 }
-
-function planDefinitionMaterial(steps) {
-  return steps.map(({ stepId, agentId, resources, execution, title, successCriterion, dependsOn }) => ({
-    stepId, ...(agentId === undefined ? {} : { agentId }),
-    ...(resources === undefined ? {} : { resources }), ...(execution === undefined ? {} : { execution }),
-    title, successCriterion, dependsOn
-  }));
-}
-
-function validGoalPlan(plan) {
+function validGoalPlan(plan, goal = null, root = null, premortemContractVersion = undefined) {
   if (!(plan && plan.schema === GOAL_PLAN_SCHEMA && plan.authority === "context-only-plan"
     && Number.isInteger(plan.revision) && plan.revision >= 0 && Array.isArray(plan.steps)
     && plan.steps.length > 0 && plan.steps.length <= 32 && /^[a-f0-9]{64}$/.test(plan.definitionsDigest || "")
-    && (plan.currentStepId === null || ID_RE.test(plan.currentStepId || "")))) return false;
+    && (plan.currentStepId === null || ID_RE.test(plan.currentStepId || ""))
+    && goalPremortem.validPlanPremortemContract(plan, premortemContractVersion))) return false;
   const ids = new Set(plan.steps.map((step) => step?.stepId));
   if (ids.size !== plan.steps.length || ids.has(undefined)) return false;
   for (const step of plan.steps) {
@@ -461,6 +460,7 @@ function validGoalPlan(plan) {
       && (step.blocker === null || (typeof step.blocker === "string" && step.blocker.length <= 500 && !SECRET_RE.test(step.blocker)))
       && (step.completedAt === null || Number.isFinite(new Date(step.completedAt).getTime()))
       && (step.completedByQueueId === null || ID_RE.test(step.completedByQueueId || ""))
+      && goalPremortem.validGoalPremortemAttachments(step, goal, root, plan.definitionsDigest)
       && validStepKnowledgeState(step, plan.definitionsDigest)
       && Number.isFinite(new Date(step.updatedAt).getTime())
       && (step.executionOutcomes || []).every((outcome) => new Date(outcome.observedAt) <= new Date(step.updatedAt)))) return false;
@@ -485,12 +485,11 @@ function validGoalPlan(plan) {
     && step.status !== "blocked")) return false;
   if (plan.steps.some((step) => step.execution && step.status === "completed"
     && !(step.executionOutcomes || []).some((outcome) => outcome.passed))) return false;
-  if (plan.definitionsDigest !== sha256(JSON.stringify(planDefinitionMaterial(plan.steps)))) return false;
+  if (plan.definitionsDigest !== sha256(JSON.stringify(goalPremortem.planDefinitionMaterial(plan.steps)))) return false;
   const current = plan.steps.filter((step) => ["active", "blocked"].includes(step.status));
   return current.length <= 1 && (plan.currentStepId === null
     ? current.length === 0 : current.length === 1 && current[0].stepId === plan.currentStepId);
 }
-
 function activateNextPlanStep(plan, now) {
   const completed = new Set(plan.steps.filter((step) => step.status === "completed").map((step) => step.stepId));
   const next = plan.steps.find((step) => step.status === "pending" && step.dependsOn.every((dependency) => completed.has(dependency)));
@@ -498,7 +497,6 @@ function activateNextPlanStep(plan, now) {
   next.status = "active"; next.updatedAt = now; plan.currentStepId = next.stepId; plan.revision += 1;
   return next;
 }
-
 function createGoalPlan(steps, now, defaultAgentId, transferContext) {
   if (!Array.isArray(steps) || steps.length === 0 || steps.length > 32) throw new Error("goal plan requires 1-32 steps");
   const normalized = steps.map((step, index) => ({
@@ -507,48 +505,44 @@ function createGoalPlan(steps, now, defaultAgentId, transferContext) {
     resources: Array.isArray(step?.resources)
       ? step.resources.map((resource) => exactId(resource, `steps[${index}].resources`)) : [],
     execution: createExecutionDecision(step?.execution, `steps[${index}].execution`, transferContext),
+    ...(transferContext.premortemContractVersion === 1 ? { premortemContractVersion: 1 } : {}),
     title: safeText(step?.title, `steps[${index}].title`, 500),
     successCriterion: safeText(step?.successCriterion, `steps[${index}].successCriterion`),
     dependsOn: Array.isArray(step?.dependsOn) ? step.dependsOn.map((dependency) => exactId(dependency, `steps[${index}].dependsOn`)) : [],
     status: "pending", checkpoint: null, blocker: null, completedAt: null, completedByQueueId: null,
     knowledgeGaps: [], selfHelpReports: [], selfHelpRequirements: [], executionOutcomes: [], updatedAt: now
   }));
-  const plan = { schema: GOAL_PLAN_SCHEMA, revision: 0, currentStepId: null, steps: normalized,
-    definitionsDigest: sha256(JSON.stringify(planDefinitionMaterial(normalized))), authority: "context-only-plan" };
-  if (!validGoalPlan(plan)) throw new Error("goal plan must be an acyclic dependency graph with exact unique step IDs");
+  const plan = { schema: GOAL_PLAN_SCHEMA, ...(transferContext.premortemContractVersion === 1
+    ? { premortemContractVersion: 1, premortemContract: goalPremortem.GOAL_PREMORTEM_CONTRACT } : {}),
+    revision: 0, currentStepId: null, steps: normalized,
+    definitionsDigest: sha256(JSON.stringify(goalPremortem.planDefinitionMaterial(normalized))), authority: "context-only-plan" };
+  if (!validGoalPlan(plan, null, null, transferContext.premortemContractVersion)) throw new Error("goal plan must be an acyclic dependency graph with exact unique step IDs");
   activateNextPlanStep(plan, now);
   return plan;
 }
-
 function currentPlanStep(goal) {
   return goal.plan?.steps.find((step) => step.stepId === goal.plan.currentStepId) || null;
 }
-
 function planStepAgentId(goal, step) {
   return step?.agentId ?? goal.agentId;
 }
-
 function planStepResources(step) {
   return Array.isArray(step?.resources) ? step.resources : [];
 }
-
 function queuePlanStep(policy, item) {
   if (!item.goalStepId) return null;
   return policy.goals.find((goal) => goal.goalId === item.goalId)?.plan?.steps
     .find((step) => step.stepId === item.goalStepId) || null;
 }
-
 function conflictingResources(policy, candidate, leased) {
   const wanted = new Set(planStepResources(queuePlanStep(policy, candidate)));
   if (!wanted.size || candidate.projectId !== leased.projectId || candidate.groupId !== leased.groupId) return [];
   return planStepResources(queuePlanStep(policy, leased)).filter((resource) => wanted.has(resource));
 }
-
 function effectiveQueuePriority(policy, item) {
   if (!item.goalId) return item.priority;
   return policy.goals.find((goal) => goal.goalId === item.goalId)?.priority ?? item.priority;
 }
-
 function planQueueKey(goalId, stepId, phase, suffix = "") {
   return ["goal", goalId, "step", stepId, phase, suffix].filter(Boolean).join(":");
 }
@@ -561,7 +555,7 @@ function newGoalQueue(goal, step, kind, key, current, availableAt = current) {
     completedAt: null, lastError: null, authority: "execution-state-only" };
 }
 
-function validGoal(goal) {
+function validGoal(goal, root = null, premortemContractVersion = undefined) {
   return goal && ID_RE.test(goal.goalId || "") && ID_RE.test(goal.agentId || "")
     && ID_RE.test(goal.ownerSubjectId || "") && ID_RE.test(goal.projectId || "")
     && (goal.groupId === null || ID_RE.test(goal.groupId || "")) && GOAL_STATUSES.has(goal.status)
@@ -574,7 +568,8 @@ function validGoal(goal) {
     && (goal.heartbeatAt === null || Number.isFinite(new Date(goal.heartbeatAt).getTime()))
     && goal.authority === "authenticated-goal-policy" && Number.isFinite(new Date(goal.createdAt).getTime())
     && Number.isFinite(new Date(goal.updatedAt).getTime())
-    && (goal.plan === undefined || goal.plan === null || (validGoalPlan(goal.plan)
+    && (goal.plan === undefined || goal.plan === null
+      || (validGoalPlan(goal.plan, goal, root, premortemContractVersion)
       && goal.plan.steps.every((step) => ["knowledgeGaps", "selfHelpReports", "selfHelpRequirements"]
         .every((field) => (step[field] || []).every((entry) => entry.goalId === goal.goalId)))
       && (goal.status !== "active" || (currentPlanStep(goal)?.status === "active" && goal.nextSafeStep === currentPlanStep(goal).title))
@@ -582,9 +577,9 @@ function validGoal(goal) {
       && (goal.status !== "completed" || goal.plan.steps.every((step) => step.status === "completed"))));
 }
 
-function validPolicyHistory(item) {
+function validPolicyHistory(item, root = null) {
   if (!item || item.authority !== "authenticated-goal-policy" || !Number.isFinite(new Date(item.at).getTime())) return false;
-  if (item.kind === "goal") return validGoal(item.value);
+  if (item.kind === "goal") return validGoal(item.value, root);
   return item.kind === "control" && item.value && typeof item.value.enabled === "boolean" && typeof item.value.killSwitch === "boolean";
 }
 
@@ -603,7 +598,9 @@ function validQueue(item) {
     && (item.completedAt === null || Number.isFinite(new Date(item.completedAt).getTime()))
     && (item.lastError === null || (typeof item.lastError === "string" && item.lastError.length <= 500 && !SECRET_RE.test(item.lastError)))
     && (item.lease === null || (item.status === "leased" && ID_RE.test(item.lease.workerId || "")
-      && Number.isFinite(new Date(item.lease.expiresAt).getTime())));
+      && Number.isFinite(new Date(item.lease.claimedAt).getTime())
+      && Number.isFinite(new Date(item.lease.expiresAt).getTime())
+      && validGatewayLeaseExecution(item.lease)));
 }
 
 function validOutbox(item) {
@@ -653,12 +650,15 @@ function validHealth(health) {
     && (health.lastReconciledAt === null || Number.isFinite(new Date(health.lastReconciledAt).getTime()));
 }
 
-function normalizePolicy(value, root) {
-  if (!value || value.schema !== GATEWAY_POLICY_SCHEMA || value.root !== root
+function normalizePolicy(value, root, provenance = null, staged = false) {
+  const contractValid = staged ? value?.schema === GATEWAY_POLICY_SCHEMA
+    && goalPremortem.ensureGoalPremortemRegistry(value) : goalPremortem.ensureGoalPremortemPolicy(value, GATEWAY_POLICY_SCHEMA, provenance);
+  if (!value || !contractValid || value.root !== root
     || !Number.isInteger(value.revision) || typeof value.enabled !== "boolean" || typeof value.killSwitch !== "boolean"
-    || !Array.isArray(value.goals) || !Array.isArray(value.history) || value.goals.some((item) => !validGoal(item))
+    || !Array.isArray(value.goals) || !Array.isArray(value.history)
+    || value.goals.some((item) => !validGoal(item, root, goalPremortem.goalPremortemContractVersion(value, item.goalId)))
     || value.goals.some((item) => !validGoalTransferProofs(item, value.goals))
-    || value.history.some((item) => !validPolicyHistory(item))) {
+    || value.history.some((item) => !validPolicyHistory(item, root))) {
     throw new Error("gateway policy is invalid; autonomous runtime is disabled");
   }
   return value;
@@ -676,8 +676,11 @@ function normalizeRuntime(value, root) {
   const outboxIndex = value.outbox.findIndex((item) => !validOutbox(item));
   const receiptIndex = value.receipts.findIndex((item) => !validReceipt(item));
   const historyIndex = value.history.findIndex((item) => !validHistory(item));
+  const leaseBindingMismatch = value.lanes.some((lane) => lane?.status === "leased"
+    && !matchesGatewayLaneLease(lane, value.queue.find((item) => item.queueId === lane.queueId)));
   if (queueIndex >= 0) invalid.push("queue:" + queueIndex);
   if (laneIndex >= 0) invalid.push("lanes:" + laneIndex);
+  if (leaseBindingMismatch) invalid.push("lane-lease-binding");
   if (outboxIndex >= 0) invalid.push("outbox:" + outboxIndex);
   if (receiptIndex >= 0) invalid.push("receipts:" + receiptIndex);
   if (historyIndex >= 0) invalid.push("history:" + historyIndex);
@@ -691,72 +694,15 @@ async function pathsFor(root, catalog = null) {
   return { catalog, directory, gatewayPolicyPath: join(directory, "gateway-policy.json"), gatewayRuntimePath: join(directory, "gateway-runtime.json") };
 }
 
-async function readJson(path, root, normalize, empty) {
-  try {
-    const metadata = await stat(path);
-    if (metadata.size > MAX_BYTES) throw new Error("gateway state exceeds 8 MiB");
-    return normalize(JSON.parse(await readFile(path, "utf8")), root);
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    return empty(root);
-  }
-}
-
-async function writeJson(path, value) {
-  const content = JSON.stringify(value, null, 2) + "\n";
-  if (Buffer.byteLength(content) > MAX_BYTES) throw new Error("gateway state exceeds 8 MiB");
-  const temporary = path + "." + process.pid + "." + randomUUID() + ".tmp";
-  try { await writeFile(temporary, content, { mode: 0o600 }); await replaceFileWithRetry(temporary, path); }
-  finally { await unlink(temporary).catch((error) => { if (error.code !== "ENOENT") throw error; }); }
-}
+const readJson = readGatewayStateJson;
+const writeJson = writeGatewayStateJson;
 
 async function withLock(paths, task) {
-  const lockPath = join(paths.directory, "gateway-runtime.lock");
-  let handle;
-  for (let attempt = 0; attempt < 160; attempt += 1) {
-    try { handle = await open(lockPath, "wx", 0o600); break; } catch (error) {
-      if (!isFileLockContention(error)) throw error;
-      try { const metadata = await stat(lockPath); if (Date.now() - metadata.mtimeMs > 120000) await unlink(lockPath); }
-      catch (lockError) { if (lockError.code !== "ENOENT") throw lockError; }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
-  if (!handle) throw new Error("gateway state is busy; retry later");
-  try { return await task(); } finally {
-    await handle.close();
-    await unlink(lockPath).catch((error) => { if (error.code !== "ENOENT") throw error; });
-  }
-}
-
-function appendReceipt(runtime, kind, objectId, now, details = {}) {
-  const material = { kind, objectId, at: now, details, authority: "execution-state-only" };
-  const digest = sha256(JSON.stringify(material));
-  const id = "gateway-receipt:" + digest.slice(0, 24);
-  const previous = runtime.receipts.find((item) => item.id === id);
-  if (previous) return previous;
-  const receipt = { id, ...material, digest };
-  runtime.receipts.push(receipt);
-  return receipt;
-}
-
-function preserve(runtime, kind, value, transition, now) {
-  runtime.history.push({ kind, objectId: kind === "outbox" ? value.outboxId : value.queueId, transition, at: now,
-    value: structuredClone(value), authority: "execution-state-only" });
-}
-
-function currentLane(runtime, agentId) {
-  return runtime.lanes.find((item) => item.agentId === agentId && item.status === "leased") || null;
-}
-
-function assertActivePersona(personaPolicy, personaRuntime, agentId, projectId, groupId) {
-  const findings = personaRuntimeFindings(personaPolicy, personaRuntime);
-  if (findings.length) throw new Error("persona runtime is unhealthy: " + findings.join(", "));
-  const persona = personaRuntime.personas.find((item) => item.personaId === agentId && item.status === "active");
-  if (!persona || !["agent", "bot"].includes(persona.kind)) throw new Error("gateway work requires an active authenticated agent or bot");
-  if (groupId !== null && persona.groupId !== groupId) throw new Error("gateway work group does not match authenticated persona membership");
-  const binding = personaPolicy.bindings.find((item) => item.id === persona.bindingId && item.active);
-  if (!binding || !binding.tenantId || !binding.profileId || !projectId) throw new Error("gateway work lacks an active authenticated identity binding");
-  return { persona, binding };
+  return withGatewayStateLock(paths, task, { validatePair: (policy, runtime) => {
+    normalizePolicy(policy, paths.catalog.root, null, true); normalizeRuntime(runtime, paths.catalog.root);
+    const findings = gatewayRuntimeFindings(policy, runtime);
+    if (findings.length) throw new Error("gateway state pair is invalid (" + findings.slice(0, 16).join(",") + ")");
+  } });
 }
 
 export async function setGatewayControl({ root = process.cwd(), enabled, killSwitch, confirmation, now = new Date() }) {
@@ -790,8 +736,11 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
     const createdAt = timestamp(now);
     const active = policy.goals.find((item) => item.agentId === agentId && item.status === "active" && item.goalId !== goalId);
     if (active) throw new Error("an agent may have only one active focused goal");
+    const previous = policy.goals.find((item) => item.goalId === goalId);
+    const premortemContractVersion = previous?.plan ? goalPremortem.goalPremortemContractVersion(policy, goalId) : 1;
     const plan = steps === null ? null : createGoalPlan(steps, createdAt, agentId, {
-      goals: policy.goals, scope: { goalId, projectId, groupId, before: createdAt }
+      goals: policy.goals, scope: { goalId, projectId, groupId, before: createdAt },
+      premortemContractVersion
     });
     if (plan) {
       for (const stepAgentId of new Set(plan.steps.map((step) => step.agentId))) {
@@ -805,10 +754,10 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
     const goal = { goalId, agentId, ownerSubjectId: exactId(ownerSubjectId, "ownerSubjectId"),
       projectId, groupId, priority: Number(priority), successCriterion: safeText(successCriterion, "successCriterion"),
       nextSafeStep: safeText(firstStep?.title || nextSafeStep, "nextSafeStep"), deadline: deadline === null ? null : timestamp(deadline),
-      status: "active", checkpoint: null, heartbeatAt: null, blocker: null, createdAt, updatedAt: createdAt,
+      status: "active", checkpoint: null, heartbeatAt: null, blocker: null,
+      createdAt: previous?.createdAt || createdAt, updatedAt: createdAt,
       plan, authority: "authenticated-goal-policy" };
-    if (!validGoal(goal)) throw new Error("goal assignment is invalid");
-    const previous = policy.goals.find((item) => item.goalId === goal.goalId);
+    if (!validGoal(goal, paths.catalog.root, plan ? premortemContractVersion : undefined)) throw new Error("goal assignment is invalid");
     if (previous && [previous.agentId, previous.ownerSubjectId, previous.projectId, previous.groupId].join("\0")
       !== [goal.agentId, goal.ownerSubjectId, goal.projectId, goal.groupId].join("\0")) throw new Error("goal scope is immutable");
     if (previous?.plan && previous.plan.definitionsDigest !== goal.plan?.definitionsDigest) {
@@ -832,7 +781,7 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
       const queued = newGoalQueue(previous, blockedStep, "follow-up", key, createdAt);
       runtime.queue.push(queued); runtime.revision += 1;
       appendReceipt(runtime, "goal-step-resumed", queued.queueId, createdAt, { goalStepId: blockedStep.stepId });
-      await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
+      await writeGatewayStatePair(policy, runtime);
       return { goal: structuredClone(previous), gatewayPolicyPath: paths.gatewayPolicyPath, resumed: true };
     }
     if (previous?.plan) return { goal: structuredClone(previous), gatewayPolicyPath: paths.gatewayPolicyPath, duplicate: true };
@@ -842,6 +791,7 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
     }
     policy.goals = policy.goals.filter((item) => item.goalId !== goal.goalId);
     policy.goals.push(goal);
+    if (plan) goalPremortem.registerGoalPremortemContract(policy, goal, premortemContractVersion, createdAt);
     policy.revision += 1;
     const key = firstStep ? planQueueKey(goal.goalId, firstStep.stepId, "assignment") : "goal:" + goal.goalId + ":assignment";
     if (!runtime.queue.some((item) => item.dedupeKey === key)) {
@@ -849,7 +799,7 @@ export async function assignGoal({ root = process.cwd(), goalId, agentId, ownerS
       runtime.revision += 1;
       appendReceipt(runtime, "queued", "gateway-queue:" + sha256(key).slice(0, 32), createdAt, { kind: "assignment", dedupeKey: key });
     }
-    await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
+    await writeGatewayStatePair(policy, runtime);
     return { goal, gatewayPolicyPath: paths.gatewayPolicyPath };
   });
 }
@@ -897,7 +847,7 @@ export async function resolveGoalKnowledgeGap({ root = process.cwd(), goalId, ga
         goalStepId: step.stepId, gapId: gap.gapId, answerSource
       });
     }
-    await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
+    await writeGatewayStatePair(policy, runtime);
     return { goal: structuredClone(goal), gap: structuredClone(gap), queueId: queued.queueId, duplicate: false };
   });
 }
@@ -948,17 +898,16 @@ export async function reconcileGateway({ root = process.cwd(), now = new Date() 
     if (channelFindings.length) throw new Error("channel runtime is unhealthy: " + channelFindings.join(", "));
     const attentionIssues = attentionFindings(attention.attention);
     if (attentionIssues.length) throw new Error("attention runtime is unhealthy: " + attentionIssues.join(", "));
+    let policyChanged = false;
     for (const lane of runtime.lanes.filter((item) => item.status === "leased" && new Date(item.expiresAt) <= new Date(current))) {
-      const item = runtime.queue.find((entry) => entry.queueId === lane.queueId && entry.status === "leased");
-      if (item) { preserve(runtime, "queue", item, "lease-expired", current); item.status = item.attempts >= 3 ? "dead-letter" : "pending"; item.lease = null; item.updatedAt = current; }
-      lane.status = "expired"; lane.updatedAt = current;
+      policyChanged = expireGatewayLane(policy, runtime, lane, current,
+        { preserve, appendReceipt }) || policyChanged;
     }
     for (const outbox of runtime.outbox.filter((item) => item.status === "sending")) {
       preserve(runtime, "outbox", outbox, "ambiguous-send-recovery", current);
       outbox.status = "delivery-unknown"; outbox.updatedAt = current;
       appendReceipt(runtime, "delivery-unknown", outbox.outboxId, current, { reason: "crash-during-send" });
     }
-    let policyChanged = false;
     if (policy.enabled && !policy.killSwitch) {
       for (const goal of policy.goals.filter((item) => item.status === "active" && item.plan)) {
         const step = currentPlanStep(goal);
@@ -1032,15 +981,14 @@ export async function reconcileGateway({ root = process.cwd(), now = new Date() 
     runtime.health.gateway = policy.enabled && !policy.killSwitch ? "running" : "stopped";
     runtime.health.scheduler = "healthy"; runtime.health.queue = "healthy"; runtime.health.lastReconciledAt = current;
     runtime.revision += 1;
-    if (policyChanged) await Promise.all([
-      writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)
-    ]);
+    if (policyChanged) await writeGatewayStatePair(policy, runtime);
     else await writeJson(paths.gatewayRuntimePath, runtime);
     return { policy, runtime, recovered: true };
   });
 }
 
-export async function claimGatewayWork({ root = process.cwd(), workerId, leaseSeconds = 120, now = new Date() }) {
+export async function claimGatewayWork({ root = process.cwd(), workerId, leaseSeconds = 120,
+  executionMode = "host-effect", now = new Date() }) {
   const paths = await pathsFor(root);
   return withLock(paths, async () => {
     const [policy, runtime, personas] = await Promise.all([
@@ -1050,6 +998,7 @@ export async function claimGatewayWork({ root = process.cwd(), workerId, leaseSe
     ]);
     if (!policy.enabled || policy.killSwitch) return { item: null, reason: "disabled" };
     const current = timestamp(now); workerId = exactId(workerId, "workerId");
+    executionMode = normalizeGatewayExecutionMode(executionMode);
     const seconds = Number(leaseSeconds);
     if (!Number.isInteger(seconds) || seconds < 15 || seconds > 900) throw new Error("leaseSeconds must be 15-900");
     const items = runtime.queue.filter((item) => item.status === "pending" && new Date(item.availableAt) <= new Date(current)
@@ -1089,27 +1038,39 @@ export async function claimGatewayWork({ root = process.cwd(), workerId, leaseSe
     if (!item) return { item: null, reason: runtime.queue.some((entry) => entry.status === "pending") ? "waiting" : "idle/needs-goal" };
     preserve(runtime, "queue", item, "leased", current);
     item.status = "leased"; item.attempts += 1; item.updatedAt = current;
-    item.lease = { workerId, claimedAt: current, expiresAt: new Date(new Date(current).getTime() + seconds * 1000).toISOString() };
+    item.lease = newGatewayLease(workerId, current, seconds, executionMode);
     runtime.lanes = runtime.lanes.filter((lane) => lane.agentId !== item.agentId || lane.status !== "leased");
     runtime.lanes.push({ agentId: item.agentId, queueId: item.queueId, workerId, status: "leased", claimedAt: current,
       expiresAt: item.lease.expiresAt, updatedAt: current, authority: "execution-state-only" });
     runtime.health.worker = "healthy"; runtime.health.lastTickAt = current; runtime.revision += 1;
-    const receipt = appendReceipt(runtime, "leased", item.queueId, current, { workerId, attempt: item.attempts });
+    const receipt = appendReceipt(runtime, "leased", item.queueId, current,
+      { workerId, attempt: item.attempts, executionMode });
     await writeJson(paths.gatewayRuntimePath, runtime);
     return { item: structuredClone(item), receipt };
   });
 }
 
-function exactReplyBinding(channelPolicy, event) {
-  const binding = channelPolicy.bindings.find((item) => item.id === event.bindingId && item.status === "active"
-    && item.agentId === event.agentId && item.projectId === event.projectId && item.groupId === event.groupId
-    && item.provider === event.provider && item.tenantId === event.tenantId && item.accountId === event.accountId
-    && item.chatId === event.chatId && item.threadId === event.threadId && item.capabilities.includes("reply"));
-  if (!binding) throw new Error("current exact channel reply capability is unavailable");
-  return binding;
+export async function markGatewayHostStarted({ root = process.cwd(), queueId, workerId, claimedAt, attempt,
+  now = new Date() }) {
+  const paths = await pathsFor(root);
+  return withLock(paths, async () => {
+    const [policy, runtime] = await Promise.all([
+      readJson(paths.gatewayPolicyPath, paths.catalog.root, normalizePolicy, emptyPolicy),
+      readJson(paths.gatewayRuntimePath, paths.catalog.root, normalizeRuntime, emptyRuntime)
+    ]);
+    if (!policy.enabled || policy.killSwitch) throw new Error("gateway was disabled before host execution");
+    const item = runtime.queue.find((entry) => entry.queueId === exactId(queueId, "queueId"));
+    workerId = exactId(workerId, "workerId"); claimedAt = exactGatewayLeaseGeneration(claimedAt, attempt, "host start");
+    const current = timestamp(now);
+    const lane = requireExactHostLease(runtime, item, { workerId, claimedAt, attempt, current });
+    const receipt = markHostStarted(runtime, item, lane, workerId, current, { preserve, appendReceipt });
+    await writeJson(paths.gatewayRuntimePath, runtime);
+    return { item: structuredClone(item), receipt };
+  });
 }
 
-export async function completeGatewayRun({ root = process.cwd(), queueId, workerId, result, now = new Date() }) {
+export async function completeGatewayRun({ root = process.cwd(), queueId, workerId, claimedAt, attempt,
+  result, now = new Date() }) {
   const paths = await pathsFor(root);
   return withLock(paths, async () => {
     const [policy, runtime, channelPolicy, channelRuntime, personas] = await Promise.all([
@@ -1121,11 +1082,11 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     if (!policy.enabled || policy.killSwitch) throw new Error("gateway was disabled before run completion");
     const item = runtime.queue.find((entry) => entry.queueId === exactId(queueId, "queueId"));
     workerId = exactId(workerId, "workerId");
-    if (!item || item.status !== "leased" || item.lease?.workerId !== workerId) throw new Error("run completion requires the exact active queue lease");
-    assertActivePersona(personas.policy, personas.runtime, item.agentId, item.projectId, item.groupId);
-    const current = timestamp(now);
-    const lane = runtime.lanes.find((entry) => entry.queueId === item.queueId && entry.workerId === workerId && entry.status === "leased");
-    if (!lane) throw new Error("agent lane lease is missing");
+    claimedAt = exactGatewayLeaseGeneration(claimedAt, attempt, "run completion"); const current = timestamp(now);
+    const lane = requireExactGatewayLease(runtime, item,
+      { workerId, claimedAt, attempt, current, action: "run completion" });
+    const markedHostRun = assertGatewayCompletionMode(item.lease, result);
+    const runIdentity = assertActivePersona(personas.policy, personas.runtime, item.agentId, item.projectId, item.groupId);
     const boundGoal = item.goalId ? policy.goals.find((entry) => entry.goalId === item.goalId) : null;
     const boundStep = item.goalStepId ? boundGoal && currentPlanStep(boundGoal) : null;
     if (item.goalStepId) {
@@ -1149,6 +1110,10 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     if (selfHelpRequest && (knowledgeGapRequest || result?.blocked || result?.completed)) {
       throw new Error("self-help research cannot also complete, block, or open a knowledge gap");
     }
+    const resultCheckpoint = boundGoal && result?.checkpoint !== undefined ? safeCheckpoint(result.checkpoint) : boundGoal?.checkpoint ?? null;
+    const premortemReview = boundStep?.premortemContractVersion === 1 && result?.completed
+      ? await goalPremortem.reviewGoalPremortem({ root: paths.catalog.root, goal: boundGoal, step: boundStep,
+        item, checkpoint: resultCheckpoint, completedAt: current, host: runIdentity.binding.host, readOnly: result?.readOnly === true }) : null;
     let executionReview = boundStep?.execution && result?.completed
       ? reviewExecutionResult(boundStep.execution, boundStep.executionOutcomes || [],
         item.queueId, result.execution, current) : null;
@@ -1177,22 +1142,22 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
       }
       item.status = "awaiting-delivery";
     } else {
-      item.status = result?.blocked || knowledgeGapRequest || (executionReview && !executionReview.passed)
+      item.status = result?.blocked || knowledgeGapRequest || premortemReview?.blocked || (executionReview && !executionReview.passed)
         ? "blocked" : "completed"; item.completedAt = current;
       const goal = boundGoal;
       if (goal) {
         policy.history.push({ kind: "goal", at: current, value: structuredClone(goal), authority: "authenticated-goal-policy" });
-        const checkpoint = result?.checkpoint === undefined ? goal.checkpoint : safeCheckpoint(result.checkpoint);
+        const checkpoint = resultCheckpoint;
         goal.checkpoint = checkpoint; goal.heartbeatAt = current;
         goal.blocker = result?.blocked ? safeText(result.blocker || "Run blocked.", "blocker", 500)
-          : executionReview && !executionReview.passed ? executionReview.reason : null;
+          : premortemReview?.blocked ? premortemReview.reason : executionReview && !executionReview.passed ? executionReview.reason : null;
         if (goal.plan && item.goalStepId) {
           const step = currentPlanStep(goal);
           step.checkpoint = checkpoint; step.updatedAt = current;
           const knowledge = handlePlanKnowledge({ goal, step, item, runtime, current,
             selfHelpRequest, knowledgeGapRequest, appendReceipt, newGoalQueue, planQueueKey });
           if (knowledge) ({ clarification = null, selfHelp = null, selfHelpRequired = null } = knowledge);
-          else if (result?.blocked) {
+          else if (result?.blocked || premortemReview?.blocked) {
             step.status = "blocked"; step.blocker = goal.blocker; goal.status = "blocked";
           } else if (executionReview && !executionReview.passed) {
             if (executionReview.outcome) step.executionOutcomes.push(executionReview.outcome);
@@ -1220,6 +1185,7 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
                   outcomeId: executionReview.outcome?.outcomeId || null });
             }
           } else if (result?.completed) {
+            if (premortemReview?.attachments) Object.assign(step, premortemReview.attachments);
             if (executionReview?.outcome) {
               step.executionOutcomes.push(executionReview.outcome);
               appendReceipt(runtime, "execution-gate-passed", item.queueId, current, {
@@ -1264,15 +1230,16 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
       }
     }
     item.lease = null; item.updatedAt = current; lane.status = "completed"; lane.updatedAt = current;
-    runtime.health.host = "healthy"; runtime.health.worker = "healthy"; runtime.health.lastTickAt = current;
+    if (markedHostRun) runtime.health.host = "healthy";
+    runtime.health.worker = "healthy"; runtime.health.lastTickAt = current;
     appendReceipt(runtime, "run-terminal", item.queueId, current, { status: item.status, goalStepId: item.goalStepId || null }); runtime.revision += 1;
-    await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
+    await writeGatewayStatePair(policy, runtime);
     return { item, outbox: runtime.outbox.find((entry) => entry.queueId === item.queueId) || null,
-      clarification, exploration, selfHelp, selfHelpRequired, executionReview };
+      clarification, exploration, selfHelp, selfHelpRequired, executionReview, premortemReview };
   });
 }
 
-export async function failGatewayRun({ root = process.cwd(), queueId, workerId, error, retryAfterMs = 5000,
+export async function failGatewayRun({ root = process.cwd(), queueId, workerId, claimedAt, attempt, error, retryAfterMs = 5000,
   now = new Date() }) {
   const paths = await pathsFor(root);
   return withLock(paths, async () => {
@@ -1281,29 +1248,18 @@ export async function failGatewayRun({ root = process.cwd(), queueId, workerId, 
       readJson(paths.gatewayRuntimePath, paths.catalog.root, normalizeRuntime, emptyRuntime)
     ]);
     const item = runtime.queue.find((entry) => entry.queueId === exactId(queueId, "queueId"));
-    workerId = exactId(workerId, "workerId");
-    if (!item || item.status !== "leased" || item.lease?.workerId !== workerId) {
-      throw new Error("run failure requires the exact active queue lease");
-    }
-    const lane = runtime.lanes.find((entry) => entry.queueId === item.queueId && entry.workerId === workerId
-      && entry.status === "leased");
-    if (!lane) throw new Error("agent lane lease is missing");
+    workerId = exactId(workerId, "workerId"); claimedAt = exactGatewayLeaseGeneration(claimedAt, attempt, "run failure");
     const current = timestamp(now);
+    const lane = requireExactGatewayLease(runtime, item,
+      { workerId, claimedAt, attempt, current, action: "run failure" });
     const message = safeText(String(error || "host runtime unavailable"), "runError", 500);
     const delay = Number(retryAfterMs);
     if (!Number.isFinite(delay) || delay < 250 || delay > 300000) throw new Error("retryAfterMs must be 250-300000");
-    preserve(runtime, "queue", item, "run-failed", current);
-    item.status = item.attempts >= 3 ? "dead-letter" : "pending";
-    item.lease = null; item.lastError = message; item.updatedAt = current;
-    item.availableAt = new Date(new Date(current).getTime() + delay).toISOString();
-    if (item.status === "dead-letter") item.completedAt = current;
-    lane.status = "completed"; lane.updatedAt = current;
-    runtime.health.host = "failed"; runtime.health.worker = "degraded"; runtime.health.lastTickAt = current;
-    runtime.revision += 1;
-    const receipt = appendReceipt(runtime, item.status === "dead-letter" ? "run-dead-letter" : "run-retry",
-      item.queueId, current, { attempt: item.attempts });
-    await writeJson(paths.gatewayRuntimePath, runtime);
-    return { item, receipt, policyEnabled: policy.enabled && !policy.killSwitch };
+    const failure = failGatewayLane(policy, runtime, item, lane, current,
+      { error: message, retryAfterMs: delay, preserve, appendReceipt });
+    if (failure.ambiguous) await writeGatewayStatePair(policy, runtime);
+    else await writeJson(paths.gatewayRuntimePath, runtime);
+    return { item, receipt: failure.receipt, policyEnabled: policy.enabled && !policy.killSwitch };
   });
 }
 
@@ -1405,18 +1361,26 @@ export async function updateGatewayHealth({ root = process.cwd(), worker = null,
 
 export async function loadGatewayRuntime(root = process.cwd(), catalog = null) {
   const paths = await pathsFor(root, catalog);
-  const [policy, runtime] = await Promise.all([
-    readJson(paths.gatewayPolicyPath, paths.catalog.root, normalizePolicy, emptyPolicy),
-    readJson(paths.gatewayRuntimePath, paths.catalog.root, normalizeRuntime, emptyRuntime)
-  ]);
-  return { policy, runtime, ...paths };
+  return withLock(paths, async () => {
+    const [policy, runtime] = await Promise.all([
+      readJson(paths.gatewayPolicyPath, paths.catalog.root, normalizePolicy, emptyPolicy),
+      readJson(paths.gatewayRuntimePath, paths.catalog.root, normalizeRuntime, emptyRuntime)
+    ]);
+    return { policy, runtime, ...paths };
+  });
 }
 
 export async function inspectGatewayRuntime(root = process.cwd(), catalog = null) {
   const paths = await pathsFor(root, catalog); const errors = [];
   let policy = emptyPolicy(paths.catalog.root); let runtime = emptyRuntime(paths.catalog.root);
-  try { policy = await readJson(paths.gatewayPolicyPath, paths.catalog.root, normalizePolicy, emptyPolicy); } catch (error) { errors.push("policy:" + error.message); }
-  try { runtime = await readJson(paths.gatewayRuntimePath, paths.catalog.root, normalizeRuntime, emptyRuntime); } catch (error) { errors.push("runtime:" + error.message); }
+  try {
+    await withLock(paths, async () => {
+      try { policy = await readJson(paths.gatewayPolicyPath, paths.catalog.root, normalizePolicy, emptyPolicy); }
+      catch (error) { errors.push("policy:" + error.message); }
+      try { runtime = await readJson(paths.gatewayRuntimePath, paths.catalog.root, normalizeRuntime, emptyRuntime); }
+      catch (error) { errors.push("runtime:" + error.message); }
+    });
+  } catch (error) { errors.push("transaction:" + error.message); }
   return { policy, runtime, errors, ...paths };
 }
 
@@ -1425,14 +1389,14 @@ export function gatewayRuntimeFindings(policy, runtime) {
   const active = new Set();
   const goalIds = new Set();
   for (const goal of policy.goals) {
-    if (!validGoal(goal)) findings.push("invalid-goal:" + (goal?.goalId || "unknown"));
+    if (!validGoal(goal, policy.root)) findings.push("invalid-goal:" + (goal?.goalId || "unknown"));
     else if (!validGoalTransferProofs(goal, policy.goals)) findings.push("invalid-strategy-transfer:" + goal.goalId);
     if (goalIds.has(goal.goalId)) findings.push("duplicate-goal:" + goal.goalId);
     goalIds.add(goal.goalId);
     if (goal.status === "active" && active.has(goal.agentId)) findings.push("multiple-active-goals:" + goal.agentId);
     if (goal.status === "active") active.add(goal.agentId);
   }
-  for (const item of policy.history) if (!validPolicyHistory(item)) findings.push("invalid-gateway-policy-history");
+  for (const item of policy.history) if (!validPolicyHistory(item, policy.root)) findings.push("invalid-gateway-policy-history");
   const queueIds = new Set(); const dedupeKeys = new Set();
   for (const item of runtime.queue) {
     if (!validQueue(item)) findings.push("invalid-queue-item:" + (item?.queueId || "unknown"));
@@ -1461,7 +1425,7 @@ export function gatewayRuntimeFindings(policy, runtime) {
   for (const lane of runtime.lanes) {
     if (!validLane(lane)) findings.push("invalid-agent-lane:" + (lane?.queueId || "unknown"));
     const queue = runtime.queue.find((item) => item.queueId === lane.queueId);
-    if (!queue || (lane.status === "leased" && (queue.status !== "leased" || queue.lease?.workerId !== lane.workerId))) {
+    if (!queue || (lane.status === "leased" && !matchesGatewayLaneLease(lane, queue))) {
       findings.push("agent-lane-queue-mismatch:" + (lane.queueId || "unknown"));
     }
   }
@@ -1478,6 +1442,7 @@ export function gatewayHealthFindings(policy, runtime, { now = new Date(), stale
   if (runtime.health.queue !== "healthy") findings.push("queue-not-healthy");
   if (!new Set(["healthy", "degraded"]).has(runtime.health.worker)) findings.push("worker-not-healthy");
   if (!new Set(["healthy", "degraded"]).has(runtime.health.adapter)) findings.push("adapter-not-healthy");
+  findings.push(...gatewayHostHealthFindings(runtime));
   const current = now instanceof Date ? now : new Date(now);
   const tick = runtime.health.lastTickAt === null ? null : new Date(runtime.health.lastTickAt);
   const reconciliation = runtime.health.lastReconciledAt === null ? null : new Date(runtime.health.lastReconciledAt);

@@ -47,7 +47,7 @@ export {
 export {
   EXECUTION_ATTEMPT_SCHEMA, GATEWAY_EVENT_SCHEMA, GATEWAY_POLICY_SCHEMA, GATEWAY_RUNTIME_SCHEMA,
   GOAL_PLAN_SCHEMA,
-  assignGoal, claimGatewayWork, completeGatewayRun, deliverPrepared,
+  assignGoal, claimGatewayWork, completeGatewayRun, deliverPrepared, failGatewayRun, markGatewayHostStarted,
   enqueueGatewayWake, executionAttemptForStep, gatewayContext, gatewayRuntimeFindings,
   inspectGatewayRuntime, loadGatewayRuntime, reconcileGateway, resolveGoalKnowledgeGap, setGatewayControl
 } from "./lib/gateway-runtime.js";

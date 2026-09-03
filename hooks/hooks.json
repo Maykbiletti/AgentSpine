@@ -37,7 +37,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|apply_patch|Bash",
+        "matcher": "Edit|Write|apply_patch|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",

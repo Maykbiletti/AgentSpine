@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 import { createHash, createHmac } from "node:crypto";
-import { spawn } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkHosts } from "./check-hosts.js";
+import { releaseCheck } from "./release-check.js";
+import {
+  invokeInstalledBlockingProtocols, invokeInstalledBlunPostWriteDigest, invokeInstalledHook
+} from "./check-install-hook.js";
+import { invokeInstalledSelfstarter as runInstalledSelfstarter } from "./check-install-selfstarter.js";
 
 function hash(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -35,78 +39,25 @@ async function removeTree(path, options = {}) {
 }
 
 async function makePreviousCache(target) {
-  for (const path of ["package.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
+  const version = "0.65.0";
+  for (const path of ["package.json", "package-lock.json", "blun.plugin.json",
+    ".claude-plugin/plugin.json", ".codex-plugin/plugin.json",
+    ".claude-plugin/marketplace.json", "hooks/version.json"]) {
     const file = join(target, path);
-    const value = JSON.parse(await readFile(file, "utf8"));
-    value.version = "0.8.0";
+    let value;
+    try { value = JSON.parse(await readFile(file, "utf8")); } catch (error) {
+      if (path !== "package-lock.json" || error.code !== "ENOENT") throw error;
+      const pkg = JSON.parse(await readFile(join(target, "package.json"), "utf8"));
+      value = { name: pkg.name, version, packages: { "": { name: pkg.name, version } } };
+    }
+    if (path === ".claude-plugin/marketplace.json") value.plugins[0].version = version;
+    else value.version = version;
+    if (path === "package-lock.json") value.packages[""].version = version;
+    if (path === ".codex-plugin/plugin.json") delete value.hooks;
     await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   }
-  const marketplacePath = join(target, ".claude-plugin/marketplace.json");
-  const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
-  marketplace.plugins[0].version = "0.8.0";
-  await writeFile(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
-  const hookVersionPath = join(target, "hooks/version.json");
-  const hookVersion = JSON.parse(await readFile(hookVersionPath, "utf8"));
-  hookVersion.version = "0.8.0";
-  await writeFile(hookVersionPath, `${JSON.stringify(hookVersion, null, 2)}\n`, "utf8");
-}
-
-async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, payload = null, { requireBriefing = true, extraEnv = {} } = {}) {
-  return await new Promise((resolveResult, reject) => {
-    const child = spawn(process.execPath, [join(pluginRoot, "src/hook.js")], {
-      cwd: projectRoot,
-      env: {
-        ...process.env,
-        AGENTSPINE_HOST: host,
-        AGENTSPINE_STATE_DIR: stateRoot,
-        CLAUDE_PLUGIN_ROOT: pluginRoot,
-        PLUGIN_ROOT: pluginRoot,
-        ...extraEnv
-      },
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`${host} installed hook timed out`));
-    }, 5000);
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`${host} installed hook exited with ${code}: ${stderr.slice(0, 2048)}`));
-      try {
-        const protocol = JSON.parse(stdout.trim());
-        const context = JSON.parse(protocol.hookSpecificOutput?.additionalContext || "null");
-        if (requireBriefing && (context?.briefing?.host !== host || !Array.isArray(context?.briefing?.sources?.documents))) {
-          throw new Error(`${host} installed hook did not inject a real session briefing: ${protocol.reason || context?.error || context?.sourceResolution?.reason || "missing context"}`);
-        }
-        resolveResult({
-          event: protocol.hookSpecificOutput?.hookEventName || payload?.hook_event_name || null, host,
-          sources: context?.briefing?.sources?.documents?.length ?? null,
-          sourceIds: context?.briefing?.sources?.documents?.map((item) => item.path) || [],
-          sourceContents: context?.briefing?.sources?.documents?.map((item) => item.content).filter(Boolean) || [],
-          sourceResolution: context?.sourceResolution || null,
-          learningClaims: context?.briefing?.learning?.map((item) => item.claim) || [],
-          attentionKinds: context?.briefing?.attention?.items?.map((item) => item.kind) || [],
-          capturedAttentionKind: context?.attentionEvent?.kind || null,
-          selfstarter: context?.selfstarter || null,
-          channelEvent: context?.channelEvent || null,
-          voiceBrief: context?.briefing?.voiceBrief || null,
-          preflight: context?.preflight || null,
-          decision: protocol.decision || null,
-          reason: protocol.reason || null
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-    child.stdin.end(`${JSON.stringify(payload || { hook_event_name: "SessionStart", cwd: projectRoot, host })}\n`);
-  });
+  await writeFile(join(target, "src/version.js"), `export const VERSION = "${version}";\n`, "utf8");
+  return version;
 }
 
 async function invokeInstalledLiveRoots(pluginRoot, workspace, stateRoot) {
@@ -191,77 +142,10 @@ async function invokeInstalledLiveRoots(pluginRoot, workspace, stateRoot) {
   };
 }
 
-async function prepareInstalledSelfstarter(pluginRoot, projectRoot, stateRoot, host) {
-  const previous = process.env.AGENTSPINE_STATE_DIR;
-  process.env.AGENTSPINE_STATE_DIR = stateRoot;
-  try {
-    const graph = await import(pathToFileURL(join(pluginRoot, "src/lib/graph.js")).href);
-    const coordination = await import(pathToFileURL(join(pluginRoot, "src/lib/coordination.js")).href);
-    const selfstarter = await import(pathToFileURL(join(pluginRoot, "src/lib/selfstarter.js")).href);
-    for (const [id, kind] of [
-      ["person:install-owner", "person"], ["agent:install-worker", "agent"], ["project:install-runtime", "project"]
-    ]) await graph.upsertEntity({ root: projectRoot, id, kind, privacy: "shared" });
-    await coordination.createTask({
-      root: projectRoot, id: `task:install-${host}`, actorId: "agent:install-worker", assigneeId: "agent:install-worker",
-      projectId: "project:install-runtime", title: `Installed ${host} self-starter check`, privacy: "private"
-    });
-    await selfstarter.grantExecution({
-      root: projectRoot, id: `execution-grant:install-${host}`, jobId: `job:install-${host}`,
-      actorId: "agent:install-worker", taskId: `task:install-${host}`, targetId: "person:install-owner",
-      projectId: "project:install-runtime", host, capabilities: ["tool:Write"],
-      reason: `Owner approved the exact installed ${host} synthetic write.`, confirmation: "local-owner-confirmed"
-    });
-    await selfstarter.registerJob({
-      root: projectRoot, id: `job:install-${host}`, grantId: `execution-grant:install-${host}`,
-      confirmation: "local-owner-confirmed"
-    });
-  } finally {
-    if (previous === undefined) delete process.env.AGENTSPINE_STATE_DIR;
-    else process.env.AGENTSPINE_STATE_DIR = previous;
-  }
-}
-
 async function invokeInstalledSelfstarter(pluginRoot, projectRoot, stateRoot, host) {
-  await prepareInstalledSelfstarter(pluginRoot, projectRoot, stateRoot, host);
-  const session = `session:install-${host}-one`;
-  const nextSession = `session:install-${host}-two`;
-  const toolUseId = `tool:install-${host}`;
-  const taskId = `task:install-${host}`;
-  const artifact = join(projectRoot, `installed-${host}-artifact.txt`);
-  const shared = {
-    cwd: projectRoot, host, entity_id: "agent:install-worker", project_id: "project:install-runtime",
-    task_id: taskId
-  };
-  const started = await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
-    ...shared, hook_event_name: "SessionStart", session_id: session
+  return runInstalledSelfstarter({
+    pluginRoot, projectRoot, stateRoot, host, invokeInstalledHook, writeFile
   });
-  if (!started.selfstarter?.active || started.selfstarter.action !== "start") {
-    throw new Error(`${host} installed hook did not start the exact authorized job`);
-  }
-  const authorized = await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
-    ...shared, hook_event_name: "PreToolUse", session_id: session,
-    tool_name: "Write", tool_use_id: toolUseId,
-    tool_input: { file_path: artifact, content: `installed ${host} checkpoint\n` }
-  }, { requireBriefing: false });
-  if (authorized.decision === "block") throw new Error(`${host} installed PreToolUse denied the exact authorized effect: ${authorized.reason}`);
-  await writeFile(artifact, `installed ${host} checkpoint\n`, "utf8");
-  await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
-    ...shared, hook_event_name: "PostToolUse", session_id: session,
-    tool_name: "Write", tool_use_id: toolUseId, success: true, tool_result: { ok: true }
-  }, { requireBriefing: false });
-  await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
-    ...shared, hook_event_name: "Stop", session_id: session
-  }, { requireBriefing: false });
-  const resumed = await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, host, {
-    ...shared, hook_event_name: "SessionStart", session_id: nextSession
-  });
-  if (!resumed.selfstarter?.active || resumed.selfstarter.action !== "resume" || resumed.selfstarter.checkpointSequence !== 1) {
-    throw new Error(`${host} installed hook did not resume the durable checkpoint`);
-  }
-  return {
-    started: started.selfstarter.action, resumed: resumed.selfstarter.action,
-    checkpointSequence: resumed.selfstarter.checkpointSequence, mcpCalls: 0
-  };
 }
 
 async function invokeInstalledAcceptance(pluginRoot) {
@@ -491,6 +375,12 @@ export async function checkInstall(root = process.cwd()) {
     const aliasResult = await checkHosts(join(aliasRoot, "agent-spine"));
     const freshState = join(workspace, "state-fresh");
     const freshHook = await invokeInstalledHook(fresh, userProject, freshState, "claude");
+    const freshBlockingProtocols = await invokeInstalledBlockingProtocols(
+      fresh, userProject, join(workspace, "state-protocol-fresh")
+    );
+    const freshBlunPost = await invokeInstalledBlunPostWriteDigest(
+      fresh, userProject, join(workspace, "state-blun-post-fresh")
+    );
     const freshAttention = await invokeInstalledAttention(fresh, userProject, freshState, "claude");
     const freshSelfstarter = await invokeInstalledSelfstarter(fresh, userProject, freshState, "claude");
     const freshChannelWake = await invokeInstalledChannelWake(fresh, userProject, freshState, "claude");
@@ -500,13 +390,19 @@ export async function checkInstall(root = process.cwd()) {
 
     const installed = join(workspace, "cache", "agent-spine");
     await copyBundle(root, installed);
-    await makePreviousCache(installed);
-    let legacyFailed = false;
+    const previousVersion = await makePreviousCache(installed);
+    let previousReleaseFailure = null;
     try {
-      const legacy = await checkHosts(installed);
-      if (legacy.version !== currentVersion) legacyFailed = true;
-    } catch { legacyFailed = true; }
-    if (!legacyFailed) throw new Error("legacy cache unexpectedly passed the current host inventory");
+      await releaseCheck({ root: installed, tag: `v${previousVersion}`, allowDirty: true, skipPack: true });
+    } catch (error) { previousReleaseFailure = error.message; }
+    if (previousReleaseFailure !== "Codex release manifest must select hooks/codex.json") {
+      throw new Error(`previous cache failed release validation for an unexpected reason: ${previousReleaseFailure}`);
+    }
+    let previousHostFailure = null;
+    try { await checkHosts(installed); } catch (error) { previousHostFailure = error.message; }
+    if (previousHostFailure !== "Codex manifest must select its host-specific hook adapter") {
+      throw new Error(`previous cache failed host validation for an unexpected reason: ${previousHostFailure}`);
+    }
 
     const staging = `${installed}.${currentVersion}.staging`;
     await copyBundle(root, staging);
@@ -515,6 +411,12 @@ export async function checkInstall(root = process.cwd()) {
     const upgraded = await checkHosts(installed);
     const upgradeState = join(workspace, "state-upgrade");
     const upgradedHook = await invokeInstalledHook(installed, userProject, upgradeState, "codex");
+    const upgradedBlockingProtocols = await invokeInstalledBlockingProtocols(
+      installed, userProject, join(workspace, "state-protocol-upgrade")
+    );
+    const upgradedBlunPost = await invokeInstalledBlunPostWriteDigest(
+      installed, userProject, join(workspace, "state-blun-post-upgrade")
+    );
     const upgradedAttention = await invokeInstalledAttention(installed, userProject, upgradeState, "codex");
     const upgradedSelfstarter = await invokeInstalledSelfstarter(installed, userProject, upgradeState, "codex");
     const upgradedChannelWake = await invokeInstalledChannelWake(installed, userProject, upgradeState, "codex");
@@ -533,6 +435,8 @@ export async function checkInstall(root = process.cwd()) {
       fresh: freshResult.exactlyOnce,
       upgrade: upgraded.exactlyOnce,
       automaticBriefing: { fresh: freshHook, upgrade: upgradedHook },
+      blockingProtocols: { fresh: freshBlockingProtocols, upgrade: upgradedBlockingProtocols },
+      blunPostWriteDigest: { fresh: freshBlunPost, upgrade: upgradedBlunPost },
       automaticAttention: { fresh: freshAttention, upgrade: upgradedAttention },
       automaticSelfstarter: { fresh: freshSelfstarter, upgrade: upgradedSelfstarter },
       automaticChannelWake: { fresh: freshChannelWake, upgrade: upgradedChannelWake },
@@ -540,7 +444,9 @@ export async function checkInstall(root = process.cwd()) {
       visibleAcceptance: { fresh: freshAcceptance, upgrade: upgradedAcceptance },
       liveRootResolution: { fresh: freshLiveRoots, upgrade: upgradedLiveRoots },
       canonicalAliasLaunch: aliasResult.ok,
-      previousCacheRejected: legacyFailed,
+      previousCacheRejected: true,
+      previousCache: { version: previousVersion,
+        releaseContractFailure: previousReleaseFailure, hostContractFailure: previousHostFailure },
       uninstallPreservedSources: true,
       authority: "installation-check-only"
     };

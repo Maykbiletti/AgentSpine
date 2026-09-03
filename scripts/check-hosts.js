@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installedHostEnvironment } from "./check-install-hook.js";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -81,7 +82,7 @@ async function initializeServer({ label, root, variable, server, version }) {
   return await new Promise((resolveResult, reject) => {
     const child = spawn(command, args, {
       cwd: root,
-      env: { ...process.env, CLAUDE_PLUGIN_ROOT: root, PLUGIN_ROOT: root },
+      env: installedHostEnvironment(label, root),
       stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "";
@@ -152,7 +153,7 @@ export async function checkHosts(root = process.cwd()) {
   await validateEntrypoint(root, resolve(root, pkg.bin["agentspine-worker"]));
   assert(claudeManifest.mcpServers === "./.mcp.json", "Claude manifest must explicitly reference ./.mcp.json");
   assert(claudeManifest.hooks === undefined, "default hooks/hooks.json must not also be registered through a supplemental manifest path");
-  assert(codexManifest.hooks === undefined, "Codex manifest must omit unsupported hook registration fields");
+  assert(codexManifest.hooks === "./hooks/codex.json", "Codex manifest must select its host-specific hook adapter");
   assert(claudeMcp.mcpServers && Object.keys(claudeMcp.mcpServers).length === 1, "Claude MCP file must contain one mcpServers registration");
   assert(codexManifest.mcpServers && Object.keys(codexManifest.mcpServers).length === 1, "Codex manifest must contain one MCP registration");
   const commonEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PreCompact", "PostCompact", "Stop", "SubagentStop"];
@@ -170,7 +171,7 @@ export async function checkHosts(root = process.cwd()) {
     ok: true, root, version: pkg.version, registrations,
     hooks: { blun: blunHookInventory, claude: claudeHookInventory, codex: codexHookInventory },
     hookDiscovery: {
-      blun: "plugin-manifest", claude: "default-hooks-directory", codex: "bundled-host-adapter",
+      blun: "plugin-manifest", claude: "default-hooks-directory", codex: "plugin-manifest",
       trust: "host-user-required", liveTrustVerified: false
     },
     worker: { entrypoint: pkg.bin["agentspine-worker"], setsPerInstall: 1 },

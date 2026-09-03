@@ -18,6 +18,10 @@ test("visible multilingual acceptance proves the complete automatic team-partner
   assert.match(report.receiptDigest, /^[a-f0-9]{64}$/);
   assert.equal(new Set(report.checks.map((item) => item.id)).size, report.total);
   assert.ok(report.checks.every((item) => item.status === "PASS" && /^[a-f0-9]{64}$/.test(item.receipt)));
+  assert.match(report.checks.find((item) => item.id === "authorized-resume").detail,
+    /Premortem lag vor dem ersten Write/);
+  assert.match(report.checks.find((item) => item.id === "denied-resume").detail,
+    /Premortem verlieh Lucía keine Berechtigung/);
   const visible = renderAcceptanceReport(report);
   assert.match(visible, /\[PASS\] Mehrsprachige Stilkontinuität/);
   assert.match(visible, /\[PASS\] Verweigerte Fremdwirkung/);
@@ -32,7 +36,7 @@ test("acceptance CLI emits a reproducible machine-readable receipt", () => {
   assert.equal(result.status, 0, result.stderr);
   const report = JSON.parse(result.stdout);
   assert.equal(report.schema, "agentspine.acceptance/v1");
-  assert.equal(report.version, "0.65.0");
+  assert.equal(report.version, "0.66.0");
   assert.equal(report.total, 15);
   assert.equal(report.mcpCalls, 0);
 });

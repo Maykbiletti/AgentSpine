@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { runHook } from "../src/hook.js";
 import { runAudit } from "../src/lib/audit.js";
 import { createTask, updateTask } from "../src/lib/coordination.js";
+import { recordDeliveryPremortem } from "../src/lib/delivery-premortem.js";
 import { upsertEntity } from "../src/lib/graph.js";
 import {
   deleteJob, grantExecution, loadExecutionPolicy, loadSelfstarter, registerJob,
@@ -69,6 +70,29 @@ async function fixture(t, { host = "claude", maxRetries = 2, leaseSeconds = 30 }
 const scope = {
   entity_id: "agent:worker", project_id: "project:alpha", task_id: "task:build"
 };
+
+const PREMORTEM_ITEMS = [
+  { category: "baseline-environment",
+    failure: "this delivery fails because the synthetic workspace baseline changed",
+    check: "Compare the exact synthetic workspace fingerprint." },
+  { category: "contract-tests",
+    failure: "this delivery fails because the selfstarter contract regressed",
+    check: "Run the focused synthetic selfstarter test." },
+  { category: "delivery-path",
+    failure: "this delivery fails because the synthetic artifact uses the wrong path",
+    check: "Verify the synthetic artifact path and digest." }
+];
+
+async function registerPremortem(root, session, timestamp = "2029-01-01T00:00:02.500Z") {
+  const prompted = await runHook({
+    hook_event_name: "UserPromptSubmit", cwd: root, host: "claude", session_id: session,
+    timestamp, prompt: "Write the authorized synthetic artifact.", ...scope
+  });
+  const recorded = await recordDeliveryPremortem({ root,
+    requirementId: prompted.preflight.premortem.requirementId, items: PREMORTEM_ITEMS, now: timestamp });
+  assert.equal(recorded.blocked, false);
+  return recorded;
+}
 
 async function start(root, session = "session:one", timestamp = "2029-01-01T00:00:02.000Z", host = "claude") {
   return runHook({ hook_event_name: "SessionStart", cwd: root, host, session_id: session, timestamp, ...scope });
@@ -133,6 +157,7 @@ async function checkpoint(root, session, toolUseId, timestamp, success = true) {
   return runHook({
     hook_event_name: "PostToolUse", cwd: root, host: "claude", session_id: session,
     timestamp, tool_name: "Write", tool_use_id: toolUseId,
+    tool_input: { file_path: join(root, "artifact.txt"), content: "synthetic" },
     success, tool_result: success ? { ok: true, content: "never stored" } : { isError: true, error: "synthetic" },
     ...scope
   });
@@ -147,6 +172,7 @@ test("native hooks start, authorize, checkpoint, stop, and resume one exact job 
   assert.deepEqual(first.selfstarter.capabilities, ["tool:Write"]);
   assert.equal(first.briefing.tasks[0].id, "task:build");
 
+  await registerPremortem(root, "session:one");
   const permitted = await authorize(root, "session:one", "tool:one", "2029-01-01T00:00:03.000Z");
   assert.equal(permitted.blocked, false);
   assert.equal(permitted.selfstarter.allowed, true);
@@ -160,13 +186,13 @@ test("native hooks start, authorize, checkpoint, stop, and resume one exact job 
 
   const stopped = await runHook({
     hook_event_name: "Stop", cwd: root, host: "claude", session_id: "session:one",
-    timestamp: "2029-01-01T00:00:06.000Z", ...scope
+    event_id: "stop:session-one:pause", timestamp: "2029-01-01T00:00:06.000Z", ...scope
   });
   assert.equal(stopped.deliveryVerification.status, "paused-job", JSON.stringify(stopped.deliveryVerification));
   assert.equal(stopped.selfstarter.job.status, "waiting");
   const stoppedAgain = await runHook({
     hook_event_name: "Stop", cwd: root, host: "claude", session_id: "session:one",
-    timestamp: "2029-01-01T00:00:06.000Z", ...scope
+    event_id: "stop:session-one:pause", timestamp: "2029-01-01T00:00:06.000Z", ...scope
   });
   assert.equal(stoppedAgain.selfstarter, null, JSON.stringify(stoppedAgain));
 
@@ -236,6 +262,7 @@ test("revocation, changed task, workspace drift, and corrupt checkpoint fail clo
     root, id: "execution-grant:build", reason: "Owner revoked the exact run.",
     confirmation: "local-owner-confirmed", now: "2029-01-01T00:00:03.000Z"
   });
+  await registerPremortem(root, "session:one", "2029-01-01T00:00:03.500Z");
   const revoked = await authorize(root, "session:one", "tool:revoked", "2029-01-01T00:00:04.000Z");
   assert.equal(revoked.blocked, true);
   assert.match(revoked.reason, /no current exact effect grant/);
@@ -280,6 +307,7 @@ test("leases prevent duplicate effects and recover a crash only when the workspa
   assert.equal(simultaneous.filter((result) => packet(result).selfstarter?.active).length, 1);
   assert.equal(simultaneous.filter((result) => result.failedClosed).length, 1);
   const activeSession = (await loadSelfstarter(root)).state.jobs[0].lease.sessionId;
+  await registerPremortem(root, activeSession);
   await authorize(root, activeSession, "tool:crash", "2029-01-01T00:00:03.000Z");
   const recovered = packet(await start(root, "session:recovered", "2029-01-01T00:00:18.000Z"));
   assert.equal(recovered.selfstarter.action, "resume");
@@ -289,6 +317,7 @@ test("leases prevent duplicate effects and recover a crash only when the workspa
 
   const changed = await fixture(t, { leaseSeconds: 15 });
   await start(changed.root, "session:crash", "2029-01-01T00:00:02.000Z");
+  await registerPremortem(changed.root, "session:crash");
   await authorize(changed.root, "session:crash", "tool:unknown", "2029-01-01T00:00:03.000Z");
   await writeFile(join(changed.root, "unknown-effect.txt"), "possibly written before the crash\n", "utf8");
   const blocked = packet(await start(changed.root, "session:after-crash", "2029-01-01T00:00:18.000Z"));
@@ -299,6 +328,7 @@ test("leases prevent duplicate effects and recover a crash only when the workspa
 test("retry budget, exponential checkpoint backoff, cancellation, and purge are durable", async (t) => {
   const { root } = await fixture(t, { maxRetries: 1 });
   await start(root);
+  await registerPremortem(root, "session:one");
   await authorize(root, "session:one", "tool:fail-one", "2029-01-01T00:00:03.000Z");
   const failed = await checkpoint(root, "session:one", "tool:fail-one", "2029-01-01T00:00:04.000Z", false);
   assert.equal(failed.selfstarter.job.status, "blocked");
@@ -307,6 +337,7 @@ test("retry budget, exponential checkpoint backoff, cancellation, and purge are 
   assert.equal(early.selfstarter.reason, "retry-backoff-active");
   const resumed = packet(await start(root, "session:retry", "2029-01-01T00:00:05.000Z"));
   assert.equal(resumed.selfstarter.action, "resume");
+  await registerPremortem(root, "session:retry", "2029-01-01T00:00:05.500Z");
   await authorize(root, "session:retry", "tool:fail-two", "2029-01-01T00:00:06.000Z");
   const exhausted = await checkpoint(root, "session:retry", "tool:fail-two", "2029-01-01T00:00:07.000Z", false);
   assert.equal(exhausted.selfstarter.job.status, "exhausted");

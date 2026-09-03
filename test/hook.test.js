@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { blunRuntimeContext, blunRuntimeMessage, runHook } from "../src/hook.js";
+import { recordDeliveryPremortem } from "../src/lib/delivery-premortem.js";
+import { registeredWriteContext } from "./premortem-write-fixture.js";
 
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -149,14 +151,15 @@ test("installed BLUN hook keeps the full briefing out of the runtime message", a
     blunHome,
     input: { hook_event_name: "UserPromptSubmit", cwd: root, session_id: "session:blun", prompt: [{ type: "text", text: "Hallo" }] }
   });
-  assert.equal(
-    output.hookSpecificOutput.message,
-    "AgentSpine ready: 145 sources indexed. Load detailed continuity only on demand through session_briefing."
-  );
+  assert.match(output.hookSpecificOutput.message,
+    /^AgentSpine ready: 145 sources indexed\. Load detailed continuity only on demand through session_briefing\./);
+  assert.match(output.hookSpecificOutput.message, /Before the first Write\/Edit\/apply_patch/);
+  assert.match(output.hookSpecificOutput.message, /Premortem closure sha256 <64hex>/);
   assert.equal(output.hookSpecificOutput.message.startsWith("{"), false);
   assert.equal(output.hookSpecificOutput.message.includes("agentspine.blun-runtime-context"), false);
   assert.equal("additionalContext" in output.hookSpecificOutput, false);
-  assert.equal(Buffer.byteLength(output.hookSpecificOutput.message) <= 160, true);
+  const messageBytes = Buffer.byteLength(output.hookSpecificOutput.message);
+  assert.equal(messageBytes <= 1200, true, `BLUN runtime message was ${messageBytes} bytes`);
 
   const compatibleOutput = await runInstalledHook({
     cwd: root,
@@ -327,7 +330,10 @@ test("PreToolUse allows an unrelated source target", async (t) => {
   process.env.AGENTSPINE_STATE_DIR = state;
   t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
   await writeFile(join(root, "CLAUDE.md"), "# Rules\n", "utf8");
+  const context = await registeredWriteContext({ root, sessionId: "session:unrelated-write",
+    projectId: "project:hook-protection" });
   const result = await runHook({
+    ...context,
     hook_event_name: "PreToolUse",
     cwd: root,
     tool_name: "Write",
@@ -358,14 +364,13 @@ test("PreToolUse blocks shell mutation of a protected source", async (t) => {
   process.env.AGENTSPINE_STATE_DIR = state;
   t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
   await writeFile(join(root, "AGENTS.md"), "# Rules\n", "utf8");
-  const result = await runHook({
-    hook_event_name: "PreToolUse",
-    cwd: root,
-    tool_name: "Bash",
-    tool_input: { command: "sed -i 's/old/new/' AGENTS.md" }
-  });
-  assert.equal(result.blocked, true);
-  assert.match(result.reason, /AGENTS\.md/);
+  for (const [tool_name, command] of [["Bash", "sed -i 's/old/new/' AGENTS.md"],
+    ["PowerShell", "Set-Content -Path AGENTS.md -Value changed"]]) {
+    const result = await runHook({ hook_event_name: "PreToolUse", cwd: root,
+      tool_name, tool_input: { command } });
+    assert.equal(result.blocked, true);
+    assert.match(result.reason, /AGENTS\.md/);
+  }
 });
 
 test("PreToolUse allows shell reads of a protected source", async (t) => {
@@ -398,4 +403,69 @@ test("generic host preflight requires an explicit instruction-host binding", asy
   assert.equal(ready.blocked, false);
   assert.equal(ready.preflight.receipt.host, "generic");
   assert.equal(ready.preflight.receipt.instructionHost, "codex");
+});
+
+test("Claude prompts in one raw session reuse one premortem and reclose after later writes", async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "agentspine-session-premortem-"));
+  const root = join(workspace, "project");
+  const state = join(workspace, "state");
+  await Promise.all([mkdir(join(root, ".git"), { recursive: true }), mkdir(state)]);
+  const source = "# Synthetic Claude rules\n\nKeep this byte-exact.\n";
+  await writeFile(join(root, "CLAUDE.md"), source, "utf8");
+  const previous = process.env.AGENTSPINE_STATE_DIR;
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => {
+    if (previous === undefined) delete process.env.AGENTSPINE_STATE_DIR;
+    else process.env.AGENTSPINE_STATE_DIR = previous;
+    await rm(workspace, { recursive: true, force: true });
+  });
+  const base = { host: "claude", cwd: root, session_id: "session:claude-premortem",
+    agent_spine_scope: { project_id: "project:session-premortem" } };
+  const prompt = (text) => runHook({ ...base, hook_event_name: "UserPromptSubmit", prompt: text });
+  const first = await prompt("Deliver the first synthetic change.");
+  const items = [
+    { category: "baseline-environment", failure: "this delivery fails because the baseline is stale",
+      check: "Check the synthetic baseline digest." },
+    { category: "contract-tests", failure: "this delivery fails because the contract regresses",
+      check: "Run the focused synthetic test." },
+    { category: "delivery-path", failure: "this delivery fails because the path is wrong",
+      check: "Check the synthetic output path." }
+  ];
+  const recorded = await recordDeliveryPremortem({ root,
+    requirementId: first.preflight.premortem.requirementId, items });
+  const writeInput = { file_path: "artifact.txt", content: "synthetic\n" };
+  assert.equal((await runHook({ ...base, hook_event_name: "PreToolUse", tool_name: "Write",
+    tool_use_id: "write:session:one", tool_input: writeInput })).blocked, false);
+  await writeFile(join(root, "artifact.txt"), "synthetic\n", "utf8");
+  const written = await runHook({ ...base, hook_event_name: "PostToolUse", tool_name: "Write",
+    tool_use_id: "write:session:one", tool_input: writeInput, success: true });
+  await runHook({ ...base, hook_event_name: "PostToolUse", tool_name: "exec_command",
+    tool_use_id: "test:session:one", tool_input: { cmd: "node --test test/synthetic.test.js" }, success: true });
+  const closing = [
+    `Premortem closure sha256 ${recorded.digest}`,
+    `Premortem latest write sha256 ${written.premortem.writeDigest}`,
+    ...recorded.artifact.items.map((item) =>
+      `- ${item.category} ${item.checkId}: PASS — synthetic check passed`)
+  ].join("\n");
+  assert.equal((await runHook({ ...base, hook_event_name: "Stop",
+    final_assistant_message: closing })).blocked, false);
+
+  const second = await prompt("Deliver the second synthetic change.");
+  assert.equal(second.preflight.premortem.requirementId,
+    first.preflight.premortem.requirementId, "the second prompt needs no extra registration");
+  const nextInput = { ...writeInput, content: "synthetic again\n" };
+  const nextPre = await runHook({ ...base, hook_event_name: "PreToolUse", tool_name: "Write",
+    tool_use_id: "write:session:two", tool_input: nextInput });
+  assert.equal(nextPre.blocked, false);
+  await writeFile(join(root, "artifact.txt"), nextInput.content, "utf8");
+  const nextPost = await runHook({ ...base, hook_event_name: "PostToolUse", tool_name: "Write",
+    tool_use_id: "write:session:two", tool_input: nextInput, success: true });
+  await runHook({ ...base, hook_event_name: "PostToolUse", tool_name: "exec_command",
+    tool_use_id: "test:session:two", tool_input: { cmd: "node --test test/synthetic.test.js" }, success: true });
+  assert.equal((await runHook({ ...base, hook_event_name: "Stop",
+    final_assistant_message: closing })).blocked, true, "the old write closure is stale");
+  const reclosed = closing.replace(written.premortem.writeDigest, nextPost.premortem.writeDigest);
+  assert.equal((await runHook({ ...base, hook_event_name: "Stop",
+    final_assistant_message: reclosed })).blocked, false);
+  assert.equal(await readFile(join(root, "CLAUDE.md"), "utf8"), source);
 });

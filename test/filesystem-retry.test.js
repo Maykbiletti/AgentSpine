@@ -26,8 +26,10 @@ test("Windows atomic replacement retries transient access errors with bounded ba
   const codes = ["EPERM", "EACCES", "EBUSY"];
   const waits = [];
   const calls = [];
+  const guardedAttempts = [];
   await replaceFileWithRetry("state.tmp", "state.json", {
     platform: "win32",
+    beforeAttempt: async (attempt) => { guardedAttempts.push(attempt); },
     renameFile: async (...paths) => {
       calls.push(paths);
       const code = codes.shift();
@@ -37,6 +39,7 @@ test("Windows atomic replacement retries transient access errors with bounded ba
   });
   assert.deepEqual(waits, [10, 20, 30]);
   assert.deepEqual(calls, Array.from({ length: 4 }, () => ["state.tmp", "state.json"]));
+  assert.deepEqual(guardedAttempts, [0, 1, 2, 3]);
 });
 
 test("atomic replacement does not retry non-Windows or non-transient failures", async () => {

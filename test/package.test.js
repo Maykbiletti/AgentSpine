@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { checkHosts } from "../scripts/check-hosts.js";
+import { installedHostEnvironment } from "../scripts/check-install-hook.js";
 import { checkInstall } from "../scripts/check-install.js";
 
 async function json(relativePath) {
@@ -24,6 +25,9 @@ test("package and host manifests keep one release version", async () => {
   assert.equal(hookVersion.version, pkg.version);
   assert.deepEqual(Object.keys(hooks).sort(), ["description", "hooks"]);
   assert.deepEqual(Object.keys(codexHooks).sort(), ["description", "hooks"]);
+  assert.match(hooks.hooks.PreToolUse[0].matcher, /PowerShell/);
+  assert.match(codexHooks.hooks.PreToolUse[0].matcher, /PowerShell/);
+  assert.match(blun.hooks.find(({ event }) => event === "PreToolUse").matcher, /PowerShell/);
   assert.equal(Object.hasOwn(codexHooks.hooks, "InstructionsLoaded"), false);
   assert.notEqual(pkg.version, "0.1.0");
   assert.equal(pkg.engines.node, ">=20.9.0");
@@ -35,7 +39,7 @@ test("host registrations launch the same provider-neutral MCP implementation", a
   ]);
   assert.equal(claude.mcpServers, "./.mcp.json");
   assert.equal(claude.hooks, undefined);
-  assert.equal(codex.hooks, undefined);
+  assert.equal(codex.hooks, "./hooks/codex.json");
   assert.deepEqual(claudeMcp.mcpServers["agent-spine"].args, ["${CLAUDE_PLUGIN_ROOT}/src/mcp.js"]);
   assert.deepEqual(blun.mcpServers["agent-spine"].args, ["./src/mcp.js"]);
   assert.deepEqual(codex.mcpServers["agent-spine"].args, ["${PLUGIN_ROOT}/src/mcp.js"]);
@@ -44,6 +48,17 @@ test("host registrations launch the same provider-neutral MCP implementation", a
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
     "PreCompact", "PostCompact", "Stop", "SubagentStop"
   ]);
+  const rootKeys = ["BLUN_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT"];
+  for (const [host, expected] of [
+    ["blun", ["BLUN_PLUGIN_ROOT"]],
+    ["claude", ["CLAUDE_PLUGIN_ROOT"]],
+    ["codex", ["CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT"]]
+  ]) {
+    const env = installedHostEnvironment(host, "/synthetic/agent-spine", {
+      BLUN_PLUGIN_ROOT: "/stale/blun", CLAUDE_PLUGIN_ROOT: "/stale/claude", PLUGIN_ROOT: "/stale/codex"
+    });
+    assert.deepEqual(rootKeys.filter((key) => Object.hasOwn(env, key)), expected);
+  }
 });
 
 test("BLUN, Claude, and Codex registrations complete a real MCP initialize handshake", async () => {
@@ -55,10 +70,10 @@ test("BLUN, Claude, and Codex registrations complete a real MCP initialize hands
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
-  assert.equal(result.version, "0.65.0");
+  assert.equal(result.version, "0.66.0");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
   assert.deepEqual(result.hookDiscovery, {
-    blun: "plugin-manifest", claude: "default-hooks-directory", codex: "bundled-host-adapter",
+    blun: "plugin-manifest", claude: "default-hooks-directory", codex: "plugin-manifest",
     trust: "host-user-required", liveTrustVerified: false
   });
   assert.equal(result.hooks.blun.events.includes("PreToolUse"), true);
@@ -71,6 +86,11 @@ test("staged install, stale-cache upgrade, and uninstall preserve one bundle and
   const result = await checkInstall(root);
   assert.equal(result.ok, true);
   assert.equal(result.previousCacheRejected, true);
+  assert.deepEqual(result.previousCache, {
+    version: "0.65.0",
+    releaseContractFailure: "Codex release manifest must select hooks/codex.json",
+    hostContractFailure: "Codex manifest must select its host-specific hook adapter"
+  });
   assert.deepEqual(result.fresh, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
   assert.deepEqual(result.upgrade, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
   assert.deepEqual(
@@ -83,6 +103,16 @@ test("staged install, stale-cache upgrade, and uninstall preserve one bundle and
     { event: "SessionStart", host: "codex" }
   );
   assert.ok(result.automaticBriefing.upgrade.sources >= 1, "the staged project source is included");
+  const blockingProtocols = {
+    claude: { preTool: "nested-permission-deny", stop: "top-level-block" },
+    codex: { preTool: "top-level-block" }
+  };
+  assert.deepEqual(result.blockingProtocols.fresh, blockingProtocols);
+  assert.deepEqual(result.blockingProtocols.upgrade, blockingProtocols);
+  for (const installed of [result.blunPostWriteDigest.fresh, result.blunPostWriteDigest.upgrade]) {
+    assert.equal(installed.contextField, "message");
+    assert.match(installed.latestWriteDigest, /^[a-f0-9]{64}$/);
+  }
   for (const installed of [result.automaticAttention.fresh, result.automaticAttention.upgrade]) {
     assert.equal(installed.captured, "promise");
     assert.deepEqual(installed.restarted, ["promise"]);

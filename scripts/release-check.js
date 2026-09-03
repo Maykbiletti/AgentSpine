@@ -76,17 +76,22 @@ function validatePackageReport(report, version) {
 }
 
 export async function releaseCheck(options) {
-  const [pkg, lock, blun, claude, codex, marketplace, hookVersion, changelog] = await Promise.all([
+  const [pkg, lock, blun, claude, codex, marketplace, hookVersion, changelog,
+    runtimeVersionSource] = await Promise.all([
     json(options.root, "package.json"), json(options.root, "package-lock.json"),
     json(options.root, "blun.plugin.json"),
     json(options.root, ".claude-plugin/plugin.json"), json(options.root, ".codex-plugin/plugin.json"),
     json(options.root, ".claude-plugin/marketplace.json"), json(options.root, "hooks/version.json"),
-    readFile(resolve(options.root, "CHANGELOG.md"), "utf8")
+    readFile(resolve(options.root, "CHANGELOG.md"), "utf8"),
+    readFile(resolve(options.root, "src/version.js"), "utf8")
   ]);
   assert(SEMVER_RE.test(pkg.version || ""), "package version is not valid SemVer");
   const versions = [lock.version, lock.packages?.[""]?.version, blun.version, claude.version, codex.version, marketplace.plugins?.[0]?.version, hookVersion.version];
   assert(versions.every((version) => version === pkg.version), "release version differs across package and host manifests");
+  const runtimeVersion = runtimeVersionSource.match(/^export const VERSION = "([^"]+)";\s*$/)?.[1];
+  assert(runtimeVersion === pkg.version, "release version differs from src/version.js");
   assert(pkg.name === lock.name && pkg.name === lock.packages?.[""]?.name, "package name differs from package-lock.json");
+  assert(codex.hooks === "./hooks/codex.json", "Codex release manifest must select hooks/codex.json");
   assert(pkg.repository?.url === "git+https://github.com/Maykbiletti/AgentSpine.git", "package repository must identify the public source repository exactly");
   if (options.tag) {
     assert(options.tag === `v${pkg.version}`, `release tag must be v${pkg.version}`);

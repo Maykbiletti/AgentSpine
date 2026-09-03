@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.66.0` requires a session- and goal-step-bound premortem before the first direct mutation or any of the recognized common shell-mediated mutations. Exactly three failure checks cover the baseline, contract/tests and delivery path; `Stop` accepts a written delivery only when all three results are closed against both the original premortem digest and the latest observed mutation digest. A later mutation invalidates an earlier closure. Read-only work remains free, technical state uncertainty is audited and fail-open, and closed checks are attached to goal checkpoints and outcome receipts without granting permissions. Large project trees no longer disable the hook when optional Markdown discovery reaches its file, entry or time budget: AgentSpine keeps required sources, skips the remainder deterministically and reports an incomplete-context warning.
+
 Version `0.65.0` makes the JavaScript undeclared-call guard differential: existing findings remain visible as exact non-blocking warnings, while only names introduced by the current write block. The comparison uses explicit original edit content, an exact PreToolUse snapshot or the last local audited state; a new file starts from an empty set, and scanner uncertainty remains fail-open.
 
 Version `0.64.0` splits the host hook into bounded lifecycle-context and protection modules while preserving the installed hook entrypoint, public exports, event ordering, fail-open scan behavior and fail-closed safety gates. The former 865-line entrypoint is now below the ordinary 500-line budget, and the legacy budget exception has been removed. The same release verifies stated snapshot baselines before direct writes, reports undeclared JavaScript calls after writes, and validates explicitly claimed exchange artifacts after the existing post-write test gate. Unreadable or unparseable evidence is audited without inventing a mismatch.
@@ -181,7 +183,7 @@ Source discovery is independent of the installation `cwd`: Claude uses `CLAUDE_C
 
 ## Install for Codex
 
-AgentSpine ships a native `.codex-plugin/plugin.json`. Add the repository to a configured marketplace, open the Codex plugin browser with `/plugins`, install AgentSpine, and start a fresh session. For development, the CLI and MCP server can be used directly:
+AgentSpine ships a native `.codex-plugin/plugin.json` that selects the Codex-only lifecycle adapter. Add the repository to a configured marketplace, open the Codex plugin browser with `/plugins`, install AgentSpine, review the current hook definition with `/hooks`, and start a fresh session. For development, the CLI and MCP server can be used directly:
 
 ```bash
 npm link
@@ -333,6 +335,7 @@ flowchart LR
 - `propose_learning`, `add_learning_evidence`, `review_learning`, `learning_context`, `learning_outcome_status`, `evaluate_learning`, `rollback_learning`, `configure_learning`, and `delete_learning` keep observations separate from accepted context and preserve every relevance change. Outcome writes remain local runtime/CLI operations; MCP receives only their read-only status.
 - `check_delegation`, `create_task`, `update_task`, and `task_context` coordinate work under a separate default-deny policy. MCP intentionally has no policy grant, revoke, or permanent task-delete tool.
 - `shared_context` reads only locally reviewed shared memory. MCP intentionally cannot initialize adapters, publish, pull, inspect the pending inbox, review imports, roll back, or delete.
+- `record_delivery_premortem` records the exact three context-only failure checks for one hook-issued requirement before mutation. Its sealed receipt is bound to the session and active goal step and grants no permissions or tool access.
 - `audit` runs the same ten gates available through the CLI.
 
 Relationship updates supersede the active view but retain the previous observation in append-only graph history. Permission-like and credential-like attributes are rejected recursively. See [relationships and learning](docs/relationships.md).

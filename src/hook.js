@@ -12,10 +12,11 @@ import { authorizeJobEffect, checkpointJobEffect, closeJobLease } from "./lib/se
 import { syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
 import { captureMustRememberPrompt, recordPreflightFailure, runPreflight, verifyPreflightReceipt } from "./lib/preflight.js";
 import { isMainModule } from "./lib/runtime.js";
+import { deliveryActorSession, deliverySuccessEvidence, recordDeliveryToolUse,
+  recordDeliveryWriteIntent } from "./lib/delivery-verification.js";
 import {
-  recordDeliveryPause, recordDeliveryToolUse, verifyDeliveryStop
-} from "./lib/delivery-verification.js";
-import { blunRuntimeContext, blunRuntimeMessage, hookOutput } from "./lib/hook-output.js";
+  blockPrompt, blockStop, blunRuntimeContext, blunRuntimeMessage, denyTool, hookOutput, lifecycleOutput
+} from "./lib/hook-output.js";
 import {
   ATTENTION_WRITE_EVENTS, boundedId, captureAttentionLifecycle, hookDeliveryId, hostContextLimit, hostFromInput,
   promptFromInput, renderContext, runtimeScope, selfstarterInput, selfstarterRootSkipped,
@@ -28,9 +29,10 @@ import {
 import {
   captureJavaScriptBeforeWrite, inspectWrittenJavaScript, verifyBaselineBeforeWrite, verifyDeliveredArtifacts
 } from "./lib/hook-artifact-guards.js";
-
+import { isPremortemWrite, prepareHookPremortem, recordHookPremortemWrite,
+  recordHookPremortemWriteIntent, verifyHookPremortemWrite } from "./lib/hook-premortem.js";
+import { denyHookStop, verifyHookStopContracts } from "./lib/hook-stop-verification.js";
 export { blunRuntimeContext, blunRuntimeMessage } from "./lib/hook-output.js";
-
 const MAX_STDIN_BYTES = 64 * 1024;
 const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
 const KNOWN_EVENTS = new Set([
@@ -38,7 +40,6 @@ const KNOWN_EVENTS = new Set([
 ]);
 const SILENT_OVERSIZE_POST_TOOL_USE = Symbol("silent-oversize-post-tool-use");
 const SILENT_OVERSIZE_POST_TOOL_USE_ARG = "--silent-oversize-post-tool-use";
-
 async function readStdin({ silentOversizePostToolUse = false } = {}) {
   const chunks = [];
   let bytes = 0;
@@ -59,33 +60,7 @@ async function readStdin({ silentOversizePostToolUse = false } = {}) {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("hook input must be one JSON object");
   return parsed;
 }
-
-function deny(reason) {
-  process.stdout.write(`${JSON.stringify({
-    decision: "block",
-    reason,
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: reason
-    }
-  })}\n`);
-}
-
-function blockPrompt(reason) {
-  process.stdout.write(`${JSON.stringify({
-    decision: "block",
-    reason,
-    hookSpecificOutput: { hookEventName: "UserPromptSubmit", decision: "block", reason }
-  })}\n`);
-}
-
-function blockStop(event, reason) {
-  process.stdout.write(`${JSON.stringify({ decision: "block", reason,
-    hookSpecificOutput: { hookEventName: event, decision: "block", reason } })}\n`);
-}
-
-async function runHookCore(input, payload) {
+async function runHookCore(input, payload, options) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("hook input must be one JSON object");
   const event = input.hook_event_name || input.event_name || "";
   if (!KNOWN_EVENTS.has(event)) throw new Error(`unsupported hook event: ${event || "missing"}`);
@@ -121,7 +96,7 @@ async function runHookCore(input, payload) {
     const reason = `AgentSpine source resolution failed closed: ${error.message}`;
     if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
       if (payload) return { blocked: true, failedClosed: true, reason };
-      deny(reason);
+      denyTool(reason);
       return;
     }
     if (event === "UserPromptSubmit") {
@@ -142,41 +117,17 @@ async function runHookCore(input, payload) {
   }
   const root = resolvedSources.projectRoot;
   const catalog = resolvedSources.catalog;
-  const catalogPath = await saveCatalog(catalog);
+  const catalogPath = await saveCatalog(catalog), sourceWarning = resolvedSources.diagnostics.warning || null;
   let scope = null;
   let selfstarter = null;
   let channelEvent = null;
   let learningDelivery = null;
   let deliveryVerification = null;
   let artifactGuard = null;
-
+  let premortem = null;
   if (event === "PreToolUse" && isScanFailOpenTool(input.tool_name) && resolvedSources.diagnostics.skipped?.length) {
     await auditSkippedScans(input, "source-resolution", resolvedSources.diagnostics.skipped);
   }
-
-  if (event === "PreToolUse") {
-    try {
-      artifactGuard = await verifyBaselineBeforeWrite({ input, cwd });
-      if (["no-stand", "no-baseline", "invalid-stand", "ambiguous-baseline"].includes(artifactGuard.status)) {
-        await auditGuard(input, "baseline-guard", artifactGuard, true);
-      }
-      if (artifactGuard.blocked) {
-        if (payload) return { blocked: true, reason: artifactGuard.reason, artifactGuard };
-        deny(artifactGuard.reason);
-        return;
-      }
-    } catch (error) {
-      artifactGuard = { status: "scan-failed-open", blocked: false, path: error.path || cwd, reason: error.message };
-      await auditGuard(input, "baseline-guard", artifactGuard);
-    }
-    try { await captureJavaScriptBeforeWrite({ input, cwd, root }); }
-    catch (error) {
-      await auditGuard(input, "identifier-before-state", {
-        status: "scan-failed-open", blocked: false, path: error.path || cwd, reason: error.message
-      });
-    }
-  }
-
   if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
     const { graph } = await loadGraph(root, catalog);
     const inferredProtected = new Set(graph.annotations
@@ -210,11 +161,32 @@ async function runHookCore(input, payload) {
       const relativePath = shellHit?.relativePath || catalog.documents.find((doc) => resolve(doc.path) === hit)?.relativePath || hit;
       const reason = `AgentSpine protected source: ${relativePath}. Existing identity, rule, soul, and memory documents are read-only to agents.`;
       if (payload) return { blocked: true, reason };
-      deny(reason);
+      denyTool(reason);
       return;
     }
   }
-
+  if (event === "PreToolUse") {
+    try {
+      artifactGuard = await verifyBaselineBeforeWrite({ input, cwd });
+      if (["no-stand", "no-baseline", "invalid-stand", "ambiguous-baseline"].includes(artifactGuard.status)) {
+        await auditGuard(input, "baseline-guard", artifactGuard, true);
+      }
+      if (artifactGuard.blocked) {
+        if (payload) return { blocked: true, reason: artifactGuard.reason, artifactGuard };
+        denyTool(artifactGuard.reason);
+        return;
+      }
+    } catch (error) {
+      artifactGuard = { status: "scan-failed-open", blocked: false, path: error.path || cwd, reason: error.message };
+      await auditGuard(input, "baseline-guard", artifactGuard);
+    }
+    try { await captureJavaScriptBeforeWrite({ input, cwd, root }); }
+    catch (error) {
+      await auditGuard(input, "identifier-before-state", {
+        status: "scan-failed-open", blocked: false, path: error.path || cwd, reason: error.message
+      });
+    }
+  }
   if (event === "PreToolUse" && !selfstarterRootSkipped(resolvedSources.diagnostics)) {
     try {
       scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
@@ -231,21 +203,47 @@ async function runHookCore(input, payload) {
       }
       const reason = `AgentSpine self-starter denied this effect: ${error.message}`;
       if (payload) return { blocked: true, reason, selfstarter: { allowed: false, reason: error.message } };
-      deny(reason);
+      denyTool(reason);
       return;
     }
+  }
+  if (event === "PreToolUse" && isPremortemWrite(input)) {
+    scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
+    premortem = await verifyHookPremortemWrite({ input, root, scope });
+    if (premortem.blocked) {
+      if (payload) return { blocked: true, reason: premortem.reason, premortem };
+      denyTool(premortem.reason);
+      return;
+    }
+  }
+  if (event === "PreToolUse") {
+    scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
+    deliveryVerification = await recordDeliveryWriteIntent({
+      root, host: scope.host, sessionId: deliveryActorSession(input), scope, input
+    });
+    if (deliveryVerification.blocked) {
+      if (payload) return { blocked: true, reason: deliveryVerification.reason, deliveryVerification };
+      denyTool(deliveryVerification.reason); return;
+    }
+    if (typeof options.afterDeliveryWriteIntent === "function") await options.afterDeliveryWriteIntent();
+    const premortemIntent = await recordHookPremortemWriteIntent({ input, root, scope });
+    if (premortemIntent.blocked) {
+      if (payload) return { blocked: true, reason: premortemIntent.reason, deliveryVerification, premortem: premortemIntent };
+      denyTool(premortemIntent.reason); return;
+    }
+    premortem = { ...premortem, writeIntent: premortemIntent.status,
+      writeDigest: premortemIntent.writeDigest || null };
   }
 
   if (["PostToolUse", "Stop", "SubagentStop"].includes(event)) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
-    const deliveryScope = {
-      entityId: scope.entityId, tenantId: scope.tenantId, groupId: scope.groupId,
-      projectId: scope.projectId, currentTaskId: scope.currentTaskId
-    };
     if (event === "PostToolUse") {
+      premortem = await recordHookPremortemWrite({
+        input, root, scope, success: toolSucceeded(input)
+      });
       deliveryVerification = await recordDeliveryToolUse({
-        root, host: scope.host, sessionId: sessionId(input), scope: deliveryScope,
-        input, success: toolSucceeded(input)
+        root, host: scope.host, sessionId: deliveryActorSession(input), scope,
+        input, success: deliverySuccessEvidence(input)
       });
       if (toolSucceeded(input)) {
         try {
@@ -258,31 +256,41 @@ async function runHookCore(input, payload) {
     } else {
       const activeJob = selfstarterRootSkipped(resolvedSources.diagnostics)
         ? null : await selfstarterScope(input, scope, root, "resume");
-      const requestedStatus = selfstarterInput(input)?.status || null;
-      deliveryVerification = activeJob && requestedStatus !== "completed"
-        ? await recordDeliveryPause({
-          root, host: scope.host, sessionId: sessionId(input), scope: deliveryScope,
-          eventId: input.event_id ?? input.hook_event_id ?? null
-        })
-        : await verifyDeliveryStop({
-          root, host: scope.host, sessionId: sessionId(input), scope: deliveryScope,
-          eventId: input.event_id ?? input.hook_event_id ?? null
-        });
-      if (deliveryVerification.blocked) {
-        if (payload) return { blocked: true, reason: deliveryVerification.reason, deliveryVerification };
-        blockStop(event, deliveryVerification.reason);
-        return;
+      const pauseRequested = Boolean(activeJob && selfstarterInput(input)?.status !== "completed");
+      let contracts = await verifyHookStopContracts({
+        input,
+        root,
+        scope,
+        recordPause: pauseRequested
+      });
+      ({ deliveryVerification, premortem } = contracts);
+      if (contracts.blocked) {
+        return denyHookStop(payload, event, contracts.reason, { deliveryVerification, premortem });
       }
+
       try {
         artifactGuard = await verifyDeliveredArtifacts({ input, cwd });
         if (artifactGuard.blocked) {
-          if (payload) return { blocked: true, reason: artifactGuard.reason, deliveryVerification, artifactGuard };
-          blockStop(event, artifactGuard.reason);
-          return;
+          return denyHookStop(payload, event, artifactGuard.reason, { deliveryVerification, artifactGuard });
         }
       } catch (error) {
         artifactGuard = { status: "scan-failed-open", blocked: false, path: error.path || cwd, reason: error.message };
         await auditGuard(input, "delivery-artifact-guard", artifactGuard);
+      }
+      if (typeof options.afterArtifactVerification === "function") await options.afterArtifactVerification();
+      contracts = await verifyHookStopContracts({
+        input,
+        root,
+        scope,
+        recordPause: pauseRequested,
+        completionFence: !pauseRequested,
+        afterDeliveryVerification: options.afterFinalDeliveryVerification,
+        afterPremortemVerification: options.afterFinalPremortemVerification
+      });
+      ({ deliveryVerification, premortem } = contracts);
+      if (contracts.blocked) {
+        return denyHookStop(payload, event, contracts.reason,
+          { deliveryVerification, premortem, artifactGuard });
       }
     }
   }
@@ -348,6 +356,7 @@ async function runHookCore(input, payload) {
           receipt: preflight.receipt, input, scope, resolvedSources, prompt,
           now: input.timestamp || new Date(), env: process.env
         })) throw new Error("newly created preflight receipt failed exact turn verification");
+        preflight.premortem = await prepareHookPremortem({ input, root, scope });
         preflight.pendingMustRemember = await captureMustRememberPrompt({ prompt, receipt: preflight.receipt, env: process.env });
         try {
           attentionEvent = await captureAttentionLifecycle(input, event, root, scope, catalog);
@@ -456,18 +465,13 @@ async function runHookCore(input, payload) {
 
   if (artifactGuard?.blocked) {
     if (payload) return { blocked: true, reason: artifactGuard.reason, artifactGuard,
-      attentionEvent, selfstarter, learningDelivery, deliveryVerification };
+      attentionEvent, selfstarter, learningDelivery, deliveryVerification, premortem };
     blockStop(event, artifactGuard.reason);
     return;
   }
-  if (payload) return { blocked: false, artifactGuard, attentionEvent, selfstarter, learningDelivery, deliveryVerification };
-  if (artifactGuard?.reason) {
-    process.stdout.write(`${JSON.stringify({ hookSpecificOutput: {
-      hookEventName: event, additionalContext: artifactGuard.reason
-    } })}\n`);
-    return;
-  }
-  process.stdout.write("{}\n");
+  if (payload) return { blocked: false, sourceWarning, artifactGuard, attentionEvent, selfstarter,
+    learningDelivery, deliveryVerification, premortem };
+  process.stdout.write(`${JSON.stringify(lifecycleOutput(event, artifactGuard, premortem, deliveryVerification, process.env, sourceWarning))}\n`);
 }
 
 export async function runHook(payload = null, options = {}) {
@@ -475,7 +479,7 @@ export async function runHook(payload = null, options = {}) {
   try {
     input ||= await readStdin(options);
     if (input === SILENT_OVERSIZE_POST_TOOL_USE) return;
-    return await runHookCore(input, payload);
+    return await runHookCore(input, payload, options);
   } catch (error) {
     if (!hookScanFailureFailsOpen(error) || input === SILENT_OVERSIZE_POST_TOOL_USE) throw error;
     return finishScanFailure(input, payload, "lifecycle", error);

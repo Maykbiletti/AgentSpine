@@ -4,7 +4,7 @@ AgentSpine releases are intentionally tag-authorized while the package is pre-1.
 
 ## Local release gate
 
-Update the version in `package.json`, `package-lock.json`, both host manifests, and the Claude marketplace entry. Move the relevant changelog entries from **Unreleased** into a dated SemVer section, then run:
+Update every release version surface: `package.json`, both version fields in `package-lock.json`, the BLUN, Claude and Codex host manifests, the Claude marketplace entry, `hooks/version.json`, and `src/version.js`. Move the relevant changelog entries from **Unreleased** into a dated SemVer section, then run:
 
 ```bash
 npm ci
@@ -15,9 +15,11 @@ python3 /path/to/skill-creator/scripts/quick_validate.py skills/agent-spine
 npm pack --dry-run
 ```
 
+The plugin validator must implement the current [Codex plugin-bundled hooks contract](https://developers.openai.com/codex/hooks#plugin-bundled-hooks), including the documented `hooks` override. A validator snapshot that rejects this field is stale and cannot certify this release; do not remove the override, because Codex would otherwise load the Claude-specific default hook bundle.
+
 `release:check` fails unless:
 
-- all five version locations agree and the tag is exactly `v{package.version}`;
+- all release version surfaces agree and the tag is exactly `v{package.version}`;
 - the changelog has a dated section for that version;
 - the Git worktree is clean;
 - npm reports SHA-512 integrity and a correctly versioned tarball;

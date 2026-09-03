@@ -1,6 +1,6 @@
 # Visible cross-host acceptance
 
-AgentSpine `0.65.0` runs a visible, reproducible 15-gate acceptance scenario for the lifecycle adapter, including complete mandatory host instructions, required provider recall and a fail-closed missing-provider probe. Staged installed-entrypoint source-root and indexed-memory scaling smoke tests execute the same bundled adapter used by Claude Code and Codex and never select an MCP tool, but they do not substitute for the hosts' own plugin discovery and hook-trust UI.
+AgentSpine `0.66.0` runs a visible, reproducible 15-gate acceptance scenario for the lifecycle adapter, including complete mandatory host instructions, required provider recall and a fail-closed missing-provider probe. Staged installed-entrypoint source-root and indexed-memory scaling smoke tests execute the same bundled adapter used by Claude Code and Codex and never select an MCP tool, but they do not substitute for the hosts' own plugin discovery and hook-trust UI.
 
 ```bash
 agentspine acceptance
@@ -52,7 +52,7 @@ Every line includes a SHA-256 receipt derived from the acceptance schema, gate I
 
 ## Installation proof
 
-`npm run host:install-check` stages both a fresh installation and an upgrade from `0.7.0`. Each installed `0.8.0` bundle must contain exactly one MCP server, one hook set, and one worker entrypoint, then pass the complete visible acceptance run with `mcpCalls: 0`. It directly invokes the packaged hook entrypoint from an AgentSpine checkout and a foreign `cwd` with sources only in a custom Claude profile, and repeats the Codex-shaped event path with a custom home, two Git projects, a fallback name, and a nested override. Uninstall removes only staged plugin and generated state; all synthetic source hashes remain unchanged. A real Codex session must separately show the plugin source in `/hooks`, record trust for the current definition hash, and inject the briefing after a new session starts.
+`npm run host:install-check` stages both a fresh installation and an upgrade from a coherent synthetic `0.65.0` cache to the current package version. Every prior-version surface agrees before that cache fails specifically because it lacks the current Codex hook-selection contract; each upgraded bundle must then contain exactly one MCP server, one hook set, and one worker entrypoint and pass the complete visible acceptance run with `mcpCalls: 0`. The check directly invokes the packaged hook entrypoint from an AgentSpine checkout and a foreign `cwd` with sources only in a custom Claude profile, and repeats the Codex-shaped event path with a custom home, two Git projects, a fallback name, and a nested override. Uninstall removes only staged plugin and generated state; all synthetic source hashes remain unchanged. A real Codex session must separately show the plugin in `/plugins`, accept the current hook-definition hash through the startup warning or `/hooks`, and inject the briefing after a new session starts.
 
 ## Deliberate trust boundaries
 

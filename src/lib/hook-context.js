@@ -17,6 +17,15 @@ export function boundedId(value, field) {
   return value;
 }
 
+function positiveInteger(value, field) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number"
+    ? value
+    : (typeof value === "string" && /^[1-9][0-9]*$/.test(value) ? Number(value) : Number.NaN);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`${field} is invalid`);
+  return parsed;
+}
+
 export function promptFromInput(input) {
   for (const key of ["prompt", "user_prompt", "message", "input"]) {
     const value = input[key];
@@ -50,13 +59,37 @@ export function hostFromInput(input) {
 export function gatewayEnvironmentContext(env = process.env) {
   if (env.AGENTSPINE_GATEWAY_CONTEXT !== "agentspine.gateway-start/v1") return null;
   return {
+    host: boundedId(env.AGENTSPINE_HOST, "AGENTSPINE_HOST"),
     entityId: boundedId(env.AGENTSPINE_ENTITY_ID, "AGENTSPINE_ENTITY_ID"),
     groupId: boundedId(env.AGENTSPINE_GROUP_ID, "AGENTSPINE_GROUP_ID"),
     projectId: boundedId(env.AGENTSPINE_PROJECT_ID, "AGENTSPINE_PROJECT_ID"),
     taskId: boundedId(env.AGENTSPINE_TASK_ID, "AGENTSPINE_TASK_ID"),
+    queueId: boundedId(env.AGENTSPINE_GATEWAY_QUEUE_ID, "AGENTSPINE_GATEWAY_QUEUE_ID"),
+    goalId: boundedId(env.AGENTSPINE_GOAL_ID, "AGENTSPINE_GOAL_ID"),
+    goalStepId: boundedId(env.AGENTSPINE_GOAL_STEP_ID, "AGENTSPINE_GOAL_STEP_ID"),
+    planDefinitionsDigest: boundedId(env.AGENTSPINE_PLAN_DEFINITIONS_DIGEST,
+      "AGENTSPINE_PLAN_DEFINITIONS_DIGEST"),
+    gatewayAttempt: positiveInteger(env.AGENTSPINE_GATEWAY_ATTEMPT, "AGENTSPINE_GATEWAY_ATTEMPT"),
     eventId: boundedId(env.AGENTSPINE_CHANNEL_EVENT_ID, "AGENTSPINE_CHANNEL_EVENT_ID"),
     provider: boundedId(env.AGENTSPINE_CHANNEL_PROVIDER, "AGENTSPINE_CHANNEL_PROVIDER")
   };
+}
+
+function gatewayBound(gateway, key, suppliedValue, field, allowAbsent = false) {
+  if (!gateway) return suppliedValue;
+  const gatewayValue = gateway[key];
+  if (gatewayValue === null || gatewayValue === undefined || gatewayValue === "") {
+    if (allowAbsent) return suppliedValue;
+    if (suppliedValue !== undefined && suppliedValue !== null && suppliedValue !== "") {
+      throw new Error(`${field} does not match the authenticated gateway binding`);
+    }
+    return null;
+  }
+  if (suppliedValue !== undefined && suppliedValue !== null
+    && suppliedValue !== "" && suppliedValue !== gatewayValue) {
+    throw new Error(`${field} does not match the authenticated gateway binding`);
+  }
+  return gatewayValue;
 }
 
 export async function runtimeScope(input, root, userStateRoot = null, catalog) {
@@ -81,14 +114,34 @@ export async function runtimeScope(input, root, userStateRoot = null, catalog) {
   const supplied = input.agent_spine_scope && typeof input.agent_spine_scope === "object"
     ? input.agent_spine_scope : input;
   const gateway = gatewayEnvironmentContext();
+  const suppliedAttempt = positiveInteger(supplied.gateway_attempt ?? supplied.gatewayAttempt,
+    "gatewayAttempt");
   return {
-    entityId: boundedId(supplied.entity_id ?? supplied.entityId ?? gateway?.entityId ?? continuity.config.defaultEntityId, "entityId"),
+    entityId: boundedId(gatewayBound(gateway, "entityId",
+      supplied.entity_id ?? supplied.entityId, "entityId")
+      ?? (gateway ? null : continuity.config.defaultEntityId), "entityId"),
     userId: boundedId(supplied.user_id ?? supplied.userId ?? process.env.AGENTSPINE_USER_ID, "userId"),
     tenantId: boundedId(supplied.tenant_id ?? supplied.tenantId ?? process.env.AGENTSPINE_TENANT_ID, "tenantId"),
-    groupId: boundedId(supplied.group_id ?? supplied.groupId ?? gateway?.groupId, "groupId"),
-    projectId: boundedId(supplied.project_id ?? supplied.projectId ?? gateway?.projectId ?? continuity.config.defaultProjectId, "projectId"),
-    currentTaskId: boundedId(supplied.task_id ?? supplied.currentTaskId ?? gateway?.taskId, "currentTaskId"),
-    host: hostFromInput(input),
+    groupId: boundedId(gatewayBound(gateway, "groupId",
+      supplied.group_id ?? supplied.groupId, "groupId"), "groupId"),
+    projectId: boundedId(gatewayBound(gateway, "projectId",
+      supplied.project_id ?? supplied.projectId, "projectId")
+      ?? (gateway ? null : continuity.config.defaultProjectId), "projectId"),
+    currentTaskId: boundedId(gatewayBound(gateway, "taskId",
+      supplied.task_id ?? supplied.taskId ?? supplied.currentTaskId, "currentTaskId", true), "currentTaskId"),
+    queueId: boundedId(gatewayBound(gateway, "queueId",
+      supplied.queue_id ?? supplied.queueId, "queueId"), "queueId"),
+    goalId: boundedId(gatewayBound(gateway, "goalId",
+      supplied.goal_id ?? supplied.goalId, "goalId"), "goalId"),
+    goalStepId: boundedId(gatewayBound(gateway, "goalStepId",
+      supplied.goal_step_id ?? supplied.goalStepId, "goalStepId"), "goalStepId"),
+    planDefinitionsDigest: boundedId(gatewayBound(gateway, "planDefinitionsDigest",
+      supplied.plan_definitions_digest ?? supplied.planDefinitionsDigest,
+      "planDefinitionsDigest"), "planDefinitionsDigest"),
+    gatewayAttempt: gatewayBound(gateway, "gatewayAttempt", suppliedAttempt, "gatewayAttempt"),
+    host: gateway
+      ? gatewayBound(gateway, "host", input.host ?? input.provider, "host")
+      : hostFromInput(input),
     config: continuity.config
   };
 }
@@ -172,6 +225,14 @@ export function renderContext(event, catalog, briefing, signal = null, attention
         id: preflight.pendingMustRemember.candidate?.id || null,
         status: preflight.pendingMustRemember.candidate?.status || (preflight.pendingMustRemember.rejected ? "rejected" : null),
         reason: preflight.pendingMustRemember.reason || null
+      } : null,
+      premortem: preflight.premortem ? {
+        status: preflight.premortem.status,
+        requirementId: preflight.premortem.requirementId || null,
+        digest: preflight.premortem.requirement?.digest || null,
+        registration: preflight.premortem.registration || null,
+        instruction: preflight.premortem.instruction,
+        authority: preflight.premortem.requirement?.authority || "context-only"
       } : null,
       briefing: preflight.briefing,
       instruction: "This exact turn passed the mandatory pre-answer gate. Apply the complete preflight briefing before answering.",
