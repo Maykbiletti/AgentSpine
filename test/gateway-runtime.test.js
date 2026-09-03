@@ -479,6 +479,87 @@ test("team plans reject foreign groups and pause safely when an assignee leaves"
   assert.deepEqual(gatewayRuntimeFindings(loaded.policy, loaded.runtime), []);
 });
 
+test("shared plan resources serialize conflicting agents by immutable goal priority", async (t) => {
+  const { root, agentId, before } = await fixture(t);
+  const highAgentId = await addSyntheticPersona(root, {
+    bindingId: "persona-binding:high", subjectId: "subject:high", host: "claude",
+    profileId: "profile:high", displayName: "High Agent", now: "2032-01-01T00:00:00.600Z"
+  });
+  const independentAgentId = await addSyntheticPersona(root, {
+    bindingId: "persona-binding:independent", subjectId: "subject:independent", host: "codex",
+    profileId: "profile:independent", displayName: "Independent Agent", now: "2032-01-01T00:00:00.700Z"
+  });
+  const foreignAgentId = await addSyntheticPersona(root, {
+    bindingId: "persona-binding:foreign-resource", subjectId: "subject:foreign-resource", host: "claude",
+    profileId: "profile:foreign-resource", displayName: "Foreign Agent", groupId: "group:beta",
+    tenantId: "tenant:beta", now: "2032-01-01T00:00:00.800Z"
+  });
+  const assignResourceGoal = ({ goalId, lead, groupId = "group:alpha", priority, resource, now }) => assignGoal({
+    root, goalId, agentId: lead, ownerSubjectId: "subject:owner", projectId: "project:alpha", groupId, priority,
+    successCriterion: `Synthetic resource goal ${goalId} passes.`,
+    steps: [{ stepId: `step:${goalId.split(":").at(-1)}`, agentId: lead, resources: [resource],
+      title: `Run ${goalId}.`, successCriterion: `The ${resource} fixture reports success.`, dependsOn: [] }],
+    confirmation: "local-owner-confirmed", now
+  });
+
+  await assignResourceGoal({ goalId: "goal:resource-low", lead: agentId, priority: 20,
+    resource: "resource:synthetic-ledger", now: "2032-01-01T00:00:01.000Z" });
+  await assignResourceGoal({ goalId: "goal:resource-high", lead: highAgentId, priority: 90,
+    resource: "resource:synthetic-ledger", now: "2032-01-01T00:00:01.100Z" });
+
+  // Runtime priority is not trusted: invert it and prove policy priority still wins.
+  let loaded = await loadGatewayRuntime(root);
+  loaded.runtime.queue.find((item) => item.goalId === "goal:resource-low").priority = 100;
+  loaded.runtime.queue.find((item) => item.goalId === "goal:resource-high").priority = 0;
+  await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
+  const raced = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+    root, workerId: `worker:resource:${index}`, leaseSeconds: 15, now: "2032-01-01T00:00:02.000Z"
+  })));
+  assert.equal(raced.filter((claim) => claim.item).length, 1);
+  const firstHigh = raced.find((claim) => claim.item);
+  assert.equal(firstHigh.item.goalId, "goal:resource-high");
+  const waiting = await gatewayContext({ root, agentId });
+  assert.deepEqual(waiting.resourceWaits.map((item) => item.resources), [["resource:synthetic-ledger"]]);
+  assert.deepEqual(waiting.resourceWaits[0].blockedByQueueIds, [firstHigh.item.queueId]);
+
+  // Simulate a worker crash. Expiry releases the resource without duplicating either wake.
+  await reconcileGateway({ root, now: "2032-01-01T00:00:17.000Z" });
+  const reraced = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+    root, workerId: `worker:resource:retry:${index}`, leaseSeconds: 15, now: "2032-01-01T00:00:18.000Z"
+  })));
+  assert.equal(reraced.filter((claim) => claim.item).length, 1);
+  const high = reraced.find((claim) => claim.item);
+  assert.equal(high.item.goalId, "goal:resource-high");
+
+  await assignResourceGoal({ goalId: "goal:resource-independent", lead: independentAgentId, priority: 50,
+    resource: "resource:synthetic-cache", now: "2032-01-01T00:00:19.000Z" });
+  await assignResourceGoal({ goalId: "goal:resource-foreign", lead: foreignAgentId, groupId: "group:beta", priority: 80,
+    resource: "resource:synthetic-ledger", now: "2032-01-01T00:00:20.000Z" });
+  assert.deepEqual((await gatewayContext({ root, agentId: foreignAgentId })).resourceWaits, []);
+
+  const foreign = await claimGatewayWork({ root, workerId: "worker:resource:foreign", now: "2032-01-01T00:00:21.000Z" });
+  assert.equal(foreign.item.goalId, "goal:resource-foreign");
+  const independent = await claimGatewayWork({ root, workerId: "worker:resource:independent", now: "2032-01-01T00:00:22.000Z" });
+  assert.equal(independent.item.goalId, "goal:resource-independent");
+  await completeGatewayRun({ root, queueId: high.item.queueId, workerId: high.item.lease.workerId,
+    result: { checkpoint: { high: true }, completed: true }, now: "2032-01-01T00:00:23.000Z" });
+  const low = await claimGatewayWork({ root, workerId: "worker:resource:low", now: "2032-01-01T00:00:24.000Z" });
+  assert.equal(low.item.goalId, "goal:resource-low");
+
+  for (const claim of [foreign, independent, low]) {
+    await completeGatewayRun({ root, queueId: claim.item.queueId, workerId: claim.item.lease.workerId,
+      result: { checkpoint: { completed: claim.item.goalId }, completed: true }, now: "2032-01-01T00:00:25.000Z" });
+  }
+  loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals.filter((goal) => goal.status === "completed").length, 4);
+  assert.deepEqual(gatewayRuntimeFindings(loaded.policy, loaded.runtime), []);
+  assert.equal(await readFile(join(root, "SOUL.md"), "utf8"), before);
+
+  loaded.policy.goals.find((goal) => goal.goalId === "goal:resource-low").plan.steps[0].resources = ["resource:tampered"];
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+});
+
 test("pre-team goal plans retain their lead-agent routing after upgrade", async (t) => {
   const { root, agentId } = await fixture(t);
   await assignGoal({
@@ -488,8 +569,16 @@ test("pre-team goal plans retain their lead-agent routing after upgrade", async 
     confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:01.000Z"
   });
   const loaded = await loadGatewayRuntime(root);
+  for (const step of loaded.policy.goals[0].plan.steps) delete step.resources;
+  let definitions = loaded.policy.goals[0].plan.steps.map(({ stepId, agentId, title, successCriterion, dependsOn }) => ({
+    stepId, agentId, title, successCriterion, dependsOn
+  }));
+  loaded.policy.goals[0].plan.definitionsDigest = createHash("sha256").update(JSON.stringify(definitions)).digest("hex");
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
+  assert.deepEqual(gatewayRuntimeFindings((await loadGatewayRuntime(root)).policy, loaded.runtime), []);
+
   for (const step of loaded.policy.goals[0].plan.steps) delete step.agentId;
-  const definitions = loaded.policy.goals[0].plan.steps.map(({ stepId, title, successCriterion, dependsOn }) => ({
+  definitions = loaded.policy.goals[0].plan.steps.map(({ stepId, title, successCriterion, dependsOn }) => ({
     stepId, title, successCriterion, dependsOn
   }));
   loaded.policy.goals[0].plan.definitionsDigest = createHash("sha256").update(JSON.stringify(definitions)).digest("hex");

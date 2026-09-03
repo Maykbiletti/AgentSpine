@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-09-03
+
+### Added
+
+- Goal-plan steps can bind up to 16 immutable shared-resource IDs. Conflicting work is serialized within the exact project and group, while independent resources and foreign groups continue concurrently.
+- Scoped gateway context exposes content-free resource waits only to the affected agent, including the blocking queue IDs needed to explain why a ready step has not started.
+
+### Security
+
+- Resource definitions are covered by the plan digest and remain context-only: they cannot grant tools, identity, delegation or policy exceptions. Definition tampering fails closed, and equal resource names never cross a group boundary.
+
+### Changed
+
+- Competing ready steps are ordered by the current owner-confirmed goal priority rather than mutable queue priority. Normal completion and existing crash-recovery lease expiry release the resource deterministically.
+
 ## [0.55.0] - 2026-09-03
 
 ### Added

@@ -137,8 +137,9 @@ function validKnowledgeGap(gap) {
 }
 
 function planDefinitionMaterial(steps) {
-  return steps.map(({ stepId, agentId, title, successCriterion, dependsOn }) => ({
-    stepId, ...(agentId === undefined ? {} : { agentId }), title, successCriterion, dependsOn
+  return steps.map(({ stepId, agentId, resources, title, successCriterion, dependsOn }) => ({
+    stepId, ...(agentId === undefined ? {} : { agentId }),
+    ...(resources === undefined ? {} : { resources }), title, successCriterion, dependsOn
   }));
 }
 
@@ -152,6 +153,8 @@ function validGoalPlan(plan) {
   for (const step of plan.steps) {
     if (!(ID_RE.test(step.stepId || "") && typeof step.title === "string" && step.title.length > 0 && step.title.length <= 500
       && (step.agentId === undefined || ID_RE.test(step.agentId || ""))
+      && (step.resources === undefined || (Array.isArray(step.resources) && step.resources.length <= 16
+        && new Set(step.resources).size === step.resources.length && step.resources.every((resource) => ID_RE.test(resource || ""))))
       && typeof step.successCriterion === "string" && step.successCriterion.length > 0 && step.successCriterion.length <= 1000
       && Array.isArray(step.dependsOn) && new Set(step.dependsOn).size === step.dependsOn.length
       && step.dependsOn.every((dependency) => ids.has(dependency) && dependency !== step.stepId)
@@ -203,6 +206,8 @@ function createGoalPlan(steps, now, defaultAgentId) {
   const normalized = steps.map((step, index) => ({
     stepId: exactId(step?.stepId ?? step?.id, `steps[${index}].stepId`),
     agentId: exactId(step?.agentId ?? defaultAgentId, `steps[${index}].agentId`),
+    resources: Array.isArray(step?.resources)
+      ? step.resources.map((resource) => exactId(resource, `steps[${index}].resources`)) : [],
     title: safeText(step?.title, `steps[${index}].title`, 500),
     successCriterion: safeText(step?.successCriterion, `steps[${index}].successCriterion`),
     dependsOn: Array.isArray(step?.dependsOn) ? step.dependsOn.map((dependency) => exactId(dependency, `steps[${index}].dependsOn`)) : [],
@@ -222,6 +227,27 @@ function currentPlanStep(goal) {
 
 function planStepAgentId(goal, step) {
   return step?.agentId ?? goal.agentId;
+}
+
+function planStepResources(step) {
+  return Array.isArray(step?.resources) ? step.resources : [];
+}
+
+function queuePlanStep(policy, item) {
+  if (!item.goalStepId) return null;
+  return policy.goals.find((goal) => goal.goalId === item.goalId)?.plan?.steps
+    .find((step) => step.stepId === item.goalStepId) || null;
+}
+
+function conflictingResources(policy, candidate, leased) {
+  const wanted = new Set(planStepResources(queuePlanStep(policy, candidate)));
+  if (!wanted.size || candidate.projectId !== leased.projectId || candidate.groupId !== leased.groupId) return [];
+  return planStepResources(queuePlanStep(policy, leased)).filter((resource) => wanted.has(resource));
+}
+
+function effectiveQueuePriority(policy, item) {
+  if (!item.goalId) return item.priority;
+  return policy.goals.find((goal) => goal.goalId === item.goalId)?.priority ?? item.priority;
 }
 
 function createKnowledgeGap(goal, step, queueId, request, now) {
@@ -253,7 +279,7 @@ function planQueueKey(goalId, stepId, phase, suffix = "") {
 function newGoalQueue(goal, step, kind, key, current, availableAt = current) {
   return { queueId: "gateway-queue:" + sha256(key).slice(0, 32), dedupeKey: key, kind,
     agentId: planStepAgentId(goal, step), projectId: goal.projectId, groupId: goal.groupId, goalId: goal.goalId,
-    goalStepId: step?.stepId || null, channelEventId: null, priority: PRIORITY[kind], status: "pending",
+    goalStepId: step?.stepId || null, channelEventId: null, priority: goal.priority, status: "pending",
     attempts: 0, lease: null, availableAt, createdAt: current, updatedAt: current,
     completedAt: null, lastError: null, authority: "execution-state-only" };
 }
@@ -752,7 +778,8 @@ export async function claimGatewayWork({ root = process.cwd(), workerId, leaseSe
     if (!Number.isInteger(seconds) || seconds < 15 || seconds > 900) throw new Error("leaseSeconds must be 15-900");
     const items = runtime.queue.filter((item) => item.status === "pending" && new Date(item.availableAt) <= new Date(current)
       && !currentLane(runtime, item.agentId));
-    items.sort((a, b) => b.priority - a.priority || a.createdAt.localeCompare(b.createdAt) || a.queueId.localeCompare(b.queueId));
+    items.sort((a, b) => effectiveQueuePriority(policy, b) - effectiveQueuePriority(policy, a)
+      || a.createdAt.localeCompare(b.createdAt) || a.queueId.localeCompare(b.queueId));
     let item = null; let revoked = false;
     for (const candidate of items) {
       try {
@@ -776,6 +803,9 @@ export async function claimGatewayWork({ root = process.cwd(), workerId, leaseSe
           continue;
         }
       }
+      const resourceConflict = runtime.queue.some((leased) => leased.status === "leased"
+        && leased.queueId !== candidate.queueId && conflictingResources(policy, candidate, leased).length > 0);
+      if (resourceConflict) continue;
       item = candidate;
       break;
     }
@@ -922,7 +952,7 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
           if (!runtime.queue.some((entry) => entry.dedupeKey === key)) runtime.queue.push({
             queueId: "gateway-queue:" + sha256(key).slice(0, 32), dedupeKey: key, kind: "follow-up",
             agentId: planStepAgentId(goal, step), projectId: goal.projectId, groupId: goal.groupId, goalId: goal.goalId,
-            goalStepId: step?.stepId || null, channelEventId: null, priority: PRIORITY["follow-up"], status: "pending", attempts: 0, lease: null,
+            goalStepId: step?.stepId || null, channelEventId: null, priority: goal.priority, status: "pending", attempts: 0, lease: null,
             availableAt: new Date(new Date(current).getTime() + 60000).toISOString(), createdAt: current, updatedAt: current,
             completedAt: null, lastError: null, authority: "execution-state-only"
           });
@@ -1159,9 +1189,21 @@ export async function gatewayContext({ root = process.cwd(), agentId = null } = 
     || item.plan?.steps.some((step) => planStepAgentId(item, step) === exactAgentId));
   const queue = runtime.queue.filter((item) => exactAgentId === null || item.agentId === exactAgentId);
   const queueIds = new Set(queue.map((item) => item.queueId));
+  const leased = runtime.queue.filter((item) => item.status === "leased");
+  const resourceWaits = queue.filter((item) => item.status === "pending").map((item) => {
+    const blockers = leased.map((entry) => ({ entry, resources: conflictingResources(policy, item, entry) }))
+      .filter(({ resources }) => resources.length > 0);
+    return blockers.length ? {
+      queueId: item.queueId,
+      resources: [...new Set(blockers.flatMap(({ resources }) => resources))].sort(),
+      blockedByQueueIds: blockers.map(({ entry }) => entry.queueId).sort(),
+      authority: "execution-state-only"
+    } : null;
+  }).filter(Boolean);
   return { schema: "agentspine.gateway-context/v1", enabled: policy.enabled, killSwitch: policy.killSwitch,
     goals: structuredClone(goals), queue: structuredClone(queue),
     outbox: structuredClone(runtime.outbox.filter((item) => queueIds.has(item.queueId))),
+    resourceWaits,
     health: structuredClone(runtime.health), healthFindings: gatewayHealthFindings(policy, runtime),
     authority: "execution-state-only" };
 }
