@@ -106,7 +106,8 @@ test("unreadable directories are skipped by both walkers and never deny PreToolU
     assert.equal(installed.status, 0, `${event}: ${installed.stderr}`);
     assert.equal(installed.stdout, "{}\n", event);
   }
-  const permissionAudits = output.audit.filter((item) => item.path === canonicalRestricted && item.decision === "allow");
+  const permissionAudits = output.audit.filter((item) => item.path === canonicalRestricted
+    && item.decision === "allow" && item.event === "PreToolUse");
   const auditedTools = [...new Set(permissionAudits.map((item) => item.toolName))];
   assert.deepEqual(auditedTools, ["Edit", "Write", "apply_patch", "Bash", "exec_command"]);
   for (const toolName of auditedTools) {
