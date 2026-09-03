@@ -4,6 +4,23 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-09-03
+
+### Added
+
+- Goal-plan workers now receive a provider-neutral self-help contract. They inspect repository evidence first and, when that evidence is insufficient, triangulate at least two independent public HTTPS primary sources before returning an objective answer instead of immediately asking the user.
+- Successful self-help stores only bounded provenance metadata, SHA-256 digests and a conclusion. The resolved knowledge gap and its continuation survive restart and compaction without retaining external source content.
+- A line-budget check caps every new JavaScript production or test file at 500 physical lines and prevents every known legacy oversized file from growing beyond its recorded reduced baseline.
+
+### Security
+
+- External evidence is permanently marked untrusted and cannot grant identity, permissions, tools, delegation, production access or policy exceptions. Private/local URLs, credentials, stale or future observations, reordered research, missing commit/license/version provenance and forged digests fail closed.
+- Repository-only resolution is permitted only when the repository evidence is explicitly sufficient. Otherwise two different public origins are mandatory; one-source confirmation cannot resolve the gap.
+
+### Changed
+
+- Knowledge-evidence validation moved out of the oversized gateway runtime into a 261-line focused module. The gateway runtime shrank from 1,623 to 1,569 physical lines while retaining its public schemas and compatibility with older stored plans.
+
 ## [0.59.1] - 2026-09-03
 
 ### Fixed

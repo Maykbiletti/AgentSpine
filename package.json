@@ -1,6 +1,6 @@
 {
   "name": "agent-spine",
-  "version": "0.59.1",
+  "version": "0.60.0",
   "description": "A non-destructive identity and memory spine for AI agents.",
   "type": "module",
   "bin": {
@@ -36,6 +36,7 @@
     "host:check": "node scripts/check-hosts.js --json",
     "host:install-check": "node scripts/check-install.js --json",
     "lint": "node scripts/check-syntax.js",
+    "line-budget": "node scripts/check-line-budget.js",
     "release:check": "node scripts/release-check.js --json",
     "release:sbom": "npm sbom --sbom-format cyclonedx",
     "smoke": "node bin/agentspine.js doctor --json",

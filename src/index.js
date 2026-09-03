@@ -46,7 +46,7 @@ export {
 } from "./lib/persona-runtime.js";
 export {
   EXECUTION_ATTEMPT_SCHEMA, GATEWAY_EVENT_SCHEMA, GATEWAY_POLICY_SCHEMA, GATEWAY_RUNTIME_SCHEMA,
-  GOAL_PLAN_SCHEMA, KNOWLEDGE_GAP_SCHEMA,
+  GOAL_PLAN_SCHEMA,
   assignGoal, claimGatewayWork, completeGatewayRun, deliverPrepared,
   enqueueGatewayWake, executionAttemptForStep, gatewayContext, gatewayRuntimeFindings,
   inspectGatewayRuntime, loadGatewayRuntime, reconcileGateway, resolveGoalKnowledgeGap, setGatewayControl
@@ -60,6 +60,11 @@ export {
   proposeMustRemember, purgeMustRemember, rollbackMustRemember, runPreflight, verifyPreflightReceipt
 } from "./lib/preflight.js";
 export { runWorker, runWorkerTick } from "./worker.js";
+export {
+  createKnowledgeGap, createSelfHelpReport, createSelfHelpResolution, KNOWLEDGE_GAP_SCHEMA,
+  resolveKnowledgeGapCandidate, sameKnowledgeGapResolution, SELF_HELP_REPORT_SCHEMA, selfHelpPolicyForWorkItem,
+  validKnowledgeGap, validSelfHelpReport
+} from "./lib/knowledge-evidence.js";
 export {
   configureSharing, deleteShared, initDirectoryAdapter, inspectSharing, loadSharing,
   publishLearning, pullShared, readDirectoryExchange, reviewShared, rollbackShared, sharedContext, sharedInbox,

@@ -10,6 +10,7 @@ import {
 import { createTelegramAdapter } from "./lib/telegram-adapter.js";
 import { acknowledgeChannelDelivery, loadChannelRuntime } from "./lib/channel-runtime.js";
 import { loadPersonaRuntime, syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
+import { selfHelpPolicyForWorkItem } from "./lib/knowledge-evidence.js";
 import { isMainModule } from "./lib/runtime.js";
 
 const MAX_FRAME = 64 * 1024;
@@ -105,6 +106,7 @@ async function hostWorkItem(root, item) {
     goal: goal ? structuredClone(goal) : null,
     goalStep: goalStep ? { ...structuredClone(goalStep),
       ...(executionAttempt === null ? {} : { executionAttempt }) } : null,
+    selfHelpPolicy: goalStep ? selfHelpPolicyForWorkItem() : null,
     hostEnvironment: {
       AGENTSPINE_GATEWAY_CONTEXT: "agentspine.gateway-start/v1",
       AGENTSPINE_ENTITY_ID: item.agentId,
@@ -163,10 +165,11 @@ export async function runWorkerTick({ root = process.cwd(), workerId = "gateway-
   const completed = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId, result, now });
   if (!completed.outbox) return {
     status: completed.clarification ? "needs-clarification"
-      : completed.exploration ? "exploring" : completed.item.status,
+      : completed.exploration ? "exploring" : completed.selfHelp ? "self-help-resolved" : completed.item.status,
     processed: true, queueId: completed.item.queueId,
     ...(completed.clarification ? { clarification: completed.clarification } : {}),
-    ...(completed.exploration ? { exploration: completed.exploration } : {})
+    ...(completed.exploration ? { exploration: completed.exploration } : {}),
+    ...(completed.selfHelp ? { selfHelp: completed.selfHelp } : {})
   };
   const delivery = await deliverPrepared({ root, outboxId: completed.outbox.outboxId,
     adapter: deliveryAdapter, now });

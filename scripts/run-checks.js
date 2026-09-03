@@ -6,6 +6,7 @@ import { githubErrorCommand } from "./github-actions.js";
 
 const CHECKS = [
   { title: "Syntax check", script: "lint" },
+  { title: "Line budget", script: "line-budget" },
   { title: "Hermetic test suite", script: "test" },
   { title: "Host manifest check", script: "host:check" },
   { title: "Installed bundle check", script: "host:install-check" },

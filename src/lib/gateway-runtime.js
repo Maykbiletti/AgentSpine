@@ -8,6 +8,10 @@ import {
   channelRuntimeFindings, loadChannelPolicy, loadChannelRuntime
 } from "./channel-runtime.js";
 import { loadGraph } from "./graph.js";
+import {
+  createKnowledgeGap, createSelfHelpResolution, KNOWLEDGE_GAP_SCHEMA,
+  resolveKnowledgeGapCandidate, sameKnowledgeGapResolution, validKnowledgeGap, validSelfHelpReport
+} from "./knowledge-evidence.js";
 import { projectStateDir } from "./paths.js";
 import { loadPersonaRuntime, personaRuntimeFindings } from "./persona-runtime.js";
 import { evaluateVoiceOutput } from "./voice-runtime.js";
@@ -16,7 +20,7 @@ export const GATEWAY_POLICY_SCHEMA = "agentspine.gateway-policy/v1";
 export const GATEWAY_RUNTIME_SCHEMA = "agentspine.gateway-runtime/v1";
 export const GATEWAY_EVENT_SCHEMA = "agentspine.gateway-event/v1";
 export const GOAL_PLAN_SCHEMA = "agentspine.goal-plan/v1";
-export const KNOWLEDGE_GAP_SCHEMA = "agentspine.knowledge-gap/v1";
+export { KNOWLEDGE_GAP_SCHEMA } from "./knowledge-evidence.js";
 export const EXECUTION_OUTCOME_SCHEMA = "agentspine.execution-outcome/v1";
 export const EXECUTION_ATTEMPT_SCHEMA = "agentspine.execution-attempt/v1";
 export const STRATEGY_TRANSFER_PROOF_SCHEMA = "agentspine.strategy-transfer-proof/v1";
@@ -35,7 +39,6 @@ const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z
 const SECRET_KEY_RE = /"(?:api[-_ ]?key|token|password|secret|credential)"\s*:/i;
 const AUTHORITY_RE = /\b(?:permission|rights?|roles?|owner|trusted|delegat|authorized|approval|production|payment|spending|tool capability|send capability)\b/i;
 const HEALTH_VALUES = new Set(["stopped", "running", "unknown", "healthy", "degraded", "failed"]);
-const KNOWLEDGE_EVIDENCE = new Set(["owner-input", "objective-observation"]);
 const METRIC_OPERATORS = new Set(["gte", "lte", "eq"]);
 
 function emptyPolicy(root) {
@@ -77,67 +80,6 @@ function safeCheckpoint(value) {
     throw new Error("checkpoint contains secret- or authority-shaped content");
   }
   return JSON.parse(content);
-}
-
-function safeKnowledgeText(value, field, maximum) {
-  const text = safeText(value, field, maximum);
-  if (AUTHORITY_RE.test(text)) throw new Error(field + " cannot grant or describe authority");
-  return text;
-}
-
-function knowledgeGapSubjectMaterial(gap) {
-  return {
-    goalId: gap.goalId, goalStepId: gap.goalStepId, planDefinitionsDigest: gap.planDefinitionsDigest,
-    question: gap.question, reason: gap.reason, requiredEvidence: gap.requiredEvidence,
-    authority: "context-only"
-  };
-}
-
-function knowledgeGapRequestMaterial(gap) {
-  return {
-    subjectDigest: gap.subjectDigest, requestedAt: gap.requestedAt,
-    requestedByQueueId: gap.requestedByQueueId, authority: "context-only"
-  };
-}
-
-function knowledgeGapResolutionMaterial(gap) {
-  return {
-    requestDigest: gap.requestDigest, answer: gap.answer, answerSource: gap.answerSource,
-    sourceDigest: gap.sourceDigest, resolvedAt: gap.resolvedAt,
-    resolvedBySubjectId: gap.resolvedBySubjectId, authority: "context-only"
-  };
-}
-
-function validKnowledgeGap(gap) {
-  if (!(gap && gap.schema === KNOWLEDGE_GAP_SCHEMA && ID_RE.test(gap.gapId || "")
-    && ID_RE.test(gap.goalId || "") && ID_RE.test(gap.goalStepId || "")
-    && /^[a-f0-9]{64}$/.test(gap.planDefinitionsDigest || "")
-    && typeof gap.question === "string" && gap.question.length <= 500
-    && typeof gap.reason === "string" && gap.reason.length <= 500
-    && KNOWLEDGE_EVIDENCE.has(gap.requiredEvidence)
-    && ID_RE.test(gap.requestedByQueueId || "")
-    && Number.isFinite(new Date(gap.requestedAt).getTime())
-    && /^[a-f0-9]{64}$/.test(gap.subjectDigest || "")
-    && /^[a-f0-9]{64}$/.test(gap.requestDigest || "")
-    && ["open", "resolved"].includes(gap.status) && gap.authority === "context-only")) return false;
-  try {
-    if (safeKnowledgeText(gap.question, "knowledgeGap.question", 500) !== gap.question
-      || safeKnowledgeText(gap.reason, "knowledgeGap.reason", 500) !== gap.reason) return false;
-  } catch { return false; }
-  if (gap.subjectDigest !== sha256(JSON.stringify(knowledgeGapSubjectMaterial(gap)))
-    || gap.gapId !== "knowledge-gap:" + gap.subjectDigest.slice(0, 32)
-    || gap.requestDigest !== sha256(JSON.stringify(knowledgeGapRequestMaterial(gap)))) return false;
-  if (gap.status === "open") return gap.answer === null && gap.answerSource === null && gap.sourceDigest === null
-    && gap.resolvedAt === null && gap.resolvedBySubjectId === null && gap.resolutionDigest === null;
-  if (!(typeof gap.answer === "string" && gap.answer.length <= 2000
-    && gap.answerSource === gap.requiredEvidence
-    && (gap.sourceDigest === null || /^[a-f0-9]{64}$/.test(gap.sourceDigest))
-    && Number.isFinite(new Date(gap.resolvedAt).getTime()) && ID_RE.test(gap.resolvedBySubjectId || "")
-    && /^[a-f0-9]{64}$/.test(gap.resolutionDigest || ""))) return false;
-  if (new Date(gap.resolvedAt) < new Date(gap.requestedAt)) return false;
-  if ((gap.answerSource === "objective-observation") !== (gap.sourceDigest !== null)) return false;
-  try { if (safeKnowledgeText(gap.answer, "knowledgeGap.answer", 2000) !== gap.answer) return false; } catch { return false; }
-  return gap.resolutionDigest === sha256(JSON.stringify(knowledgeGapResolutionMaterial(gap)));
 }
 
 function executionDecisionMaterial(execution) {
@@ -523,6 +465,10 @@ function validGoalPlan(plan) {
         && new Set(step.knowledgeGaps.map((gap) => gap.gapId)).size === step.knowledgeGaps.length
         && step.knowledgeGaps.every((gap) => validKnowledgeGap(gap)
           && gap.goalStepId === step.stepId && gap.planDefinitionsDigest === plan.definitionsDigest)))
+      && (step.selfHelpReports === undefined || (Array.isArray(step.selfHelpReports) && step.selfHelpReports.length <= 16
+        && new Set(step.selfHelpReports.map((report) => report.reportId)).size === step.selfHelpReports.length
+        && step.selfHelpReports.every((report) => validSelfHelpReport(report)
+          && report.goalStepId === step.stepId && report.planDefinitionsDigest === plan.definitionsDigest)))
       && Number.isFinite(new Date(step.updatedAt).getTime())
       && (step.executionOutcomes || []).every((outcome) => new Date(outcome.observedAt) <= new Date(step.updatedAt)))) return false;
   }
@@ -572,7 +518,7 @@ function createGoalPlan(steps, now, defaultAgentId, transferContext) {
     successCriterion: safeText(step?.successCriterion, `steps[${index}].successCriterion`),
     dependsOn: Array.isArray(step?.dependsOn) ? step.dependsOn.map((dependency) => exactId(dependency, `steps[${index}].dependsOn`)) : [],
     status: "pending", checkpoint: null, blocker: null, completedAt: null, completedByQueueId: null,
-    knowledgeGaps: [], executionOutcomes: [], updatedAt: now
+    knowledgeGaps: [], selfHelpReports: [], executionOutcomes: [], updatedAt: now
   }));
   const plan = { schema: GOAL_PLAN_SCHEMA, revision: 0, currentStepId: null, steps: normalized,
     definitionsDigest: sha256(JSON.stringify(planDefinitionMaterial(normalized))), authority: "context-only-plan" };
@@ -608,28 +554,6 @@ function conflictingResources(policy, candidate, leased) {
 function effectiveQueuePriority(policy, item) {
   if (!item.goalId) return item.priority;
   return policy.goals.find((goal) => goal.goalId === item.goalId)?.priority ?? item.priority;
-}
-
-function createKnowledgeGap(goal, step, queueId, request, now) {
-  const gap = {
-    schema: KNOWLEDGE_GAP_SCHEMA, gapId: null, goalId: goal.goalId, goalStepId: step.stepId,
-    planDefinitionsDigest: goal.plan.definitionsDigest,
-    question: safeKnowledgeText(request?.question, "knowledgeGap.question", 500),
-    reason: safeKnowledgeText(request?.reason, "knowledgeGap.reason", 500),
-    requiredEvidence: request?.requiredEvidence,
-    requestedAt: now, requestedByQueueId: exactId(queueId, "requestedByQueueId"),
-    subjectDigest: null, requestDigest: null, status: "open", answer: null, answerSource: null,
-    sourceDigest: null, resolvedAt: null, resolvedBySubjectId: null, resolutionDigest: null,
-    authority: "context-only"
-  };
-  if (!KNOWLEDGE_EVIDENCE.has(gap.requiredEvidence)) {
-    throw new Error("knowledgeGap.requiredEvidence must be owner-input or objective-observation");
-  }
-  gap.subjectDigest = sha256(JSON.stringify(knowledgeGapSubjectMaterial(gap)));
-  gap.gapId = "knowledge-gap:" + gap.subjectDigest.slice(0, 32);
-  gap.requestDigest = sha256(JSON.stringify(knowledgeGapRequestMaterial(gap)));
-  if (!validKnowledgeGap(gap)) throw new Error("knowledge gap request is invalid");
-  return gap;
 }
 
 function planQueueKey(goalId, stepId, phase, suffix = "") {
@@ -953,16 +877,8 @@ export async function resolveGoalKnowledgeGap({ root = process.cwd(), goalId, ga
     assertActivePersona(personas.policy, personas.runtime, goal.agentId, goal.projectId, goal.groupId);
     const gap = (step.knowledgeGaps || []).find((item) => item.gapId === gapId);
     if (!gap) throw new Error("knowledge gap is not bound to the current goal-plan step");
-    answer = safeKnowledgeText(answer, "answer", 2000);
-    if (!KNOWLEDGE_EVIDENCE.has(answerSource) || answerSource !== gap.requiredEvidence) {
-      throw new Error("answer source does not satisfy the requested evidence class");
-    }
-    sourceDigest = sourceDigest === null || sourceDigest === undefined || sourceDigest === "" ? null : String(sourceDigest);
-    if ((answerSource === "objective-observation") !== (/^[a-f0-9]{64}$/.test(sourceDigest || ""))) {
-      throw new Error("objective observation answers require one exact SHA-256 source digest");
-    }
     if (gap.status === "resolved") {
-      if (gap.answer !== answer || gap.answerSource !== answerSource || gap.sourceDigest !== sourceDigest) {
+      if (!sameKnowledgeGapResolution(gap, { answer, answerSource, sourceDigest })) {
         throw new Error("knowledge gap already has a different bound resolution");
       }
       return { goal: structuredClone(goal), gap: structuredClone(gap), duplicate: true };
@@ -971,10 +887,8 @@ export async function resolveGoalKnowledgeGap({ root = process.cwd(), goalId, ga
       throw new Error("open knowledge gap resolution requires the exact blocked goal-plan step");
     }
     const resolvedAt = timestamp(now);
-    const candidate = { ...gap, status: "resolved", answer, answerSource, sourceDigest,
-      resolvedAt, resolvedBySubjectId: goal.ownerSubjectId, resolutionDigest: null };
-    candidate.resolutionDigest = sha256(JSON.stringify(knowledgeGapResolutionMaterial(candidate)));
-    if (!validKnowledgeGap(candidate)) throw new Error("knowledge gap resolution is invalid");
+    const candidate = resolveKnowledgeGapCandidate(gap, { answer, answerSource, sourceDigest,
+      resolvedAt, resolvedBySubjectId: goal.ownerSubjectId });
     policy.history.push({ kind: "goal", at: resolvedAt, value: structuredClone(goal), authority: "authenticated-goal-policy" });
     Object.assign(gap, candidate);
     step.status = "active"; step.blocker = null; step.updatedAt = resolvedAt;
@@ -1228,11 +1142,18 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     }
     const knowledgeGapRequest = result?.knowledgeGap === undefined || result?.knowledgeGap === null
       ? null : result.knowledgeGap;
+    const selfHelpRequest = result?.selfHelp === undefined || result?.selfHelp === null ? null : result.selfHelp;
     if (knowledgeGapRequest && (item.channelEventId || !item.goalStepId || !boundGoal?.plan)) {
       throw new Error("knowledge gaps require an exact goal-plan step without a channel obligation");
     }
+    if (selfHelpRequest && (item.channelEventId || !item.goalStepId || !boundGoal?.plan)) {
+      throw new Error("self-help research requires an exact goal-plan step without a channel obligation");
+    }
     if (knowledgeGapRequest && (result?.blocked || result?.completed)) {
       throw new Error("knowledge gap result cannot also complete or generically block a step");
+    }
+    if (selfHelpRequest && (knowledgeGapRequest || result?.blocked || result?.completed)) {
+      throw new Error("self-help research cannot also complete, block, or open a knowledge gap");
     }
     let executionReview = boundStep?.execution && result?.completed
       ? reviewExecutionResult(boundStep.execution, boundStep.executionOutcomes || [],
@@ -1241,7 +1162,7 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
       executionReview = { passed: false, outcome: null, reason: "Execution outcome history is full." };
     }
     const text = result?.text ? safeText(result.text, "result.text", 16000) : null;
-    let clarification = null; let exploration = null;
+    let clarification = null; let exploration = null; let selfHelp = null;
     preserve(runtime, "queue", item, "run-completed", current);
     if (item.channelEventId) {
       if (!text) throw new Error("a channel obligation requires a non-empty response");
@@ -1274,7 +1195,32 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
         if (goal.plan && item.goalStepId) {
           const step = currentPlanStep(goal);
           step.checkpoint = checkpoint; step.updatedAt = current;
-          if (knowledgeGapRequest) {
+          if (selfHelpRequest) {
+            if (!Array.isArray(step.knowledgeGaps)) step.knowledgeGaps = [];
+            if (!Array.isArray(step.selfHelpReports)) step.selfHelpReports = [];
+            const resolved = createSelfHelpResolution({ goal, step, queueId: item.queueId,
+              report: selfHelpRequest, agentId: item.agentId, now: current });
+            const existingGap = step.knowledgeGaps.find((gap) => gap.gapId === resolved.gap.gapId);
+            if (existingGap) {
+              goal.blocker = "The host repeated an already resolved self-help question.";
+              step.status = "blocked"; step.blocker = goal.blocker; goal.status = "blocked";
+              appendReceipt(runtime, "self-help-research-regression", item.queueId, current,
+                { goalStepId: step.stepId, reportId: resolved.report.reportId, gapId: existingGap.gapId });
+            } else if (step.knowledgeGaps.length >= 16 || step.selfHelpReports.length >= 16) {
+              throw new Error("goal step exceeds 16 self-help research resolutions");
+            } else {
+              step.knowledgeGaps.push(resolved.gap); step.selfHelpReports.push(resolved.report);
+              step.status = "active"; step.blocker = null; goal.status = "active"; goal.blocker = null;
+              goal.nextSafeStep = step.title;
+              const key = planQueueKey(goal.goalId, step.stepId, "self-help", resolved.report.reportDigest.slice(0, 20));
+              let queued = runtime.queue.find((entry) => entry.dedupeKey === key);
+              if (!queued) { queued = newGoalQueue(goal, step, "follow-up", key, current); runtime.queue.push(queued); }
+              selfHelp = { report: structuredClone(resolved.report), queueId: queued.queueId };
+              appendReceipt(runtime, "self-help-research-resolved", queued.queueId, current,
+                { goalStepId: step.stepId, reportId: resolved.report.reportId, gapId: resolved.gap.gapId });
+            }
+            goal.plan.revision += 1;
+          } else if (knowledgeGapRequest) {
             if (!Array.isArray(step.knowledgeGaps)) step.knowledgeGaps = [];
             const proposed = createKnowledgeGap(goal, step, item.queueId, knowledgeGapRequest, current);
             const existing = step.knowledgeGaps.find((gap) => gap.gapId === proposed.gapId);
@@ -1351,7 +1297,7 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
         }
         goal.updatedAt = current;
         policy.revision += 1;
-        if (goal.status === "active" && (!goal.plan || !result?.completed)) {
+        if (goal.status === "active" && (!goal.plan || !result?.completed) && !selfHelp) {
           const checkpointDigest = sha256(JSON.stringify(goal.checkpoint || { heartbeatAt: current })).slice(0, 20);
           const step = currentPlanStep(goal);
           const key = step ? planQueueKey(goal.goalId, step.stepId, "follow-up", checkpointDigest)
@@ -1371,7 +1317,7 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     appendReceipt(runtime, "run-terminal", item.queueId, current, { status: item.status, goalStepId: item.goalStepId || null }); runtime.revision += 1;
     await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
     return { item, outbox: runtime.outbox.find((entry) => entry.queueId === item.queueId) || null,
-      clarification, exploration, executionReview };
+      clarification, exploration, selfHelp, executionReview };
   });
 }
 
