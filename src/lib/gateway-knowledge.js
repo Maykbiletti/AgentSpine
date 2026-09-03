@@ -21,6 +21,15 @@ function resolvedSelfHelp({ goal, step, item, runtime, current, request,
     throw new Error("goal step exceeds 16 self-help research resolutions");
   }
   step.knowledgeGaps.push(resolved.gap); step.selfHelpReports.push(resolved.report);
+  if (resolved.status === "needs-owner-input") {
+    item.status = "blocked"; step.status = "blocked"; step.blocker = resolved.gap.question;
+    goal.status = "blocked"; goal.blocker = resolved.gap.question;
+    appendReceipt(runtime, "self-help-research-exhausted", item.queueId, current,
+      { goalStepId: step.stepId, reportId: resolved.report.reportId, gapId: resolved.gap.gapId });
+    appendReceipt(runtime, "knowledge-gap-opened", item.queueId, current,
+      { goalStepId: step.stepId, gapId: resolved.gap.gapId, requiredEvidence: "owner-input" });
+    return { clarification: structuredClone(resolved.gap), report: structuredClone(resolved.report) };
+  }
   step.status = "active"; step.blocker = null; goal.status = "active"; goal.blocker = null;
   goal.nextSafeStep = step.title;
   const key = planQueueKey(goal.goalId, step.stepId, "self-help", resolved.report.reportDigest.slice(0, 20));
@@ -92,7 +101,10 @@ export function handlePlanKnowledge(options) {
   const { goal, step, item, runtime, current, selfHelpRequest, knowledgeGapRequest } = options;
   if (!selfHelpRequest && !knowledgeGapRequest) return null;
   let result;
-  if (selfHelpRequest) result = { selfHelp: resolvedSelfHelp({ ...options, request: selfHelpRequest }) };
+  if (selfHelpRequest) {
+    const handled = resolvedSelfHelp({ ...options, request: selfHelpRequest });
+    result = handled?.clarification ? handled : { selfHelp: handled };
+  }
   else if (knowledgeGapRequest.requiredEvidence === "objective-observation") {
     result = { selfHelpRequired: requireSelfHelp({ ...options, request: knowledgeGapRequest }) };
   } else result = { clarification: openOwnerGap({ ...options, request: knowledgeGapRequest }) };

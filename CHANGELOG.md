@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-09-03
+
+### Added
+
+- Bounded repository-first self-help can now escalate an unresolved conflict between two independent public primary sources into exactly one durable owner decision. The report binds both conflicting SHA-256 digests, one question, a reason and 2-8 distinct options.
+- The owner-input gap survives restart and resumes the exact plan step once through the existing locally confirmed clarification path.
+
+### Security
+
+- Escalation is rejected unless repository evidence was exhausted first and two fresh conflicting sources come from different public HTTPS origins. Missing digests, duplicate options, altered bindings and forged persisted reports fail closed.
+- External material, options and answers remain context only; they cannot grant identity, tools, permissions, delegation or policy exceptions. Foreign project groups receive no goal context.
+
+### Tests
+
+- A synthetic Before/After scenario proves that the prior forced-answer dead end becomes one evidence-bound decision, six concurrent identical answers converge on one continuation, torn-write recovery restores one wake, and source Markdown remains byte-exact.
+
 ## [0.61.0] - 2026-09-03
 
 ### Added

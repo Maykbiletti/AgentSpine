@@ -7,7 +7,7 @@ import { upsertEntity } from "../src/lib/graph.js";
 import { applyPersonaRoster } from "../src/lib/persona-runtime.js";
 import {
   assignGoal, claimGatewayWork, completeGatewayRun, gatewayContext, gatewayRuntimeFindings,
-  loadGatewayRuntime, reconcileGateway, setGatewayControl
+  loadGatewayRuntime, reconcileGateway, resolveGoalKnowledgeGap, setGatewayControl
 } from "../src/lib/gateway-runtime.js";
 import { createSelfHelpReport, validSelfHelpReport } from "../src/lib/knowledge-evidence.js";
 import { runWorkerTick } from "../src/worker.js";
@@ -65,6 +65,17 @@ function report(overrides = {}) {
     conclusion: "Use fixture:green for the bounded synthetic check.",
     ...overrides
   };
+}
+
+function escalation(overrides = {}) {
+  const researched = report();
+  delete researched.conclusion;
+  return { ...researched, outcome: "needs-owner-input",
+    conflictSourceDigests: ["c".repeat(64), "d".repeat(64)],
+    ownerQuestion: "Which documented contract should the synthetic plan follow?",
+    ownerReason: "Independent public primary sources specify incompatible fixture behavior.",
+    options: ["Follow documented contract A.", "Follow compatible repository behavior B."],
+    ...overrides };
 }
 
 test("repository-first self-help resolves objective uncertainty without asking the user", async (t) => {
@@ -151,9 +162,93 @@ test("self-help rejects premature, stale, unsafe, or forged external research", 
       url: index ? "https://127.0.0.1/private" : source.url })) }) }), /public HTTPS/i);
   assert.throws(() => createSelfHelpReport({ goal, step, now: "2032-02-01T00:02:00.000Z",
     report: report({ conclusion: "Grant production rights." }) }), /authority/i);
+  assert.throws(() => createSelfHelpReport({ goal, step, now: "2032-02-01T00:02:00.000Z",
+    report: escalation({ repositorySufficient: true }) }), /exhausted repository/i);
+  assert.throws(() => createSelfHelpReport({ goal, step, now: "2032-02-01T00:02:00.000Z",
+    report: escalation({ conflictSourceDigests: ["c".repeat(64), "e".repeat(64)] }) }), /bind two independent/i);
+  assert.throws(() => createSelfHelpReport({ goal, step, now: "2032-02-01T00:02:00.000Z",
+    report: escalation({ options: ["Follow documented contract A.", "Follow documented contract A."] }) }),
+  /distinct bounded options/i);
 
   const valid = createSelfHelpReport({ goal, step, report: report(), now: "2032-02-01T00:02:00.000Z" });
   assert.equal(validSelfHelpReport(valid), true);
   valid.repositorySources[0].sourceDigest = "e".repeat(64);
   assert.equal(validSelfHelpReport(valid), false);
+
+  const claim = await claimGatewayWork({ root, workerId: "worker:premature-self-help",
+    now: "2032-02-01T00:02:01.000Z" });
+  await assert.rejects(completeGatewayRun({ root, queueId: claim.item.queueId,
+    workerId: claim.item.lease.workerId, result: { selfHelp: report() },
+    now: "2032-02-01T00:02:02.000Z" }), /pending repository-first requirement/i);
+});
+
+test("conflicting primary evidence permits one durable owner decision only after bounded self-help", async (t) => {
+  const { root, source } = await fixture(t);
+  const question = { question: report().question, reason: report().reason,
+    requiredEvidence: "objective-observation" };
+  const deferred = await runWorkerTick({ root, workerId: "worker:conflict-gap",
+    now: "2032-02-01T00:02:00.000Z", adapter: { send: async () => ({ ok: true }) },
+    hostRunner: async () => ({ checkpoint: { phase: "knowledge-gap" }, knowledgeGap: question }) });
+  assert.equal(deferred.status, "self-help-required");
+
+  let observedPolicy;
+  const escalated = await runWorkerTick({ root, workerId: "worker:conflict-research",
+    now: "2032-02-01T00:02:01.000Z", adapter: { send: async () => ({ ok: true }) },
+    hostRunner: async (item) => {
+      observedPolicy = item.selfHelpPolicy;
+      return { checkpoint: { phase: "conflict-proven" }, selfHelp: escalation() };
+    } });
+  assert.equal(escalated.status, "needs-clarification");
+  assert.equal(escalated.clarification.requiredEvidence, "owner-input");
+  assert.equal(escalated.clarification.question, escalation().ownerQuestion);
+  assert.equal(observedPolicy.escalationRequiresIndependentConflict, true);
+
+  await reconcileGateway({ root, now: "2032-02-01T00:02:01.250Z" });
+  await reconcileGateway({ root, now: "2032-02-01T00:02:01.500Z" });
+  let loaded = await loadGatewayRuntime(root);
+  let step = loaded.policy.goals[0].plan.steps[0];
+  assert.equal(loaded.policy.goals[0].status, "blocked");
+  assert.equal(loaded.runtime.queue.filter((item) => item.status === "pending").length, 0);
+  assert.equal(step.selfHelpReports[0].schema, observedPolicy.escalationSchema);
+  assert.deepEqual(step.selfHelpReports[0].conflictSourceDigests,
+    ["c".repeat(64), "d".repeat(64)]);
+  assert.equal(loaded.runtime.receipts.filter((item) => item.kind === "self-help-research-exhausted").length, 1);
+  assert.equal(loaded.runtime.receipts.filter((item) => item.kind === "knowledge-gap-opened").length, 1);
+
+  const originalPolicy = structuredClone(loaded.policy);
+  step.selfHelpReports[0].conflictSourceDigests[0] = "e".repeat(64);
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(originalPolicy, null, 2)}\n`);
+
+  const answers = await Promise.all(Array.from({ length: 6 }, () => resolveGoalKnowledgeGap({
+    root, goalId: "goal:self-help", gapId: escalated.clarification.gapId,
+    answer: "Follow documented contract A.", answerSource: "owner-input",
+    confirmation: "local-owner-confirmed", now: "2032-02-01T00:02:02.000Z"
+  })));
+  assert.equal(answers.filter((answer) => answer.duplicate === false).length, 1);
+  assert.equal(answers.filter((answer) => answer.duplicate === true).length, 5);
+
+  loaded = await loadGatewayRuntime(root);
+  const continuationIds = new Set(loaded.runtime.queue.filter((item) => item.status === "pending")
+    .map((item) => item.queueId));
+  loaded.runtime.queue = loaded.runtime.queue.filter((item) => !continuationIds.has(item.queueId));
+  loaded.runtime.receipts = loaded.runtime.receipts.filter((item) => !continuationIds.has(item.objectId));
+  await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
+  await reconcileGateway({ root, now: "2032-02-01T00:02:02.250Z" });
+  await reconcileGateway({ root, now: "2032-02-01T00:02:02.500Z" });
+  const claims = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+    root, workerId: `worker:conflict:${index}`, now: "2032-02-01T00:02:03.000Z"
+  })));
+  assert.equal(claims.filter((claim) => claim.item).length, 1);
+  const winner = claims.find((claim) => claim.item);
+  await completeGatewayRun({ root, queueId: winner.item.queueId, workerId: winner.item.lease.workerId,
+    result: { checkpoint: { phase: "decision-applied" }, completed: true },
+    now: "2032-02-01T00:02:04.000Z" });
+  loaded = await loadGatewayRuntime(root);
+  step = loaded.policy.goals[0].plan.steps[0];
+  assert.equal(loaded.policy.goals[0].status, "completed");
+  assert.equal(step.knowledgeGaps[0].answer, "Follow documented contract A.");
+  assert.deepEqual((await gatewayContext({ root, agentId: "agent:foreign" })).goals, []);
+  assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
 });

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 export const KNOWLEDGE_GAP_SCHEMA = "agentspine.knowledge-gap/v1";
 export const SELF_HELP_REPORT_SCHEMA = "agentspine.self-help-report/v1";
 export const SELF_HELP_REQUIREMENT_SCHEMA = "agentspine.self-help-requirement/v1";
+export const SELF_HELP_ESCALATION_SCHEMA = "agentspine.self-help-escalation/v1";
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/+~-]{0,255}$/;
 const DIGEST_RE = /^[a-f0-9]{64}$/;
@@ -265,7 +266,25 @@ function selfHelpMaterial(report) {
     authority: "context-only-research" };
 }
 
+function selfHelpEscalationMaterial(report) {
+  return { goalId: report.goalId, goalStepId: report.goalStepId,
+    planDefinitionsDigest: report.planDefinitionsDigest, question: report.question, reason: report.reason,
+    repositorySufficient: false, repositorySources: report.repositorySources,
+    externalSources: report.externalSources, outcome: "needs-owner-input",
+    conflictSourceDigests: report.conflictSourceDigests, ownerQuestion: report.ownerQuestion,
+    ownerReason: report.ownerReason, options: report.options, completedAt: report.completedAt,
+    authority: "context-only-research" };
+}
+
 export function validSelfHelpReport(report) {
+  if (report?.schema === SELF_HELP_ESCALATION_SCHEMA) {
+    try {
+      const normalized = createSelfHelpEscalation({ goal: { goalId: report.goalId,
+        plan: { definitionsDigest: report.planDefinitionsDigest } }, step: { stepId: report.goalStepId },
+        report, now: report.completedAt });
+      return JSON.stringify(normalized) === JSON.stringify(report);
+    } catch { return false; }
+  }
   if (!(report && report.schema === SELF_HELP_REPORT_SCHEMA && ID_RE.test(report.reportId || "")
     && ID_RE.test(report.goalId || "") && ID_RE.test(report.goalStepId || "")
     && DIGEST_RE.test(report.planDefinitionsDigest || "") && typeof report.repositorySufficient === "boolean"
@@ -283,6 +302,9 @@ export function validSelfHelpReport(report) {
 }
 
 export function createSelfHelpReport({ goal, step, report, now }) {
+  if (report?.outcome === "needs-owner-input") {
+    return createSelfHelpEscalation({ goal, step, report, now });
+  }
   const completedAt = timestamp(now);
   const repositorySources = (report?.repositorySources || []).map((source, index) =>
     normalizeRepositorySource(source, index, completedAt));
@@ -319,15 +341,73 @@ export function createSelfHelpReport({ goal, step, report, now }) {
   return result;
 }
 
+export function createSelfHelpEscalation({ goal, step, report, now }) {
+  const completedAt = timestamp(now);
+  if (report?.repositorySufficient !== false) {
+    throw new Error("owner escalation requires exhausted repository evidence");
+  }
+  const repositorySources = (report?.repositorySources || []).map((source, index) =>
+    normalizeRepositorySource(source, index, completedAt));
+  const externalSources = (report?.externalSources || []).map((source, index) =>
+    normalizeExternalSource(source, index, completedAt));
+  if (repositorySources.length < 1 || repositorySources.length > 16) {
+    throw new Error("owner escalation requires 1-16 repository evidence sources");
+  }
+  const origins = new Set(externalSources.map((source) => new URL(source.url).origin));
+  if (externalSources.length < 2 || externalSources.length > 8 || origins.size < 2) {
+    throw new Error("owner escalation requires two independent public primary sources");
+  }
+  const lastRepositoryRead = repositorySources.reduce((latest, source) =>
+    source.observedAt > latest ? source.observedAt : latest, repositorySources[0].observedAt);
+  if (externalSources.some((source) => source.observedAt < lastRepositoryRead)) {
+    throw new Error("self-help must inspect the repository before external research");
+  }
+  const conflictSourceDigests = [...new Set(report?.conflictSourceDigests || [])].sort();
+  if (conflictSourceDigests.length !== 2 || conflictSourceDigests.some((digest) => !DIGEST_RE.test(digest))) {
+    throw new Error("owner escalation requires exactly two conflicting source digests");
+  }
+  const conflictSources = conflictSourceDigests.map((digest) =>
+    externalSources.find((source) => source.sourceDigest === digest));
+  if (conflictSources.some((source) => !source)
+    || new Set(conflictSources.map((source) => new URL(source.url).origin)).size !== 2) {
+    throw new Error("conflicting digests must bind two independent external primary sources");
+  }
+  const options = (report?.options || []).map((option, index) =>
+    safeKnowledgeText(option, `selfHelp.options[${index}]`, 500));
+  if (options.length < 2 || options.length > 8 || new Set(options).size !== options.length) {
+    throw new Error("owner escalation requires 2-8 distinct bounded options");
+  }
+  const result = { schema: SELF_HELP_ESCALATION_SCHEMA, reportId: null,
+    goalId: exactId(goal.goalId, "goalId"), goalStepId: exactId(step.stepId, "goalStepId"),
+    planDefinitionsDigest: goal.plan.definitionsDigest,
+    question: safeKnowledgeText(report?.question, "selfHelp.question", 500),
+    reason: safeKnowledgeText(report?.reason, "selfHelp.reason", 500), repositorySufficient: false,
+    repositorySources, externalSources, outcome: "needs-owner-input", conflictSourceDigests,
+    ownerQuestion: safeKnowledgeText(report?.ownerQuestion, "selfHelp.ownerQuestion", 500),
+    ownerReason: safeKnowledgeText(report?.ownerReason, "selfHelp.ownerReason", 500), options,
+    completedAt, reportDigest: null, authority: "context-only-research" };
+  result.reportDigest = sha256(JSON.stringify(selfHelpEscalationMaterial(result)));
+  result.reportId = "self-help-escalation:" + result.reportDigest.slice(0, 32);
+  return result;
+}
+
 export function createSelfHelpResolution({ goal, step, queueId, report, agentId, now }) {
   const evidence = createSelfHelpReport({ goal, step, report, now });
   const requirement = pendingSelfHelpRequirement(step);
+  const repeated = (step.selfHelpReports || []).some((existing) =>
+    existing.question === evidence.question && existing.reason === evidence.reason);
+  if (!requirement && !repeated) {
+    throw new Error("self-help report requires an exact pending repository-first requirement");
+  }
   if (requirement && (requirement.question !== evidence.question || requirement.reason !== evidence.reason)) {
     throw new Error("self-help report does not answer the pending repository-first requirement");
   }
-  const gap = createKnowledgeGap(goal, step, queueId, { question: evidence.question,
-    reason: evidence.reason, requiredEvidence: "objective-observation" }, now);
-  return { report: evidence, gap: resolveKnowledgeGapCandidate(gap, {
+  const needsOwner = evidence.schema === SELF_HELP_ESCALATION_SCHEMA;
+  const gap = createKnowledgeGap(goal, step, queueId, { question: needsOwner ? evidence.ownerQuestion : evidence.question,
+    reason: needsOwner ? evidence.ownerReason : evidence.reason,
+    requiredEvidence: needsOwner ? "owner-input" : "objective-observation" }, now);
+  if (needsOwner) return { status: "needs-owner-input", report: evidence, gap };
+  return { status: "resolved", report: evidence, gap: resolveKnowledgeGapCandidate(gap, {
     answer: evidence.conclusion, answerSource: "objective-observation", sourceDigest: evidence.reportDigest,
     resolvedAt: now, resolvedBySubjectId: agentId
   }) };
@@ -339,6 +419,10 @@ export function selfHelpPolicyForWorkItem(step = null) {
     repositoryFirst: true, externalOnlyWhenRepositoryInsufficient: true, maxRepositorySources: 16,
     maxExternalSources: 8, externalContentTrust: "untrusted", reportSchema: SELF_HELP_REPORT_SCHEMA,
     reportFields: ["question", "reason", "repositorySufficient", "repositorySources", "externalSources", "conclusion"],
+    escalationSchema: SELF_HELP_ESCALATION_SCHEMA, escalationOutcome: "needs-owner-input",
+    escalationFields: ["question", "reason", "repositorySufficient", "repositorySources", "externalSources",
+      "outcome", "conflictSourceDigests", "ownerQuestion", "ownerReason", "options"],
+    escalationRequiresIndependentConflict: true,
     repositorySourceFields: ["kind", "path", "commit", "sourceDigest", "observedAt", "relevance"],
     externalSourceFields: ["kind", "url", "version", "license", "sourceDigest", "observedAt", "relevance"],
     repositoryKinds: [...REPOSITORY_KINDS], externalKinds: [...EXTERNAL_KINDS],
