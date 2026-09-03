@@ -4,6 +4,21 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-09-03
+
+### Changed
+
+- The PostToolUse undeclared-call guard now compares canonical identifier-name sets before and after a JavaScript write. Existing undeclared calls remain visible as exact `file:line: name` warnings but do not block unrelated work; only names introduced by the current write block.
+- PreToolUse records a bounded, tool-delivery-bound snapshot outside the project. PostToolUse prefers explicit original edit content, then the exact snapshot, then the last audited state. New files have an empty previous set, and removing findings is accepted.
+
+### Security
+
+- Parser, file and local state uncertainty remains fail-open and auditable. A denial requires a verified new undeclared name; stored comparison state is diagnostic only and grants no permissions, identity, tools or policy exceptions.
+
+### Tests
+
+- Before/After tests prove that an unchanged pre-existing finding passes with a warning, adding one new undeclared name blocks and names only that addition, removing a finding passes, and an undeclared call in a brand-new file blocks.
+
 ## [0.64.0] - 2026-09-03
 
 ### Changed

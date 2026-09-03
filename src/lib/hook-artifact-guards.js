@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { lstat, readFile, readdir, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
-import { canonicalPath } from "./paths.js";
+import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { canonicalPath, stateRoot } from "./paths.js";
 import { undeclaredCalls } from "./identifier-analysis.js";
 
 const STAND_SCHEMA = "blun.snapshot-stand/v1";
@@ -14,6 +14,7 @@ const MAX_ASSIGNMENT_BYTES = 128 * 1024;
 const MAX_SOURCE_BYTES = 200 * 1024;
 const DIRECT_WRITE = /(^|__)(write|edit)(_|$)/i;
 const JAVASCRIPT_FILE = /\.(?:js|mjs|cjs)$/i;
+const IDENTIFIER_STATE_SCHEMA = "agentspine.identifier-state/v1";
 
 function configuredExchange(input, cwd) {
   const value = input.agent_spine_exchange_directory ?? input.exchange_directory
@@ -111,6 +112,103 @@ function writtenPath(input, cwd) {
   return typeof path === "string" && path ? resolve(cwd, path) : null;
 }
 
+function toolDeliveryId(input) {
+  const value = input.tool_use_id ?? input.toolUseId ?? input.event_id ?? input.hook_event_id;
+  return typeof value === "string" && value.length > 0 && value.length <= 512 ? value : null;
+}
+
+function identifierStatePath(root, path, kind, deliveryId = null) {
+  const project = createHash("sha256").update(resolve(root)).digest("hex").slice(0, 32);
+  const file = createHash("sha256").update(resolve(path)).digest("hex");
+  const suffix = kind === "pending"
+    ? `${file}.${createHash("sha256").update(deliveryId || "unbound").digest("hex")}.json`
+    : `${file}.json`;
+  return join(stateRoot(), "identifier-guard", project, kind, suffix);
+}
+
+async function writeIdentifierState(root, path, kind, deliveryId, state) {
+  const target = identifierStatePath(root, path, kind, deliveryId);
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+  await rename(temporary, target);
+}
+
+async function readIdentifierState(root, path, kind, deliveryId) {
+  const target = identifierStatePath(root, path, kind, deliveryId);
+  let content;
+  try {
+    content = await boundedText(target, MAX_STAND_BYTES);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+  if (content === null) return null;
+  try {
+    const state = JSON.parse(content);
+    if (!(state?.schema === IDENTIFIER_STATE_SCHEMA && state.path === resolve(path)
+      && Array.isArray(state.names) && state.names.every((name) => /^[A-Za-z_$][\w$]*$/.test(name))
+      && typeof state.existed === "boolean")) return null;
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+function stateFor(path, existed, findings, source) {
+  return {
+    schema: IDENTIFIER_STATE_SCHEMA, path: resolve(path), existed,
+    names: [...new Set(findings.map((item) => item.name))].sort(),
+    sourceDigest: source === null ? null : createHash("sha256").update(source).digest("hex"),
+    authority: "diagnostic-only"
+  };
+}
+
+function originalSource(input, current) {
+  const value = input.tool_input ?? input.tool_args;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  for (const key of ["original_content", "previous_content", "before_content"]) {
+    if (typeof value[key] === "string" && Buffer.byteLength(value[key]) <= MAX_SOURCE_BYTES) return value[key];
+  }
+  if (typeof value.old_string !== "string" || typeof value.new_string !== "string") return null;
+  if (value.new_string.length === 0) return null;
+  if (value.replace_all === true) return current.split(value.new_string).join(value.old_string);
+  const index = current.indexOf(value.new_string);
+  return index < 0 ? null : current.slice(0, index) + value.old_string + current.slice(index + value.new_string.length);
+}
+
+function parsesJavaScript(source) {
+  return spawnSync(process.execPath, ["--check", "-"], {
+    input: source, encoding: "utf8", timeout: 2000
+  }).status === 0;
+}
+
+export async function captureJavaScriptBeforeWrite({ input, cwd, root }) {
+  if ((input.hook_event_name || input.event_name) !== "PreToolUse" || !DIRECT_WRITE.test(input.tool_name || "")) {
+    return { status: "not-applicable", blocked: false };
+  }
+  const path = writtenPath(input, cwd);
+  const deliveryId = toolDeliveryId(input);
+  if (!path || !JAVASCRIPT_FILE.test(path) || !deliveryId) return { status: "not-applicable", blocked: false, path };
+  let source = null;
+  try {
+    const metadata = await lstat(path);
+    if (!metadata.isFile() || metadata.size > MAX_SOURCE_BYTES) {
+      return { status: metadata.isFile() ? "skipped-large" : "skipped-non-file", blocked: false, path };
+    }
+    source = await readFile(path, "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  let findings = [];
+  if (source !== null) {
+    if (!parsesJavaScript(source)) return { status: "parse-warning", blocked: false, path };
+    findings = undeclaredCalls(source, { allowlist: await identifierAllowlist(root) });
+  }
+  await writeIdentifierState(root, path, "pending", deliveryId, stateFor(path, source !== null, findings, source));
+  return { status: "captured", blocked: false, path, findings };
+}
+
 async function identifierAllowlist(root) {
   const path = join(root, ".agentspine-identifier-allowlist.json");
   let content;
@@ -148,17 +246,40 @@ export async function inspectWrittenJavaScript({ input, cwd, root }) {
   }
   const source = await readFile(path, "utf8");
   let findings;
+  const allowlist = await identifierAllowlist(root);
   try {
-    findings = undeclaredCalls(source, { allowlist: await identifierAllowlist(root) })
+    findings = undeclaredCalls(source, { allowlist })
       .map((item) => ({ ...item, path }));
   } catch (error) {
     return { status: "parse-warning", blocked: false, path, findings: [], reason: error.message };
   }
-  if (!findings.length) return { status: "clean", blocked: false, path, findings };
-  const warning = findings.map((item) => `${item.path}:${item.line}: ${item.name}`).join("\n");
+  const deliveryId = toolDeliveryId(input);
+  const previousSource = originalSource(input, source);
+  let previous = null;
+  if (previousSource !== null && parsesJavaScript(previousSource)) {
+    previous = stateFor(path, true, undeclaredCalls(previousSource, { allowlist }), previousSource);
+  } else if (deliveryId) {
+    previous = await readIdentifierState(root, path, "pending", deliveryId);
+  }
+  previous ||= await readIdentifierState(root, path, "last", null);
+  const previousNames = previous ? new Set(previous.names) : null;
+  const newFindings = previousNames ? findings.filter((item) => !previousNames.has(item.name)) : [];
+  const existingFindings = previousNames ? findings.filter((item) => previousNames.has(item.name)) : findings;
+  await writeIdentifierState(root, path, "last", null, stateFor(path, true, findings, source));
+  if (deliveryId) await rm(identifierStatePath(root, path, "pending", deliveryId), { force: true });
+  const warning = existingFindings.map((item) => `${item.path}:${item.line}: ${item.name}`).join("\n");
+  if (newFindings.length) {
+    const added = newFindings.map((item) => `${item.path}:${item.line}: ${item.name}`).join("\n");
+    return {
+      status: "new-undeclared-identifiers", blocked: true, path, findings, newFindings, existingFindings,
+      reason: `AgentSpine new undeclared calls:\n${added}${warning ? `\nPre-existing warnings:\n${warning}` : ""}`
+    };
+  }
+  if (!findings.length) return { status: "clean", blocked: false, path, findings, newFindings, existingFindings };
   return {
-    status: "undeclared-identifiers", blocked: true, path, findings,
-    reason: `AgentSpine undeclared-identifier warning:\n${warning}`
+    status: previousNames ? "pre-existing-undeclared-identifiers" : "unverified-undeclared-identifiers",
+    blocked: false, path, findings, newFindings, existingFindings,
+    reason: `AgentSpine pre-existing undeclared-call warning (non-blocking):\n${warning}`
   };
 }
 

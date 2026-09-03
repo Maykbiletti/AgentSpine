@@ -26,7 +26,7 @@ import {
   isMutationTool, isScanFailOpenTool, shellTargetsProtected
 } from "./lib/hook-protection.js";
 import {
-  inspectWrittenJavaScript, verifyBaselineBeforeWrite, verifyDeliveredArtifacts
+  captureJavaScriptBeforeWrite, inspectWrittenJavaScript, verifyBaselineBeforeWrite, verifyDeliveredArtifacts
 } from "./lib/hook-artifact-guards.js";
 
 export { blunRuntimeContext, blunRuntimeMessage } from "./lib/hook-output.js";
@@ -168,6 +168,12 @@ async function runHookCore(input, payload) {
     } catch (error) {
       artifactGuard = { status: "scan-failed-open", blocked: false, path: error.path || cwd, reason: error.message };
       await auditGuard(input, "baseline-guard", artifactGuard);
+    }
+    try { await captureJavaScriptBeforeWrite({ input, cwd, root }); }
+    catch (error) {
+      await auditGuard(input, "identifier-before-state", {
+        status: "scan-failed-open", blocked: false, path: error.path || cwd, reason: error.message
+      });
     }
   }
 
@@ -455,6 +461,12 @@ async function runHookCore(input, payload) {
     return;
   }
   if (payload) return { blocked: false, artifactGuard, attentionEvent, selfstarter, learningDelivery, deliveryVerification };
+  if (artifactGuard?.reason) {
+    process.stdout.write(`${JSON.stringify({ hookSpecificOutput: {
+      hookEventName: event, additionalContext: artifactGuard.reason
+    } })}\n`);
+    return;
+  }
   process.stdout.write("{}\n");
 }
 

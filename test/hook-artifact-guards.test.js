@@ -36,6 +36,24 @@ function preWrite(root, exchange, assignment) {
   };
 }
 
+async function writeLifecycle(root, path, before, after, id) {
+  if (before !== null) await writeFile(path, before, "utf8");
+  const toolName = before === null ? "Write" : "Edit";
+  const toolInput = before === null
+    ? { file_path: path, content: after }
+    : { file_path: path, old_string: before, new_string: after };
+  const pre = await runHook({
+    hook_event_name: "PreToolUse", host: "codex", cwd: root, tool_name: toolName,
+    tool_use_id: id, tool_input: toolInput
+  });
+  assert.equal(pre.blocked, false);
+  await writeFile(path, after, "utf8");
+  return runHook({
+    hook_event_name: "PostToolUse", host: "codex", cwd: root, tool_name: toolName,
+    tool_use_id: id, tool_input: toolInput
+  });
+}
+
 test("baseline guard blocks only a verified stand mismatch and names both digests", async (t) => {
   const { root, exchange } = await fixture(t);
   const snapshot = "a".repeat(64);
@@ -68,39 +86,76 @@ test("missing baseline evidence allows the write and is audited once", async (t)
   assert.equal(records[0].decision, "allow");
 });
 
-test("PostToolUse reports undeclared calls but accepts multi-line variable declarations", async (t) => {
+test("editing around a pre-existing undeclared call passes with an exact warning", async (t) => {
   const { root } = await fixture(t);
-  const source = [
+  const before = [
     "const first = () => 1,",
     "  second = () => 2;",
     "function execute(value) {",
     "  first();",
     "  second();",
-    "  missingAction(value);",
+    "  legacyAction(value);",
     "}",
     "execute(1);",
     ""
   ].join("\n");
   const path = join(root, "output.mjs");
-  await writeFile(path, source, "utf8");
-  const result = await runHook({
-    hook_event_name: "PostToolUse", host: "codex", cwd: root, tool_name: "Edit",
-    tool_use_id: "tool:identifier:one", tool_input: { file_path: path }
-  });
-  assert.equal(result.blocked, true);
-  assert.deepEqual(result.artifactGuard.findings.map((item) => [item.line, item.name]), [[6, "missingAction"]]);
-  assert.match(result.reason, /output\.mjs:6: missingAction/);
-  assert.doesNotMatch(result.reason, /second/);
+  const after = before.replace("  first();", "  first();\n  const changed = value + 1;");
+  const result = await writeLifecycle(root, path, before, after, "tool:identifier:legacy");
+  assert.equal(result.blocked, false);
+  assert.equal(result.artifactGuard.status, "pre-existing-undeclared-identifiers");
+  assert.deepEqual(result.artifactGuard.newFindings, []);
+  assert.match(result.artifactGuard.reason, /output\.mjs:7: legacyAction/);
+  assert.doesNotMatch(result.artifactGuard.reason, /second/);
+});
 
-  await writeFile(join(root, ".agentspine-identifier-allowlist.json"), `${JSON.stringify({
-    schema: "agentspine.identifier-allowlist/v1", identifiers: ["missingAction"]
-  })}\n`);
-  const allowed = await runHook({
+test("adding a new undeclared call blocks with only the new name", async (t) => {
+  const { root } = await fixture(t);
+  const path = join(root, "output.js");
+  const before = "legacyAction();\n";
+  const result = await writeLifecycle(root, path, before,
+    `${before}newAction();\n`, "tool:identifier:new");
+  assert.equal(result.blocked, true);
+  assert.deepEqual(result.artifactGuard.newFindings.map((item) => item.name), ["newAction"]);
+  assert.match(result.reason, /new undeclared calls:[\s\S]*newAction/);
+  assert.match(result.reason, /Pre-existing warnings:[\s\S]*legacyAction/);
+});
+
+test("removing an undeclared call is accepted", async (t) => {
+  const { root } = await fixture(t);
+  const path = join(root, "output.cjs");
+  const result = await writeLifecycle(root, path, "legacyAction();\n",
+    "module.exports = 1;\n", "tool:identifier:remove");
+  assert.equal(result.blocked, false);
+  assert.equal(result.artifactGuard.status, "clean");
+  assert.deepEqual(result.artifactGuard.findings, []);
+});
+
+test("a brand-new file with an undeclared call blocks", async (t) => {
+  const { root } = await fixture(t);
+  const path = join(root, "new-output.js");
+  const result = await writeLifecycle(root, path, null,
+    "brandNewAction();\n", "tool:identifier:new-file");
+  assert.equal(result.blocked, true);
+  assert.deepEqual(result.artifactGuard.newFindings.map((item) => item.name), ["brandNewAction"]);
+  assert.match(result.reason, /new-output\.js:1: brandNewAction/);
+});
+
+test("the last audited identifier set remains a restart-safe comparison baseline", async (t) => {
+  const { root } = await fixture(t);
+  const path = join(root, "restart.js");
+  const before = "legacyAction();\n";
+  const first = await writeLifecycle(root, path, before,
+    `${before}const checkpoint = true;\n`, "tool:identifier:audit");
+  assert.equal(first.blocked, false);
+  await writeFile(path, `${before}const checkpoint = true;\nafterRestart();\n`, "utf8");
+  const restarted = await runHook({
     hook_event_name: "PostToolUse", host: "codex", cwd: root, tool_name: "Edit",
-    tool_use_id: "tool:identifier:allowlisted", tool_input: { file_path: path }
+    tool_use_id: "tool:identifier:after-restart", tool_input: { file_path: path }
   });
-  assert.equal(allowed.blocked, false);
-  assert.equal(allowed.artifactGuard.status, "clean");
+  assert.equal(restarted.blocked, true);
+  assert.deepEqual(restarted.artifactGuard.newFindings.map((item) => item.name), ["afterRestart"]);
+  assert.deepEqual(restarted.artifactGuard.existingFindings.map((item) => item.name), ["legacyAction"]);
 });
 
 test("delivery guard blocks a missing claim and allows a matching digest prefix", async (t) => {
