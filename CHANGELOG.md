@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-09-03
+
+### Added
+
+- Owner-confirmed plan steps can precommit required capability classes, two to eight candidate strategies, bounded risk and cost, and an objective metric gate. The lowest-risk sufficient strategy is selected deterministically before host execution.
+- Completed execution reports retain content-free, SHA-256-bound objective outcomes with the exact selected strategy, used capability classes, evaluator, metric, case count and blocking-defect result.
+
+### Security
+
+- Capability classes and strategy selection are context only and never grant a host tool or permission. Strategy, evaluator, metric and threshold drift fail closed, and scoped gateway context does not expose another agent's plan.
+- A model or runner completion claim without the exact objective evidence blocks the step. No favorable aggregate can overrule a blocking defect.
+
+### Changed
+
+- Failed objective gates pause the exact step for owner-confirmed retry. Restart reconciliation recreates one lost wake, while a passing gate advances the dependency plan exactly once.
+
 ## [0.56.0] - 2026-09-03
 
 ### Added

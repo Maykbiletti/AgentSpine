@@ -560,6 +560,94 @@ test("shared plan resources serialize conflicting agents by immutable goal prior
   await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
 });
 
+test("plan steps choose the safest sufficient strategy and require an objective post-action gate", async (t) => {
+  const { root, agentId, before } = await fixture(t);
+  const steps = [{
+    stepId: "step:bounded-inspection", title: "Inspect the bounded synthetic fixture.",
+    successCriterion: "The objective fixture score reaches the precommitted threshold.", dependsOn: [],
+    execution: {
+      requiredCapabilities: ["capability:inspect"],
+      strategies: [
+        { strategyId: "strategy:write-and-inspect", capabilities: ["capability:inspect", "capability:write"], risk: 40, cost: 10 },
+        { strategyId: "strategy:read-only", capabilities: ["capability:inspect"], risk: 5, cost: 20 }
+      ],
+      verification: { evaluatorId: "evaluator:synthetic-fixture", metric: "metric:quality", operator: "gte",
+        threshold: 0.9, minCases: 12 }
+    }
+  }];
+  await assignGoal({
+    root, goalId: "goal:execution-reflection", agentId, ownerSubjectId: "subject:owner",
+    projectId: "project:alpha", groupId: "group:alpha",
+    successCriterion: "The safest sufficient strategy passes objective verification.", steps,
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:01.000Z"
+  });
+
+  let seenDecision;
+  const unsupportedSelfReport = await runWorkerTick({ root, workerId: "worker:reflection:missing",
+    now: "2032-01-01T00:00:02.000Z", hostRunner: async (item) => {
+      seenDecision = item.goalStep.execution;
+      return { checkpoint: { inspected: true }, completed: true };
+    }, adapter: { send: async () => ({ ok: true }) } });
+  assert.equal(seenDecision.selectedStrategyId, "strategy:read-only");
+  assert.equal(unsupportedSelfReport.status, "blocked");
+  let loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals[0].plan.steps[0].executionOutcomes.length, 0);
+  assert.equal(loaded.runtime.receipts.some((receipt) => receipt.kind === "execution-proof-invalid"), true);
+
+  await assignGoal({ root, goalId: "goal:execution-reflection", agentId, ownerSubjectId: "subject:owner",
+    projectId: "project:alpha", groupId: "group:alpha",
+    successCriterion: "The safest sufficient strategy passes objective verification.", steps,
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:03.000Z" });
+  const failedGate = await runWorkerTick({ root, workerId: "worker:reflection:defect",
+    now: "2032-01-01T00:00:04.000Z", hostRunner: async () => ({ checkpoint: { inspected: true }, completed: true,
+      execution: { strategyId: "strategy:read-only", capabilitiesUsed: ["capability:inspect"], outcome: {
+        evaluatorId: "evaluator:synthetic-fixture", metric: "metric:quality", value: 0.98, cases: 12,
+        blockingDefect: true, sourceDigest: "a".repeat(64), observedAt: "2032-01-01T00:00:03.900Z"
+      } }
+    }), adapter: { send: async () => ({ ok: true }) } });
+  assert.equal(failedGate.status, "blocked");
+  loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals[0].plan.steps[0].executionOutcomes[0].passed, false);
+
+  await assignGoal({ root, goalId: "goal:execution-reflection", agentId, ownerSubjectId: "subject:owner",
+    projectId: "project:alpha", groupId: "group:alpha",
+    successCriterion: "The safest sufficient strategy passes objective verification.", steps,
+    confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:05.000Z" });
+  // Lose the resumed wake and prove restart reconciliation recreates exactly one.
+  loaded = await loadGatewayRuntime(root);
+  const lostQueueIds = new Set(loaded.runtime.queue.filter((item) => item.status === "pending").map((item) => item.queueId));
+  loaded.runtime.queue = loaded.runtime.queue.filter((item) => !lostQueueIds.has(item.queueId));
+  loaded.runtime.receipts = loaded.runtime.receipts.filter((receipt) => !lostQueueIds.has(receipt.objectId));
+  await writeFile(loaded.gatewayRuntimePath, `${JSON.stringify(loaded.runtime, null, 2)}\n`);
+  await reconcileGateway({ root, now: "2032-01-01T00:00:05.500Z" });
+  await reconcileGateway({ root, now: "2032-01-01T00:00:05.750Z" });
+  const raced = await Promise.all(Array.from({ length: 6 }, (_, index) => claimGatewayWork({
+    root, workerId: `worker:reflection:pass:${index}`, now: "2032-01-01T00:00:06.000Z"
+  })));
+  assert.equal(raced.filter((claim) => claim.item).length, 1);
+  const claim = raced.find((entry) => entry.item);
+  const completed = await completeGatewayRun({ root, queueId: claim.item.queueId,
+    workerId: claim.item.lease.workerId, now: "2032-01-01T00:00:07.000Z",
+    result: { checkpoint: { verified: true }, completed: true,
+      execution: { strategyId: "strategy:read-only", capabilitiesUsed: ["capability:inspect"], outcome: {
+        evaluatorId: "evaluator:synthetic-fixture", metric: "metric:quality", value: 0.93, cases: 12,
+        blockingDefect: false, sourceDigest: "b".repeat(64), observedAt: "2032-01-01T00:00:06.900Z"
+      } }
+    }
+  });
+  assert.equal(completed.executionReview.passed, true);
+  loaded = await loadGatewayRuntime(root);
+  assert.equal(loaded.policy.goals[0].status, "completed");
+  assert.deepEqual(loaded.policy.goals[0].plan.steps[0].executionOutcomes.map((outcome) => outcome.passed), [false, true]);
+  assert.deepEqual((await gatewayContext({ root, agentId: "agent:foreign" })).goals, []);
+  assert.deepEqual(gatewayRuntimeFindings(loaded.policy, loaded.runtime), []);
+  assert.equal(await readFile(join(root, "SOUL.md"), "utf8"), before);
+
+  loaded.policy.goals[0].plan.steps[0].execution.strategies[1].risk = 99;
+  await writeFile(loaded.gatewayPolicyPath, `${JSON.stringify(loaded.policy, null, 2)}\n`);
+  await assert.rejects(loadGatewayRuntime(root), /gateway policy is invalid/i);
+});
+
 test("pre-team goal plans retain their lead-agent routing after upgrade", async (t) => {
   const { root, agentId } = await fixture(t);
   await assignGoal({
@@ -569,7 +657,9 @@ test("pre-team goal plans retain their lead-agent routing after upgrade", async 
     confirmation: "local-owner-confirmed", now: "2032-01-01T00:00:01.000Z"
   });
   const loaded = await loadGatewayRuntime(root);
-  for (const step of loaded.policy.goals[0].plan.steps) delete step.resources;
+  for (const step of loaded.policy.goals[0].plan.steps) {
+    delete step.resources; delete step.execution; delete step.executionOutcomes;
+  }
   let definitions = loaded.policy.goals[0].plan.steps.map(({ stepId, agentId, title, successCriterion, dependsOn }) => ({
     stepId, agentId, title, successCriterion, dependsOn
   }));

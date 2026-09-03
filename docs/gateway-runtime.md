@@ -123,7 +123,22 @@ An agent without a queued message or an owner-assigned goal reports `idle/needs-
 {
   "steps": [
     { "stepId": "step:observe", "agentId": "agent:synthetic-codex", "resources": ["resource:synthetic-worktree"], "title": "Observe the state.", "successCriterion": "The input digest is recorded.", "dependsOn": [] },
-    { "stepId": "step:act", "agentId": "agent:synthetic-claude", "resources": ["resource:synthetic-worktree"], "title": "Apply the bounded action.", "successCriterion": "The action reports success.", "dependsOn": ["step:observe"] },
+    {
+      "stepId": "step:act",
+      "agentId": "agent:synthetic-claude",
+      "resources": ["resource:synthetic-worktree"],
+      "title": "Apply the bounded action.",
+      "successCriterion": "The objective gate passes.",
+      "dependsOn": ["step:observe"],
+      "execution": {
+        "requiredCapabilities": ["capability:inspect"],
+        "strategies": [
+          { "strategyId": "strategy:write-and-inspect", "capabilities": ["capability:inspect", "capability:write"], "risk": 40, "cost": 10 },
+          { "strategyId": "strategy:read-only", "capabilities": ["capability:inspect"], "risk": 5, "cost": 20 }
+        ],
+        "verification": { "evaluatorId": "evaluator:synthetic", "metric": "metric:quality", "operator": "gte", "threshold": 0.9, "minCases": 12 }
+      }
+    },
     { "stepId": "step:verify", "agentId": "agent:synthetic-codex", "resources": [], "title": "Verify the outcome.", "successCriterion": "The independent check passes.", "dependsOn": ["step:act"] }
   ]
 }
@@ -151,7 +166,33 @@ The immutable definition digest binds 1-32 exact step IDs, agent assignees, up t
 
 While a step is leased, another ready step with an intersecting resource set waits only when both steps belong to the exact same project and group. Competing steps are ordered by the current owner-confirmed goal priority; queue priority is not trusted. Independent resources and equal names in a foreign group continue concurrently. The affected agent's scoped gateway context reports the content-free resource IDs and blocking queue IDs. Completion releases the resources immediately, and ordinary lease-expiry reconciliation releases them after a worker crash.
 
-A generically blocked step retains its checkpoint and requires the owner to repeat the same confirmed assignment before it becomes runnable again. If an assignee leaves, reconciliation cancels runnable work and pauses the exact step before host execution. A step with an open knowledge gap cannot use the generic resume shortcut: it resumes only through `goal-clarify`, and the resolved context is included in the next exact host request. Restart reconciliation recreates exactly one missing runnable step after a torn policy/runtime write but never duplicates an open question. Cycles, unknown dependencies, assignment, resource or definition drift, stale leases, out-of-order completion, weak answer provenance and altered gap bindings fail closed. Plans, resources, gaps, answers and checkpoints remain context-only: they cannot choose or grant a tool, route, identity, delegation, payment, production right or policy exception.
+An optional execution decision precommits one or more required capability classes, two to eight candidate strategies, and an objective verification gate. AgentSpine filters out strategies that do not cover every requirement, then selects the lowest risk, lowest cost and lexicographically first strategy in that order. These are planning labels, not tool grants: the separately approved host and its native policy remain the only source of actual tool access.
+
+For an execution-bound step, `completed: true` is insufficient. The runner must return the selected strategy, capability classes actually used and one content-free objective outcome:
+
+```json
+{
+  "checkpoint": { "inspected": true },
+  "completed": true,
+  "execution": {
+    "strategyId": "strategy:read-only",
+    "capabilitiesUsed": ["capability:inspect"],
+    "outcome": {
+      "evaluatorId": "evaluator:synthetic",
+      "metric": "metric:quality",
+      "value": 0.93,
+      "cases": 12,
+      "blockingDefect": false,
+      "sourceDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "observedAt": "2032-01-01T00:00:06.900Z"
+    }
+  }
+}
+```
+
+The selected strategy, evaluator, metric, threshold and case floor are covered by the immutable plan definition. Missing or mismatched evidence blocks the exact step. A blocking defect always fails even when the numeric metric passes; an owner-confirmed retry preserves earlier outcomes. A passing outcome advances the dependency graph once, and restart reconciliation reconstructs one lost wake without duplicating completion.
+
+A generically blocked step retains its checkpoint and requires the owner to repeat the same confirmed assignment before it becomes runnable again. If an assignee leaves, reconciliation cancels runnable work and pauses the exact step before host execution. A step with an open knowledge gap cannot use the generic resume shortcut: it resumes only through `goal-clarify`, and the resolved context is included in the next exact host request. Restart reconciliation recreates exactly one missing runnable step after a torn policy/runtime write but never duplicates an open question. Cycles, unknown dependencies, assignment, resource, execution-decision or definition drift, stale leases, out-of-order completion, weak answer provenance and altered gap bindings fail closed. Plans, resources, capability labels, gaps, answers and checkpoints remain context-only: they cannot choose or grant an actual tool, route, identity, delegation, payment, production right or policy exception.
 
 Promise, resolved-blocker, deadline, assignment, follow-up, and direct-message wakes share bounded per-agent lanes. Each effect rechecks current policy, identity, group, route, current plan step, and kill-switch state.
 

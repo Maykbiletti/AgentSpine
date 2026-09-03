@@ -17,6 +17,7 @@ export const GATEWAY_RUNTIME_SCHEMA = "agentspine.gateway-runtime/v1";
 export const GATEWAY_EVENT_SCHEMA = "agentspine.gateway-event/v1";
 export const GOAL_PLAN_SCHEMA = "agentspine.goal-plan/v1";
 export const KNOWLEDGE_GAP_SCHEMA = "agentspine.knowledge-gap/v1";
+export const EXECUTION_OUTCOME_SCHEMA = "agentspine.execution-outcome/v1";
 
 const CONFIRMATION = "local-owner-confirmed";
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -33,6 +34,7 @@ const SECRET_KEY_RE = /"(?:api[-_ ]?key|token|password|secret|credential)"\s*:/i
 const AUTHORITY_RE = /\b(?:permission|rights?|roles?|owner|trusted|delegat|authorized|approval|production|payment|spending|tool capability|send capability)\b/i;
 const HEALTH_VALUES = new Set(["stopped", "running", "unknown", "healthy", "degraded", "failed"]);
 const KNOWLEDGE_EVIDENCE = new Set(["owner-input", "objective-observation"]);
+const METRIC_OPERATORS = new Set(["gte", "lte", "eq"]);
 
 function emptyPolicy(root) {
   return { schema: GATEWAY_POLICY_SCHEMA, root, revision: 0, enabled: false, killSwitch: false, goals: [], history: [] };
@@ -136,10 +138,153 @@ function validKnowledgeGap(gap) {
   return gap.resolutionDigest === sha256(JSON.stringify(knowledgeGapResolutionMaterial(gap)));
 }
 
+function executionDecisionMaterial(execution) {
+  return {
+    requiredCapabilities: execution.requiredCapabilities, strategies: execution.strategies,
+    verification: execution.verification, selectedStrategyId: execution.selectedStrategyId,
+    authority: "context-only-decision"
+  };
+}
+
+function selectedExecutionStrategy(execution) {
+  const required = new Set(execution.requiredCapabilities);
+  return execution.strategies.filter((strategy) => strategy.capabilities.every((capability) => ID_RE.test(capability))
+    && [...required].every((capability) => strategy.capabilities.includes(capability)))
+    .sort((left, right) => left.risk - right.risk || left.cost - right.cost
+      || left.strategyId.localeCompare(right.strategyId))[0] || null;
+}
+
+function validExecutionDecision(execution) {
+  if (!(execution && execution.authority === "context-only-decision"
+    && Array.isArray(execution.requiredCapabilities) && execution.requiredCapabilities.length > 0
+    && execution.requiredCapabilities.length <= 16
+    && new Set(execution.requiredCapabilities).size === execution.requiredCapabilities.length
+    && execution.requiredCapabilities.every((capability) => ID_RE.test(capability || ""))
+    && Array.isArray(execution.strategies) && execution.strategies.length >= 2 && execution.strategies.length <= 8
+    && new Set(execution.strategies.map((strategy) => strategy?.strategyId)).size === execution.strategies.length
+    && execution.strategies.every((strategy) => strategy && ID_RE.test(strategy.strategyId || "")
+      && Array.isArray(strategy.capabilities) && strategy.capabilities.length > 0 && strategy.capabilities.length <= 16
+      && new Set(strategy.capabilities).size === strategy.capabilities.length
+      && strategy.capabilities.every((capability) => ID_RE.test(capability || ""))
+      && Number.isInteger(strategy.risk) && strategy.risk >= 0 && strategy.risk <= 100
+      && Number.isInteger(strategy.cost) && strategy.cost >= 0 && strategy.cost <= 100)
+    && execution.verification && ID_RE.test(execution.verification.evaluatorId || "")
+    && ID_RE.test(execution.verification.metric || "") && METRIC_OPERATORS.has(execution.verification.operator)
+    && Number.isFinite(execution.verification.threshold)
+    && Number.isInteger(execution.verification.minCases) && execution.verification.minCases >= 1
+    && execution.verification.minCases <= 100000 && ID_RE.test(execution.selectedStrategyId || "")
+    && /^[a-f0-9]{64}$/.test(execution.decisionDigest || ""))) return false;
+  const selected = selectedExecutionStrategy(execution);
+  return selected?.strategyId === execution.selectedStrategyId
+    && execution.decisionDigest === sha256(JSON.stringify(executionDecisionMaterial(execution)));
+}
+
+function createExecutionDecision(value, field) {
+  if (value === null || value === undefined) return null;
+  const execution = {
+    requiredCapabilities: Array.isArray(value.requiredCapabilities)
+      ? value.requiredCapabilities.map((capability) => exactId(capability, `${field}.requiredCapabilities`)) : [],
+    strategies: Array.isArray(value.strategies) ? value.strategies.map((strategy, index) => ({
+      strategyId: exactId(strategy?.strategyId, `${field}.strategies[${index}].strategyId`),
+      capabilities: Array.isArray(strategy?.capabilities)
+        ? strategy.capabilities.map((capability) => exactId(capability, `${field}.strategies[${index}].capabilities`)) : [],
+      risk: Number(strategy?.risk), cost: Number(strategy?.cost)
+    })) : [],
+    verification: {
+      evaluatorId: exactId(value.verification?.evaluatorId, `${field}.verification.evaluatorId`),
+      metric: exactId(value.verification?.metric, `${field}.verification.metric`),
+      operator: value.verification?.operator,
+      threshold: Number(value.verification?.threshold), minCases: Number(value.verification?.minCases)
+    },
+    selectedStrategyId: null, decisionDigest: null, authority: "context-only-decision"
+  };
+  execution.selectedStrategyId = selectedExecutionStrategy(execution)?.strategyId || null;
+  execution.decisionDigest = sha256(JSON.stringify(executionDecisionMaterial(execution)));
+  if (!validExecutionDecision(execution)) {
+    throw new Error(`${field} requires 2-8 bounded strategies and one objective verification gate`);
+  }
+  return execution;
+}
+
+function executionOutcomeMaterial(outcome) {
+  return {
+    queueId: outcome.queueId, decisionDigest: outcome.decisionDigest, strategyId: outcome.strategyId,
+    capabilitiesUsed: outcome.capabilitiesUsed, evaluatorId: outcome.evaluatorId, metric: outcome.metric,
+    value: outcome.value, cases: outcome.cases, blockingDefect: outcome.blockingDefect,
+    sourceDigest: outcome.sourceDigest, observedAt: outcome.observedAt, passed: outcome.passed,
+    authority: "objective-evidence-only"
+  };
+}
+
+function metricPassed(operator, value, threshold) {
+  if (operator === "gte") return value >= threshold;
+  if (operator === "lte") return value <= threshold;
+  return value === threshold;
+}
+
+function validExecutionOutcome(outcome, execution) {
+  if (!(outcome && outcome.schema === EXECUTION_OUTCOME_SCHEMA && ID_RE.test(outcome.outcomeId || "")
+    && ID_RE.test(outcome.queueId || "") && outcome.decisionDigest === execution.decisionDigest
+    && outcome.strategyId === execution.selectedStrategyId && Array.isArray(outcome.capabilitiesUsed)
+    && outcome.capabilitiesUsed.length <= 16 && new Set(outcome.capabilitiesUsed).size === outcome.capabilitiesUsed.length
+    && outcome.capabilitiesUsed.every((capability) => ID_RE.test(capability || ""))
+    && outcome.evaluatorId === execution.verification.evaluatorId && outcome.metric === execution.verification.metric
+    && Number.isFinite(outcome.value) && Number.isInteger(outcome.cases) && outcome.cases >= 0
+    && typeof outcome.blockingDefect === "boolean" && /^[a-f0-9]{64}$/.test(outcome.sourceDigest || "")
+    && Number.isFinite(new Date(outcome.observedAt).getTime()) && typeof outcome.passed === "boolean"
+    && /^[a-f0-9]{64}$/.test(outcome.digest || "") && outcome.authority === "objective-evidence-only")) return false;
+  const strategy = execution.strategies.find((item) => item.strategyId === execution.selectedStrategyId);
+  const used = new Set(outcome.capabilitiesUsed);
+  const expectedPass = execution.requiredCapabilities.every((capability) => used.has(capability))
+    && outcome.capabilitiesUsed.every((capability) => strategy.capabilities.includes(capability))
+    && outcome.cases >= execution.verification.minCases && !outcome.blockingDefect
+    && metricPassed(execution.verification.operator, outcome.value, execution.verification.threshold);
+  const digest = sha256(JSON.stringify(executionOutcomeMaterial(outcome)));
+  return outcome.passed === expectedPass && outcome.digest === digest
+    && outcome.outcomeId === "execution-outcome:" + digest.slice(0, 32);
+}
+
+function reviewExecutionResult(execution, queueId, report, now) {
+  if (!report || report.strategyId !== execution.selectedStrategyId || !Array.isArray(report.capabilitiesUsed)
+    || !report.outcome || report.outcome.evaluatorId !== execution.verification.evaluatorId
+    || report.outcome.metric !== execution.verification.metric) {
+    return { passed: false, outcome: null, reason: "Objective execution evidence is missing or invalid." };
+  }
+  let outcome;
+  try {
+    outcome = {
+      schema: EXECUTION_OUTCOME_SCHEMA, outcomeId: null, queueId,
+      decisionDigest: execution.decisionDigest, strategyId: report.strategyId,
+      capabilitiesUsed: report.capabilitiesUsed.map((capability) => exactId(capability, "execution.capabilitiesUsed")),
+      evaluatorId: report.outcome.evaluatorId, metric: report.outcome.metric,
+      value: Number(report.outcome.value), cases: Number(report.outcome.cases),
+      blockingDefect: report.outcome.blockingDefect === true, sourceDigest: String(report.outcome.sourceDigest || ""),
+      observedAt: timestamp(report.outcome.observedAt || now), passed: false, digest: null,
+      authority: "objective-evidence-only"
+    };
+    const strategy = execution.strategies.find((item) => item.strategyId === execution.selectedStrategyId);
+    const used = new Set(outcome.capabilitiesUsed);
+    outcome.passed = execution.requiredCapabilities.every((capability) => used.has(capability))
+      && outcome.capabilitiesUsed.every((capability) => strategy.capabilities.includes(capability))
+      && outcome.cases >= execution.verification.minCases && !outcome.blockingDefect
+      && metricPassed(execution.verification.operator, outcome.value, execution.verification.threshold);
+    outcome.digest = sha256(JSON.stringify(executionOutcomeMaterial(outcome)));
+    outcome.outcomeId = "execution-outcome:" + outcome.digest.slice(0, 32);
+  } catch {
+    return { passed: false, outcome: null, reason: "Objective execution evidence is missing or invalid." };
+  }
+  if (!validExecutionOutcome(outcome, execution)) {
+    return { passed: false, outcome: null, reason: "Objective execution evidence is missing or invalid." };
+  }
+  return { passed: outcome.passed, outcome,
+    reason: outcome.passed ? null : "The objective execution gate did not pass." };
+}
+
 function planDefinitionMaterial(steps) {
-  return steps.map(({ stepId, agentId, resources, title, successCriterion, dependsOn }) => ({
+  return steps.map(({ stepId, agentId, resources, execution, title, successCriterion, dependsOn }) => ({
     stepId, ...(agentId === undefined ? {} : { agentId }),
-    ...(resources === undefined ? {} : { resources }), title, successCriterion, dependsOn
+    ...(resources === undefined ? {} : { resources }), ...(execution === undefined ? {} : { execution }),
+    title, successCriterion, dependsOn
   }));
 }
 
@@ -155,6 +300,11 @@ function validGoalPlan(plan) {
       && (step.agentId === undefined || ID_RE.test(step.agentId || ""))
       && (step.resources === undefined || (Array.isArray(step.resources) && step.resources.length <= 16
         && new Set(step.resources).size === step.resources.length && step.resources.every((resource) => ID_RE.test(resource || ""))))
+      && (step.execution === undefined || step.execution === null || validExecutionDecision(step.execution))
+      && (step.executionOutcomes === undefined || (Array.isArray(step.executionOutcomes) && step.executionOutcomes.length <= 8
+        && new Set(step.executionOutcomes.map((outcome) => outcome.outcomeId)).size === step.executionOutcomes.length
+        && (step.executionOutcomes.length === 0 || (step.execution
+          && step.executionOutcomes.every((outcome) => validExecutionOutcome(outcome, step.execution))))))
       && typeof step.successCriterion === "string" && step.successCriterion.length > 0 && step.successCriterion.length <= 1000
       && Array.isArray(step.dependsOn) && new Set(step.dependsOn).size === step.dependsOn.length
       && step.dependsOn.every((dependency) => ids.has(dependency) && dependency !== step.stepId)
@@ -187,6 +337,8 @@ function validGoalPlan(plan) {
   if (plan.steps.some((step) => (step.knowledgeGaps || []).filter((gap) => gap.status === "open").length > 1)) return false;
   if (plan.steps.some((step) => (step.knowledgeGaps || []).some((gap) => gap.status === "open")
     && step.status !== "blocked")) return false;
+  if (plan.steps.some((step) => step.execution && step.status === "completed"
+    && !(step.executionOutcomes || []).some((outcome) => outcome.passed))) return false;
   if (plan.definitionsDigest !== sha256(JSON.stringify(planDefinitionMaterial(plan.steps)))) return false;
   const current = plan.steps.filter((step) => ["active", "blocked"].includes(step.status));
   return current.length <= 1 && (plan.currentStepId === null
@@ -208,11 +360,12 @@ function createGoalPlan(steps, now, defaultAgentId) {
     agentId: exactId(step?.agentId ?? defaultAgentId, `steps[${index}].agentId`),
     resources: Array.isArray(step?.resources)
       ? step.resources.map((resource) => exactId(resource, `steps[${index}].resources`)) : [],
+    execution: createExecutionDecision(step?.execution, `steps[${index}].execution`),
     title: safeText(step?.title, `steps[${index}].title`, 500),
     successCriterion: safeText(step?.successCriterion, `steps[${index}].successCriterion`),
     dependsOn: Array.isArray(step?.dependsOn) ? step.dependsOn.map((dependency) => exactId(dependency, `steps[${index}].dependsOn`)) : [],
     status: "pending", checkpoint: null, blocker: null, completedAt: null, completedByQueueId: null,
-    knowledgeGaps: [], updatedAt: now
+    knowledgeGaps: [], executionOutcomes: [], updatedAt: now
   }));
   const plan = { schema: GOAL_PLAN_SCHEMA, revision: 0, currentStepId: null, steps: normalized,
     definitionsDigest: sha256(JSON.stringify(planDefinitionMaterial(normalized))), authority: "context-only-plan" };
@@ -851,10 +1004,10 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     const lane = runtime.lanes.find((entry) => entry.queueId === item.queueId && entry.workerId === workerId && entry.status === "leased");
     if (!lane) throw new Error("agent lane lease is missing");
     const boundGoal = item.goalId ? policy.goals.find((entry) => entry.goalId === item.goalId) : null;
+    const boundStep = item.goalStepId ? boundGoal && currentPlanStep(boundGoal) : null;
     if (item.goalStepId) {
-      const step = boundGoal && currentPlanStep(boundGoal);
-      if (!boundGoal?.plan || boundGoal.status !== "active" || step?.stepId !== item.goalStepId || step.status !== "active"
-        || item.agentId !== planStepAgentId(boundGoal, step)) {
+      if (!boundGoal?.plan || boundGoal.status !== "active" || boundStep?.stepId !== item.goalStepId
+        || boundStep.status !== "active" || item.agentId !== planStepAgentId(boundGoal, boundStep)) {
         throw new Error("run completion is not bound to the current active goal step");
       }
     }
@@ -865,6 +1018,11 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     }
     if (knowledgeGapRequest && (result?.blocked || result?.completed)) {
       throw new Error("knowledge gap result cannot also complete or generically block a step");
+    }
+    let executionReview = boundStep?.execution && result?.completed
+      ? reviewExecutionResult(boundStep.execution, item.queueId, result.execution, current) : null;
+    if (executionReview && (boundStep.executionOutcomes || []).length >= 8) {
+      executionReview = { passed: false, outcome: null, reason: "Execution outcome history is full." };
     }
     const text = result?.text ? safeText(result.text, "result.text", 16000) : null;
     let clarification = null;
@@ -888,13 +1046,15 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
       }
       item.status = "awaiting-delivery";
     } else {
-      item.status = result?.blocked || knowledgeGapRequest ? "blocked" : "completed"; item.completedAt = current;
+      item.status = result?.blocked || knowledgeGapRequest || (executionReview && !executionReview.passed)
+        ? "blocked" : "completed"; item.completedAt = current;
       const goal = boundGoal;
       if (goal) {
         policy.history.push({ kind: "goal", at: current, value: structuredClone(goal), authority: "authenticated-goal-policy" });
         const checkpoint = result?.checkpoint === undefined ? goal.checkpoint : safeCheckpoint(result.checkpoint);
         goal.checkpoint = checkpoint; goal.heartbeatAt = current;
-        goal.blocker = result?.blocked ? safeText(result.blocker || "Run blocked.", "blocker", 500) : null;
+        goal.blocker = result?.blocked ? safeText(result.blocker || "Run blocked.", "blocker", 500)
+          : executionReview && !executionReview.passed ? executionReview.reason : null;
         if (goal.plan && item.goalStepId) {
           const step = currentPlanStep(goal);
           step.checkpoint = checkpoint; step.updatedAt = current;
@@ -921,7 +1081,19 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
             goal.plan.revision += 1;
           } else if (result?.blocked) {
             step.status = "blocked"; step.blocker = goal.blocker; goal.status = "blocked";
+          } else if (executionReview && !executionReview.passed) {
+            if (executionReview.outcome) step.executionOutcomes.push(executionReview.outcome);
+            step.status = "blocked"; step.blocker = goal.blocker; goal.status = "blocked";
+            appendReceipt(runtime, executionReview.outcome ? "execution-gate-failed" : "execution-proof-invalid",
+              item.queueId, current, { goalStepId: step.stepId,
+                outcomeId: executionReview.outcome?.outcomeId || null });
           } else if (result?.completed) {
+            if (executionReview?.outcome) {
+              step.executionOutcomes.push(executionReview.outcome);
+              appendReceipt(runtime, "execution-gate-passed", item.queueId, current, {
+                goalStepId: step.stepId, outcomeId: executionReview.outcome.outcomeId
+              });
+            }
             step.status = "completed"; step.completedAt = current; step.completedByQueueId = item.queueId; step.blocker = null;
             goal.plan.currentStepId = null; goal.plan.revision += 1;
             const next = activateNextPlanStep(goal.plan, current);
@@ -963,7 +1135,8 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     runtime.health.host = "healthy"; runtime.health.worker = "healthy"; runtime.health.lastTickAt = current;
     appendReceipt(runtime, "run-terminal", item.queueId, current, { status: item.status, goalStepId: item.goalStepId || null }); runtime.revision += 1;
     await Promise.all([writeJson(paths.gatewayPolicyPath, policy), writeJson(paths.gatewayRuntimePath, runtime)]);
-    return { item, outbox: runtime.outbox.find((entry) => entry.queueId === item.queueId) || null, clarification };
+    return { item, outbox: runtime.outbox.find((entry) => entry.queueId === item.queueId) || null,
+      clarification, executionReview };
   });
 }
 
