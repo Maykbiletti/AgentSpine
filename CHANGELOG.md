@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-09-03
+
+### Added
+
+- Owner-confirmed execution decisions can precommit two to four bounded attempts. After an objectively measured, non-blocking failure, the worker continues with exactly one remaining sufficient strategy from the same minimum-risk class.
+- Every host request receives a content-free execution-attempt contract containing the frozen strategy, attempt number, budget, decision digest and previous outcome digest. Scoped gateway context exposes only the current agent's pending attempt.
+
+### Security
+
+- Exploration never enters a higher-risk strategy class, never grants a tool or permission, and never starts from missing, malformed, future-dated or reused evidence. A blocking defect stops immediately regardless of its numeric score.
+- Attempt order, budget and outcome lineage are covered by immutable digests. Cross-group context, altered orders and duplicate source evidence fail closed.
+
+### Changed
+
+- A valid non-blocking objective failure can advance one frozen alternative atomically instead of always pausing for owner retry. Budget exhaustion still blocks the exact step and requires a new goal ID; restart reconciliation recreates one lost continuation without duplicating an attempt.
+
 ## [0.58.0] - 2026-09-03
 
 ### Added

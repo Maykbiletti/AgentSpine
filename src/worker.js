@@ -3,7 +3,10 @@ import { spawn } from "node:child_process";
 import { watch } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
-import { claimGatewayWork, completeGatewayRun, deliverPrepared, failGatewayRun, loadGatewayRuntime, reconcileGateway, updateGatewayHealth } from "./lib/gateway-runtime.js";
+import {
+  claimGatewayWork, completeGatewayRun, deliverPrepared, executionAttemptForStep,
+  failGatewayRun, loadGatewayRuntime, reconcileGateway, updateGatewayHealth
+} from "./lib/gateway-runtime.js";
 import { createTelegramAdapter } from "./lib/telegram-adapter.js";
 import { acknowledgeChannelDelivery, loadChannelRuntime } from "./lib/channel-runtime.js";
 import { loadPersonaRuntime, syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
@@ -93,12 +96,15 @@ async function hostWorkItem(root, item) {
   const goalStep = item.goalStepId === null || item.goalStepId === undefined ? null
     : goal?.plan?.steps.find((entry) => entry.stepId === item.goalStepId) || null;
   if (item.goalStepId && !goalStep) throw new Error("claimed work lost its exact goal-plan step");
+  const executionAttempt = executionAttemptForStep(goalStep);
   const event = item.channelEventId === null ? null
     : channel.runtime.events.find((entry) => entry.eventId === item.channelEventId) || null;
   if (item.channelEventId && !event) throw new Error("claimed channel work lost its exact event");
   return {
     ...structuredClone(item), host: identity.host, profileId: identity.profileId, projectRoot: root,
-    goal: goal ? structuredClone(goal) : null, goalStep: goalStep ? structuredClone(goalStep) : null,
+    goal: goal ? structuredClone(goal) : null,
+    goalStep: goalStep ? { ...structuredClone(goalStep),
+      ...(executionAttempt === null ? {} : { executionAttempt }) } : null,
     hostEnvironment: {
       AGENTSPINE_GATEWAY_CONTEXT: "agentspine.gateway-start/v1",
       AGENTSPINE_ENTITY_ID: item.agentId,
@@ -156,9 +162,11 @@ export async function runWorkerTick({ root = process.cwd(), workerId = "gateway-
   }
   const completed = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId, result, now });
   if (!completed.outbox) return {
-    status: completed.clarification ? "needs-clarification" : completed.item.status,
+    status: completed.clarification ? "needs-clarification"
+      : completed.exploration ? "exploring" : completed.item.status,
     processed: true, queueId: completed.item.queueId,
-    ...(completed.clarification ? { clarification: completed.clarification } : {})
+    ...(completed.clarification ? { clarification: completed.clarification } : {}),
+    ...(completed.exploration ? { exploration: completed.exploration } : {})
   };
   const delivery = await deliverPrepared({ root, outboxId: completed.outbox.outboxId,
     adapter: deliveryAdapter, now });
