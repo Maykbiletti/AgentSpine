@@ -13,6 +13,31 @@ import { upsertEntity } from "../src/lib/graph.js";
 import { proposeLearning, reviewLearning } from "../src/lib/learning.js";
 import { initDirectoryAdapter, publishLearning, pullShared, reviewShared } from "../src/lib/sharing.js";
 
+function closeMcpChild(child) {
+  return new Promise((resolve, reject) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
+    let forceTimer;
+    let failureTimer;
+    const finish = () => {
+      clearTimeout(forceTimer);
+      clearTimeout(failureTimer);
+      resolve();
+    };
+    child.once("close", finish);
+    child.stdin.end();
+    forceTimer = setTimeout(() => {
+      try { child.kill(); } catch {}
+    }, 1_000);
+    failureTimer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch {}
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.unref();
+      reject(new Error("MCP child did not close after stdin EOF and forced termination"));
+    }, 3_000);
+  });
+}
+
 test("MCP server initializes and lists its read and graph tools", async () => {
   const input = new PassThrough();
   const output = new PassThrough();
@@ -134,7 +159,7 @@ test("MCP accepts reordered items and records a canonical context-only premortem
     env: { ...process.env, AGENTSPINE_STATE_DIR: state },
     stdio: ["pipe", "pipe", "pipe"]
   });
-  t.after(() => child.kill());
+  t.after(() => closeMcpChild(child));
   child.stdin.write(`${JSON.stringify({
     jsonrpc: "2.0", id: 3, method: "tools/call",
     params: {
@@ -197,7 +222,7 @@ test("MCP accepts reordered items and records a canonical context-only premortem
 test("agentspine mcp CLI launches the stdio server", async (t) => {
   const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
   const child = spawn(process.execPath, [cli, "mcp"], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => child.kill());
+  t.after(() => closeMcpChild(child));
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 7, method: "initialize", params: {} })}\n`);
   const response = await new Promise((resolve, reject) => {
     let buffer = "";

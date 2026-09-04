@@ -1,15 +1,16 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
 import { cpus, tmpdir } from "node:os";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { githubErrorCommand } from "./github-actions.js";
+import { configuredTestTimeout, runBoundedProcess } from "./hermetic-process.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const base = await mkdtemp(join(tmpdir(), "agentspine-hermetic-tests-"));
 const testFiles = (await readdir(join(root, "test"))).filter((name) => name.endsWith(".test.js")).sort();
 const concurrency = Math.max(1, Math.min(4, cpus().length));
+const testTimeoutMs = configuredTestTimeout();
 
 async function profileEnvironment(mode, index) {
   const profile = join(base, mode, String(index));
@@ -29,14 +30,14 @@ async function profileEnvironment(mode, index) {
 
 async function runOne(file, mode, index) {
   const env = await profileEnvironment(mode, index);
-  return new Promise((resolvePromise) => {
-    const child = spawn(process.execPath, ["--test", join(root, "test", file)], { cwd: root, env, shell: false,
-      stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-    let stdout = ""; let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk; }); child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("close", (code) => resolvePromise({ file, mode, code, stdout, stderr }));
-    child.on("error", (error) => resolvePromise({ file, mode, code: 1, stdout, stderr: error.message }));
+  const result = await runBoundedProcess({
+    command: process.execPath,
+    args: ["--test", join(root, "test", file)],
+    options: { cwd: root, env },
+    label: `${mode} ${file}`,
+    timeoutMs: testTimeoutMs
   });
+  return { ...result, file, mode };
 }
 
 async function runMode(mode) {
