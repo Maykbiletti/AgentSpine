@@ -5,7 +5,6 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { runHook } from "../src/hook.js";
 import {
@@ -15,7 +14,6 @@ import {
 import {
   closedPremortemForGoal, inspectDeliveryPremortems, recordDeliveryPremortem
 } from "../src/lib/delivery-premortem.js";
-import { canonicalPath } from "../src/lib/paths.js";
 
 const HOOK_PATH = fileURLToPath(new URL("../src/hook.js", import.meta.url));
 const PROJECT_ID = "project:write-intent";
@@ -90,15 +88,6 @@ function installedOversize(state, root, input) {
   const result = installed(state, root, input, ["--silent-oversize-post-tool-use"]);
   assert.deepEqual({ status: result.status, stdout: result.stdout, stderr: result.stderr },
     { status: 0, stdout: "", stderr: "" });
-}
-
-async function waitForFile(path) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try { await readFile(path); return; }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
-    await delay(5);
-  }
-  throw new Error(`timed out waiting for ${path}`);
 }
 
 test("oversized mutating PostToolUse leaves a durable intent until an objective test", async (t) => {
@@ -335,30 +324,20 @@ test("only explicit delivery outcome evidence satisfies a recognized test", () =
 });
 
 test("PreToolUse blocks when premortem state conflicts after its initial verification", async (t) => {
-  const { root, state } = await fixture(t);
+  const { root } = await fixture(t);
   const identity = lane(root, "session:intent-race", "turn:intent-race");
   const recorded = await registerPremortem(root, identity);
   const target = join(root, "race.js");
   const tool = { tool_name: "Write", tool_use_id: "tool:intent-race",
     tool_input: { file_path: target, content: "const safe = true;\n" } };
-  const verification = await deliveryVerificationPath({ root, host: "codex",
-    sessionId: deliveryActorSession(identity), scope: { projectId: PROJECT_ID } });
-  const lock = `${verification}.lock`;
-  await writeFile(lock, "synthetic race barrier\n", "utf8");
-  const canonicalRoot = await canonicalPath(root);
-  const project = createHash("sha256").update(canonicalRoot).digest("hex").slice(0, 32);
-  const pending = join(state, "identifier-guard", project, "pending",
-    `${createHash("sha256").update(target).digest("hex")}.${createHash("sha256")
-      .update(tool.tool_use_id).digest("hex")}.json`);
-  const running = runHook({ ...identity, ...tool, hook_event_name: "PreToolUse" });
-  try {
-    await waitForFile(pending);
-    const conflict = await recordDeliveryPremortem({ root, requirementId: recorded.requirementId,
+  const denied = await runHook({ ...identity, ...tool, hook_event_name: "PreToolUse" }, {
+    afterDeliveryWriteIntent: async () => {
+      const conflict = await recordDeliveryPremortem({ root, requirementId: recorded.requirementId,
       items: premortemItems().map((item, index) => index ? item
         : { ...item, failure: `${item.failure} unexpectedly` }) });
-    assert.equal(conflict.status, "conflict");
-  } finally { await rm(lock, { force: true }); }
-  const denied = await running;
+      assert.equal(conflict.status, "conflict");
+    }
+  });
   assert.equal(denied.blocked, true);
   assert.equal(denied.deliveryVerification.status, "intent-recorded");
   assert.equal(denied.premortem.status, "conflict");

@@ -11,6 +11,14 @@ const base = await mkdtemp(join(tmpdir(), "agentspine-hermetic-tests-"));
 const testFiles = (await readdir(join(root, "test"))).filter((name) => name.endsWith(".test.js")).sort();
 const concurrency = Math.max(1, Math.min(4, cpus().length));
 const testTimeoutMs = configuredTestTimeout();
+const slowTestTimeouts = new Map([
+  ["indexed-memory.test.js", 300_000]
+]);
+
+function timeoutFor(file) {
+  if (process.env.AGENTSPINE_TEST_FILE_TIMEOUT_MS) return testTimeoutMs;
+  return slowTestTimeouts.get(file) || testTimeoutMs;
+}
 
 async function profileEnvironment(mode, index) {
   const profile = join(base, mode, String(index));
@@ -35,7 +43,7 @@ async function runOne(file, mode, index) {
     args: ["--test", join(root, "test", file)],
     options: { cwd: root, env },
     label: `${mode} ${file}`,
-    timeoutMs: testTimeoutMs
+    timeoutMs: timeoutFor(file)
   });
   return { ...result, file, mode };
 }

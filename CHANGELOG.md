@@ -10,12 +10,16 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 - Hermetic test workers now have a bounded per-file deadline and terminate the complete descendant process tree on Windows, macOS and Linux. A leaked child can no longer hold every matrix job silently until GitHub's six-hour limit.
 - MCP subprocess tests now close stdin and await the server's confirmed exit, removing the unjoined pipe lifecycle that held the Windows matrix open after assertions had passed.
+- MCP subprocesses are explicitly closed before Windows removes their fixtures, preventing `EBUSY` cleanup failures and ensuring test teardown cannot retain a runner.
 - Every test file reports `START` immediately and a terminal `PASS`, `FAIL` or `TIMEOUT` line. CI therefore identifies the exact blocked file while retaining the prior isolated empty/populated profiles and four-worker concurrency.
 - The CI matrix has an independent 20-minute outer deadline. The per-file limit can be adjusted from 1 to 900 seconds with `AGENTSPINE_TEST_FILE_TIMEOUT_MS`; its default is three minutes.
+- The intentional 50,000-file offline stress probe has its own five-minute ceiling, while ordinary test files keep the three-minute deadline and explicit environment overrides remain authoritative.
+- Repository text is checked out with LF on every host, so npm's 2 MiB unpacked-size safety boundary has the same byte meaning on Windows, macOS and Linux instead of growing through CRLF conversion.
 
 ### Tests
 
 - A synthetic never-ending parent and descendant prove the runner returns code 124 within the bound and leaves neither process alive; a successful child proves normal output and completion semantics remain intact.
+- The premortem conflict race now uses the hook's deterministic post-intent fence rather than filesystem scheduling, and the release contract asserts the cross-platform LF policy.
 
 ## [0.66.0] - 2026-09-03
 

@@ -217,6 +217,7 @@ test("MCP accepts reordered items and records a canonical context-only premortem
   assert.equal(receipt.artifact.items.every((item) => /^check-[a-f0-9]{20}$/.test(item.checkId)), true);
   assert.equal(new Set(receipt.artifact.items.map((item) => item.checkId)).size, 3);
   assert.deepEqual(await readFile(sourcePath), sourceBefore);
+  await closeMcpChild(child);
 });
 
 test("agentspine mcp CLI launches the stdio server", async (t) => {
@@ -243,6 +244,7 @@ test("agentspine mcp CLI launches the stdio server", async (t) => {
   });
   assert.equal(response.id, 7);
   assert.equal(response.result.serverInfo.name, "agent-spine");
+  await closeMcpChild(child);
 });
 
 test("MCP session briefing is read-only, scoped, and byte-budgeted", async (t) => {

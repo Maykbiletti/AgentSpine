@@ -78,15 +78,18 @@ test("CI and release workflows pin every action and isolate write permission", a
   const values = await Promise.all([
     readFile(join(root, ".github", "workflows", "ci.yml"), "utf8"),
     readFile(join(root, ".github", "workflows", "release.yml"), "utf8"),
-    readFile(join(root, ".github", "CODEOWNERS"), "utf8")
+    readFile(join(root, ".github", "CODEOWNERS"), "utf8"),
+    readFile(join(root, ".gitattributes"), "utf8")
   ]);
-  const [ci, release, owners] = values.map((value) => value.replace(/\r\n/g, "\n"));
+  const [ci, release, owners, attributes] = values.map((value) => value.replace(/\r\n/g, "\n"));
   const workflows = `${ci}\n${release}`;
   const uses = [...workflows.matchAll(/^\s*-?\s*uses:\s*[^@\s]+@([^\s#]+)/gm)].map((match) => match[1]);
   assert.equal(uses.length >= 8, true);
   assert.equal(uses.every((reference) => /^[a-f0-9]{40}$/.test(reference)), true);
   assert.match(ci, /permissions:\n\s+contents: read/);
   assert.match(ci, /npm run release:check/);
+  assert.match(attributes, /^\* text=auto eol=lf\n$/,
+    "release inputs must stay LF-normalized so the byte limit is platform-independent");
   assert.match(release, /tags:\n\s+- "v\*\.\*\.\*"/);
   assert.doesNotMatch(release, /pull_request/);
   assert.match(release, /id-token: write/);
