@@ -67,7 +67,7 @@ function catalogConflicts(documents) {
 
 export async function buildCatalog(inputRoot = process.cwd(), { env = process.env } = {}) {
   const root = await canonicalPath(inputRoot);
-  const documents = await discoverDocuments(root, { excludeRoots: [stateRoot(env)] });
+  const documents = await discoverDocuments(root, { excludeRoots: [stateRoot(env)], env });
   const conflicts = catalogConflicts(documents);
   const byLayer = Object.fromEntries(
     [...new Set(documents.map((document) => document.layer))]

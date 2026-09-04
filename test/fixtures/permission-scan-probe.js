@@ -4,31 +4,43 @@ import { runHook } from "../../src/hook.js";
 import { hookScanAuditPath } from "../../src/lib/hook-audit.js";
 import { workspaceFingerprint } from "../../src/lib/selfstarter.js";
 import { resolveHostSourceCatalog } from "../../src/lib/source-roots.js";
+import { registeredWriteContext } from "../premortem-write-fixture.js";
 
 const root = await realpath(resolve(process.argv[2]));
 const resolved = await resolveHostSourceCatalog({ host: "codex", cwd: root, env: process.env });
 const fingerprint = await workspaceFingerprint(root);
+const hookContext = await registeredWriteContext({
+  root,
+  sessionId: "session:permission-probe",
+  projectId: "project:permission-probe"
+});
 const hooks = [];
 for (const toolName of ["Edit", "Write", "apply_patch", "Bash", "exec_command"]) {
   hooks.push({
     toolName,
     result: await runHook({
-      hook_event_name: "PreToolUse", host: "codex", cwd: root,
-      session_id: "session:permission-probe", tool_use_id: `tool:permission-probe:${toolName}`,
+      ...hookContext, hook_event_name: "PreToolUse",
+      tool_use_id: `tool:permission-probe:${toolName}`,
       tool_name: toolName, tool_input: { file_path: "allowed-output.txt", content: "allowed\n" }
     })
   });
 }
+const lifecycleContext = {
+  host: "codex",
+  cwd: root,
+  session_id: "session:permission-lifecycle",
+  agent_spine_scope: { project_id: "project:permission-probe" }
+};
 const lifecycle = [];
 for (const event of ["PostToolUse", "Stop"]) {
   lifecycle.push({
     event,
     result: await runHook({
-      hook_event_name: event, host: "codex", cwd: root,
-      session_id: "session:permission-probe", event_id: `event:permission-probe:${event}`,
+      ...lifecycleContext, hook_event_name: event,
+      event_id: `event:permission-probe:${event}`,
       ...(event === "PostToolUse" ? {
-        tool_use_id: "tool:permission-probe:post", tool_name: "Write",
-        tool_input: { file_path: "allowed-output.txt" }, tool_response: { ok: true }
+        tool_use_id: "tool:permission-probe:post", tool_name: "Read",
+        tool_input: { file_path: "AGENTS.md" }, tool_response: { ok: true }
       } : {})
     })
   });

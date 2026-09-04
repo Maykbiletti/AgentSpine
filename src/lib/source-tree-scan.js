@@ -40,8 +40,8 @@ function skippedExtraDirectory(name) {
     || lower.includes("dropbox") || lower === "onedrive" || lower.startsWith("onedrive - ");
 }
 
-function skippableTraversalError(error) {
-  return ["EPERM", "EACCES", "ENOENT"].includes(error?.code);
+export function skippableTraversalError(error) {
+  return ["EPERM", "EACCES", "ENOENT", "ENOTDIR"].includes(error?.code);
 }
 
 function recordSkippedPath(skipped, path, error, operation) {

@@ -4,6 +4,14 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+### Fixed
+
+- Catalog discovery now skips and audits unreadable or vanished directory entries with the same traversal-error policy as host source discovery, so catalog-backed MCP tools continue past protected Windows folders without changing their permissions.
+
+### Tests
+
+- A synthetic permission-denied catalog fixture verifies fail-open discovery, the allow audit, source byte preservation and the corresponding failing mutant.
+
 ## [0.66.1] - 2026-09-04
 
 ### Fixed

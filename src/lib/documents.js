@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { lstat, opendir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { recordHookScanAudit } from "./hook-audit.js";
+import { skippableTraversalError } from "./source-tree-scan.js";
 
 const SKIP_DIRS = new Set([
   ".git", ".hg", ".svn", ".next", ".nuxt", ".turbo", ".venv",
@@ -137,16 +139,36 @@ function isInside(parent, child) {
   return value === "" || (!isAbsolute(value) && !value.startsWith(`..${sep}`) && value !== "..");
 }
 
-async function walk(directory, found, excludedRoots) {
+async function walk(directory, found, excludedRoots, env) {
+  let stream;
+  try {
+    stream = await opendir(directory);
+  } catch (error) {
+    if (!skippableTraversalError(error)) throw error;
+    await recordHookScanAudit({
+      event: "CatalogScan", phase: "document-discovery", error,
+      path: error.path || directory, operation: "opendir", env
+    });
+    return;
+  }
   const entries = [];
-  for await (const entry of await opendir(directory)) entries.push(entry);
+  try {
+    for await (const entry of stream) entries.push(entry);
+  } catch (error) {
+    if (!skippableTraversalError(error)) throw error;
+    await recordHookScanAudit({
+      event: "CatalogScan", phase: "document-discovery", error,
+      path: error.path || directory, operation: "readdir", env
+    });
+    return;
+  }
   entries.sort((a, b) => a.name.localeCompare(b.name));
   for (const entry of entries) {
     if (entry.isSymbolicLink()) continue;
     const fullPath = join(directory, entry.name);
     if (entry.isDirectory()) {
       if (!SKIP_DIRS.has(entry.name) && !excludedRoots.some((root) => isInside(root, fullPath))) {
-        await walk(fullPath, found, excludedRoots);
+        await walk(fullPath, found, excludedRoots, env);
       }
     } else if (entry.isFile() && extname(entry.name).toLowerCase() === ".md") {
       found.push(fullPath);
@@ -154,7 +176,7 @@ async function walk(directory, found, excludedRoots) {
   }
 }
 
-export async function discoverDocuments(root, { excludeRoots = [] } = {}) {
+export async function discoverDocuments(root, { excludeRoots = [], env = process.env } = {}) {
   const files = [];
   // Canonicalize existing exclusion roots just like the scanned root. On macOS
   // temporary directories commonly cross /var -> /private/var, while Windows
@@ -167,7 +189,7 @@ export async function discoverDocuments(root, { excludeRoots = [] } = {}) {
       throw error;
     }
   }))).filter((path) => isInside(root, path));
-  await walk(root, files, excludedRoots);
+  await walk(root, files, excludedRoots, env);
   const documents = new Array(files.length);
   let cursor = 0;
   async function worker() {

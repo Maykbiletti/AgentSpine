@@ -85,18 +85,18 @@ test("unreadable directories are skipped by both walkers and never deny PreToolU
     ["Edit", "Write", "apply_patch", "Bash", "exec_command"]);
   for (const { toolName, result: hook } of output.hooks) {
     assert.equal(hook.blocked, false, toolName);
-    assert.equal(hook.scanFailedOpen, true, toolName);
+    assert.equal(hook.scanFailedOpen, undefined, toolName);
   }
   assert.deepEqual(output.lifecycle.map((item) => [item.event, item.result.blocked, item.result.scanFailedOpen]), [
-    ["PostToolUse", false, true], ["Stop", false, true]
+    ["PostToolUse", false, undefined], ["Stop", false, undefined]
   ]);
   for (const event of ["PostToolUse", "Stop"]) {
     const input = {
       hook_event_name: event, host: "codex", cwd: root,
       session_id: "session:permission-installed", event_id: `event:permission-installed:${event}`,
       ...(event === "PostToolUse" ? {
-        tool_use_id: "tool:permission-installed:post", tool_name: "Write",
-        tool_input: { file_path: "allowed-output.txt" }, tool_response: { ok: true }
+        tool_use_id: "tool:permission-installed:post", tool_name: "Read",
+        tool_input: { file_path: "AGENTS.md" }, tool_response: { ok: true }
       } : {})
     };
     const installed = spawnSync(process.execPath, [join(pluginRoot, "src", "hook.js")], {
@@ -114,6 +114,6 @@ test("unreadable directories are skipped by both walkers and never deny PreToolU
     assert.ok(permissionAudits.some((item) => item.toolName === toolName && item.code), toolName);
   }
   assert.deepEqual([...new Set(output.audit.filter((item) => item.path === canonicalRestricted)
-    .map((item) => item.event))].sort(), ["PostToolUse", "PreToolUse", "Stop"]);
+    .map((item) => item.event))].sort(), ["CatalogScan", "PreToolUse"]);
   assert.equal(hash(await readFile(sourcePath)), before);
 });
