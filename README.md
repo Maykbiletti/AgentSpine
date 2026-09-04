@@ -92,7 +92,7 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
-Version `0.71.0` adds a durable provenance-bound world model. Measured and explicitly user-confirmed assertions can become context-only facts; model suggestions, expired evidence, and contradictory values remain separate uncertainty and never silently drive the next session.
+Version `0.72.0` keeps the durable provenance-bound world model and decomposes the complete outcome-bound learning runtime into bounded contract domains. Measured and explicitly user-confirmed assertions can become context-only facts; model suggestions, expired evidence, contradictory values, and failed outcomes remain separate uncertainty and never silently drive the next session.
 
 Version `0.69.0` splits the CLI into seven bounded domains while preserving all 114 commands and behavior.
 

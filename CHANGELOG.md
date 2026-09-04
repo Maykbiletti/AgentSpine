@@ -4,6 +4,23 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.72.0] - 2026-09-04
+
+### Changed
+
+- Split the 6,923-line outcome-bound learning runtime into 24 cohesive schema, state, evidence, evaluation, validation, measurement, delivery, outcome, reconciliation, context, and diagnostic modules behind the unchanged 34-export compatibility surface.
+- Split the 4,250-line learning regression suite into a shared synthetic fixture and 12 independently bounded behavioral suites. Every resulting production and test file is below 500 physical lines, and both legacy line-budget exceptions are removed.
+
+### Security
+
+- Stored schemas, immutable evidence and revocation lineages, evaluator-root independence, trial deadlines, Canary admission, blocking-defect precedence, group isolation, atomic locks, and context-only authority retain byte-equivalent implementations.
+- The refactor introduces no new permissions, delegation, external effects, or model-derived evidence and does not modify user-owned sources.
+
+### Tests
+
+- Exact declaration-body, public-export, and test-name parity checks prove the mechanical Before/After boundary before the full learning, hook, audit, install, upgrade, package, and hermetic suites execute.
+- All 50 existing learning scenarios remain intact, including concurrency, restart, corrupt-state, legacy v10-v29 upgrade, revocation, rollback, source-byte preservation, and CLI workflows.
+
 ## [0.71.0] - 2026-09-04
 
 ### Added

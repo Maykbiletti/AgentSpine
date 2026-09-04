@@ -46,11 +46,11 @@ test("release check validates every host version and the exact safe package boun
   const source = await readFile(join(root, "AGENTS.md"));
   const before = sha(source);
   const result = await releaseCheck({
-    root, tag: "v0.71.0", allowDirty: true, skipPack: false, json: true
+    root, tag: "v0.72.0", allowDirty: true, skipPack: false, json: true
   });
   assert.equal(result.ok, true);
-  assert.equal(result.version, "0.71.0");
-  assert.equal(result.package.filename, "agent-spine-0.71.0.tgz");
+  assert.equal(result.version, "0.72.0");
+  assert.equal(result.package.filename, "agent-spine-0.72.0.tgz");
   assert.match(result.package.integrity, /^sha512-/);
   assert.equal(result.package.files > 40, true);
   assert.equal(result.package.packedSize > 0 && result.package.packedSize <= 512 * 1024, true);

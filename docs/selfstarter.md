@@ -1,6 +1,6 @@
 # Rights-bound self-starter
 
-AgentSpine `0.71.0` can start or resume one waiting job through installed Claude Code and Codex lifecycle hooks. Its runtime is split into bounded core-state, workspace, owner-policy, job-lifecycle and leased-effect domains behind the unchanged public interface. This is intentionally narrower than general autonomy: an explicit local execution grant must bind the exact actor, action set, job, task, target, project, optional group, host, and finite tool capabilities. Memory, Markdown, learning, relationships, attention, task text, old approvals, and model claims never satisfy that grant.
+AgentSpine `0.72.0` can start or resume one waiting job through installed Claude Code and Codex lifecycle hooks. Its runtime is split into bounded core-state, workspace, owner-policy, job-lifecycle and leased-effect domains behind the unchanged public interface. This is intentionally narrower than general autonomy: an explicit local execution grant must bind the exact actor, action set, job, task, target, project, optional group, host, and finite tool capabilities. Memory, Markdown, learning, relationships, attention, task text, old approvals, and model claims never satisfy that grant.
 
 ## Lifecycle
 
