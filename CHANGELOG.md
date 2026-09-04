@@ -4,6 +4,19 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-09-04
+
+### Changed
+
+- The 1,485-line gateway runtime is decomposed into bounded contract, execution, state, control, run-lifecycle, delivery and inspection modules. The original import path remains a compatibility surface with the same 25 public exports.
+- The 1,325-line gateway regression suite is split by channel delivery, plans, exploration, strategy transfer, continuity, host lifecycle, adapters and security. Every resulting production and test file stays below 500 physical lines.
+- Gateway runtime and test files no longer use legacy line-budget exceptions; future growth is enforced by the ordinary 500-line gate.
+
+### Tests
+
+- Before/After checks compare the exact public export manifest and preserve all 56 executed gateway behaviors, including team handoff, resource serialization, objective outcomes, bounded exploration, upgrade, lock ownership, atomic pair commits and crash recovery.
+- Both hermetic profiles, visible Acceptance, Audit, Fresh Install, Upgrade, host, package and release checks cover the decomposed modules.
+
 ## [0.67.0] - 2026-09-04
 
 ### Added

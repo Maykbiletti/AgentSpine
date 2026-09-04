@@ -12,14 +12,12 @@ const LEGACY_LIMITS = new Map(Object.entries({
   "src/lib/authentication.js": 515,
   "src/lib/channel-runtime.js": 665,
   "src/lib/coordination.js": 577,
-  "src/lib/gateway-runtime.js": 1485,
   "src/lib/learning.js": 6923,
   "src/lib/persona-runtime.js": 581,
   "src/lib/preflight.js": 702,
   "src/lib/selfstarter.js": 911,
   "src/lib/sharing.js": 969,
   "src/lib/sqlite-transport.js": 501,
-  "test/gateway-runtime.test.js": 1325,
   "test/learning.test.js": 4250
 }));
 
