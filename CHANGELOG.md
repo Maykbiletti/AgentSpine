@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-09-04
+
+### Changed
+
+- Split the 911-line rights-bound self-starter into core-state, workspace, owner-policy, job-lifecycle and leased-effect domains behind the unchanged 18-export public interface.
+- Every self-starter production and test file is below 500 physical lines; the legacy budget exception is gone.
+- The package gate now bounds both the packed archive at 512 KiB and the unpacked tree at 2.25 MiB, retaining a finite release boundary after the module split.
+
+### Security
+
+- Execution grants, task and group binding, finite capabilities, workspace fingerprints, leases, effect checkpoints, crash recovery and context-only authority keep their existing fail-closed behavior.
+
+### Tests
+
+- Added exact public-surface ownership coverage alongside all existing self-starter lifecycle, concurrency, tamper, retry, restart and byte-preservation scenarios.
+
 ## [0.69.0] - 2026-09-04
 
 ### Changed

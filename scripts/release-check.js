@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const MAX_PACKED_BYTES = 512 * 1024;
+const MAX_UNPACKED_BYTES = 2304 * 1024;
 const REQUIRED_PACKAGE_FILES = [
   "blun.plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".mcp.json",
   "CHANGELOG.md", "LICENSE", "README.md", "bin/agentspine.js", "bin/agentspine-mcp.js",
@@ -64,7 +66,8 @@ function validatePackageReport(report, version) {
   assert(typeof item.filename === "string" && item.filename.endsWith(`-${version}.tgz`), "npm pack filename is not versioned correctly");
   assert(typeof item.integrity === "string" && item.integrity.startsWith("sha512-"), "npm pack did not report SHA-512 integrity");
   assert(Number.isInteger(item.entryCount) && item.entryCount > 0 && item.entryCount <= 500, "npm package file count is outside the release limit");
-  assert(Number.isInteger(item.unpackedSize) && item.unpackedSize > 0 && item.unpackedSize <= 2 * 1024 * 1024, "npm package exceeds the 2 MiB unpacked release limit");
+  assert(Number.isInteger(item.size) && item.size > 0 && item.size <= MAX_PACKED_BYTES, "npm package exceeds the 512 KiB packed release limit");
+  assert(Number.isInteger(item.unpackedSize) && item.unpackedSize > 0 && item.unpackedSize <= MAX_UNPACKED_BYTES, "npm package exceeds the 2.25 MiB unpacked release limit");
   const paths = (item.files || []).map((file) => file.path);
   assert(paths.length === new Set(paths).size, "npm package contains duplicate paths");
   for (const path of REQUIRED_PACKAGE_FILES) assert(paths.includes(path), `npm package is missing required file: ${path}`);
@@ -72,7 +75,10 @@ function validatePackageReport(report, version) {
     assert(path && !path.startsWith("/") && !path.split("/").includes(".."), `npm package contains an unsafe path: ${path}`);
     assert(!FORBIDDEN_PACKAGE_PATHS.some((pattern) => pattern.test(path)), `npm package contains forbidden state or source material: ${path}`);
   }
-  return { filename: item.filename, integrity: item.integrity, files: paths.length, unpackedSize: item.unpackedSize };
+  return {
+    filename: item.filename, integrity: item.integrity, files: paths.length,
+    packedSize: item.size, unpackedSize: item.unpackedSize
+  };
 }
 
 export async function releaseCheck(options) {

@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.70.0` splits the 911-line rights-bound self-starter into bounded core-state, workspace, owner-policy, job-lifecycle and leased-effect domains behind its unchanged 18-export interface. Execution grants, capability checks, workspace fingerprints, leases, checkpoints, crash recovery and context-only authority remain behaviorally unchanged.
+
 Version `0.69.0` splits the CLI into seven bounded domains while preserving all 114 commands and behavior.
 
 Version `0.68.0` decomposes the gateway runtime and its regression suite along explicit contract, planning, state, control, run-lifecycle, delivery, inspection and behavioral-test boundaries. The stable `gateway-runtime.js` entrypoint retains the exact public export surface, while every resulting gateway production and test file is governed by the ordinary 500-line budget. Persisted schemas, security gates, atomic state-pair recovery, goal planning, team handoff, resource serialization, tool strategy selection, reflection, exploration and outcome-bound learning remain behaviorally unchanged.

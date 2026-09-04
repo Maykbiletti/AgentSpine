@@ -14,7 +14,6 @@ const LEGACY_LIMITS = new Map(Object.entries({
   "src/lib/learning.js": 6923,
   "src/lib/persona-runtime.js": 581,
   "src/lib/preflight.js": 702,
-  "src/lib/selfstarter.js": 911,
   "src/lib/sharing.js": 969,
   "src/lib/sqlite-transport.js": 501,
   "test/learning.test.js": 4250
