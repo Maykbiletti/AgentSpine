@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -184,7 +184,8 @@ test("concurrency deduplicates receipts, verification stays bounded, and uncerta
   const uncertain = await prepare(root, "session:uncertain");
   await actualPreflight(call, root, uncertain.requirementId);
   const generation = uncertain.requirementId.split(":")[2];
-  const usagePath = join(await projectStateDir(root), "delivery-agent-usage", `${generation}.json`);
+  const usagePath = join(await projectStateDir(await realpath(root)),
+    "delivery-agent-usage", `${generation}.json`);
   await writeFile(usagePath, "{not-json\n");
   const allowed = await runHook(hookInput(root, "session:uncertain", "PreToolUse", {
     tool_name: "Edit", tool_use_id: "write:uncertain",
