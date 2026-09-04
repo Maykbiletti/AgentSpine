@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.69.0` splits the CLI into seven bounded domains while preserving all 114 commands and behavior.
+
 Version `0.68.0` decomposes the gateway runtime and its regression suite along explicit contract, planning, state, control, run-lifecycle, delivery, inspection and behavioral-test boundaries. The stable `gateway-runtime.js` entrypoint retains the exact public export surface, while every resulting gateway production and test file is governed by the ordinary 500-line budget. Persisted schemas, security gates, atomic state-pair recovery, goal planning, team handoff, resource serialization, tool strategy selection, reflection, exploration and outcome-bound learning remain behaviorally unchanged.
 
 Version `0.67.0` makes real AgentSpine use part of every writing delivery contract. Before the first mutation, the hook now requires three ordered, auditable MCP calls bound to the exact session and active goal step: `session_briefing`, `delivery_knowledge_query` for affected targets, contracts and recent errors, then `record_delivery_premortem`. Text claims, foreign-session or foreign-step evidence, and consumed receipts do not count. Missing stages are named precisely at the first write and at completion, while read-only work and verified parser or filesystem uncertainty retain their fail-open behavior. The new knowledge query returns bounded target fingerprints and contract matches as untrusted, context-only evidence; none of these calls grants permissions, tools, delegation or external effects.

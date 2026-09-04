@@ -4,6 +4,17 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-09-04
+
+### Changed
+
+- Split the 1,488-line CLI into seven domains while preserving all 114 commands and behavior.
+- Every CLI file is below 500 lines; its legacy budget exception is gone.
+
+### Tests
+
+- Added exact command-ownership coverage alongside 98 existing CLI invocations.
+
 ## [0.68.0] - 2026-09-04
 
 ### Changed

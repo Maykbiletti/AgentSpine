@@ -7,7 +7,6 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DEFAULT_LIMIT = 500;
 const JAVASCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".cjs"]);
 const LEGACY_LIMITS = new Map(Object.entries({
-  "src/cli.js": 1488,
   "src/lib/attention.js": 755,
   "src/lib/authentication.js": 515,
   "src/lib/channel-runtime.js": 665,

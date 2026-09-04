@@ -1,6 +1,6 @@
 # Visible cross-host acceptance
 
-AgentSpine `0.68.0` runs a visible, reproducible 15-gate acceptance scenario for the lifecycle adapter, including complete mandatory host instructions, required provider recall, the three-stage writing-delivery preflight and a fail-closed missing-provider probe. Staged installed-entrypoint source-root and indexed-memory scaling smoke tests execute the same bundled adapter used by Claude Code and Codex, but they do not substitute for the hosts' own plugin discovery and hook-trust UI.
+AgentSpine `0.69.0` runs a visible, reproducible 15-gate acceptance scenario for the lifecycle adapter, including complete mandatory host instructions, required provider recall, the three-stage writing-delivery preflight and a fail-closed missing-provider probe. Staged installed-entrypoint source-root and indexed-memory scaling smoke tests execute the same bundled adapter used by Claude Code and Codex, but they do not substitute for the hosts' own plugin discovery and hook-trust UI.
 
 ```bash
 agentspine acceptance
