@@ -4,6 +4,24 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.71.0] - 2026-09-04
+
+### Added
+
+- A durable provider-neutral world model stores immutable provenance-bound assertions about world, user, relationship, team, and project subjects outside user-owned files.
+- Session briefing now carries unexpired, non-conflicting measured or explicitly user-confirmed facts and separately exposes model proposals, stale evidence, and contradictions as uncertainty.
+
+### Security
+
+- Model output can never become an established fact or supersede one. A contradictory measured value removes the predicate from facts until a new established assertion explicitly supersedes the conflict.
+- Exact project, group, and private scopes are enforced. Authority-shaped predicates and nested values, future observations, reused IDs, altered value digests, invalid state, and oversized values fail closed.
+- Owned locks, atomic replacement, bounded state, and idempotent receipts preserve concurrent updates, crash recovery, and byte-exact user sources.
+
+### Tests
+
+- Synthetic scenarios cover persistence across restart-style reads, briefing integration, measured/user/model evidence separation, expiry, conflict and resolution, group isolation, private context, concurrency, idempotency, tamper rejection, MCP portability, and source-byte preservation.
+- The documented Before/After boundary is observable: `0.70.0` had no world-model tools or briefing section; `0.71.0` resolves the complete synthetic context set while withholding every unsafe or uncertain assertion.
+
 ## [0.70.0] - 2026-09-04
 
 ### Changed

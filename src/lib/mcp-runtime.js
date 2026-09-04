@@ -20,6 +20,7 @@ import {
   learningContext, learningOutcomeStatus, proposeLearning, reviewLearning, rollbackLearning
 } from "./learning.js";
 import { sharedContext } from "./sharing.js";
+import { recordWorldAssertion, worldContext } from "./world-model.js";
 
 function textResult(value, isError = false) {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }], isError };
@@ -78,6 +79,8 @@ async function callTool(name, args = {}) {
   if (name === "update_task") return textResult(await updateTask({ ...args, root }));
   if (name === "task_context") return textResult(await taskContext({ ...args, root }));
   if (name === "shared_context") return textResult(await sharedContext({ ...args, root }));
+  if (name === "record_world_assertion") return textResult(await recordWorldAssertion({ ...args, root }));
+  if (name === "world_context") return textResult(await worldContext({ ...args, root }));
   if (name === "audit") return textResult(await runAudit(root));
   if (name === "record_delivery_premortem") {
     if (typeof args.root !== "string" || !args.root) {

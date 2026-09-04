@@ -92,7 +92,7 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
-Version `0.70.0` splits the 911-line rights-bound self-starter into bounded core-state, workspace, owner-policy, job-lifecycle and leased-effect domains behind its unchanged 18-export interface. Execution grants, capability checks, workspace fingerprints, leases, checkpoints, crash recovery and context-only authority remain behaviorally unchanged.
+Version `0.71.0` adds a durable provenance-bound world model. Measured and explicitly user-confirmed assertions can become context-only facts; model suggestions, expired evidence, and contradictory values remain separate uncertainty and never silently drive the next session.
 
 Version `0.69.0` splits the CLI into seven bounded domains while preserving all 114 commands and behavior.
 
@@ -344,6 +344,7 @@ flowchart LR
 - `check_delegation`, `create_task`, `update_task`, and `task_context` coordinate work under a separate default-deny policy. MCP intentionally has no policy grant, revoke, or permanent task-delete tool.
 - `shared_context` reads only locally reviewed shared memory. MCP intentionally cannot initialize adapters, publish, pull, inspect the pending inbox, review imports, roll back, or delete.
 - `record_delivery_premortem` records the exact three context-only failure checks for one hook-issued requirement before mutation. Its sealed receipt is bound to the session and active goal step and grants no permissions or tool access.
+- `record_world_assertion` stores one immutable measured, explicitly user-confirmed, or model-proposed assertion outside source files; `world_context` returns only unexpired, non-conflicting established facts while exposing proposals, stale evidence, and contradictions separately.
 - `audit` runs the same ten gates available through the CLI.
 
 Relationship updates supersede the active view but retain the previous observation in append-only graph history. Permission-like and credential-like attributes are rejected recursively. See [relationships and learning](docs/relationships.md).
@@ -401,6 +402,7 @@ AgentSpine is in active early development. `v0.8` adds authenticated persona syn
 | Reproduce the complete host behavior | [Visible cross-host acceptance](docs/acceptance.md) |
 | Enable automatic continuity | [Automatic continuity](docs/automatic-continuity.md) |
 | Load one compact session packet | [Session briefing](docs/session-briefing.md) |
+| Persist measured facts and visible uncertainty | [Provenance-bound world model](docs/world-model.md) |
 | Resume one exactly authorized job | [Rights-bound self-starter](docs/selfstarter.md) |
 | Understand relationships and history | [Relationships](docs/relationships.md) |
 | Configure sparse follow-ups | [Attention](docs/attention.md) |

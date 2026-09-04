@@ -23,6 +23,7 @@ import { checkHosts } from "../../scripts/check-hosts.js";
 import { resolveHostSourceCatalog } from "./source-roots.js";
 import { preflightStatus } from "./preflight.js";
 import { inspectPremortemAudit } from "./audit-premortem.js";
+import { worldModelStatePath } from "./world-model.js";
 
 function gate(id, name, ok, detail, severity = "error") {
   return { id, name, ok, severity, detail };
@@ -125,6 +126,7 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
     : await buildCatalog(root));
   const catalog = before;
   const catalogPath = await saveCatalog(catalog);
+  const worldModelPath = await worldModelStatePath(before.root);
   const { graph, graphPath } = await loadGraph(before.root, catalog);
   const { attention, attentionPath, error: attentionLoadError } = await inspectAttention(before.root, catalog);
   const { learning, learningPath, error: learningLoadError } = await inspectLearning(before.root, catalog);
@@ -302,7 +304,7 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
       ? `${catalog.documents.length} project documents; host-native source resolution failed closed: ${sourceResolutionError}`
       : sourceResolution ? `${sourceResolution.scopes.user} user, ${sourceResolution.scopes.project} project, and ${sourceResolution.scopes["project-memory"]} memory sources; broad home scan disabled`
         : `${catalog.documents.length} Markdown documents indexed`),
-    gate(3, "State isolation", [catalogPath, graphPath, attentionPath, learningPath, continuityPath,
+    gate(3, "State isolation", [catalogPath, graphPath, worldModelPath, attentionPath, learningPath, continuityPath,
       policyPath, coordinationPath, executionPolicyPath, selfstarterPath, channelPolicyPath,
       channelRuntimePath, personaPolicyPath, personaRuntimePath, gatewayPolicyPath, gatewayRuntimePath,
       sharingPath, trustPath, registryPath, signerDirectory, feedStatePath, premortems.directory,
@@ -337,6 +339,7 @@ export async function runAudit(root = process.cwd(), { host = null } = {}) {
     gates,
     catalogPath,
     graphPath,
+    worldModelPath,
     attentionPath,
     learningPath,
     continuityPath,

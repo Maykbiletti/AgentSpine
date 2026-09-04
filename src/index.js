@@ -1,6 +1,7 @@
 export { buildCatalog, loadCatalog, saveCatalog, scanAndSave, verifyCatalog } from "./lib/catalog.js";
 export { resolveContext, readDocument } from "./lib/context.js";
 export { sessionBriefing } from "./lib/briefing.js";
+export { recordWorldAssertion, worldContext, worldModelStatePath } from "./lib/world-model.js";
 export { discoverDocuments } from "./lib/documents.js";
 export {
   bindSourceRoot, inspectSourceRegistry, purgeSourceBinding, resolveHostSourceCatalog,

@@ -2,6 +2,7 @@ import { VERSION } from "./version.js";
 import { isMainModule } from "./lib/runtime.js";
 import { deliveryPremortemTool } from "./lib/mcp-premortem.js";
 import { deliveryKnowledgeTool, sessionBriefingTool } from "./lib/mcp-delivery-tools.js";
+import { worldModelTools } from "./lib/mcp-world-tools.js";
 import { startMcpProtocol } from "./lib/mcp-runtime.js";
 
 const tools = [
@@ -24,6 +25,7 @@ const tools = [
   },
   sessionBriefingTool,
   deliveryKnowledgeTool,
+  ...worldModelTools,
   {
     name: "read_document",
     description: "Read an indexed Markdown source byte range with its SHA-256 provenance.",

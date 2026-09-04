@@ -11,6 +11,7 @@ import { upsertEntity } from "../src/lib/graph.js";
 import {
   initDirectoryAdapter, loadSharing, publishLearning, pullShared, reviewShared
 } from "../src/lib/sharing.js";
+import { recordWorldAssertion, worldModelStatePath } from "../src/lib/world-model.js";
 
 test("ten-point audit passes a healthy spine without source writes", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "agentspine-audit-"));
@@ -25,6 +26,8 @@ test("ten-point audit passes a healthy spine without source writes", async (t) =
   assert.equal(result.total, 10);
   assert.equal(result.passed, 10);
   assert.equal(result.ok, true);
+  assert.equal(result.worldModelPath.startsWith(state), true);
+  assert.equal(result.worldModelPath.startsWith(root), false);
   assert.equal(result.gates[9].name, "Byte preservation");
 });
 
@@ -88,6 +91,27 @@ test("ten-point audit reports malformed learning state instead of overwriting it
   assert.equal(result.ok, false);
   assert.equal(result.gates.find((gate) => gate.name === "Context privacy").ok, false);
   assert.equal(await readFile(loaded.learningPath, "utf8"), corrupt);
+});
+
+test("ten-point audit reports tampered world state without overwriting it", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-audit-world-corrupt-"));
+  const state = await mkdtemp(join(tmpdir(), "agentspine-audit-world-corrupt-state-"));
+  process.env.AGENTSPINE_STATE_DIR = state;
+  t.after(async () => { await rm(root, { recursive: true }); await rm(state, { recursive: true }); });
+  await writeFile(join(root, "AGENTS.md"), "# Synthetic rules\n", "utf8");
+  await recordWorldAssertion({
+    root, id: "assertion:audit", subjectId: "project:audit", predicate: "suite.status", value: "green",
+    evidenceKind: "objective-measurement", evidenceId: "measurement:audit",
+    evidenceDigest: "a".repeat(64), observedAt: "2026-09-04T08:00:00.000Z", privacy: "shared"
+  });
+  const path = await worldModelStatePath(root);
+  const corrupt = await readFile(path, "utf8");
+  const tampered = corrupt.replace('"green"', '"red"');
+  await writeFile(path, tampered, "utf8");
+  const result = await runAudit(root);
+  assert.equal(result.ok, false);
+  assert.equal(result.gates.find((gate) => gate.name === "Context budget").ok, false);
+  assert.equal(await readFile(path, "utf8"), tampered);
 });
 
 test("ten-point audit rejects a delegation grant with forged provenance", async (t) => {

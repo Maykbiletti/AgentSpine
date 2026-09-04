@@ -62,7 +62,8 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   assert.equal(messages[0].result.serverInfo.name, "agent-spine");
   const names = messages[1].result.tools.map((tool) => tool.name);
   assert.deepEqual(names, [
-    "scan", "resolve_context", "session_briefing", "delivery_knowledge_query", "read_document", "verify",
+    "scan", "resolve_context", "session_briefing", "delivery_knowledge_query",
+    "record_world_assertion", "world_context", "read_document", "verify",
     "link_documents", "annotate_document", "upsert_entity",
     "link_entities", "relationship_context", "upsert_attention",
     "record_activity", "attention_context", "resolve_attention",

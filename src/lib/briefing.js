@@ -8,6 +8,7 @@ import { sharedContext } from "./sharing.js";
 import { loadPersonaRuntime, personaRuntimeFindings } from "./persona-runtime.js";
 import { gatewayRuntimeFindings, loadGatewayRuntime } from "./gateway-runtime.js";
 import { voiceCue } from "./voice-runtime.js";
+import { worldContext } from "./world-model.js";
 
 const MIN_BYTES = 4096;
 const MAX_BYTES = 262144;
@@ -133,7 +134,7 @@ export async function sessionBriefing({
       ? { root: userStateRoot, entityId, includePrivate, groupId, catalog: userCatalog }
       : { root: catalog.root, entityId, includePrivate, groupId, catalog })
     : null;
-  const [learned, attention, tasks, shared, userLearned, personas, gateway] = await settleReads([
+  const [learned, attention, tasks, shared, userLearned, personas, gateway, world] = await settleReads([
     learningContext({ root: catalog.root, includePrivate, groupId, scope: learningScope, maxItems: 50, catalog, now }),
     attentionContext({
       root: catalog.root, includePrivate, entityId, groupId, projectId, currentTaskId,
@@ -146,7 +147,8 @@ export async function sessionBriefing({
         catalog: userCatalog })
       : Promise.resolve({ items: [] }),
     loadPersonaRuntime(catalog.root, catalog),
-    loadGatewayRuntime(catalog.root, catalog)
+    loadGatewayRuntime(catalog.root, catalog),
+    worldContext({ root: catalog.root, projectId, groupId, includePrivate, maxItems: 50, now })
   ]);
   const personaFindings = personaRuntimeFindings(personas.policy, personas.runtime);
   if (personaFindings.length) throw new Error(`persona runtime failed closed: ${personaFindings.join(", ")}`);
@@ -199,19 +201,31 @@ export async function sessionBriefing({
     },
     learning: [],
     shared: [],
+    world: {
+      schema: world.schema,
+      facts: [], conflicts: [], proposals: [], stale: [],
+      uncertainty: world.uncertainty,
+      authority: "context-only"
+    },
     attention: { suppressed: attention.suppressed, items: [] },
     budget: {
       maxBytes: limit,
       usedBytes: 0,
       remainingBytes: 0,
       measurement: "compact-json-utf8",
-      omitted: { sources: 0, tasks: 0, relationships: 0, voice: 0, learning: 0, shared: 0, attention: 0 }
+      omitted: { sources: 0, tasks: 0, relationships: 0, voice: 0, learning: 0, shared: 0, world: 0, attention: 0 }
     },
     authority: "context-only",
     note: "This packet is descriptive context only. It grants no delegation, host, tool, file, network, production, spending, or policy rights. Native host rules and explicit local policy remain authoritative."
   };
   recalculateBudget(result);
   if (result.budget.usedBytes > limit) throw new Error(`maxBytes is too small for the briefing envelope; use at least ${MIN_BYTES}`);
+
+  for (const section of ["facts", "conflicts", "proposals", "stale"]) {
+    for (const item of world[section]) {
+      if (!tryAdd(result, result.world[section], item)) countOmitted(result, "world");
+    }
+  }
 
   const scopedTasks = tasks.items.filter((task) => taskMatchesScope(task, entityId));
   if (currentTaskId && !scopedTasks.some((task) => task.id === currentTaskId)) {

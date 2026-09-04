@@ -10,8 +10,9 @@ const MAX_UNPACKED_BYTES = 2304 * 1024;
 const REQUIRED_PACKAGE_FILES = [
   "blun.plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".mcp.json",
   "CHANGELOG.md", "LICENSE", "README.md", "bin/agentspine.js", "bin/agentspine-mcp.js",
-  "docs/acceptance.md", "docs/source-roots.md", "docs/preflight-recall.md", "docs/preservation-contract.md", "scripts/run-acceptance.js",
-  "skills/agent-spine/SKILL.md", "src/index.js", "src/mcp.js", "src/worker.js",
+  "docs/acceptance.md", "docs/source-roots.md", "docs/preflight-recall.md", "docs/preservation-contract.md",
+  "docs/world-model.md", "scripts/run-acceptance.js", "skills/agent-spine/SKILL.md",
+  "src/index.js", "src/mcp.js", "src/lib/mcp-world-tools.js", "src/lib/world-model.js", "src/worker.js",
   "hooks/hooks.json", "hooks/codex.json", "hooks/version.json"
 ];
 const FORBIDDEN_PACKAGE_PATHS = [
@@ -22,7 +23,7 @@ const FORBIDDEN_PACKAGE_PATHS = [
   /(?:^|\/)(?:test|\.github)(?:$|\/)/,
   /\.(?:key|pem|p12|pfx)$/i,
   /(?:^|\/)state\.json$/i,
-  /(?:^|\/)(?:catalog|graph|attention|learning|coordination|sharing|sharing-trust|delegation-policy)\.json$/
+  /(?:^|\/)(?:catalog|graph|world-model|attention|learning|coordination|sharing|sharing-trust|delegation-policy)\.json$/
 ];
 
 function parse(argv) {

@@ -21,7 +21,7 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
-Version `0.70.0` replaces the `0.69.0` plugin cache identity and splits the rights-bound self-starter into bounded security domains while preserving its public surface and stored contracts. Writing deliveries must call `session_briefing`, `delivery_knowledge_query` and `record_delivery_premortem` in that order with the exact hook-issued requirement before their first mutation.
+Version `0.71.0` replaces the `0.70.0` plugin cache identity and adds provenance-bound world context to the provider-neutral MCP and session briefing while preserving all execution boundaries. Writing deliveries must call `session_briefing`, `delivery_knowledge_query` and `record_delivery_premortem` in that order with the exact hook-issued requirement before their first mutation.
 
 Version `0.39.0` replaces the `0.38.0` plugin cache identity.
 
