@@ -5,6 +5,7 @@ import { sessionBriefing } from "./briefing.js";
 import { readDocument } from "./context.js";
 import { inspectPremortemState } from "./delivery-premortem.js";
 import { canonicalPath, isInside } from "./paths.js";
+import { resolveMcpSources } from "./mcp-source-context.js";
 
 const MAX_TARGETS = 32;
 const MAX_CONTRACTS = 8;
@@ -57,14 +58,19 @@ export async function deliveryKnowledgeQuery({ root, requirementId, targetPaths,
   const current = await inspectPremortemState({ root: canonicalRoot, requirementId });
   if (current.blocked || current.status === "degraded" || current.status === "absent") return current;
   const binding = current.binding;
+  const sources = await resolveMcpSources({ root: canonicalRoot, host: binding.host,
+    entityId: binding.entityId, groupId: binding.groupId, projectId: binding.projectId,
+    currentTaskId: binding.taskId, required: true });
   const [targetResults, contractDocuments, briefing] = await Promise.all([
     Promise.all(targets.map((path) => targetSnapshot(canonicalRoot, path))),
     Promise.all(contracts.map((path) => readDocument({ root: canonicalRoot,
-      path, offset: 0, length: 65536 }))),
+      path, offset: 0, length: 65536, catalog: sources.catalog }))),
     sessionBriefing({ root: canonicalRoot, cwd: canonicalRoot,
       host: binding.host, entityId: binding.entityId, groupId: binding.groupId,
       projectId: binding.projectId, currentTaskId: binding.taskId,
-      includePrivate: false, focusActive: true, includeSourceContent: false, maxBytes })
+      includePrivate: false, focusActive: true, includeSourceContent: false, maxBytes,
+      catalog: sources.catalog, userStateRoot: sources.userStateRoot,
+      sourceDiagnostics: sources.diagnostics })
   ]);
   const result = {
     schema: "agentspine.delivery-knowledge-query/v1",

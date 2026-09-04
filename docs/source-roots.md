@@ -1,5 +1,28 @@
 # Host-native source roots
 
+## MCP preflight source parity (0.72.1)
+
+`session_briefing`, `delivery_knowledge_query`, `resolve_context`, and
+`read_document` resolve bounded sources internally. The knowledge query shares
+one catalog across contract readers and its nested briefing; it never falls back
+to a home-tree scan. Pass the exact resolved project root and choose the host
+with `host` where supported. `read_document` accepts the same host selector and
+host source IDs returned by the briefing. Generic mode loads project sources,
+not another provider's profile or auto-memory.
+
+Catalogs, source registries, environments and user-state locations are internal
+inputs, not trusted MCP arguments. A required preflight with incomplete discovery
+returns an error without a successful receipt. Retry after correcting the source
+problem; no state reset is necessary. Read-only briefing may return bounded
+available context with diagnostics, while hook scan errors retain their existing
+fail-open lifecycle handling. Source metadata and receipts confer no authority.
+
+Synthetic tests count directory accesses through actual MCP requests, exercise
+permission-error retry, independent protocol instances, exact requirement scope,
+source replacement and read races. They do not establish installed Codex, Claude
+or Kimi tool availability; native discovery and live task outcomes need separate
+measurements. No live configuration or user source is changed by this repair.
+
 AgentSpine `0.8.0` resolves active user, project, and host-memory sources before every production lifecycle hook. Resolution does not depend on the directory from which the plugin was installed, and it never treats the entire home directory as one project.
 
 ## Resolution contract

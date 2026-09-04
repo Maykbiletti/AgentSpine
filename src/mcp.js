@@ -28,11 +28,12 @@ const tools = [
   ...worldModelTools,
   {
     name: "read_document",
-    description: "Read an indexed Markdown source byte range with its SHA-256 provenance.",
+    description: "Read a bounded host-indexed Markdown source byte range with verified SHA-256 provenance; no broad home scan.",
     inputSchema: {
       type: "object", required: ["path"],
       properties: {
         root: { type: "string" }, path: { type: "string" },
+        host: { type: "string", enum: ["codex", "claude", "generic"] },
         offset: { type: "integer", minimum: 0 }, length: { type: "integer", minimum: 1, maximum: 1048576 }
       }
     }

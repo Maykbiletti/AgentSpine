@@ -329,7 +329,7 @@ async function codexSources({ cwd, projectRoot, codexHome, config }) {
 }
 
 export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), input = {}, env = process.env, memoryHooks = {} } = {}) {
-  if (!["claude", "codex"].includes(host)) throw new Error(`host-native source resolution requires claude or codex, received ${host}`);
+  if (!["claude", "codex", "generic"].includes(host)) throw new Error(`unsupported source host: ${host}`);
   const canonicalCwd = await canonicalPath(cwd);
   const deadline = Date.now() + SOURCE_RESOLUTION_MS;
   const { registry } = await readRegistry(env);
@@ -347,7 +347,7 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, config.rootMarkers));
     sources = await codexSources({ cwd: canonicalCwd, projectRoot, codexHome: hostHome, config });
     hostDetails = { rootMarkers: config.rootMarkers, fallbackNames: config.fallbackNames };
-  } else {
+  } else if (host === "claude") {
     hostHome = await existingDirectory(resolve(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")))
       || resolve(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
     if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
@@ -357,12 +357,26 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     skipped = result.skipped;
     hostDetails = { memoryRoot: result.memoryRoot, memoryProvenance: result.memoryProvenance,
       memoryDiagnostics: result.memoryDiagnostics };
+  } else {
+    // Generic hosts get project sources, never another provider's profile.
+    hostHome = await canonicalPath(homedir());
+    if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
+    else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, [".git"]));
+    sources = [];
+    for (const directory of ancestorsBetween(projectRoot, canonicalCwd)) {
+      for (const name of ["AGENTS.md", "SOUL.md", "MEMORY.md"]) {
+        await addFile(sources, join(directory, name), {
+          id: `generic:project/${relative(projectRoot, join(directory, name)).replaceAll("\\", "/")}`,
+          host, scope: "project", binding: "native-project-chain", precedence: 1000 + sources.length
+        });
+      }
+    }
   }
   sources = [...new Map(sources.map((item) => [item.path, item])).values()];
   if (sources.length > MAX_SOURCES) throw new Error(`host-native required source set exceeds ${MAX_SOURCES} files`);
   const nativeNames = new Set(host === "codex"
     ? ["AGENTS.override.md", "AGENTS.md", ...(hostDetails.fallbackNames || [])]
-    : ["CLAUDE.md", "CLAUDE.local.md"]);
+    : host === "claude" ? ["CLAUDE.md", "CLAUDE.local.md"] : ["AGENTS.md", "SOUL.md", "MEMORY.md"]);
   const knownHomeRoots = await homeRoots(env);
   const skippedHomeTree = knownHomeRoots.some((root) => samePath(root, projectRoot));
   const skippedProfileTree = samePath(hostHome, projectRoot);

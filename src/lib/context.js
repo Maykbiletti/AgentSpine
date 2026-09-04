@@ -4,6 +4,7 @@ import { ancestorsBetween, canonicalPath, isInside } from "./paths.js";
 import { buildCatalog } from "./catalog.js";
 import { attachDocumentSnapshot, documentSnapshotContent } from "./documents.js";
 import { loadGraph } from "./graph.js";
+import { readCatalogDocument } from "./catalog-document-read.js";
 
 function depth(root, path) {
   const value = relative(root, dirname(path));
@@ -131,8 +132,9 @@ export async function resolveContext({ root = process.cwd(), cwd = root, host = 
   };
 }
 
-export async function readDocument({ root = process.cwd(), path, offset = 0, length = 65536 }) {
+export async function readDocument({ root = process.cwd(), path, offset = 0, length = 65536, catalog: providedCatalog = null }) {
   if (!path) throw new Error("path is required");
+  if (providedCatalog) return readCatalogDocument({ root, path, offset, length, catalog: providedCatalog });
   const catalog = await buildCatalog(root);
   const absolute = resolve(catalog.root, path);
   const document = catalog.documents.find((item) => item.path === absolute);

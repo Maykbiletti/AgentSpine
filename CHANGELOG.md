@@ -4,6 +4,20 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.72.1] - 2026-09-04
+
+### Fixed
+
+- MCP session briefing and delivery knowledge queries now resolve the same bounded native sources as hooks. Each knowledge query shares one catalog across every contract read and its nested briefing, instead of scanning the directory tree once per contract plus once for the briefing.
+- Home-root and host-profile exclusions remain effective through the MCP path. Generic hosts use bounded project sources without borrowing another provider's profile. MCP resolve/read calls use the same bounded source selection.
+- Caller-supplied internal catalogs, source registries, environments and alternate state roots are rejected. Requirement-bound briefing scope is checked before source discovery. Incomplete required discovery issues no successful preflight receipt and can be retried without resetting state.
+- Contract reads verify the selected source's digest and file identity using bounded handle reads; changed, replaced, deleted and symlinked sources yield no content.
+
+### Evidence and limits
+
+- Synthetic real-protocol Before/After: six contracts caused seven directory enumerations before this change and one afterward. Home-cwd probes for Codex, Claude and generic mode perform zero reads or enumeration in the unrelated home subtree and preserve source bytes.
+- This is a repository-level MCP repair, not proof of native tool discovery in any installed host. The reported manifest mismatch, registration-conflict recovery and real F79 outcome remain separate open work.
+
 ## [0.72.0] - 2026-09-04
 
 ### Changed

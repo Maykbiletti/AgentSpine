@@ -21,6 +21,7 @@ import {
 } from "./learning.js";
 import { sharedContext } from "./sharing.js";
 import { recordWorldAssertion, worldContext } from "./world-model.js";
+import { boundBriefingArguments, rejectInternalSourceArguments, resolveMcpSources } from "./mcp-source-context.js";
 
 function textResult(value, isError = false) {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }], isError };
@@ -29,30 +30,44 @@ function textResult(value, isError = false) {
 async function callTool(name, args = {}) {
   const root = args.root || process.cwd();
   if (name === "scan") return textResult(await scanAndSave(root));
-  if (name === "resolve_context") return textResult(await resolveContext({
-    root,
-    cwd: args.cwd || root,
-    host: args.host || "generic",
-    maxBytes: args.maxBytes ?? 65536,
-    includeContent: args.includeContent ?? true
-  }));
+  if (name === "resolve_context") {
+    rejectInternalSourceArguments(args);
+    const sources = await resolveMcpSources({ root, cwd: args.cwd || root, host: args.host });
+    return textResult(await resolveContext({
+      root,
+      cwd: args.cwd || root,
+      host: sources.host,
+      maxBytes: args.maxBytes ?? 65536,
+      includeContent: args.includeContent ?? true,
+      catalog: sources.catalog
+    }));
+  }
   if (name === "session_briefing") {
-    const briefing = await sessionBriefing({ ...args, root });
+    const scoped = await boundBriefingArguments({ ...args, root });
+    const sources = await resolveMcpSources({ ...scoped, required: Boolean(args.requirementId) });
+    const briefing = await sessionBriefing({ ...scoped, host: sources.host,
+      catalog: sources.catalog, userStateRoot: sources.userStateRoot, sourceDiagnostics: sources.diagnostics });
     if (!args.requirementId) return textResult(briefing);
     const receipt = await recordDeliveryBriefingUse({ root,
       requirementId: args.requirementId, input: args, result: briefing });
     return textResult({ ...briefing, deliveryUseReceipt: receipt }, receipt.blocked);
   }
   if (name === "delivery_knowledge_query") {
+    rejectInternalSourceArguments(args);
     const knowledge = await deliveryKnowledgeQuery({ ...args, root });
     if (knowledge.blocked) return textResult(knowledge, true);
     const receipt = await recordDeliveryKnowledgeUse({ root,
       requirementId: args.requirementId, input: args, result: knowledge });
     return textResult({ ...knowledge, deliveryUseReceipt: receipt }, receipt.blocked);
   }
-  if (name === "read_document") return textResult(await readDocument({
-    root, path: args.path, offset: args.offset ?? 0, length: args.length ?? 65536
-  }));
+  if (name === "read_document") {
+    rejectInternalSourceArguments(args);
+    const sources = await resolveMcpSources({ root, host: args.host });
+    return textResult(await readDocument({
+      root, path: args.path, offset: args.offset ?? 0, length: args.length ?? 65536,
+      catalog: sources.catalog
+    }));
+  }
   if (name === "verify") return textResult(await verifyCatalog(root));
   if (name === "link_documents") return textResult(await linkDocuments({ ...args, root }));
   if (name === "annotate_document") return textResult(await annotateDocument({ ...args, root }));
