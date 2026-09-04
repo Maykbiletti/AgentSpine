@@ -13,7 +13,7 @@ import { boundedId } from "./hook-context.js";
 import { auditGuard } from "./hook-protection.js";
 import { comparablePath, projectId as localProjectId } from "./paths.js";
 import { resolveFinalAssistantMessage } from "./hook-final-message.js";
-import { assignmentPremortemBinding, beginDeliveryAssignment,
+import { assignmentPremortemBinding, beginDeliveryAssignment, continueDeliveryAssignment,
   resolveDeliveryAssignment } from "./delivery-assignment.js";
 import { deliveryWriteIdDigest } from "./delivery-premortem-binding.js";
 
@@ -35,7 +35,14 @@ export function premortemBinding(input, scope, root = null) {
 }
 
 async function exactBinding(input, scope, root, begin = false) {
+  if (input?.assignment_id && input?.assignmentId && input.assignment_id !== input.assignmentId) {
+    return { status: "foreign-assignment", blocked: true,
+      reason: "Conflicting assignment_id and assignmentId cannot select a delivery." };
+  }
   const binding = premortemBinding(input, scope, root);
+  if (begin && binding.assignmentId) {
+    return continueDeliveryAssignment({ root, binding, assignmentId: binding.assignmentId });
+  }
   const suppliedEventId = input?.event_id ?? input?.hook_event_id ?? input?.turn_id;
   const promptEventId = suppliedEventId
     ? boundedId(suppliedEventId, "eventId")
@@ -87,6 +94,7 @@ function withRegistrationGuidance(result, root, assignmentId = null) {
       `Use root ${JSON.stringify(root)}; Requirement: ${requirementId || "<unavailable; retry the hook>"}.`,
       "The premortem needs exactly baseline-environment, contract-tests, and delivery-path; each failure starts `this delivery fails because ` and has a concrete check.",
       "Claims, foreign or reused receipts do not count. This is context only and grants no authority.",
+      "For an unfinished delivery, the host may send this assignmentId in the next UserPromptSubmit to continue the same exact scope; omit it for a new delivery. Prompt text is not a continuation signal.",
       "Complete with `Premortem closure sha256 <64hex>`, `Premortem latest write sha256 <64hex>`, and:",
       "- <category> <checkId>: PASS — <nonempty result>"
     ].join("\n")
@@ -97,6 +105,14 @@ export async function prepareHookPremortem({ input, root, scope }) {
   try {
     const exact = await exactBinding(input, scope, root, true);
     if (exact.blocked) return withRegistrationGuidance(exact, root, exact.assignmentId);
+    if (exact.status === "degraded") {
+      await diagnostic(input, "premortem-prepare", exact);
+      return withRegistrationGuidance(exact, root);
+    }
+    if (exact.status === "continued") return withRegistrationGuidance({
+      status: "required", blocked: false, requirementId: exact.requirementId,
+      requirement: exact.requirement, continuation: true
+    }, root, exact.assignmentId);
     const result = await preparePremortemRequirement({
       root, binding: exact.binding, now: input.timestamp || new Date()
     });

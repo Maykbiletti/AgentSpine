@@ -4,6 +4,19 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.72.3] - 2026-09-05
+
+### Fixed
+
+- Host-explicit continuation now retains one unfinished assignment and its exact premortem across supplementary prompts, restart and compaction. Closed assignments and foreign session, entity, group, task or goal-step bindings cannot be continued; normal new-delivery prompts still require fresh preflight receipts.
+- Delivery knowledge queries record not-yet-created target files as an explicit absent baseline. Existing ancestors remain project-bound and non-symlinked, permission errors still abort the query, and target inspection never enumerates a directory tree.
+
+### Evidence and limits
+
+- Red/green probes reproduce the lost continuation requirement and ENOENT new-file failure. The combined Hook/MCP regression completes two assignments with real child-process artifact tests, preserves open write obligations through supplementary input, and rejects the first assignment's test as proof for the second write.
+- Negative probes cover scope drift, completed receipts, concurrent prompts, source bytes, parent replacement, permission failure and actual process exit during continuation followed by lock-lease recovery. Synthetic unknown events/schemas remain unchanged and unaccepted; no external event semantics or live compatibility are inferred.
+- Native Codex/PowerShell result-envelope diagnosis, installation registration, loaded-reader compatibility and structured MCP closure remain separate pending work. No live configuration, session or CodexLink state is changed.
+
 ## [0.72.2] - 2026-09-04
 
 ### Fixed

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { withOwnedFileLock } from "./owned-file-lock.js";
 import { canonicalPath, projectStateDir } from "./paths.js";
 import { writePremortemFile } from "./delivery-premortem-file.js";
+import { inspectPremortemState } from "./delivery-premortem.js";
 import { canonicalPremortem as canonical, premortemSha256 as sha256,
   premortemTime as at, sealPremortem as seal,
   validPremortemSeal as validSeal, validPremortemTime as validTime } from "./delivery-premortem-codec.js";
@@ -87,7 +88,10 @@ function assignmentFor(binding, eventId, digest, predecessor, now) {
     host: binding.host, sessionId: binding.sessionId, projectId: binding.projectId,
     binding: { host: binding.host, sessionId: binding.sessionId,
       projectId: binding.projectId, entityId: binding.entityId || null,
-      groupId: binding.groupId || null, taskId: binding.taskId || null },
+      groupId: binding.groupId || null, taskId: binding.taskId || null,
+      goalId: binding.goalId || null, goalStepId: binding.goalStepId || null,
+      queueId: binding.queueId || null, gatewayAttempt: binding.gatewayAttempt ?? null,
+      planDefinitionsDigest: binding.planDefinitionsDigest || null },
     predecessorAssignmentId: predecessor?.assignmentId || null,
     createdAt: at(now), authority: AUTHORITY });
 }
@@ -155,6 +159,41 @@ export async function resolveDeliveryAssignment({ root, binding, assignmentId = 
   }
   return { status: "resolved", blocked: false, assignmentId: pointer.assignmentId,
     assignment: structuredClone(pointer.assignment) };
+}
+
+export async function continueDeliveryAssignment({ root, binding, assignmentId }) {
+  if (!ID_RE.test(assignmentId || "")) {
+    return { status: "foreign-assignment", blocked: true,
+      reason: "Continuation requires the exact active assignmentId returned by this host session." };
+  }
+  const paths = await pathsFor(root, binding);
+  // Serialize the check with new assignments. Continuation never advances the pointer
+  // or rewrites history, including when a process exits during this inspection.
+  return withOwnedFileLock(paths.lock, async () => {
+    const current = await resolveDeliveryAssignment({ root, binding, assignmentId });
+    if (current.blocked) return current;
+    if (!current.assignment) return { status: "foreign-assignment", blocked: true,
+      reason: "This session has no active assignment matching the continuation." };
+    for (const key of ["entityId", "groupId", "taskId", "goalId", "goalStepId", "queueId",
+      "gatewayAttempt", "planDefinitionsDigest"]) {
+      if ((current.assignment.binding[key] || null) !== (binding[key] || null)) {
+        return { status: "foreign-assignment", blocked: true,
+          reason: `Continuation requires the same explicit ${key} binding, including absence.` };
+      }
+    }
+    const exact = assignmentPremortemBinding(binding, current);
+    const inspected = await inspectPremortemState({ root, binding: exact });
+    if (inspected.blocked || inspected.status === "degraded") return inspected;
+    if (!inspected.requirement) return { status: "missing", blocked: true,
+      reason: "The exact continuation scope has no existing premortem requirement." };
+    if (inspected.closed || inspected.consumed) return { status: "finalized", blocked: true,
+      reason: "A completed assignment cannot be continued; a new delivery needs fresh preflight calls." };
+    if (inspected.conflicted) return { status: "conflict", blocked: true,
+      requirementId: inspected.requirementId,
+      reason: "Continuation cannot repair a conflicted registration or bypass its recovery checks." };
+    return { ...current, status: "continued", requirement: inspected.requirement,
+      requirementId: inspected.requirementId, binding: exact };
+  });
 }
 
 export function assignmentPremortemBinding(binding, result) {
