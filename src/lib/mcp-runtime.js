@@ -11,6 +11,7 @@ import { scanAndSave, verifyCatalog } from "./catalog.js";
 import { checkDelegation, createTask, taskContext, updateTask } from "./coordination.js";
 import { readDocument, resolveContext } from "./context.js";
 import { recordDeliveryPremortem } from "./delivery-premortem.js";
+import { recoverDeliveryPremortem } from "./delivery-premortem-correction.js";
 import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
@@ -110,6 +111,15 @@ async function callTool(name, args = {}) {
       items: args.items
     });
     return textResult({ ...premortem, agentSpineUse: usage }, premortem.blocked);
+  }
+  if (name === "recover_delivery_premortem") {
+    if (typeof args.root !== "string" || !args.root) {
+      throw new Error("recover_delivery_premortem requires the exact project root");
+    }
+    const recovery = await recoverDeliveryPremortem({ root: args.root,
+      predecessorRequirementId: args.predecessorRequirementId,
+      taskId: args.taskId || null });
+    return textResult(recovery, recovery.blocked);
   }
   throw new Error(`Unknown tool: ${name}`);
 }

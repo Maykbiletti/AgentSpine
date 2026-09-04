@@ -13,6 +13,9 @@ import { boundedId } from "./hook-context.js";
 import { auditGuard } from "./hook-protection.js";
 import { comparablePath, projectId as localProjectId } from "./paths.js";
 import { resolveFinalAssistantMessage } from "./hook-final-message.js";
+import { assignmentPremortemBinding, beginDeliveryAssignment,
+  resolveDeliveryAssignment } from "./delivery-assignment.js";
+import { deliveryWriteIdDigest } from "./delivery-premortem-binding.js";
 
 export function premortemBinding(input, scope, root = null) {
   return {
@@ -21,11 +24,30 @@ export function premortemBinding(input, scope, root = null) {
     entityId: scope?.entityId || null,
     groupId: scope?.groupId || null,
     projectId: scope?.projectId || (root ? `project:${localProjectId(comparablePath(root))}` : null),
+    taskId: scope?.goalId || scope?.queueId ? null : scope?.currentTaskId || null,
+    assignmentId: input?.assignment_id || input?.assignmentId || null,
     goalId: scope?.goalId || null,
     goalStepId: scope?.goalStepId || null,
     queueId: scope?.queueId || null,
     planDefinitionsDigest: scope?.planDefinitionsDigest || null,
     gatewayAttempt: scope?.gatewayAttempt || null
+  };
+}
+
+async function exactBinding(input, scope, root, begin = false) {
+  const binding = premortemBinding(input, scope, root);
+  const suppliedEventId = input?.event_id ?? input?.hook_event_id ?? input?.turn_id;
+  const promptEventId = suppliedEventId
+    ? boundedId(suppliedEventId, "eventId")
+    : `prompt:${deliveryWriteIdDigest({ tool_input: input?.prompt ?? input?.user_prompt
+      ?? input?.message ?? input?.input ?? null })}`;
+  const assignment = begin
+    ? await beginDeliveryAssignment({ root, binding,
+      eventId: promptEventId,
+      now: input.timestamp || new Date() })
+    : await resolveDeliveryAssignment({ root, binding, assignmentId: binding.assignmentId });
+  return assignment.blocked ? assignment : {
+    ...assignment, binding: assignmentPremortemBinding(binding, assignment)
   };
 }
 
@@ -53,12 +75,12 @@ function invalidWriteSession(error, path) {
   };
 }
 
-function withRegistrationGuidance(result, root) {
+function withRegistrationGuidance(result, root, assignmentId = null) {
   const requirementId = result.requirementId || result.requirement?.requirementId || null;
   const registration = { tool: "record_delivery_premortem", root, requirementId };
   const agentSpineUse = deliveryAgentUseGuidance(root, requirementId);
   return {
-    ...result, registration, agentSpineUse,
+    ...result, assignmentId, registration, agentSpineUse,
     instruction: [
       "Before the first Write/Edit/apply_patch or recognized shell mutation, make exactly three stored AgentSpine calls bound to this session and goal step, in order:",
       "1. session_briefing; 2. delivery_knowledge_query for targets, contracts, and recent errors; 3. record_delivery_premortem.",
@@ -73,11 +95,13 @@ function withRegistrationGuidance(result, root) {
 
 export async function prepareHookPremortem({ input, root, scope }) {
   try {
+    const exact = await exactBinding(input, scope, root, true);
+    if (exact.blocked) return withRegistrationGuidance(exact, root, exact.assignmentId);
     const result = await preparePremortemRequirement({
-      root, binding: premortemBinding(input, scope, root), now: input.timestamp || new Date()
+      root, binding: exact.binding, now: input.timestamp || new Date()
     });
     await diagnostic(input, "premortem-prepare", result);
-    return withRegistrationGuidance(result, root);
+    return withRegistrationGuidance(result, root, exact.assignmentId);
   } catch (error) {
     const result = degraded(error, root);
     await diagnostic(input, "premortem-prepare", result);
@@ -95,7 +119,9 @@ export async function verifyHookPremortemWrite({ input, root, scope }) {
     return invalidWriteSession(error, root);
   }
   try {
-    const binding = premortemBinding(input, scope, root);
+    const exact = await exactBinding(input, scope, root);
+    if (exact.blocked) return exact;
+    const binding = exact.binding;
     const result = await diagnostic(input, "premortem-before-write", await verifyPremortemBeforeWrite({
       root, binding, now: input.timestamp || new Date()
     }));
@@ -108,7 +134,13 @@ export async function verifyHookPremortemWrite({ input, root, scope }) {
       if (requirement.blocked) return requirement;
     }
     if (result.blocked && new Set(["conflict", "late", "finalized", "mismatch"]).has(result.status)) {
-      return { ...result, reason: `${result.reason}\nPremortem status: ${result.status}.` };
+      const recovery = result.status === "conflict" ? {
+        tool: "recover_delivery_premortem", root,
+        predecessorRequirementId: result.requirementId,
+        instruction: "Recover into a fresh assignment-bound requirement, then run all three preflight calls again. History is preserved; recovery grants no authority."
+      } : null;
+      return { ...result, recovery,
+        reason: `${result.reason}\nPremortem status: ${result.status}.${recovery ? `\n${recovery.instruction}` : ""}` };
     }
     const requirementId = requirement?.requirementId || result.requirementId;
     if (requirementId?.split(":").length === 3) {
@@ -135,8 +167,10 @@ export async function recordHookPremortemWrite({ input, root, scope, success }) 
   if (!isPremortemWrite(input)) return { status: "not-applicable", blocked: false };
   if (success !== true) return { status: "write-failed", blocked: false };
   try {
+    const exact = await exactBinding(input, scope, root);
+    if (exact.blocked) return exact;
     const result = await diagnostic(input, "premortem-write", await recordPremortemWrite({
-      root, binding: premortemBinding(input, scope, root), input,
+      root, binding: exact.binding, input,
       now: input.timestamp || new Date()
     }));
     return result.status === "duplicate" ? { ...result, status: "write-recorded" } : result;
@@ -148,8 +182,10 @@ export async function recordHookPremortemWrite({ input, root, scope, success }) 
 export async function recordHookPremortemWriteIntent({ input, root, scope }) {
   if (!isPremortemWrite(input)) return { status: "not-applicable", blocked: false };
   try {
+    const exact = await exactBinding(input, scope, root);
+    if (exact.blocked) return exact;
     return await diagnostic(input, "premortem-write-intent", await recordPremortemWriteIntent({
-      root, binding: premortemBinding(input, scope, root), input, now: input.timestamp || new Date()
+      root, binding: exact.binding, input, now: input.timestamp || new Date()
     }));
   } catch (error) {
     return diagnostic(input, "premortem-write-intent", degraded(error, root));
@@ -164,7 +200,9 @@ export async function verifyHookPremortemStop({ input, root, scope, paused = fal
     if (!message.known) {
       return diagnostic(input, "premortem-stop", degraded(new Error(`premortem ${message.reason}`), root));
     }
-    const binding = premortemBinding(input, scope, root);
+    const exact = await exactBinding(input, scope, root);
+    if (exact.blocked) return exact;
+    const binding = exact.binding;
     const inspection = await diagnostic(input, "premortem-stop-inspect",
       await inspectPremortemState({ root, binding }));
     let usage = null;
@@ -174,7 +212,7 @@ export async function verifyHookPremortemStop({ input, root, scope, paused = fal
       if (usage.blocked) return usage;
     }
     const result = await diagnostic(input, "premortem-stop", await verifyPremortemStop({
-      root, binding: premortemBinding(input, scope, root), message: message.text,
+      root, binding, message: message.text,
       now: input.timestamp || new Date()
     }));
     if (!inspection.hasWrite && inspection.requirementId) {

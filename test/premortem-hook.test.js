@@ -10,7 +10,7 @@ import { gatewayEnvironmentContext } from "../src/lib/hook-context.js";
 import { createTask } from "../src/lib/coordination.js";
 import { upsertEntity } from "../src/lib/graph.js";
 import {
-  deliveryPremortemPath, recordDeliveryPremortem
+  deliveryPremortemPath, inspectPremortemState, recordDeliveryPremortem
 } from "../src/lib/delivery-premortem.js";
 import {
   recordDeliveryBriefingUse, recordDeliveryKnowledgeUse
@@ -478,9 +478,8 @@ test("malformed premortem state is audited and fails open", async (t) => {
   const { root, state } = await fixture(t);
   const session = "session:uncertain";
   const result = await prepare(root, session);
-  const binding = premortemBinding(common(root, session), {
-    host: "codex", projectId: PROJECT_ID
-  });
+  const binding = (await inspectPremortemState({ root,
+    requirementId: result.preflight.premortem.requirementId })).binding;
   const path = await deliveryPremortemPath({ root, binding });
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, "{not-json\n", "utf8");

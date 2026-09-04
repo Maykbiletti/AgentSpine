@@ -92,7 +92,7 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
-Version `0.72.1` keeps the durable provenance-bound world model and decomposes the complete outcome-bound learning runtime into bounded contract domains. Measured and explicitly user-confirmed assertions can become context-only facts; model suggestions, expired evidence, contradictory values, and failed outcomes remain separate uncertainty and never silently drive the next session.
+Version `0.72.2` gives every new host prompt a durable assignment identifier and an independent three-call delivery lane. A conflicting premortem retry is preserved as a rejection receipt without poisoning the first valid registration, while `premortem-recover` and `recover_delivery_premortem` move legacy 0.72 conflicts into a fresh assignment without deleting history or granting authority.
 
 Version `0.69.0` splits the CLI into seven bounded domains while preserving all 114 commands and behavior.
 

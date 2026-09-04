@@ -48,3 +48,21 @@ export const deliveryPremortemTool = {
     }
   }
 };
+
+export const deliveryPremortemRecoveryTool = {
+  name: "recover_delivery_premortem",
+  description: "Create a fresh assignment-bound requirement from a preserved legacy conflict. The predecessor, rejection history, and all checks remain immutable; this grants no authority.",
+  inputSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["root", "predecessorRequirementId"],
+    properties: {
+      root: { type: "string", minLength: 1 },
+      predecessorRequirementId: {
+        type: "string",
+        pattern: "^premortem-requirement:[a-f0-9]{64}:[a-f0-9]{64}$"
+      },
+      taskId: { anyOf: [{ type: "string", minLength: 1, maxLength: 512 }, { type: "null" }] }
+    }
+  }
+};

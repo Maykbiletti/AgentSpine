@@ -19,6 +19,7 @@ import { createPremortemArtifact, createPremortemAttachment, createPremortemClos
 import { inspectActiveDeliveryPremortems,
   verifyEmptyPremortemGoalScope } from "./delivery-premortem-inspection.js";
 import { premortemGoalWriterScopeCheck } from "./delivery-premortem-session-guard.js";
+import { recordPremortemRegistrationRejection } from "./delivery-premortem-rejection.js";
 import { removePremortemStateFile,
   resolvePremortemGoalScope } from "./delivery-premortem-recovery.js";
 import { canonicalPremortem as canonical, premortemSha256 as sha256, premortemTime as at,
@@ -173,7 +174,8 @@ export async function inspectPremortemState({ root, binding: rawBinding = null,
       requirement: structuredClone(state.requirement),
       binding: structuredClone(state.binding), hasWrite: Boolean(state.firstWrite),
       closed: Boolean(state.closure),
-      consumed: state.events.some((event) => event.type === "premortem-consumed") };
+      consumed: state.events.some((event) => event.type === "premortem-consumed"),
+      conflicted: Boolean(state.conflict), artifactDigest: state.artifact?.digest || null };
   } catch (error) {
     return boundary(error);
   }
@@ -216,11 +218,9 @@ export async function recordDeliveryPremortem({ root, requirementId: id, items, 
         { requirementId: id, digest: state.artifact?.digest || null });
       if (state.artifact) {
         if (canonical(state.artifact.items) !== canonical(proposed.items)) {
-          state.conflict = sha256({ prior: state.artifact.digest, proposed: proposed.digest });
-          appendEvent(state, "artifact-conflict", { conflict: state.conflict }, now);
-          await saveState(paths.path, state, assertOwned);
+          const rejection = await recordPremortemRegistrationRejection({ root, state, proposed, now });
           return block("conflict", `AgentSpine premortem ${id} conflicts with its first registration.`,
-            { requirementId: id, digest: state.artifact.digest });
+            { requirementId: id, digest: state.artifact.digest, rejection });
         }
         return { status: state.late ? "late" : "duplicate", blocked: state.late,
           reason: state.late ? `AgentSpine premortem ${id} was recorded after the first write.` : undefined,

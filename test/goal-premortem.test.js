@@ -141,7 +141,7 @@ test("an exact queue with a recorded write but no closure blocks completion", as
   assert.equal(completed.item.status, "blocked");
   assert.equal(completed.premortemReview.status, "missing");
 });
-test("a conflict recorded after closure still blocks goal completion", async (t) => {
+test("a rejected registration after closure preserves goal completion", async (t) => {
   const { root, agentId } = await fixture(t);
   await assignPlan(root, agentId, "goal:premortem-conflict");
   const claim = await claimGatewayWork({ root, workerId: "worker:premortem-conflict",
@@ -158,8 +158,8 @@ test("a conflict recorded after closure still blocks goal completion", async (t)
   const completed = await completeGatewayRun({ root, queueId: claim.item.queueId,
     workerId: "worker:premortem-conflict", claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts, result: { checkpoint: { done: true }, completed: true },
     now: "2032-02-01T00:00:03.000Z" });
-  assert.equal(completed.item.status, "blocked");
-  assert.equal(completed.premortemReview.status, "conflict");
+  assert.equal(completed.item.status, "completed");
+  assert.equal(completed.premortemReview.status, "closed");
 });
 test("a closed written lane cannot be relabelled read-only", async (t) => {
   const { root, agentId } = await fixture(t);

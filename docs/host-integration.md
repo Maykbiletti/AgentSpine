@@ -21,7 +21,9 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
-Version `0.72.1` replaces the `0.71.0` plugin cache identity and keeps provenance-bound world and learning context behind bounded modules while preserving all execution boundaries. Writing deliveries must call `session_briefing`, `delivery_knowledge_query` and `record_delivery_premortem` in that order with the exact hook-issued requirement before their first mutation.
+Version `0.72.2` replaces the `0.72.1` plugin cache identity. Each new prompt starts a durable assignment-bound requirement, while restart and compaction reuse that assignment until another prompt arrives. Writing deliveries must call `session_briefing`, `delivery_knowledge_query` and `record_delivery_premortem` in that order with the exact hook-issued requirement before their first mutation.
+
+A contradictory retry is rejected and stored separately without changing the first valid registration. A legacy 0.72 conflict can be preserved and moved to a fresh requirement through either `recover_delivery_premortem` or `agentspine premortem-recover <predecessor-requirement> --root <project>`. The returned requirement must perform all three preflight calls again; recovery never deletes evidence or grants authority.
 
 Version `0.39.0` replaces the `0.38.0` plugin cache identity.
 

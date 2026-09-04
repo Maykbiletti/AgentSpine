@@ -324,7 +324,7 @@ test("only explicit delivery outcome evidence satisfies a recognized test", () =
   }
 });
 
-test("PreToolUse blocks when premortem state conflicts after its initial verification", async (t) => {
+test("PreToolUse preserves the verified premortem when a conflicting retry races", async (t) => {
   const { root } = await fixture(t);
   const identity = lane(root, "session:intent-race", "turn:intent-race");
   const recorded = await registerPremortem(root, identity);
@@ -339,9 +339,9 @@ test("PreToolUse blocks when premortem state conflicts after its initial verific
       assert.equal(conflict.status, "conflict");
     }
   });
-  assert.equal(denied.blocked, true);
+  assert.equal(denied.blocked, false);
   assert.equal(denied.deliveryVerification.status, "intent-recorded");
-  assert.equal(denied.premortem.status, "conflict");
+  assert.equal(denied.premortem.status, "verified");
   await assert.rejects(readFile(target), { code: "ENOENT" });
 });
 

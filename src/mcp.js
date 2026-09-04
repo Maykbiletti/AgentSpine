@@ -1,6 +1,6 @@
 import { VERSION } from "./version.js";
 import { isMainModule } from "./lib/runtime.js";
-import { deliveryPremortemTool } from "./lib/mcp-premortem.js";
+import { deliveryPremortemRecoveryTool, deliveryPremortemTool } from "./lib/mcp-premortem.js";
 import { deliveryKnowledgeTool, sessionBriefingTool } from "./lib/mcp-delivery-tools.js";
 import { worldModelTools } from "./lib/mcp-world-tools.js";
 import { startMcpProtocol } from "./lib/mcp-runtime.js";
@@ -437,7 +437,8 @@ const tools = [
     description: "Run AgentSpine's ten deterministic quality gates for discovery, hierarchy, links, authority, privacy, budget, and source preservation.",
     inputSchema: { type: "object", properties: { root: { type: "string" } } }
   },
-  deliveryPremortemTool
+  deliveryPremortemTool,
+  deliveryPremortemRecoveryTool
 ];
 
 export function startMcpServer(input = process.stdin, output = process.stdout) {

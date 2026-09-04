@@ -1,6 +1,6 @@
 # Host-native source roots
 
-## MCP preflight source parity (0.72.1)
+## MCP preflight source parity (0.72.2)
 
 `session_briefing`, `delivery_knowledge_query`, `resolve_context`, and
 `read_document` resolve bounded sources internally. The knowledge query shares

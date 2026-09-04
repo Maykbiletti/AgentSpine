@@ -4,6 +4,19 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.72.2] - 2026-09-04
+
+### Fixed
+
+- Every new host prompt now starts a durable assignment identifier and its own requirement, briefing receipt, knowledge receipt and premortem. Later tool events, restart and compaction resolve the same active assignment; another prompt cannot reuse a completed delivery's receipts.
+- A contradictory premortem registration is rejected into a separate integrity-sealed receipt before the valid lane is changed. The first registration, closure and goal outcome remain usable instead of becoming permanently conflicted.
+- The new MCP and CLI recovery path creates a fresh assignment-bound requirement for a preserved legacy 0.72 conflict. It links predecessor and replacement while retaining the original conflict, registration, audit history and source bytes.
+
+### Security and tests
+
+- Assignment lookup is bound to host, session, project and any established entity, group or task. Foreign or inactive assignment IDs, replayed old prompts and scope drift are denied without granting permissions.
+- Real Hook/MCP/CLI tests cover assignment A completion, assignment B isolation, conflicting registration, correction, successful B completion, parallel prompts, replay, foreign scope, restart, compaction and idempotent legacy recovery.
+
 ## [0.72.1] - 2026-09-04
 
 ### Fixed

@@ -406,7 +406,7 @@ test("generic host preflight requires an explicit instruction-host binding", asy
   assert.equal(ready.preflight.receipt.instructionHost, "codex");
 });
 
-test("Claude prompts in one raw session reuse one premortem and reclose after later writes", async (t) => {
+test("Claude prompts in one raw session receive separate assignment premortems", async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), "agentspine-session-premortem-"));
   const root = join(workspace, "project");
   const state = join(workspace, "state");
@@ -453,9 +453,11 @@ test("Claude prompts in one raw session reuse one premortem and reclose after la
     final_assistant_message: closing })).blocked, false);
 
   const second = await prompt("Deliver the second synthetic change.");
-  assert.equal(second.preflight.premortem.requirementId,
-    first.preflight.premortem.requirementId, "the second prompt needs no extra registration");
+  assert.notEqual(second.preflight.premortem.requirementId,
+    first.preflight.premortem.requirementId, "the second assignment needs its own registration");
   await seedDeliveryAgentUse(root, second.preflight.premortem.requirementId);
+  const secondRecorded = await recordDeliveryPremortem({ root,
+    requirementId: second.preflight.premortem.requirementId, items });
   const nextInput = { ...writeInput, content: "synthetic again\n" };
   const nextPre = await runHook({ ...base, hook_event_name: "PreToolUse", tool_name: "Write",
     tool_use_id: "write:session:two", tool_input: nextInput });
@@ -467,7 +469,12 @@ test("Claude prompts in one raw session reuse one premortem and reclose after la
     tool_use_id: "test:session:two", tool_input: { cmd: "node --test test/synthetic.test.js" }, success: true });
   assert.equal((await runHook({ ...base, hook_event_name: "Stop",
     final_assistant_message: closing })).blocked, true, "the old write closure is stale");
-  const reclosed = closing.replace(written.premortem.writeDigest, nextPost.premortem.writeDigest);
+  const reclosed = [
+    `Premortem closure sha256 ${secondRecorded.digest}`,
+    `Premortem latest write sha256 ${nextPost.premortem.writeDigest}`,
+    ...secondRecorded.artifact.items.map((item) =>
+      `- ${item.category} ${item.checkId}: PASS — synthetic check passed`)
+  ].join("\n");
   assert.equal((await runHook({ ...base, hook_event_name: "Stop",
     final_assistant_message: reclosed })).blocked, false);
   assert.equal(await readFile(join(root, "CLAUDE.md"), "utf8"), source);

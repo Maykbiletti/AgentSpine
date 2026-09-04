@@ -34,6 +34,7 @@ export function normalizePremortemBinding(input) {
     entityId: bounded(input.entityId, "entityId", VALUE_LIMIT, true),
     groupId: bounded(input.groupId, "groupId", VALUE_LIMIT, true),
     taskId: bounded(suppliedTask, "taskId", VALUE_LIMIT, true),
+    assignmentId: bounded(input.assignmentId, "assignmentId", VALUE_LIMIT, true),
     goalId: bounded(input.goalId, "goalId", VALUE_LIMIT, true),
     goalStepId: bounded(input.goalStepId, "goalStepId", VALUE_LIMIT, true),
     queueId: bounded(input.queueId, "queueId", VALUE_LIMIT, true),
@@ -53,8 +54,10 @@ export function normalizePremortemBinding(input) {
 }
 
 export function premortemLaneDigest(binding) {
-  const exact = binding.queueId || binding.goalId ? binding
-    : { host: binding.host, sessionId: binding.sessionId, projectId: binding.projectId };
+  const { assignmentId, ...legacyBinding } = binding;
+  const exact = binding.queueId || binding.goalId ? legacyBinding
+    : assignmentId ? binding
+      : { host: binding.host, sessionId: binding.sessionId, projectId: binding.projectId };
   return sha256({ schema: "agentspine.delivery-premortem-lane/v1", binding: exact });
 }
 

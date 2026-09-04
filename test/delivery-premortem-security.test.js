@@ -160,7 +160,7 @@ test("write intent revalidates after a concurrent read-only Stop deletes the lan
   assert.equal(intent.blocked, true);
 });
 
-test("write intent revalidates a conflict inserted after pre-write verification", async (t) => {
+test("write intent keeps the first valid registration after a conflicting retry", async (t) => {
   const { root, binding } = await fixture(t, "intent-conflict-race");
   const requirement = await preparePremortemRequirement({ root, binding });
   await recordDeliveryPremortem({ root, requirementId: requirement.requirementId, items: ITEMS });
@@ -170,8 +170,8 @@ test("write intent revalidates a conflict inserted after pre-write verification"
       : { ...item, failure: `${item.failure} unexpectedly` }) })).status, "conflict");
   const intent = await recordPremortemWrite({ root, binding, phase: "intent",
     input: { tool_use_id: "write:after-conflict" } });
-  assert.equal(intent.status, "conflict");
-  assert.equal(intent.blocked, true);
+  assert.equal(intent.status, "write-recorded");
+  assert.equal(intent.blocked, false);
 });
 
 test("a lane owner lost while waiting for the scope lock cannot replace state", async (t) => {

@@ -77,7 +77,8 @@ export async function deliveryKnowledgeQuery({ root, requirementId, targetPaths,
     requirementId,
     binding: {
       host: binding.host, projectId: binding.projectId, groupId: binding.groupId,
-      taskId: binding.taskId, goalId: binding.goalId, goalStepId: binding.goalStepId,
+      taskId: binding.taskId, assignmentId: binding.assignmentId,
+      goalId: binding.goalId, goalStepId: binding.goalStepId,
       queueId: binding.queueId, gatewayAttempt: binding.gatewayAttempt
     },
     targets: targetResults,

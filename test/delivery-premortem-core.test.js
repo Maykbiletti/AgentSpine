@@ -361,7 +361,7 @@ test("a premortem recorded after a successful write remains blocked", async (t) 
     message: closure(late.artifact, write.writeDigest), hasWrite: true })).blocked, true);
 });
 
-test("registration is concurrent-idempotent and a changed artifact conflicts", async (t) => {
+test("registration is concurrent-idempotent and a changed artifact is rejected without poisoning", async (t) => {
   const { root } = await fixture(t);
   const lane = binding("parallel");
   const prepared = await preparePremortemRequirement({ root, binding: lane });
@@ -376,10 +376,10 @@ test("registration is concurrent-idempotent and a changed artifact conflicts", a
     items: items(" after drift") });
   assert.equal(conflict.status, "conflict");
   assert.equal(conflict.blocked, true);
-  assert.equal((await verifyPremortemBeforeWrite({ root, binding: lane })).status, "conflict");
+  assert.equal((await verifyPremortemBeforeWrite({ root, binding: lane })).status, "verified");
 });
 
-test("a conflicting registration after closure blocks the exact goal attempt", async (t) => {
+test("a conflicting registration after closure preserves the exact closed goal attempt", async (t) => {
   const { root } = await fixture(t);
   const lane = binding("closed-then-conflicted", true);
   const prepared = await preparePremortemRequirement({ root, binding: lane });
@@ -394,9 +394,9 @@ test("a conflicting registration after closure blocks the exact goal attempt", a
   const lookup = await closedPremortemForGoal({ root, goalId: lane.goalId,
     goalStepId: lane.goalStepId, queueId: lane.queueId,
     gatewayAttempt: lane.gatewayAttempt });
-  assert.equal(lookup.status, "conflict");
-  assert.equal(lookup.blocked, true);
-  assert.equal(lookup.attachment, null);
+  assert.equal(lookup.status, "closed");
+  assert.equal(lookup.blocked, false);
+  assert.equal(lookup.attachment.premortemDigest, recorded.digest);
 });
 
 test("secret-shaped premortem text and closure results are never persisted", async (t) => {
