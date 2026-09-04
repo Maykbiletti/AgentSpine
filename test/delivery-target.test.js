@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
+import { join } from "node:path";
 import { targetSnapshot } from "../src/lib/delivery-target.js";
 import { fixture, client } from "./mcp-bounded-fixture.js";
 import { prompt } from "./assignment-continuation-fixture.js";
@@ -35,8 +36,10 @@ test("MCP snapshots absent new files without creating them and hashes existing t
 test("only ENOENT is an absent baseline; permission and parent races yield no snapshot", async t => {
   const f = await fixture(t, { homeRoot: false });
   const lstat = fs.lstat;
+  let deniedCalls = 0;
   fs.lstat = async (path, ...args) => {
-    if (String(path) === `${f.root}/denied.js`) {
+    if (String(path) === join(f.root, "denied.js")) {
+      deniedCalls++;
       throw Object.assign(new Error("synthetic permission failure"), { code: "EACCES" });
     }
     return lstat(path, ...args);
@@ -47,11 +50,12 @@ test("only ENOENT is an absent baseline; permission and parent races yield no sn
     fs.lstat = lstat;
     syncBuiltinESMExports();
   }
+  assert.equal(deniedCalls, 1, "the permission failure must actually be injected");
   await fs.mkdir(`${f.root}/parent`);
   await fs.mkdir(`${f.root}/elsewhere`);
   let changed = false;
   fs.lstat = async (path, ...args) => {
-    if (String(path) === `${f.root}/parent/new.js` && !changed) {
+    if (String(path) === join(f.root, "parent", "new.js") && !changed) {
       changed = true;
       await fs.rename(`${f.root}/parent`, `${f.root}/original-parent`);
       await fs.symlink(`${f.root}/elsewhere`, `${f.root}/parent`, process.platform === "win32" ? "junction" : "dir");
@@ -64,6 +68,7 @@ test("only ENOENT is an absent baseline; permission and parent races yield no sn
     fs.lstat = lstat;
     syncBuiltinESMExports();
   }
+  assert.equal(changed, true, "the parent replacement must actually be injected");
   await f.preserve();
 });
 

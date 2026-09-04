@@ -31,6 +31,8 @@ The original 0.72.2 reader fails two positive assertions: a supplementary prompt
 
 Continuation adds no tree traversal. A nine-sample local comparison measured 6.91 ms median for fresh preparation and 2.42 ms for continuation before the final full regression; the test reports current measurements, not a universal latency promise. Crash recovery kills a process inside the state read and waits for the real 15-second lock lease; it never edits the lock timestamp or historical state to force recovery.
 
+CI run 143 exposed a Windows-only defect in the new fault-injection test: its literal forward-slash comparison did not match native paths, so the intended permission exception never occurred. The corrected probe uses native path joining and explicitly asserts both permission injection and parent replacement. No production protection or timeout was relaxed; the initial red CI is not counted as a successful validation.
+
 ## Unresolved compatibility and host evidence
 
 An externally produced recovery event has been reported but its exact schema and transition semantics have not been supplied. Synthetic unknown events, unknown schemas and corrupted digests are deliberately not migrated or accepted by this change. Their bytes remain unchanged. The existing unsupported-event classification problem remains open; this release is not a recommendation to install or restart that live session.
