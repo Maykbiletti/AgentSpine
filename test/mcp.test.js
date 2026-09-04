@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { startMcpServer } from "../src/mcp.js";
 import { grantDelegation } from "../src/lib/coordination.js";
 import { preparePremortemRequirement } from "../src/lib/delivery-premortem.js";
+import { recordDeliveryBriefingUse, recordDeliveryKnowledgeUse } from "../src/lib/delivery-agent-usage.js";
 import { upsertEntity } from "../src/lib/graph.js";
 import { proposeLearning, reviewLearning } from "../src/lib/learning.js";
 import { initDirectoryAdapter, publishLearning, pullShared, reviewShared } from "../src/lib/sharing.js";
@@ -61,7 +62,7 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   assert.equal(messages[0].result.serverInfo.name, "agent-spine");
   const names = messages[1].result.tools.map((tool) => tool.name);
   assert.deepEqual(names, [
-    "scan", "resolve_context", "session_briefing", "read_document", "verify",
+    "scan", "resolve_context", "session_briefing", "delivery_knowledge_query", "read_document", "verify",
     "link_documents", "annotate_document", "upsert_entity",
     "link_entities", "relationship_context", "upsert_attention",
     "record_activity", "attention_context", "resolve_attention",
@@ -153,6 +154,10 @@ test("MCP accepts reordered items and records a canonical context-only premortem
     binding: { host: "codex", sessionId: "session:mcp-premortem", projectId: "project:mcp-premortem" }
   });
   assert.equal(prepared.status, "required");
+  await recordDeliveryBriefingUse({ root, requirementId: prepared.requirementId,
+    input: { root }, result: { schema: "synthetic-briefing" } });
+  await recordDeliveryKnowledgeUse({ root, requirementId: prepared.requirementId,
+    input: { targets: ["synthetic"] }, result: { schema: "synthetic-knowledge" } });
   const server = fileURLToPath(new URL("../src/mcp.js", import.meta.url));
   const child = spawn(process.execPath, [server], {
     cwd: nested,

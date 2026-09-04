@@ -50,7 +50,8 @@ export async function verifyHookStopContracts({ input, root, scope, recordPause 
     input,
     root,
     scope,
-    paused: deliveryVerification.status === "paused-job"
+    paused: deliveryVerification.status === "paused-job",
+    consume: completionFence
   });
   if (premortem.blocked) {
     return { blocked: true, reason: premortem.reason, deliveryVerification, premortem };

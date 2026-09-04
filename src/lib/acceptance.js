@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAudit } from "./audit.js";
@@ -10,6 +10,7 @@ import { linkEntities, upsertEntity } from "./graph.js";
 import { loadLearning, rollbackLearning } from "./learning.js";
 import { configurePreflightPolicy } from "./preflight.js";
 import { recordDeliveryPremortem } from "./delivery-premortem.js";
+import { recordDeliveryBriefingUse, recordDeliveryKnowledgeUse } from "./delivery-agent-usage.js";
 import {
   grantExecution, loadSelfstarter, registerJob
 } from "./selfstarter.js";
@@ -34,6 +35,16 @@ function requireCondition(condition, detail) {
 
 function receipt(id, evidence) {
   return digest(`${SCHEMA}\0${id}\0${JSON.stringify(evidence)}`);
+}
+
+async function seedAcceptanceDeliveryUse(root, requirementId, label) {
+  const briefing = await recordDeliveryBriefingUse({ root, requirementId,
+    input: { root, label }, result: { schema: "agentspine.acceptance-briefing/v1", label } });
+  requireCondition(!briefing.blocked, `acceptance ${label} briefing call was rejected`);
+  const knowledge = await recordDeliveryKnowledgeUse({ root, requirementId,
+    input: { targets: ["AGENTS.md"], label },
+    result: { schema: "agentspine.acceptance-knowledge/v1", label } });
+  requireCondition(!knowledge.blocked, `acceptance ${label} knowledge call was rejected`);
 }
 
 function addCheck(checks, id, label, detail, evidence) {
@@ -85,7 +96,25 @@ export function renderAcceptanceReport(report) {
 export async function runVisibleAcceptance() {
   const projectRoot = await mkdtemp(join(tmpdir(), "agentspine-visible-acceptance-project-"));
   const stateRoot = await mkdtemp(join(tmpdir(), "agentspine-visible-acceptance-state-"));
-  const previousState = process.env.AGENTSPINE_STATE_DIR;
+  const profileRoot = join(stateRoot, "profiles");
+  const isolatedEnvironment = {
+    AGENTSPINE_STATE_DIR: stateRoot,
+    HOME: join(profileRoot, "home"),
+    USERPROFILE: join(profileRoot, "home"),
+    CLAUDE_CONFIG_DIR: join(profileRoot, "claude"),
+    CODEX_HOME: join(profileRoot, "codex"),
+    BLUN_HOME: join(profileRoot, "codex")
+  };
+  const previousEnvironment = Object.fromEntries(Object.keys(isolatedEnvironment)
+    .map((key) => [key, process.env[key]]));
+  for (const directory of new Set(Object.values(isolatedEnvironment))) {
+    await mkdir(directory, { recursive: true });
+  }
+  await writeFile(join(isolatedEnvironment.CLAUDE_CONFIG_DIR, "CLAUDE.md"),
+    "# Isolated acceptance profile\n\nSynthetic Claude source.\n", "utf8");
+  await writeFile(join(isolatedEnvironment.CODEX_HOME, "AGENTS.md"),
+    "# Isolated acceptance profile\n\nSynthetic Codex source.\n", "utf8");
+  Object.assign(process.env, isolatedEnvironment);
   process.env.AGENTSPINE_STATE_DIR = stateRoot;
   const checks = [];
   const sources = {
@@ -277,6 +306,7 @@ process.stdin.on("end", () => {
     const premortemRequirement = deliveryPrompt.preflight?.premortem;
     requireCondition(!deliveryPrompt.blocked && premortemRequirement?.status === "required",
       "authorized delivery did not receive its exact premortem requirement");
+    await seedAcceptanceDeliveryUse(projectRoot, premortemRequirement.requirementId, "authorized");
     const deliveryPremortem = await recordDeliveryPremortem({
       root: projectRoot, requirementId: premortemRequirement.requirementId,
       items: acceptancePremortemItems(), now: "2031-04-05T09:10:02.750Z"
@@ -322,6 +352,7 @@ process.stdin.on("end", () => {
     const deniedRequirement = deniedPrompt.preflight?.premortem;
     requireCondition(!deniedPrompt.blocked && deniedRequirement?.status === "required",
       "resumed delivery did not receive an isolated premortem requirement");
+    await seedAcceptanceDeliveryUse(projectRoot, deniedRequirement.requirementId, "foreign-actor");
     const deniedPremortem = await recordDeliveryPremortem({
       root: projectRoot, requirementId: deniedRequirement.requirementId,
       items: acceptancePremortemItems(), now: "2031-04-05T09:10:06.500Z"
@@ -390,8 +421,10 @@ process.stdin.on("end", () => {
     };
     return report;
   } finally {
-    if (previousState === undefined) delete process.env.AGENTSPINE_STATE_DIR;
-    else process.env.AGENTSPINE_STATE_DIR = previousState;
+    for (const [key, value] of Object.entries(previousEnvironment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     await rm(projectRoot, { recursive: true, force: true });
     await rm(stateRoot, { recursive: true, force: true });
   }

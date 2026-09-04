@@ -9,6 +9,7 @@ import {
 } from "../src/lib/delivery-premortem.js";
 import { premortemScopeDigest } from "../src/lib/delivery-premortem-index.js";
 import { claimGatewayWork, loadGatewayRuntime, reconcileGateway } from "../src/lib/gateway-runtime.js";
+import { seedDeliveryAgentUse } from "./delivery-agent-use-fixture.js";
 import {
   assignPremortemPlan as assignPlan,
   PREMORTEM_ITEMS as ITEMS, premortemGoalBinding as binding,
@@ -41,6 +42,7 @@ test("a restarted writer session blocks an ambiguous host effect instead of repl
 
   const prematureSession = binding({ ...first.item, planDefinitionsDigest }, "session:restart:two");
   const prematurePrepared = await preparePremortemRequirement({ root, binding: prematureSession });
+  await seedDeliveryAgentUse(root, prematurePrepared.requirementId);
   assert.equal((await recordDeliveryPremortem({ root,
     requirementId: prematurePrepared.requirementId, items: ITEMS })).status, "recorded");
   const blockedHook = await runHook(preWrite(root, agentId, first.item,
@@ -113,6 +115,7 @@ test("uncertain session index parsing fails open and is reported as degraded", a
     input: { tool_use_id: "write:uncertain:one" }, phase: "intent" });
   const otherSession = binding({ ...claim.item, planDefinitionsDigest }, "session:uncertain:two");
   const otherPrepared = await preparePremortemRequirement({ root, binding: otherSession });
+  await seedDeliveryAgentUse(root, otherPrepared.requirementId);
   await recordDeliveryPremortem({ root, requirementId: otherPrepared.requirementId, items: ITEMS });
   const scope = premortemScopeDigest(claim.item.goalId, claim.item.goalStepId,
     claim.item.queueId, claim.item.attempts);

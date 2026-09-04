@@ -4,6 +4,9 @@ import {
   recordActivity, resolveAttention, upsertAttention
 } from "./attention.js";
 import { sessionBriefing } from "./briefing.js";
+import { deliveryKnowledgeQuery } from "./delivery-knowledge.js";
+import { recordDeliveryBriefingUse, recordDeliveryKnowledgeUse,
+  verifyDeliveryAgentUse } from "./delivery-agent-usage.js";
 import { scanAndSave, verifyCatalog } from "./catalog.js";
 import { checkDelegation, createTask, taskContext, updateTask } from "./coordination.js";
 import { readDocument, resolveContext } from "./context.js";
@@ -32,7 +35,20 @@ async function callTool(name, args = {}) {
     maxBytes: args.maxBytes ?? 65536,
     includeContent: args.includeContent ?? true
   }));
-  if (name === "session_briefing") return textResult(await sessionBriefing({ ...args, root }));
+  if (name === "session_briefing") {
+    const briefing = await sessionBriefing({ ...args, root });
+    if (!args.requirementId) return textResult(briefing);
+    const receipt = await recordDeliveryBriefingUse({ root,
+      requirementId: args.requirementId, input: args, result: briefing });
+    return textResult({ ...briefing, deliveryUseReceipt: receipt }, receipt.blocked);
+  }
+  if (name === "delivery_knowledge_query") {
+    const knowledge = await deliveryKnowledgeQuery({ ...args, root });
+    if (knowledge.blocked) return textResult(knowledge, true);
+    const receipt = await recordDeliveryKnowledgeUse({ root,
+      requirementId: args.requirementId, input: args, result: knowledge });
+    return textResult({ ...knowledge, deliveryUseReceipt: receipt }, receipt.blocked);
+  }
   if (name === "read_document") return textResult(await readDocument({
     root, path: args.path, offset: args.offset ?? 0, length: args.length ?? 65536
   }));
@@ -67,11 +83,15 @@ async function callTool(name, args = {}) {
     if (typeof args.root !== "string" || !args.root) {
       throw new Error("record_delivery_premortem requires the exact project root");
     }
-    return textResult(await recordDeliveryPremortem({
+    const usage = await verifyDeliveryAgentUse({ root: args.root,
+      requirementId: args.requirementId });
+    if (usage.blocked) return textResult(usage, true);
+    const premortem = await recordDeliveryPremortem({
       root: args.root,
       requirementId: args.requirementId,
       items: args.items
-    }));
+    });
+    return textResult({ ...premortem, agentSpineUse: usage }, premortem.blocked);
   }
   throw new Error(`Unknown tool: ${name}`);
 }

@@ -4,13 +4,28 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-09-04
+
+### Added
+
+- Writing deliveries now require three real, ordered AgentSpine MCP calls before their first mutation: the current session briefing, a bounded knowledge query over affected target fingerprints, contracts and recent errors, and the existing three-item premortem registration.
+- Each call writes a context-only, integrity-sealed receipt bound to the exact hook requirement, host session and active goal step. The hook verifies the same receipt chain before writing and completion.
+
 ### Fixed
 
 - Catalog discovery now skips and audits unreadable or vanished directory entries with the same traversal-error policy as host source discovery, so catalog-backed MCP tools continue past protected Windows folders without changing their permissions.
 
+### Security
+
+- A verified missing briefing or knowledge call blocks with the exact missing stage. Text claims, receipts from another session or goal step, conflicting calls and consumed receipts cannot satisfy the gate or grant permissions.
+- Read-only work remains unrestricted. Parser, scanner and filesystem uncertainty remains audited and fail-open; exact missing, conflicting, late, finalized or reused evidence remains fail-closed.
+- A completed non-goal delivery can begin a fresh three-call cycle in the same host session, but cannot reuse the prior receipts. Goal-step finalization remains terminal.
+
 ### Tests
 
 - A synthetic permission-denied catalog fixture verifies fail-open discovery, the allow audit, source byte preservation and the corresponding failing mutant.
+- Before/After regressions exercise real MCP calls and prove missing-stage denial, successful three-stage admission, foreign-session and foreign-step isolation, text-claim rejection, single-use receipts, concurrent deduplication, crash-safe state integrity, bounded verification latency and source-byte preservation.
+- Full hook, goal-race, restart, compact-context, Acceptance, Fresh Install, Upgrade, package and cross-platform release paths use the new contract.
 
 ## [0.66.1] - 2026-09-04
 

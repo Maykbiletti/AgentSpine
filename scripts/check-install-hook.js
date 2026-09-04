@@ -130,6 +130,11 @@ export async function invokeInstalledBlunPostWriteDigest(pluginRoot, projectRoot
   try {
     process.env.AGENTSPINE_STATE_DIR = stateRoot;
     const premortem = await import(pathToFileURL(join(pluginRoot, "src/lib/delivery-premortem.js")).href);
+    const usage = await import(pathToFileURL(join(pluginRoot, "src/lib/delivery-agent-usage.js")).href);
+    await usage.recordDeliveryBriefingUse({ root: projectRoot, requirementId,
+      input: { root: projectRoot }, result: { schema: "synthetic-installed-briefing" } });
+    await usage.recordDeliveryKnowledgeUse({ root: projectRoot, requirementId,
+      input: { targets: ["AGENTS.md"] }, result: { schema: "synthetic-installed-knowledge" } });
     const recorded = await premortem.recordDeliveryPremortem({
       root: projectRoot, requirementId, items: [
         { category: "baseline-environment", failure: "this delivery fails because the installed baseline is stale",

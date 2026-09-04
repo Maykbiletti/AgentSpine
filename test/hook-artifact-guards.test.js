@@ -8,6 +8,7 @@ import { runHook } from "../src/hook.js";
 import { inspectDeliveryPremortems,
   recordDeliveryPremortem } from "../src/lib/delivery-premortem.js";
 import { hookScanAuditPath } from "../src/lib/hook-audit.js";
+import { seedDeliveryAgentUse } from "./delivery-agent-use-fixture.js";
 import { registeredWriteContext } from "./premortem-write-fixture.js";
 
 function digest(value) {
@@ -230,6 +231,7 @@ test("a downstream artifact denial cannot replay a persisted premortem closure",
     agent_spine_scope: { project_id: "project:artifact-retry" } };
   const prompted = await runHook({ ...common, hook_event_name: "UserPromptSubmit",
     event_id: "prompt:artifact-retry", prompt: "Write the synthetic artifact." });
+  await seedDeliveryAgentUse(root, prompted.preflight.premortem.requirementId);
   const recorded = await recordDeliveryPremortem({ root,
     requirementId: prompted.preflight.premortem.requirementId, items: PREMORTEM_ITEMS });
   const toolInput = { file_path: "output.js", content: "export const ok = true;\n" };

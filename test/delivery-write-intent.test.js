@@ -14,6 +14,7 @@ import {
 import {
   closedPremortemForGoal, inspectDeliveryPremortems, recordDeliveryPremortem
 } from "../src/lib/delivery-premortem.js";
+import { seedDeliveryAgentUse } from "./delivery-agent-use-fixture.js";
 
 const HOOK_PATH = fileURLToPath(new URL("../src/hook.js", import.meta.url));
 const PROJECT_ID = "project:write-intent";
@@ -61,9 +62,9 @@ async function registerPremortem(root, identity) {
     ...identity, hook_event_name: "UserPromptSubmit", event_id: `prompt:${identity.turn_id}`,
     prompt: "Change the synthetic artifact safely."
   });
-  const recorded = await recordDeliveryPremortem({
-    root, requirementId: prompted.preflight.premortem.requirementId, items: premortemItems()
-  });
+  const requirementId = prompted.preflight.premortem.requirementId;
+  await seedDeliveryAgentUse(root, requirementId);
+  const recorded = await recordDeliveryPremortem({ root, requirementId, items: premortemItems() });
   assert.equal(recorded.blocked, false);
   return recorded;
 }
@@ -268,7 +269,7 @@ test("redirection and PowerShell mutations share the premortem and delivery cont
     const missing = lane(root, `session:${name}:missing`, `turn:${name}:missing`);
     const denied = await runHook({ ...missing, ...tool, hook_event_name: "PreToolUse" });
     assert.equal(denied.blocked, true);
-    assert.match(denied.reason, /missing premortem/);
+    assert.match(denied.reason, /stage 1: session_briefing/);
     const identity = lane(root, `session:${name}:closed`, `turn:${name}:closed`);
     await registerPremortem(root, identity);
     assert.equal((await runHook({ ...identity, ...tool, hook_event_name: "PreToolUse" })).blocked, false);

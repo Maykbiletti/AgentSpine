@@ -11,6 +11,7 @@ import { runAudit } from "../src/lib/audit.js";
 import { createTask, updateTask } from "../src/lib/coordination.js";
 import { recordDeliveryPremortem } from "../src/lib/delivery-premortem.js";
 import { upsertEntity } from "../src/lib/graph.js";
+import { seedDeliveryAgentUse } from "./delivery-agent-use-fixture.js";
 import {
   deleteJob, grantExecution, loadExecutionPolicy, loadSelfstarter, registerJob,
   revokeExecution, selfstarterContext, workspaceFingerprint
@@ -88,8 +89,10 @@ async function registerPremortem(root, session, timestamp = "2029-01-01T00:00:02
     hook_event_name: "UserPromptSubmit", cwd: root, host: "claude", session_id: session,
     timestamp, prompt: "Write the authorized synthetic artifact.", ...scope
   });
+  const requirementId = prompted.preflight.premortem.requirementId;
+  await seedDeliveryAgentUse(root, requirementId);
   const recorded = await recordDeliveryPremortem({ root,
-    requirementId: prompted.preflight.premortem.requirementId, items: PREMORTEM_ITEMS, now: timestamp });
+    requirementId, items: PREMORTEM_ITEMS, now: timestamp });
   assert.equal(recorded.blocked, false);
   return recorded;
 }

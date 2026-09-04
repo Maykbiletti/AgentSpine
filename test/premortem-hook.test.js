@@ -12,6 +12,9 @@ import { upsertEntity } from "../src/lib/graph.js";
 import {
   deliveryPremortemPath, recordDeliveryPremortem
 } from "../src/lib/delivery-premortem.js";
+import {
+  recordDeliveryBriefingUse, recordDeliveryKnowledgeUse
+} from "../src/lib/delivery-agent-usage.js";
 import { hookScanAuditPath } from "../src/lib/hook-audit.js";
 import { premortemBinding } from "../src/lib/hook-premortem.js";
 import { canonicalPath } from "../src/lib/paths.js";
@@ -62,6 +65,14 @@ function items() {
       failure: "this delivery fails because the artifact is misplaced",
       check: "Verify the synthetic artifact path and digest." }
   ];
+}
+
+async function recordPreparedPremortem(root, requirementId) {
+  await recordDeliveryBriefingUse({ root, requirementId,
+    input: { root }, result: { schema: "synthetic-briefing" } });
+  await recordDeliveryKnowledgeUse({ root, requirementId,
+    input: { targets: ["synthetic"] }, result: { schema: "synthetic-knowledge" } });
+  return recordDeliveryPremortem({ root, requirementId, items: items() });
 }
 
 function preWrite(root, session, id = `write:${session}`) {
@@ -158,7 +169,7 @@ test("authenticated gateway scope rejects every conflicting hook payload field",
   const matched = await runHook({
     ...preWrite(root, "session:gateway-matching"), agent_spine_scope: matching
   });
-  assert.equal(matched.premortem.status, "missing");
+  assert.equal(matched.premortem.status, "missing-briefing");
   for (const [field, value, expected] of [
     ["entity_id", "agent:poisoned", "entityId"],
     ["group_id", "group:poisoned", "groupId"],
@@ -198,7 +209,7 @@ test("authenticated gateway scope rejects every conflicting hook payload field",
     ...preWrite(root, "session:gateway-host-task"),
     agent_spine_scope: { ...nonGoal, task_id: "task:host-supplied" }
   });
-  assert.equal(hostTask.premortem.status, "missing",
+  assert.equal(hostTask.premortem.status, "missing-briefing",
     "a gateway field absent from the environment remains host-supplied");
 });
 
@@ -215,11 +226,10 @@ test("first write blocks on a verified missing premortem", async (t) => {
   const { root, source } = await fixture(t);
   const result = await runHook(preWrite(root, "session:missing"));
   assert.equal(result.blocked, true);
-  assert.equal(result.premortem.status, "missing");
-  assert.match(result.reason, /missing premortem premortem-requirement:[a-f0-9]{64}/);
-  const recorded = await recordDeliveryPremortem({
-    root, requirementId: result.premortem.requirementId, items: items()
-  });
+  assert.equal(result.premortem.status, "missing-briefing");
+  assert.match(result.reason, /stage 1: session_briefing/);
+  const requirementId = result.premortem.requirementId;
+  const recorded = await recordPreparedPremortem(root, requirementId);
   assert.equal(recorded.blocked, false, "the first-write denial must prepare a usable requirement");
   assert.equal((await runHook(preWrite(root, "session:missing", "write:missing:retry"))).blocked, false);
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
@@ -232,9 +242,8 @@ test("a premortem follows its session across turns but not into another session"
     ...common(root, session), turn_id: "turn:prepare", hook_event_name: "UserPromptSubmit",
     event_id: "prompt:cross-turn", prompt: "Change the synthetic artifact safely."
   });
-  const recorded = await recordDeliveryPremortem({
-    root, requirementId: prompted.preflight.premortem.requirementId, items: items()
-  });
+  const recorded = await recordPreparedPremortem(root,
+    prompted.preflight.premortem.requirementId);
   assert.equal(recorded.blocked, false);
   const allowed = await runHook({
     ...preWrite(root, session), turn_id: "turn:write"
@@ -244,7 +253,7 @@ test("a premortem follows its session across turns but not into another session"
     ...preWrite(root, "session:foreign"), turn_id: "turn:write"
   });
   assert.equal(foreign.blocked, true);
-  assert.match(foreign.reason, /missing premortem/);
+  assert.match(foreign.reason, /stage 1: session_briefing/);
 });
 
 test("premortem before the first write and three closed checks allow Stop", async (t) => {
@@ -254,9 +263,7 @@ test("premortem before the first write and three closed checks allow Stop", asyn
   assert.equal(prompted.blocked, false);
   const requirement = prompted.preflight.premortem;
   assert.match(requirement.instruction, /Premortem closure sha256 <64hex>/);
-  const recorded = await recordDeliveryPremortem({
-    root, requirementId: requirement.requirementId, items: items()
-  });
+  const recorded = await recordPreparedPremortem(root, requirement.requirementId);
   assert.equal(recorded.blocked, false);
   assert.equal((await runHook(preWrite(root, session))).blocked, false);
   await writeFile(join(root, "artifact.txt"), "synthetic\n", "utf8");
@@ -281,9 +288,8 @@ test("installed PostToolUse exposes the latest write digest beside identifier wa
   const after = `${before}const changed = true;\n`;
   await writeFile(join(root, "artifact.js"), before, "utf8");
   const prompted = await prepare(root, session);
-  const recorded = await recordDeliveryPremortem({
-    root, requirementId: prompted.preflight.premortem.requirementId, items: items()
-  });
+  const recorded = await recordPreparedPremortem(root,
+    prompted.preflight.premortem.requirementId);
   const edit = { file_path: "artifact.js", old_string: before, new_string: after };
   const commonInput = {
     ...common(root, session), tool_name: "Edit", tool_use_id: "write:installed-receipt", tool_input: edit
@@ -315,9 +321,8 @@ test("a premortem registered after the first actual write stays blocked", async 
   const session = "session:late";
   const prompted = await prepare(root, session);
   await post(root, session, "Write", { file_path: "artifact.txt", content: "late\n" }, `write:${session}`);
-  const recorded = await recordDeliveryPremortem({
-    root, requirementId: prompted.preflight.premortem.requirementId, items: items()
-  });
+  const recorded = await recordPreparedPremortem(root,
+    prompted.preflight.premortem.requirementId);
   assert.equal(recorded.status, "late");
   const denied = await runHook(preWrite(root, session, "write:late:second"));
   assert.equal(denied.blocked, true);
@@ -341,9 +346,8 @@ test("unknown final-message transport fails open but a known empty message block
   const { root, state } = await fixture(t);
   const session = "session:message-transport";
   const prompted = await prepare(root, session);
-  const recorded = await recordDeliveryPremortem({
-    root, requirementId: prompted.preflight.premortem.requirementId, items: items()
-  });
+  const recorded = await recordPreparedPremortem(root,
+    prompted.preflight.premortem.requirementId);
   assert.equal(recorded.blocked, false);
   const writeInput = { file_path: "artifact.txt", content: "synthetic\n" };
   assert.equal((await runHook({
@@ -383,9 +387,8 @@ test("read-only Session B is not mistaken for Session A on the same task lane", 
     ...common(root, session, { entity_id: lane.entity_id }), hook_event_name: "UserPromptSubmit",
     event_id: "prompt:writer-a", prompt: "Write the synthetic artifact."
   });
-  const recorded = await recordDeliveryPremortem({
-    root, requirementId: prompted.preflight.premortem.requirementId, items: items()
-  });
+  const recorded = await recordPreparedPremortem(root,
+    prompted.preflight.premortem.requirementId);
   const writeInput = { file_path: "artifact.txt", content: "synthetic\n" };
   assert.equal((await runHook({
     ...common(root, session, lane), hook_event_name: "PreToolUse", tool_name: "Write",
@@ -412,9 +415,8 @@ test("selfstarter task discovery cannot change the session premortem lane", asyn
   const { root } = await fixture(t);
   const session = "session:task-drift";
   const prompted = await prepare(root, session);
-  const recorded = await recordDeliveryPremortem({
-    root, requirementId: prompted.preflight.premortem.requirementId, items: items()
-  });
+  const recorded = await recordPreparedPremortem(root,
+    prompted.preflight.premortem.requirementId);
   const allowed = await runHook({
     ...preWrite(root, session),
     agent_spine_scope: { project_id: PROJECT_ID, task_id: "task:discovered-after-prompt" }
@@ -460,9 +462,7 @@ test("nested cwd receives the project root needed to register and retry", async 
     tool: "record_delivery_premortem", root: canonicalRoot,
     requirementId: prompted.preflight.premortem.requirementId
   });
-  const recorded = await recordDeliveryPremortem({
-    root: registration.root, requirementId: registration.requirementId, items: items()
-  });
+  const recorded = await recordPreparedPremortem(registration.root, registration.requirementId);
   assert.equal(recorded.blocked, false);
   const allowed = await runHook({
     ...common(root, session), cwd: nested, hook_event_name: "PreToolUse", tool_name: "Edit",

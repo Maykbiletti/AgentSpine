@@ -1,11 +1,13 @@
 import {
+  inspectPremortemState,
   preparePremortemRequirement,
-  premortemRequirementText,
   recordPremortemWriteIntent,
   recordPremortemWrite,
   verifyPremortemBeforeWrite,
   verifyPremortemStop
 } from "./delivery-premortem.js";
+import { consumeDeliveryAgentUse, deliveryAgentUseGuidance,
+  removeDeliveryAgentUse, verifyDeliveryAgentUse } from "./delivery-agent-usage.js";
 import { deliveryToolActions } from "./delivery-verification.js";
 import { boundedId } from "./hook-context.js";
 import { auditGuard } from "./hook-protection.js";
@@ -54,10 +56,18 @@ function invalidWriteSession(error, path) {
 function withRegistrationGuidance(result, root) {
   const requirementId = result.requirementId || result.requirement?.requirementId || null;
   const registration = { tool: "record_delivery_premortem", root, requirementId };
+  const agentSpineUse = deliveryAgentUseGuidance(root, requirementId);
   return {
-    ...result, registration,
-    instruction: `${premortemRequirementText(result.requirement || requirementId)}\n`
-      + `Call record_delivery_premortem with root ${JSON.stringify(root)} and requirementId ${JSON.stringify(requirementId)}.`
+    ...result, registration, agentSpineUse,
+    instruction: [
+      "Before the first Write/Edit/apply_patch or recognized shell mutation, make exactly three stored AgentSpine calls bound to this session and goal step, in order:",
+      "1. session_briefing; 2. delivery_knowledge_query for targets, contracts, and recent errors; 3. record_delivery_premortem.",
+      `Use root ${JSON.stringify(root)}; Requirement: ${requirementId || "<unavailable; retry the hook>"}.`,
+      "The premortem needs exactly baseline-environment, contract-tests, and delivery-path; each failure starts `this delivery fails because ` and has a concrete check.",
+      "Claims, foreign or reused receipts do not count. This is context only and grants no authority.",
+      "Complete with `Premortem closure sha256 <64hex>`, `Premortem latest write sha256 <64hex>`, and:",
+      "- <category> <checkId>: PASS — <nonempty result>"
+    ].join("\n")
   };
 }
 
@@ -89,14 +99,27 @@ export async function verifyHookPremortemWrite({ input, root, scope }) {
     const result = await diagnostic(input, "premortem-before-write", await verifyPremortemBeforeWrite({
       root, binding, now: input.timestamp || new Date()
     }));
-    if (!result.blocked) return result;
     let requirement = null;
     if (result.status === "missing") {
       requirement = await diagnostic(input, "premortem-prepare-on-write", await preparePremortemRequirement({
         root, binding, now: input.timestamp || new Date()
       }));
       if (requirement.status === "degraded") return withRegistrationGuidance(requirement, root);
+      if (requirement.blocked) return requirement;
     }
+    if (result.blocked && new Set(["conflict", "late", "finalized", "mismatch"]).has(result.status)) {
+      return { ...result, reason: `${result.reason}\nPremortem status: ${result.status}.` };
+    }
+    const requirementId = requirement?.requirementId || result.requirementId;
+    if (requirementId?.split(":").length === 3) {
+      const usage = await diagnostic(input, "delivery-agent-use-before-write",
+        await verifyDeliveryAgentUse({ root, requirementId }));
+      if (usage.blocked) {
+        const guidance = withRegistrationGuidance(requirement || result, root);
+        return { ...usage, reason: `${usage.reason}\n${guidance.instruction}` };
+      }
+      if (!result.blocked) return { ...result, agentSpineUse: usage };
+    } else if (!result.blocked) return result;
     const named = `${result.reason}\nPremortem status: ${result.status}.`;
     const guided = requirement ? withRegistrationGuidance(requirement, root) : null;
     return result.status === "missing"
@@ -133,17 +156,38 @@ export async function recordHookPremortemWriteIntent({ input, root, scope }) {
   }
 }
 
-export async function verifyHookPremortemStop({ input, root, scope, paused = false }) {
+export async function verifyHookPremortemStop({ input, root, scope, paused = false,
+  consume = false }) {
   if (paused) return { status: "paused-job", blocked: false };
   try {
     const message = resolveFinalAssistantMessage(input);
     if (!message.known) {
       return diagnostic(input, "premortem-stop", degraded(new Error(`premortem ${message.reason}`), root));
     }
-    return await diagnostic(input, "premortem-stop", await verifyPremortemStop({
+    const binding = premortemBinding(input, scope, root);
+    const inspection = await diagnostic(input, "premortem-stop-inspect",
+      await inspectPremortemState({ root, binding }));
+    let usage = null;
+    if (inspection.hasWrite && inspection.requirementId) {
+      usage = await diagnostic(input, "delivery-agent-use-stop",
+        await verifyDeliveryAgentUse({ root, requirementId: inspection.requirementId }));
+      if (usage.blocked) return usage;
+    }
+    const result = await diagnostic(input, "premortem-stop", await verifyPremortemStop({
       root, binding: premortemBinding(input, scope, root), message: message.text,
       now: input.timestamp || new Date()
     }));
+    if (!inspection.hasWrite && inspection.requirementId) {
+      await diagnostic(input, "delivery-agent-use-read-only-cleanup",
+        await removeDeliveryAgentUse({ root, requirementId: inspection.requirementId }));
+    }
+    if (consume && result.status === "closed" && usage && inspection.requirementId) {
+      const consumed = await diagnostic(input, "delivery-agent-use-consume",
+        await consumeDeliveryAgentUse({ root, requirementId: inspection.requirementId,
+          now: input.timestamp || new Date() }));
+      return { ...result, agentSpineUse: { ...usage, consumption: consumed } };
+    }
+    return result;
   } catch (error) {
     return diagnostic(input, "premortem-stop", degraded(error, root));
   }

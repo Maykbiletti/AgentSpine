@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { blunRuntimeContext, blunRuntimeMessage, runHook } from "../src/hook.js";
 import { recordDeliveryPremortem } from "../src/lib/delivery-premortem.js";
+import { seedDeliveryAgentUse } from "./delivery-agent-use-fixture.js";
 import { registeredWriteContext } from "./premortem-write-fixture.js";
 
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -431,8 +432,9 @@ test("Claude prompts in one raw session reuse one premortem and reclose after la
     { category: "delivery-path", failure: "this delivery fails because the path is wrong",
       check: "Check the synthetic output path." }
   ];
-  const recorded = await recordDeliveryPremortem({ root,
-    requirementId: first.preflight.premortem.requirementId, items });
+  const requirementId = first.preflight.premortem.requirementId;
+  await seedDeliveryAgentUse(root, requirementId);
+  const recorded = await recordDeliveryPremortem({ root, requirementId, items });
   const writeInput = { file_path: "artifact.txt", content: "synthetic\n" };
   assert.equal((await runHook({ ...base, hook_event_name: "PreToolUse", tool_name: "Write",
     tool_use_id: "write:session:one", tool_input: writeInput })).blocked, false);
@@ -453,6 +455,7 @@ test("Claude prompts in one raw session reuse one premortem and reclose after la
   const second = await prompt("Deliver the second synthetic change.");
   assert.equal(second.preflight.premortem.requirementId,
     first.preflight.premortem.requirementId, "the second prompt needs no extra registration");
+  await seedDeliveryAgentUse(root, second.preflight.premortem.requirementId);
   const nextInput = { ...writeInput, content: "synthetic again\n" };
   const nextPre = await runHook({ ...base, hook_event_name: "PreToolUse", tool_name: "Write",
     tool_use_id: "write:session:two", tool_input: nextInput });

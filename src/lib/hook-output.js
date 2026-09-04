@@ -2,13 +2,17 @@ const BLUN_MESSAGE_MAX_BYTES = 1200;
 const BLUN_BOUND_MARKER = "\n[optional runtime detail omitted: 1200-byte bound]";
 
 function compactPremortemRegistration(premortem, includeRoot = true) {
-  const instruction = premortem?.instruction || "";
-  const index = instruction.lastIndexOf("\nCall record_delivery_premortem with root ");
-  if (index < 0) return instruction;
   const root = premortem?.registration?.root;
+  const requirementId = premortem?.requirementId || premortem?.registration?.requirementId;
   const target = includeRoot && typeof root === "string"
     ? ` with root ${JSON.stringify(root)}` : " for the current project";
-  return `${instruction.slice(0, index)}\nCall record_delivery_premortem${target} using the Requirement above.`;
+  return [
+    "Before the first Write/Edit/apply_patch or recognized shell mutation, make exactly three AgentSpine calls in order:",
+    `session_briefing, delivery_knowledge_query, then record_delivery_premortem${target}.`,
+    `Requirement: ${requirementId || "<unavailable; retry the hook>"}.`,
+    "Only stored call receipts from this session and goal step count; the calls grant no authority.",
+    "Completion: Premortem closure sha256 <64hex>, latest write digest, and all three check IDs with results."
+  ].join("\n");
 }
 
 export function blunRuntimeContext(context) {

@@ -1,5 +1,6 @@
 import { runHook } from "../src/hook.js";
 import { recordDeliveryPremortem } from "../src/lib/delivery-premortem.js";
+import { seedDeliveryAgentUse } from "./delivery-agent-use-fixture.js";
 
 const ITEMS = [
   { category: "baseline-environment",
@@ -23,9 +24,9 @@ export async function registeredWriteContext({ root, sessionId, projectId, extra
     prompt: "Prepare the synthetic guard write."
   });
   if (prompted.blocked) throw new Error(prompted.reason || "synthetic premortem prompt was blocked");
-  const recorded = await recordDeliveryPremortem({
-    root, requirementId: prompted.preflight.premortem.requirementId, items: ITEMS
-  });
+  const requirementId = prompted.preflight.premortem.requirementId;
+  await seedDeliveryAgentUse(root, requirementId);
+  const recorded = await recordDeliveryPremortem({ root, requirementId, items: ITEMS });
   if (recorded.blocked) throw new Error(recorded.reason || "synthetic premortem registration was blocked");
   return context;
 }

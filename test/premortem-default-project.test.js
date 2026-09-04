@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runHook } from "../src/hook.js";
 import { recordDeliveryPremortem } from "../src/lib/delivery-premortem.js";
+import { seedDeliveryAgentUse } from "./delivery-agent-use-fixture.js";
 
 const ITEMS = [
   { category: "baseline-environment", failure: "this delivery fails because the baseline is stale",
@@ -42,6 +43,7 @@ test("an ordinary session derives one project-bound premortem without project_id
   assert.equal(denied.blocked, true);
   assert.equal(denied.premortem.requirementId, requirement.requirementId);
   assert.match(denied.reason, new RegExp(requirement.requirementId));
+  await seedDeliveryAgentUse(root, requirement.requirementId);
   assert.equal((await recordDeliveryPremortem({ root, requirementId: requirement.requirementId,
     items: ITEMS })).blocked, false);
   const allowed = await runHook(write);

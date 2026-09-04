@@ -7,6 +7,7 @@ import { runHook } from "../src/hook.js";
 import { recordDeliveryPremortem } from "../src/lib/delivery-premortem.js";
 import { recordDeliveryWriteIntent } from "../src/lib/delivery-verification.js";
 import { verifyHookStopContracts } from "../src/lib/hook-stop-verification.js";
+import { seedDeliveryAgentUse } from "./delivery-agent-use-fixture.js";
 
 const PROJECT_ID = "project:stop-linearization";
 const ITEMS = [
@@ -95,11 +96,9 @@ async function preparedDelivery(t, session) {
     event_id: `prompt:${session}`,
     prompt: "Create the synthetic artifact."
   });
-  const recorded = await recordDeliveryPremortem({
-    root,
-    requirementId: prompt.preflight.premortem.requirementId,
-    items: ITEMS
-  });
+  const requirementId = prompt.preflight.premortem.requirementId;
+  await seedDeliveryAgentUse(root, requirementId);
+  const recorded = await recordDeliveryPremortem({ root, requirementId, items: ITEMS });
   const written = await write(root, session, `write:${session}:initial`, "initial\n");
   await post(root, session, "exec_command",
     { cmd: "node --test test/synthetic.test.js" }, `test:${session}:initial`);

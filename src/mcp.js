@@ -1,6 +1,7 @@
 import { VERSION } from "./version.js";
 import { isMainModule } from "./lib/runtime.js";
 import { deliveryPremortemTool } from "./lib/mcp-premortem.js";
+import { deliveryKnowledgeTool, sessionBriefingTool } from "./lib/mcp-delivery-tools.js";
 import { startMcpProtocol } from "./lib/mcp-runtime.js";
 
 const tools = [
@@ -21,27 +22,8 @@ const tools = [
       }
     }
   },
-  {
-    name: "session_briefing",
-    description: "Assemble one byte-budgeted, privacy-filtered session packet across native sources, relationships, accepted learning, reviewed shared memory, tasks, and optional attention cues. Read-only and context-only.",
-    inputSchema: {
-      type: "object", additionalProperties: false,
-      properties: {
-        root: { type: "string" }, cwd: { type: "string" },
-        host: { type: "string", enum: ["codex", "claude", "generic"] },
-        entityId: { anyOf: [{ type: "string" }, { type: "null" }] },
-        userId: { anyOf: [{ type: "string" }, { type: "null" }] },
-        tenantId: { anyOf: [{ type: "string" }, { type: "null" }] },
-        groupId: { anyOf: [{ type: "string" }, { type: "null" }] },
-        projectId: { anyOf: [{ type: "string" }, { type: "null" }] },
-        currentTaskId: { anyOf: [{ type: "string" }, { type: "null" }] },
-        includePrivate: { type: "boolean" }, focusActive: { type: "boolean" },
-        includeSourceContent: { type: "boolean" },
-        maxBytes: { type: "integer", minimum: 4096, maximum: 262144 },
-        now: { type: "string" }
-      }
-    }
-  },
+  sessionBriefingTool,
+  deliveryKnowledgeTool,
   {
     name: "read_document",
     description: "Read an indexed Markdown source byte range with its SHA-256 provenance.",

@@ -155,6 +155,29 @@ function appendEvent(state, type, payload, now, details = {}) {
   return event;
 }
 const parseRequirement = (id) => parsePremortemRequirementId(id).laneDigest;
+export async function inspectPremortemState({ root, binding: rawBinding = null,
+  requirementId: id = null }) {
+  try {
+    if (Boolean(rawBinding) === Boolean(id)) throw new Error("inspect premortem requires one exact selector");
+    const binding = rawBinding ? normalizeBinding(rawBinding) : null;
+    const digest = binding ? laneDigest(binding) : parseRequirement(id);
+    const state = await readState((await pathsFor(root, digest)).path, digest);
+    if (!state) return { status: "absent", blocked: false, laneDigest: digest,
+      requirementId: id };
+    if (id && state.requirement?.requirementId !== id) {
+      return block("stale", `AgentSpine cannot find current premortem requirement ${id}.`,
+        { requirementId: id });
+    }
+    return { status: state.firstWrite ? "written" : "read-only", blocked: false,
+      laneDigest: digest, requirementId: state.requirement?.requirementId || null,
+      requirement: structuredClone(state.requirement),
+      binding: structuredClone(state.binding), hasWrite: Boolean(state.firstWrite),
+      closed: Boolean(state.closure),
+      consumed: state.events.some((event) => event.type === "premortem-consumed") };
+  } catch (error) {
+    return boundary(error);
+  }
+}
 export function premortemRequirementText(requirement) {
   const id = typeof requirement === "string" ? requirement : requirement?.requirementId;
   return `${PREMORTEM_REQUIREMENT_TEXT}\nRequirement: ${id || "<unavailable; retry registration>"}`;

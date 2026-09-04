@@ -78,6 +78,12 @@ async function registerPremortem(pluginRoot, projectRoot, stateRoot, requirement
   return withStateRoot(stateRoot, async () => {
     const premortem = await import(pathToFileURL(join(pluginRoot,
       "src/lib/delivery-premortem.js")).href);
+    const usage = await import(pathToFileURL(join(pluginRoot,
+      "src/lib/delivery-agent-usage.js")).href);
+    await usage.recordDeliveryBriefingUse({ root: projectRoot, requirementId,
+      input: { root: projectRoot }, result: { schema: "synthetic-installed-briefing" } });
+    await usage.recordDeliveryKnowledgeUse({ root: projectRoot, requirementId,
+      input: { targets: ["AGENTS.md"] }, result: { schema: "synthetic-installed-knowledge" } });
     const recorded = await premortem.recordDeliveryPremortem({
       root: projectRoot,
       requirementId,
