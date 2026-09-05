@@ -39,6 +39,7 @@ function windowsSidAclWorkerCommand() {
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "$PSModuleAutoLoadingPreference = 'None'",
+    "[Console]::Out.WriteLine('READY')",
     "while (($line = [Console]::In.ReadLine()) -ne $null) {",
     "  try {",
     "    $target = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line))",
@@ -71,6 +72,8 @@ export function createWindowsSidAclReader({ env = process.env, spawnProcess = sp
   let buffer = "";
   let diagnostics = "";
   let idleTimer = null;
+  let startupTimer = null;
+  let ready = false;
   const pending = [];
 
   function rejectAll(error) {
@@ -81,8 +84,11 @@ export function createWindowsSidAclReader({ env = process.env, spawnProcess = sp
     const current = child;
     child = null;
     buffer = "";
+    ready = false;
     if (idleTimer) clearTimeout(idleTimer);
+    if (startupTimer) clearTimeout(startupTimer);
     idleTimer = null;
+    startupTimer = null;
     if (error) rejectAll(error);
     if (current && !current.killed) current.kill();
   }
@@ -95,8 +101,16 @@ export function createWindowsSidAclReader({ env = process.env, spawnProcess = sp
     stop(new Error(`session timeline Windows SID ACL reader failed: ${message}${diagnostics ? `: ${diagnostics}` : ""}`));
   }
   function consume(line) {
+    const value = line.replace(/^\uFEFF/, "");
+    if (!active && !ready && value === "READY") {
+      ready = true;
+      clearTimeout(startupTimer);
+      startupTimer = null;
+      pump();
+      return;
+    }
     if (!active) return fail("unexpected response");
-    const ace = line.replace(/^\uFEFF/, "").match(/^ACE (S-1-\d+(?:-\d+)+) (-?\d+) ([01]) ([0-3]) ([0-3]) ([01])$/i);
+    const ace = value.match(/^ACE (S-1-\d+(?:-\d+)+) (-?\d+) ([01]) ([0-3]) ([0-3]) ([01])$/i);
     if (ace) {
       if (active.rows.length >= 2048) return fail("response exceeded ACE limit");
       active.rows.push({ sid: ace[1], mask: Number(ace[2]), inherited: ace[3] === "1",
@@ -104,7 +118,6 @@ export function createWindowsSidAclReader({ env = process.env, spawnProcess = sp
       return;
     }
     const request = active;
-    const value = line.replace(/^\uFEFF/, "");
     if (value === "END") {
       active = null;
       clearTimeout(request.timer);
@@ -133,6 +146,7 @@ export function createWindowsSidAclReader({ env = process.env, spawnProcess = sp
     current.stdout.setEncoding("utf8");
     current.stderr.setEncoding("utf8");
     current.stdout.on("data", chunk => {
+      if (child !== current) return;
       buffer += chunk;
       if (buffer.length > 1024 * 1024) return fail("response exceeded limit");
       let end;
@@ -142,17 +156,22 @@ export function createWindowsSidAclReader({ env = process.env, spawnProcess = sp
         consume(line);
       }
     });
-    current.stderr.on("data", chunk => { diagnostics = (diagnostics + chunk).slice(-240); });
+    current.stderr.on("data", chunk => {
+      if (child === current) diagnostics = (diagnostics + chunk).slice(-240);
+    });
     current.once("error", error => { if (child === current) fail(error.message); });
     current.once("close", (code, signal) => {
       if (child === current) fail(`process closed (${code ?? signal ?? "unknown"})`);
     });
+    startupTimer = setTimeout(() => fail("startup deadline exceeded"), timeoutMs);
+    startupTimer.unref?.();
   }
   function pump() {
     if (active || !pending.length) return scheduleIdle();
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = null;
     if (!child) start();
+    if (!ready) return;
     active = pending.shift();
     active.timer = setTimeout(() => fail("deadline exceeded"), timeoutMs);
     child.stdin.write(`${Buffer.from(active.path, "utf8").toString("base64")}\n`, error => {

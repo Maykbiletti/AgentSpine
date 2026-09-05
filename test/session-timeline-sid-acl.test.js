@@ -81,8 +81,8 @@ test("path metacharacters stay encoded data and both inherited and explicit SIDs
   assert.equal(Buffer.from(encoded, "base64").toString("utf8"), path);
 });
 
-function worker({ respond = true } = {}) {
-  const state = { spawns: [], paths: [], children: [], kills: 0, respond };
+function worker({ respond = true, ready = true } = {}) {
+  const state = { spawns: [], paths: [], children: [], kills: 0, respond, ready };
   state.spawn = (binary, args, options) => {
     const child = new EventEmitter();
     child.killed = false;
@@ -104,6 +104,9 @@ function worker({ respond = true } = {}) {
     };
     state.spawns.push({ binary, args, options });
     state.children.push(child);
+    queueMicrotask(() => {
+      if (state.ready && !child.killed) child.stdout.write("READY\n");
+    });
     return child;
   };
   return state;
@@ -122,6 +125,7 @@ test("bounded SID reader serializes a burst through one trusted PowerShell proce
   assert.deepEqual(args.slice(0, 4), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand"]);
   const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
   assert.match(script, /PSModuleAutoLoadingPreference = 'None'/);
+  assert.match(script, /\[Console\]::Out.WriteLine\('READY'\)/);
   assert.match(script, /while \(\(\$line = \[Console\]::In.ReadLine\(\)\) -ne \$null\)/);
   assert.match(script, /\[Console\]::Out.WriteLine\('ACE '/);
   assert.ok(!script.includes("ConvertTo-Json"));
@@ -140,11 +144,21 @@ test("a stalled SID worker fails closed at its own unchanged query deadline", as
   assert.equal(fake.kills, 1);
 });
 
+test("a stalled SID worker startup fails closed at its own unchanged deadline", async () => {
+  const fake = worker({ ready: false });
+  const reader = createWindowsSidAclReader({ env: { SystemRoot: "/Windows" },
+    spawnProcess: fake.spawn, timeoutMs: 10, idleMs: 10 });
+  await assert.rejects(reader.read("/synthetic/startup-stalled"), /startup deadline exceeded/);
+  assert.equal(fake.paths.length, 0);
+  assert.equal(fake.kills, 1);
+});
+
 test("a crashed SID worker rejects its request and a later request starts cleanly", async () => {
   const fake = worker({ respond: false });
   const reader = createWindowsSidAclReader({ env: { SystemRoot: "/Windows" },
     spawnProcess: fake.spawn, timeoutMs: 100, idleMs: 10 });
   const interrupted = reader.read("/synthetic/interrupted");
+  await new Promise(resolve => setImmediate(resolve));
   fake.children[0].emit("close", 17, null);
   await assert.rejects(interrupted, /process closed \(17\)/);
   fake.respond = true;

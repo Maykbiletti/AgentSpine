@@ -65,5 +65,17 @@ Exact-head run 33974374882 reduced the native Windows ACL test from the earlier
 than providing acceptance: a test compared a Windows path with POSIX separators,
 and some cold workers still missed the unchanged 1,500 ms deadline when four
 Windows test processes started PowerShell together. The portable path assertion
-and compact record protocol address those measured failures. A new exact-head
-Windows run remains required; neither earlier failing run is acceptance evidence.
+and compact record protocol addressed the first failure, but exact-head run
+33975490139 still measured first requests at 4.3–5.5 seconds and one worker
+deadline at 1.56 seconds. The query deadline had incorrectly started before the
+PowerShell worker reported that it was ready.
+
+Worker startup and each ACL query are now separate fail-closed phases. The
+worker must emit a fixed `READY` marker within its own unchanged 1,500 ms
+startup deadline before JavaScript sends any path. Every sent ACL query retains
+its own unchanged 1,500 ms deadline. A stalled startup, stalled query,
+unexpected response, crash or oversized output rejects the ACL check and stops
+the worker. Deterministic tests cover both independent deadlines and restart
+after a crash. A new exact-head Windows run remains required; none of the
+earlier failing runs is acceptance evidence, and no change is accepted on main
+or live systems until that run is fully green.
