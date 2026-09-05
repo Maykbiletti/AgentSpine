@@ -146,7 +146,7 @@ export async function runtimeScope(input, root, userStateRoot = null, catalog) {
   };
 }
 
-export function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null, channelEvent = null, sourceDiagnostics = null, preflight = null) {
+export function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null, channelEvent = null, sourceDiagnostics = null, preflight = null, lessonRecall = null) {
   const loaded = sourceDiagnostics?.status === "loaded";
   const packet = {
     schema: "agentspine.hook-context/v1",
@@ -212,6 +212,13 @@ export function renderContext(event, catalog, briefing, signal = null, attention
     } : null,
     indexedSources: catalog.summary.total,
     sourceResolution: sourceDiagnostics,
+    lessonRecall: lessonRecall?.status === "recalled" ? {
+      status: "recalled", schema: lessonRecall.schema, receiptDigest: lessonRecall.receiptDigest,
+      items: lessonRecall.items, omitted: lessonRecall.omitted,
+      instruction: lessonRecall.instruction, authority: "context-only"
+    } : lessonRecall?.status === "group-suppressed" ? {
+      status: "group-suppressed", items: [], authority: "context-only"
+    } : null,
     preflight: preflight ? {
       schema: preflight.receipt.schema,
       receiptId: preflight.receipt.id,

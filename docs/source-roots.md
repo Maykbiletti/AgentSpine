@@ -63,7 +63,7 @@ The persistent cache lives under AgentSpine's platform state directory, outside 
 
 Indexed targets use no-follow open semantics. Parent components, canonical scope, regular-file status, size, identity, modification metadata, and the pathname-to-handle identity are checked around the same read. A changing target is retried a bounded number of times and then rejected as a race; mixed snapshots are never injected.
 
-The live resolver processes at most 128 direct index links, one target at a time, under the host resolver's two-second work budget. `MEMORY.md` and each target are limited to 4 MiB, while the complete external cache is capped at 16 MiB. Exceeding a bound fails closed instead of widening discovery.
+The live resolver processes at most 4,096 direct index links, selects at most eight relevant targets, and opens them one at a time under the host resolver's two-second work budget. `MEMORY.md` and each target are limited to 4 MiB, while the complete external cache is capped at 16 MiB. Exceeding a bound fails closed instead of widening discovery.
 
 Codex resolution uses `CODEX_HOME` or `~/.codex`, selects `AGENTS.override.md` before `AGENTS.md` at user scope, and walks from the configured project root to `cwd`. Per directory it selects override, regular, then the configured `project_doc_fallback_filenames`; `project_root_markers` and `project_doc_max_bytes` are read from the active profile's `config.toml`. Without a root marker, only `cwd` is the project root. See OpenAI's [AGENTS.md discovery order](https://developers.openai.com/codex/agent-configuration/agents-md) and [configuration reference](https://developers.openai.com/codex/config-reference).
 

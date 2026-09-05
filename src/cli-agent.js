@@ -3,6 +3,11 @@ import { cancelJob, deleteJob, grantExecution, loadExecutionPolicy, registerJob,
 import { channelRuntimeContext, grantChannelBinding, loadChannelPolicy, revokeChannelBinding } from "./lib/channel-runtime.js";
 import { personaContext, syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
 import { assignGoal, gatewayContext, resolveGoalKnowledgeGap, setGatewayControl } from "./lib/gateway-runtime.js";
+import {
+  currentHostTranscriptReceipt, enrollPrivateSessionTimeline, LOCAL_TIMELINE_ENROLLMENT_CONFIRMATION,
+  LOCAL_TIMELINE_ENROLLMENT_RECOVERY_CONFIRMATION, resetPrivateSessionTimelineEnrollment
+} from "./lib/session-timeline-enrollment.js";
+import { bootstrapSessionTimelineEnrollment } from "./lib/session-timeline.js";
 import { booleanFlag, goalPlanFlag, output } from "./cli-common.js";
 
 export const agentCommands = new Set([
@@ -30,10 +35,62 @@ export const agentCommands = new Set([
   "goal-assign",
   "goal-clarify",
   "gateway-control",
-  "gateway-status"
+  "gateway-status",
+  "timeline-receipt",
+  "timeline-enroll",
+  "timeline-enrollment-recover"
 ]);
 
+function timelineFlagValue(flags, name) {
+  const value = flags[name];
+  if (typeof value !== "string" || !value) throw new Error(`timeline command requires --${name}`);
+  return value;
+}
+
+function onlyTimelineFlags(flags, allowed, command) {
+  const unexpected = Object.keys(flags).filter((name) => !allowed.has(name));
+  if (unexpected.length) {
+    throw new Error(`${command} accepts only ${[...allowed].filter((name) => name !== "json").map((name) => `--${name}`).join(", ")}`);
+  }
+}
+
 export async function runAgentCommand({ command, flags, positional, json }) {
+  if (command === "timeline-receipt") {
+    if (positional.length) throw new Error("timeline receipt accepts no positional arguments; pass --root explicitly");
+    onlyTimelineFlags(flags, new Set(["root", "json"]), "timeline receipt");
+    return output(await currentHostTranscriptReceipt({ root: timelineFlagValue(flags, "root") }), json);
+  }
+
+  if (command === "timeline-enroll") {
+    if (positional.length) throw new Error("timeline enrollment accepts no positional arguments; pass --root explicitly");
+    onlyTimelineFlags(flags, new Set(["root", "receipt", "confirm-local-timeline", "json"]), "timeline enrollment");
+    if (!booleanFlag(flags["confirm-local-timeline"])) {
+      throw new Error("timeline enrollment requires --confirm-local-timeline");
+    }
+    const enrollment = await enrollPrivateSessionTimeline({
+      root: timelineFlagValue(flags, "root"), hostReceipt: timelineFlagValue(flags, "receipt"),
+      confirmation: LOCAL_TIMELINE_ENROLLMENT_CONFIRMATION
+    });
+    if (enrollment.status !== "enrolled") return output(enrollment, json);
+    const bootstrap = await bootstrapSessionTimelineEnrollment({
+      root: timelineFlagValue(flags, "root"), enrollmentDigest: enrollment.enrollmentDigest
+    });
+    return output({ ...enrollment, stateBootstrap: { status: bootstrap.status, reason: bootstrap.reason ?? null } }, json);
+  }
+
+  if (command === "timeline-enrollment-recover") {
+    if (positional.length) throw new Error("timeline enrollment recovery accepts no positional arguments; pass --root explicitly");
+    onlyTimelineFlags(flags, new Set(["root", "confirm-local-timeline-recovery", "json"]), "timeline enrollment recovery");
+    if (!booleanFlag(flags["confirm-local-timeline-recovery"])) {
+      throw new Error("timeline enrollment recovery requires --confirm-local-timeline-recovery");
+    }
+    const recovered = await resetPrivateSessionTimelineEnrollment({
+      root: timelineFlagValue(flags, "root"), confirmation: LOCAL_TIMELINE_ENROLLMENT_RECOVERY_CONFIRMATION
+    });
+    return output({ status: recovered ? "recovered" : "unavailable",
+      reason: recovered ? null : "timeline-enrollment-recovery-unavailable", authority: "context-only" }, json);
+  }
+
   if (command === "delegation-grant") {
     return output(await grantDelegation({
       root: flags.root || process.cwd(), actorId: positional[0],

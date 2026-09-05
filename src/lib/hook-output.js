@@ -113,7 +113,7 @@ export function blockStop(event, reason) {
 }
 
 export function lifecycleOutput(event, artifactGuard, premortem, deliveryVerification = null, env = process.env,
-  sourceWarning = null) {
+  sourceWarning = null, lessonRecall = null) {
   const messages = sourceWarning ? [`AgentSpine source warning: ${sourceWarning}`] : [];
   if (artifactGuard?.reason) messages.push(artifactGuard.reason);
   if (deliveryVerification?.status === "test-failed" && deliveryVerification.reason) {
@@ -126,6 +126,13 @@ export function lifecycleOutput(event, artifactGuard, premortem, deliveryVerific
         : "AgentSpine recorded the direct write for the delivery premortem.",
       `Premortem latest write sha256 ${premortem.writeDigest}`
     ].join("\n"));
+  }
+  if (lessonRecall?.status === "recalled") {
+    messages.push(JSON.stringify({
+      schema: lessonRecall.schema, receiptDigest: lessonRecall.receiptDigest,
+      instruction: lessonRecall.instruction, items: lessonRecall.items, omitted: lessonRecall.omitted,
+      authority: "context-only"
+    }));
   }
   if (!messages.length) return {};
   const field = env.BLUN_PLUGIN_ROOT ? "message" : "additionalContext";

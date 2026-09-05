@@ -77,6 +77,9 @@ Usage:
   agentspine source-bind <state-root> --host all|claude|codex --scope state-user --project path --host-home path --confirm-local-binding
   agentspine source-rollback <binding-id> --confirm-local-binding
   agentspine source-purge <binding-id> --confirm-local-binding
+  agentspine timeline-receipt --root path
+  agentspine timeline-enroll --root path --receipt asthr_… --confirm-local-timeline
+  agentspine timeline-enrollment-recover --root path --confirm-local-timeline-recovery
   agentspine delegation-grant <actor-id> --actions assign,manage --targets agent:id --reason text [--confirm-local-policy]
   agentspine delegation-revoke <grant-id> --reason text [--confirm-local-policy]
   agentspine delegation-check <actor-id> --action assign [--target agent:id]

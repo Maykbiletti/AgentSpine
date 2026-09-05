@@ -331,12 +331,15 @@ test("Claude project memory loads only files indexed by MEMORY.md", async (t) =>
   assert.deepEqual(result.diagnostics.memory, {
     indexed: 3 + indexedSymlink,
     relevant: 3 + indexedSymlink,
+    selected: 3 + indexedSymlink,
+    omittedRelevant: 0,
     loaded: 1,
     cacheHits: 0,
     cacheMisses: 2,
     missing: 1,
     rejected: { scope: 0, path: 1, symlink: indexedSymlink, race: 0, size: 0 },
-    directoryEnumeration: 0
+    directoryEnumeration: 0,
+    recall: { restored: 0, loadStatus: "no-session", recordStatus: "no-session", recorded: 0, authority: "context-only" }
   });
   for (const [path, expected] of before) assert.equal(hash(await readFile(path)), expected);
 });

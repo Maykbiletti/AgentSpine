@@ -4,6 +4,22 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.73.0] - 2026-09-05
+
+### Added
+
+- Added a bounded, provider-neutral session-timeline sidecar for host-owned transcripts. The verified Claude adapter keeps the existing regular transcript as primary source and exposes only explicit bounded MCP indexing plus exact-time or two-term evidence search after a host-issued opaque receipt and local immutable-snapshot enrollment. A signed state/head pair detects state-only and mixed rollback while its integrity anchor remains intact.
+- Added digest-bound time/offset room IDs and a continuation capsule that carries only current task, goal, step, selected-lesson digest, objective outcome status, and recent room IDs across restart and compaction.
+
+### Security
+
+- Timeline capture and retrieval require exact locally enrolled host, session, entity, user, tenant, project, task, and optional goal-step scope. Group and unknown visibility are excluded. A non-symlinked host profile/projects root, regular source, source identity, bounded prefix digest, state signature, and descriptor binding are revalidated before any result; changed snapshots require a fresh receipt and local renewal.
+- Only direct structured tool or runner results with a direct UTC timestamp become objective cards. Generic chat, nested tool-looking claims, unstructured timestamps, raw transcript access, and authority-shaped interpretations are excluded. Cards are bounded, secret-redacted, marked `untrusted-session-history`, and remain context-only.
+
+### Tests
+
+- Synthetic 2,500-link memory scenarios include four old CSS-archive error lessons and prove a bounded `12:40` objective-result retrieval after compaction and restart without opening unrelated links. Timeline probes cover exact-time and two-term recall, source-blind lifecycle status, final JSONL records, foreign scope/group rejection, source/state tampering, profile-root symlinks, secret redaction, concurrent indexing, and source-byte preservation.
+
 ## [0.72.7] - 2026-09-05
 
 ### Added

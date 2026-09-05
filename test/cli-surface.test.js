@@ -27,7 +27,7 @@ share-feed-state share-https-publish share-https-pull share-inbox share-init sha
 share-peer-pull share-peer-serve share-publish share-pull share-review share-rollback share-signers
 share-snapshot-export share-sqlite-init share-sqlite-inspect share-sqlite-publish share-sqlite-pull
 share-trust share-trust-list share-trust-revoke source-bind source-purge source-rollback source-status
-task-create task-delete task-update tasks verify
+task-create task-delete task-update tasks timeline-enroll timeline-enrollment-recover timeline-receipt verify
 `.trim().split(/\s+/).sort();
 
 test("CLI domain routes preserve the exact command surface without duplicate ownership", () => {

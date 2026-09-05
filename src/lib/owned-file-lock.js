@@ -35,9 +35,10 @@ function sameFile(left, right) {
     && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
 }
 
-async function removeStaleLock(path, staleAfterMs) {
+async function removeStaleLock(path, staleAfterMs, assertPath = null) {
   let before;
   try {
+    await assertPath?.();
     before = await stat(path);
   } catch (error) {
     if (isTransientLockMetadataError(error)) return false;
@@ -47,6 +48,7 @@ async function removeStaleLock(path, staleAfterMs) {
   await readOwner(path);
   let after;
   try {
+    await assertPath?.();
     after = await stat(path);
   } catch (error) {
     if (isTransientLockMetadataError(error)) return false;
@@ -54,7 +56,9 @@ async function removeStaleLock(path, staleAfterMs) {
   }
   if (!sameFile(before, after) || Date.now() - after.mtimeMs <= staleAfterMs) return false;
   try {
+    await assertPath?.();
     await unlink(path);
+    await assertPath?.();
     return true;
   } catch (error) {
     if (isFileLockContention(error) || isTransientLockMetadataError(error)) return false;
@@ -66,7 +70,8 @@ export async function withOwnedFileLock(path, task, {
   staleAfterMs = 15000,
   heartbeatIntervalMs = 1000,
   retryDelayMs = 25,
-  maxAttempts = 80
+  maxAttempts = 80,
+  assertPath = null
 } = {}) {
   if (typeof task !== "function") throw new Error("owned file lock requires a task");
   if (!Number.isInteger(staleAfterMs) || staleAfterMs < 50
@@ -80,11 +85,14 @@ export async function withOwnedFileLock(path, task, {
   const acquiredAt = new Date().toISOString();
   let acquired = false; let recovered = false;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    let handle;
+    let handle; let created = false;
     try {
+      await assertPath?.();
       handle = await open(path, "wx", 0o600);
+      created = true;
       const payload = `${JSON.stringify(lockPayload(token, acquiredAt, staleAfterMs))}\n`;
       await handle.writeFile(payload, "utf8");
+      await assertPath?.();
       acquired = true;
       break;
     } catch (error) {
@@ -92,13 +100,16 @@ export async function withOwnedFileLock(path, task, {
         if (handle) {
           await handle.close();
           handle = null;
-          await unlink(path).catch((cleanupError) => {
+          try {
+            await assertPath?.();
+            if (created) await unlink(path);
+          } catch (cleanupError) {
             if (cleanupError.code !== "ENOENT") error.cleanupError = cleanupError;
-          });
+          }
         }
         throw error;
       }
-      recovered ||= await removeStaleLock(path, staleAfterMs);
+      recovered ||= await removeStaleLock(path, staleAfterMs, assertPath);
       if (attempt + 1 < maxAttempts) await delay(retryDelayMs);
     } finally {
       await handle?.close();
@@ -110,7 +121,9 @@ export async function withOwnedFileLock(path, task, {
   let heartbeat = Promise.resolve();
   const assertOwned = async () => {
     if (ownershipError) throw ownershipError;
+    await assertPath?.();
     const owner = await readOwner(path);
+    await assertPath?.();
     if (!owner || owner.token !== token) {
       ownershipError = new Error("state lock ownership was lost; mutation aborted");
       throw ownershipError;
@@ -120,6 +133,7 @@ export async function withOwnedFileLock(path, task, {
     await assertOwned();
     const now = new Date();
     await utimes(path, now, now);
+    await assertPath?.();
   };
   const timer = setInterval(() => {
     heartbeat = heartbeat.then(renew).catch((error) => { ownershipError ||= error; });
@@ -133,9 +147,15 @@ export async function withOwnedFileLock(path, task, {
   } finally {
     clearInterval(timer);
     await heartbeat;
-    const owner = await readOwner(path).catch(() => null);
+    const owner = await (async () => {
+      await assertPath?.();
+      return readOwner(path);
+    })().catch(() => null);
     if (owner?.token === token) {
-      await unlink(path).catch((error) => {
+      await (async () => {
+        await assertPath?.();
+        await unlink(path);
+      })().catch((error) => {
         if (error.code !== "ENOENT") throw error;
       });
     }

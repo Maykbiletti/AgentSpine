@@ -6,6 +6,7 @@ import { ancestorsBetween, canonicalPath, isInside, stateRoot } from "./paths.js
 import { indexExplicitDocuments } from "./documents.js";
 import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { purgeIndexedMemoryCache, resolveIndexedMemory } from "./indexed-memory.js";
+import { hookMemoryQuery, loadLessonRecallSelection, rememberLessonRecallSelection } from "./lesson-recall-session.js";
 import { catalogScanPolicy } from "./catalog.js";
 import {
   SOURCE_SCAN_INCOMPLETE, boundedMarkdownTree, existingDirectory, existingRegular, sourceScanError
@@ -283,6 +284,12 @@ async function claudeSources({ cwd, projectRoot, configDir, input, env, registry
   if (memoryRoot) {
     const supplied = input.agent_spine_scope && typeof input.agent_spine_scope === "object"
       ? input.agent_spine_scope : input;
+    let recall = { status: "empty", paths: [], authority: "context-only" };
+    try {
+      recall = await loadLessonRecallSelection({ root: projectRoot, input, now: input.timestamp || new Date() });
+    } catch (error) {
+      recall = { status: "degraded", paths: [], reason: error.message, authority: "context-only" };
+    }
     const resolved = await resolveIndexedMemory({
       root: memoryRoot, env, hooks: memoryHooks, deadline,
       scope: {
@@ -290,10 +297,21 @@ async function claudeSources({ cwd, projectRoot, configDir, input, env, registry
         groupId: supplied.group_id ?? supplied.groupId ?? null,
         projectId: supplied.project_id ?? supplied.projectId ?? null,
         currentTaskId: supplied.task_id ?? supplied.currentTaskId ?? null,
-        prompt: input.prompt ?? input.user_prompt ?? input.message ?? input.input ?? null
+        prompt: hookMemoryQuery(input),
+        pinnedPaths: recall.paths
       }
     });
-    memoryDiagnostics = resolved.diagnostics;
+    let recorded = { status: "not-recorded", paths: [], authority: "context-only" };
+    try {
+      recorded = await rememberLessonRecallSelection({ root: projectRoot, input,
+        sources: resolved.sources, now: input.timestamp || new Date() });
+    } catch (error) {
+      recorded = { status: "degraded", paths: [], reason: error.message, authority: "context-only" };
+    }
+    memoryDiagnostics = { ...resolved.diagnostics, recall: {
+      restored: recall.paths.length, loadStatus: recall.status, recordStatus: recorded.status,
+      recorded: recorded.paths.length, authority: "context-only"
+    } };
     for (const item of resolved.sources) {
       sources.push({
         path: item.path, id: `claude:memory/${item.relativePath}`, host: "claude", scope: "project-memory",
@@ -428,7 +446,7 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
       memoryRootDigest: hostDetails.memoryRoot ? digest(hostDetails.memoryRoot).slice(0, 16) : null,
       memoryProvenance: hostDetails.memoryProvenance,
       memory: hostDetails.memoryDiagnostics || {
-        indexed: 0, relevant: 0, loaded: 0, cacheHits: 0, cacheMisses: 0, missing: 0,
+        indexed: 0, relevant: 0, selected: 0, omittedRelevant: 0, loaded: 0, cacheHits: 0, cacheMisses: 0, missing: 0,
         rejected: { scope: 0, path: 0, symlink: 0, race: 0, size: 0 }, directoryEnumeration: 0
       }
     } : hostDetails)

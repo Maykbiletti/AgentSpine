@@ -5,6 +5,9 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { installedHostEnvironment } from "./check-install-hook.js";
 
+const TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search))$";
+const BLUN_TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|exec_command|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search))$";
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -40,6 +43,8 @@ function validateHooks(root, hooks, { required, commandRoot }) {
       ? " --silent-oversize-post-tool-use" : ""}`;
     assert(command.command === expected, `${event} must use the bundled lifecycle adapter`);
     assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} timeout is unsafe`);
+    if (event === "PreToolUse") assert(registrations[0].matcher === TIMELINE_PRE_TOOL_MATCHER,
+      "PreToolUse must route only exact mutations and timeline MCP calls through one guard");
   }
   const extras = Object.keys(hooks.hooks || {}).filter((event) => !required.includes(event));
   assert(extras.length === 0, `unknown hook events: ${extras.join(", ")}`);
@@ -63,6 +68,8 @@ function validateBlunHooks(root, hooks) {
       ? " --silent-oversize-post-tool-use" : ""}`;
     assert(command.command === expected, `${event} must use the bundled BLUN lifecycle adapter`);
     assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} BLUN timeout is unsafe`);
+    if (event === "PreToolUse") assert(command.matcher === BLUN_TIMELINE_PRE_TOOL_MATCHER,
+      "BLUN PreToolUse must route only exact mutations and timeline MCP calls through one guard");
   }
   return { events: required, commands: required.length, entrypoint: relative(root, resolve(root, "src/hook.js")) };
 }

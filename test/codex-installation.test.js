@@ -137,7 +137,7 @@ test("Codex host-install CLI requires local confirmation and reaches the stable 
   });
   assert.equal(installed.status, 0, installed.stderr);
   const result = JSON.parse(installed.stdout);
-  assert.equal(result.version, "0.72.7");
+  assert.equal(result.version, "0.73.0");
   assert.equal(result.restartRequired, true);
   assert.equal((await readFile(result.configPath, "utf8")).includes(JSON.stringify(result.launcherPath)), true);
   assert.equal(await readFile(result.skill.skillPath, "utf8"),

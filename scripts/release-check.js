@@ -13,8 +13,9 @@ const REQUIRED_PACKAGE_FILES = [
   "src/codex-reader-launcher.js", "src/lib/codex-installation.js",
   "src/lib/codex-skill-installation.js", "src/cli-host.js",
   "docs/acceptance.md", "docs/source-roots.md", "docs/preflight-recall.md", "docs/preservation-contract.md",
-  "docs/world-model.md", "scripts/run-acceptance.js", "skills/agent-spine/SKILL.md",
-  "src/index.js", "src/mcp.js", "src/lib/mcp-world-tools.js", "src/lib/world-model.js", "src/worker.js",
+  "docs/world-model.md", "docs/session-timeline.md", "scripts/run-acceptance.js", "skills/agent-spine/SKILL.md",
+  "src/index.js", "src/mcp.js", "src/lib/mcp-world-tools.js", "src/lib/world-model.js", "src/lib/session-timeline.js",
+  "src/lib/session-timeline-auth.js", "src/lib/session-timeline-results.js", "src/lib/session-timeline-state.js", "src/lib/mcp-timeline-tools.js", "src/worker.js",
   "hooks/hooks.json", "hooks/codex.json", "hooks/version.json"
 ];
 const FORBIDDEN_PACKAGE_PATHS = [
@@ -25,7 +26,8 @@ const FORBIDDEN_PACKAGE_PATHS = [
   /(?:^|\/)(?:test|\.github)(?:$|\/)/,
   /\.(?:key|pem|p12|pfx)$/i,
   /(?:^|\/)state\.json$/i,
-  /(?:^|\/)(?:catalog|graph|world-model|attention|learning|coordination|sharing|sharing-trust|delegation-policy)\.json$/
+  /(?:^|\/)(?:catalog|graph|world-model|attention|learning|coordination|sharing|sharing-trust|delegation-policy|session-timeline|lesson-recall-sessions)\.json$/,
+  /(?:^|\/)session-timeline-head-[a-f0-9]+\.json$/
 ];
 
 function parse(argv) {

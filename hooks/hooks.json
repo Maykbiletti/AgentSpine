@@ -37,7 +37,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|apply_patch|Bash|PowerShell",
+        "matcher": "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search))$",
         "hooks": [
           {
             "type": "command",

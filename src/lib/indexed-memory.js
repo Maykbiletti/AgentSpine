@@ -11,7 +11,8 @@ export const INDEXED_MEMORY_CACHE_SCHEMA = "agentspine.indexed-memory-cache/v1";
 const CACHE_LIMIT = 16 * 1024 * 1024;
 const FILE_LIMIT = 4 * 1024 * 1024;
 const MAX_ATTEMPTS = 3;
-const MAX_INDEXED_LINKS = 128;
+const MAX_INDEXED_LINKS = 4096;
+const MAX_LIVE_SELECTIONS = 8;
 
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
 function cachePath(env) { return join(stateRoot(env), "indexed-memory-cache.json"); }
@@ -205,17 +206,22 @@ export function parseMemoryIndex(text, indexPath, root) {
 }
 
 export function relevantMemoryEntry(entry, scope = {}) {
-  if (entry.always) return { relevant: true, reason: "always" };
+  const pinned = new Set(Array.isArray(scope.pinnedPaths) ? scope.pinnedPaths : []);
+  if (pinned.has(entry.relativePath)) return { relevant: true, reason: "pinned", score: 1000 };
   const exact = [
     ["entity", scope.entityId], ["person", scope.entityId], ["project", scope.projectId],
     ["group", scope.groupId], ["task", scope.currentTaskId]
   ];
   for (const [key, value] of exact) {
-    if (entry.directives[key] && value && entry.directives[key] === value) return { relevant: true, reason: key };
+    if (entry.directives[key] && value && entry.directives[key] === value) {
+      return { relevant: true, reason: key, score: 500 };
+    }
   }
   const prompt = tokens(scope.prompt);
-  if (entry.promptTokens.some((value) => prompt.has(value))) return { relevant: true, reason: "prompt" };
-  return { relevant: false, reason: "scope" };
+  const matches = entry.promptTokens.filter((value) => prompt.has(value)).length;
+  if (matches) return { relevant: true, reason: "prompt", score: 700 + Math.min(matches, 99) };
+  if (entry.always) return { relevant: true, reason: "always", score: 100 };
+  return { relevant: false, reason: "scope", score: 0 };
 }
 
 export async function resolveIndexedMemory({ root, scope = {}, env = process.env, hooks = {}, deadline = Infinity }) {
@@ -228,7 +234,7 @@ export async function resolveIndexedMemory({ root, scope = {}, env = process.env
   const key = rootKey(canonicalRoot);
   const cached = cache.roots[key] || {};
   const diagnostics = {
-    indexed: 0, relevant: 0, loaded: 0, cacheHits: 0, cacheMisses: 0, missing: 0,
+    indexed: 0, relevant: 0, selected: 0, omittedRelevant: 0, loaded: 0, cacheHits: 0, cacheMisses: 0, missing: 0,
     rejected: { scope: 0, path: 0, symlink: 0, race: 0, size: 0 }, directoryEnumeration: 0
   };
   const index = await safeIndexedSnapshot(canonicalRoot, "MEMORY.md", cached["MEMORY.md"], hooks);
@@ -244,11 +250,22 @@ export async function resolveIndexedMemory({ root, scope = {}, env = process.env
   if (entries.length > MAX_INDEXED_LINKS) throw new Error(`Claude MEMORY.md indexes more than ${MAX_INDEXED_LINKS} direct files`);
   diagnostics.indexed = entries.length;
   const sources = [{ path: index.path, relativePath: "MEMORY.md", snapshot: index, relevance: "index" }];
+  const selected = [];
   for (const entry of entries) {
     checkDeadline();
     const relevance = relevantMemoryEntry(entry, scope);
     if (!relevance.relevant) { diagnostics.rejected.scope += 1; continue; }
     diagnostics.relevant += 1;
+    selected.push({ entry, relevance });
+  }
+  const chosen = new Set([...selected].sort((left, right) => right.relevance.score - left.relevance.score
+    || left.entry.relativePath.localeCompare(right.entry.relativePath)).slice(0, MAX_LIVE_SELECTIONS)
+    .map(({ entry }) => entry.relativePath));
+  diagnostics.selected = chosen.size;
+  diagnostics.omittedRelevant = Math.max(0, selected.length - MAX_LIVE_SELECTIONS);
+  for (const { entry, relevance } of selected) {
+    if (!chosen.has(entry.relativePath)) continue;
+    checkDeadline();
     const snapshot = await safeIndexedSnapshot(canonicalRoot, entry.relativePath, cached[entry.relativePath], hooks);
     if (snapshot.rejected) {
       if (snapshot.rejected === "missing") diagnostics.missing += 1;

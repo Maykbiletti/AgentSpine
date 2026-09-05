@@ -23,13 +23,63 @@ import {
 } from "./learning.js";
 import { sharedContext } from "./sharing.js";
 import { recordWorldAssertion, worldContext } from "./world-model.js";
+import { indexSessionTimeline, searchSessionTimeline } from "./session-timeline.js";
+import { gatewayEnvironmentContext } from "./hook-context.js";
+import {
+  timelineInvocationInput, timelineInvocationRequest
+} from "./mcp-timeline-tools.js";
+import { sessionTimelineBinding } from "./session-timeline-contract.js";
+import { timelineTransportDigest } from "./session-timeline-transport.js";
 import { boundBriefingArguments, rejectInternalSourceArguments, resolveMcpSources } from "./mcp-source-context.js";
 
 function textResult(value, isError = false) {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }], isError };
 }
 
-async function callTool(name, args = {}) {
+function timelineTransport(input, root, environment) {
+  const { scope } = input;
+  return { scope, transportDigest: timelineTransportDigest({ root,
+    binding: sessionTimelineBinding({ host: "claude", sessionId: input.request.sessionId, scope }), environment }) };
+}
+
+function absent(value) { return value === undefined || value === null || value === ""; }
+
+// The MCP process can outlive a host turn.  A group claim that appears after a
+// private permit was issued must therefore suppress consumption here as well
+// as in PreToolUse; tool arguments cannot clear an authenticated environment.
+function runtimeTimelineGroup(environment, input) {
+  try {
+    const gateway = gatewayEnvironmentContext(environment);
+    return Boolean(input?.groupClaim) || !absent(environment?.AGENTSPINE_GROUP_ID) || !absent(gateway?.groupId);
+  } catch {
+    return true;
+  }
+}
+
+function runtimeGatewayMatchesTimeline(environment, scope) {
+  let gateway;
+  try { gateway = gatewayEnvironmentContext(environment); }
+  catch { return false; }
+  if (!gateway) return true;
+  if (!absent(gateway.groupId)) return false;
+  const claims = [
+    [gateway.host, "claude"], [gateway.entityId, scope.entityId], [gateway.projectId, scope.projectId],
+    [gateway.taskId, scope.currentTaskId], [gateway.goalId, scope.goalId], [gateway.goalStepId, scope.goalStepId]
+  ];
+  if (!claims.every(([actual, expected]) => actual === expected)) return false;
+  // Gateway context predates these two claims.  In an authenticated gateway
+  // process, accepting an unverifiable user or tenant would let a stale private
+  // permit cross a newly selected identity, so their canonical env claims are
+  // deliberately mandatory until the gateway context carries them itself.
+  return environment?.AGENTSPINE_USER_ID === scope.userId
+    && environment?.AGENTSPINE_TENANT_ID === scope.tenantId;
+}
+
+function unavailableTimelineInvocation(reason) {
+  return { status: "unavailable", reason, authority: "context-only" };
+}
+
+async function callTool(name, args = {}, environment = process.env) {
   const root = args.root || process.cwd();
   if (name === "scan") return textResult(await scanAndSave(root));
   if (name === "resolve_context") {
@@ -98,6 +148,35 @@ async function callTool(name, args = {}) {
   if (name === "shared_context") return textResult(await sharedContext({ ...args, root }));
   if (name === "record_world_assertion") return textResult(await recordWorldAssertion({ ...args, root }));
   if (name === "world_context") return textResult(await worldContext({ ...args, root }));
+  if (name === "session_timeline_index") {
+    const input = timelineInvocationInput(args);
+    if (runtimeTimelineGroup(environment, input)) return textResult(unavailableTimelineInvocation("timeline-group-suppressed"));
+    if (!input.valid) return textResult(unavailableTimelineInvocation(input.reason || "timeline-scope-invalid"));
+    const timeline = timelineTransport(input, root, environment);
+    if (!runtimeGatewayMatchesTimeline(environment, timeline.scope)) {
+      return textResult(unavailableTimelineInvocation("timeline-gateway-binding-mismatch"));
+    }
+    const invocationRequest = timelineInvocationRequest("index", args, root);
+    if (!invocationRequest) return textResult(unavailableTimelineInvocation("timeline-invocation-unavailable"));
+    return textResult(await indexSessionTimeline({ root, host: "claude", sessionId: input.request.sessionId, scope: timeline.scope,
+      maxBytes: args.maxBytes, enrollmentDigest: input.request.enrollmentDigest,
+      hostHome: environment.CLAUDE_CONFIG_DIR ?? null, transportDigest: timeline.transportDigest, invocationRequest }));
+  }
+  if (name === "session_timeline_search") {
+    const input = timelineInvocationInput(args);
+    if (runtimeTimelineGroup(environment, input)) return textResult(unavailableTimelineInvocation("timeline-group-suppressed"));
+    if (!input.valid) return textResult(unavailableTimelineInvocation(input.reason || "timeline-scope-invalid"));
+    const timeline = timelineTransport(input, root, environment);
+    if (!runtimeGatewayMatchesTimeline(environment, timeline.scope)) {
+      return textResult(unavailableTimelineInvocation("timeline-gateway-binding-mismatch"));
+    }
+    const invocationRequest = timelineInvocationRequest("search", args, root);
+    if (!invocationRequest) return textResult(unavailableTimelineInvocation("timeline-invocation-unavailable"));
+    return textResult(await searchSessionTimeline({ root, host: "claude", sessionId: input.request.sessionId, scope: timeline.scope,
+      at: args.at, query: args.query, windowSeconds: args.windowSeconds, enrollmentDigest: input.request.enrollmentDigest,
+      hostHome: environment.CLAUDE_CONFIG_DIR ?? null, transportDigest: timeline.transportDigest,
+      invocationRequest }));
+  }
   if (name === "audit") return textResult(await runAudit(root));
   if (name === "complete_delivery") {
     const completed = await completeDelivery(args);
@@ -129,7 +208,7 @@ async function callTool(name, args = {}) {
   throw new Error(`Unknown tool: ${name}`);
 }
 
-async function dispatch(message, tools, version) {
+async function dispatch(message, tools, version, environment) {
   const { id, method, params = {} } = message;
   if (method === "initialize") {
     return {
@@ -145,7 +224,7 @@ async function dispatch(message, tools, version) {
   if (method === "tools/list") return { jsonrpc: "2.0", id, result: { tools } };
   if (method === "tools/call") {
     try {
-      return { jsonrpc: "2.0", id, result: await callTool(params.name, params.arguments) };
+      return { jsonrpc: "2.0", id, result: await callTool(params.name, params.arguments, environment) };
     } catch (error) {
       return { jsonrpc: "2.0", id, result: textResult({ error: error.message }, true) };
     }
@@ -154,7 +233,7 @@ async function dispatch(message, tools, version) {
   return { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } };
 }
 
-export function startMcpProtocol({ input, output, tools, version }) {
+export function startMcpProtocol({ input, output, tools, version, environment = process.env }) {
   input.setEncoding("utf8");
   let buffer = "";
   let queue = Promise.resolve();
@@ -168,7 +247,7 @@ export function startMcpProtocol({ input, output, tools, version }) {
       queue = queue.then(async () => {
         let response;
         try {
-          response = await dispatch(JSON.parse(line), tools, version);
+          response = await dispatch(JSON.parse(line), tools, version, environment);
         } catch (error) {
           response = { jsonrpc: "2.0", id: null, error: { code: -32700, message: error.message } };
         }

@@ -63,7 +63,7 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   const names = messages[1].result.tools.map((tool) => tool.name);
   assert.deepEqual(names, [
     "scan", "resolve_context", "session_briefing", "delivery_knowledge_query",
-    "record_world_assertion", "world_context", "read_document", "verify",
+    "record_world_assertion", "world_context", "session_timeline_index", "session_timeline_search", "read_document", "verify",
     "link_documents", "annotate_document", "upsert_entity",
     "link_entities", "relationship_context", "upsert_attention",
     "record_activity", "attention_context", "resolve_attention",
@@ -74,6 +74,19 @@ test("MCP server initializes and lists its read and graph tools", async () => {
     "task_context", "shared_context", "audit", "record_delivery_premortem",
     "complete_delivery", "recover_delivery_premortem"
   ]);
+  const timelineIndex = messages[1].result.tools.find((tool) => tool.name === "session_timeline_index");
+  const timelineSearch = messages[1].result.tools.find((tool) => tool.name === "session_timeline_search");
+  for (const tool of [timelineIndex, timelineSearch]) {
+    assert.equal(tool.inputSchema.additionalProperties, false);
+    assert.deepEqual(tool.inputSchema.required, []);
+    assert.equal("accessProof" in tool.inputSchema.properties, false);
+    assert.equal("invocationPermit" in tool.inputSchema.properties, false);
+    assert.equal("transportDigest" in tool.inputSchema.properties, false);
+    assert.equal("appendVerification" in tool.inputSchema.properties, false);
+    assert.equal(tool.inputSchema.properties.enrollmentDigest.pattern, "^[a-f0-9]{64}$");
+  }
+  assert.equal(timelineIndex.inputSchema.properties.maxBytes.maximum, 16777216);
+  assert.equal(timelineSearch.inputSchema.anyOf.length, 2);
   const premortem = messages[1].result.tools.find(tool => tool.name === "record_delivery_premortem");
   assert.deepEqual(premortem.inputSchema.required, ["root", "requirementId", "items"]);
   assert.equal(premortem.inputSchema.properties.root.type, "string");
@@ -99,6 +112,8 @@ test("MCP server initializes and lists its read and graph tools", async () => {
     assert.equal(item.properties.check.maxLength, 500);
   }
   assert.equal(names.includes("grant_delegation"), false);
+  assert.equal(names.includes("session_timeline_register"), false);
+  assert.equal(names.includes("session_timeline_read"), false);
   assert.equal(names.includes("revoke_delegation"), false);
   assert.equal(names.includes("publish_learning"), false);
   assert.equal(names.includes("pull_shared"), false);

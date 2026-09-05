@@ -28,6 +28,9 @@ test("package and host manifests keep one release version", async () => {
   assert.match(hooks.hooks.PreToolUse[0].matcher, /PowerShell/);
   assert.match(codexHooks.hooks.PreToolUse[0].matcher, /PowerShell/);
   assert.match(blun.hooks.find(({ event }) => event === "PreToolUse").matcher, /PowerShell/);
+  assert.match(hooks.hooks.PreToolUse[0].matcher, /session_timeline_\(\?:index\|search\)/);
+  assert.match(codexHooks.hooks.PreToolUse[0].matcher, /session_timeline_\(\?:index\|search\)/);
+  assert.match(blun.hooks.find(({ event }) => event === "PreToolUse").matcher, /session_timeline_\(\?:index\|search\)/);
   assert.equal(Object.hasOwn(codexHooks.hooks, "InstructionsLoaded"), false);
   assert.notEqual(pkg.version, "0.1.0");
   assert.equal(pkg.engines.node, ">=20.9.0");
@@ -70,7 +73,7 @@ test("BLUN, Claude, and Codex registrations complete a real MCP initialize hands
     { label: "claude", server: "agent-spine" },
     { label: "codex", server: "agent-spine" }
   ]);
-  assert.equal(result.version, "0.72.7");
+  assert.equal(result.version, "0.73.0");
   assert.deepEqual(result.exactlyOnce, { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 });
   assert.deepEqual(result.hookDiscovery, {
     blun: "plugin-manifest", claude: "default-hooks-directory", codex: "plugin-manifest",
@@ -150,8 +153,9 @@ test("staged install, stale-cache upgrade, and uninstall preserve one bundle and
     assert.equal(installed.claude.project.includes("claude:memory/style.md"), true);
     assert.equal(installed.claude.project.includes("claude:memory/unindexed.md"), false);
     assert.deepEqual(installed.claude.indexedMemory, {
-      indexed: 1, relevant: 1, loaded: 1, cacheHits: 0, cacheMisses: 2, missing: 0,
-      rejected: { scope: 0, path: 0, symlink: 0, race: 0, size: 0 }, directoryEnumeration: 0
+      indexed: 1, relevant: 1, selected: 1, omittedRelevant: 0, loaded: 1, cacheHits: 0, cacheMisses: 2, missing: 0,
+      rejected: { scope: 0, path: 0, symlink: 0, race: 0, size: 0 }, directoryEnumeration: 0,
+      recall: { restored: 0, loadStatus: "no-session", recordStatus: "no-session", recorded: 0, authority: "context-only" }
     });
   }
   assert.equal(result.canonicalAliasLaunch, true);

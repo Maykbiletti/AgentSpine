@@ -11,6 +11,11 @@ import { recordLearningApplications, recordLearningDeliveries } from "./lib/lear
 import { authorizeJobEffect, checkpointJobEffect, closeJobLease } from "./lib/selfstarter.js";
 import { syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
 import { captureMustRememberPrompt, recordPreflightFailure, runPreflight, verifyPreflightReceipt } from "./lib/preflight.js";
+import { actionLessonRecall } from "./lib/action-lesson-recall.js";
+import { captureSessionTimelineLifecycle, finalizeUserPromptSessionTimeline } from "./lib/hook-timeline.js";
+import { timelineToolKind } from "./lib/mcp-timeline-tools.js";
+import { emitTimelineToolGuard, runTimelineToolGuard } from "./lib/timeline-tool-guard.js";
+import { readHookInput, SILENT_OVERSIZE_POST_TOOL_USE, SILENT_OVERSIZE_POST_TOOL_USE_ARG } from "./lib/hook-input.js";
 import { isMainModule } from "./lib/runtime.js";
 import { deliveryActorSession, deliverySuccessEvidence, recordDeliveryToolUse,
   recordDeliveryWriteIntent } from "./lib/delivery-verification.js";
@@ -33,33 +38,10 @@ import { isPremortemWrite, prepareHookPremortem, recordHookPremortemWrite,
   recordHookPremortemWriteIntent, verifyHookPremortemWrite } from "./lib/hook-premortem.js";
 import { denyHookStop, verifyHookStopContracts } from "./lib/hook-stop-verification.js";
 export { blunRuntimeContext, blunRuntimeMessage } from "./lib/hook-output.js";
-const MAX_STDIN_BYTES = 64 * 1024;
 const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
 const KNOWN_EVENTS = new Set([
   ...CONTEXT_EVENTS, "InstructionsLoaded", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"
 ]);
-const SILENT_OVERSIZE_POST_TOOL_USE = Symbol("silent-oversize-post-tool-use");
-const SILENT_OVERSIZE_POST_TOOL_USE_ARG = "--silent-oversize-post-tool-use";
-async function readStdin({ silentOversizePostToolUse = false } = {}) {
-  const chunks = [];
-  let bytes = 0;
-  let oversized = false;
-  for await (const chunk of process.stdin) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    const remaining = Math.max(0, MAX_STDIN_BYTES - bytes);
-    if (remaining) chunks.push(buffer.subarray(0, remaining));
-    bytes += buffer.length;
-    if (bytes > MAX_STDIN_BYTES) oversized = true;
-  }
-  if (oversized) {
-    if (silentOversizePostToolUse) return SILENT_OVERSIZE_POST_TOOL_USE;
-    throw new Error("hook input exceeds the 64 KiB limit");
-  }
-  const value = Buffer.concat(chunks, bytes).toString("utf8");
-  const parsed = value.trim() ? JSON.parse(value) : {};
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("hook input must be one JSON object");
-  return parsed;
-}
 async function runHookCore(input, payload, options) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("hook input must be one JSON object");
   const event = input.hook_event_name || input.event_name || "";
@@ -125,6 +107,7 @@ async function runHookCore(input, payload, options) {
   let deliveryVerification = null;
   let artifactGuard = null;
   let premortem = null;
+  let lessonRecall = null;
   if (event === "PreToolUse" && isScanFailOpenTool(input.tool_name) && resolvedSources.diagnostics.skipped?.length) {
     await auditSkippedScans(input, "source-resolution", resolvedSources.diagnostics.skipped);
   }
@@ -233,6 +216,8 @@ async function runHookCore(input, payload, options) {
     }
     premortem = { ...premortem, writeIntent: premortemIntent.status,
       writeDigest: premortemIntent.writeDigest || null };
+    try { lessonRecall = actionLessonRecall({ catalog, event, input, scope }); }
+    catch (error) { lessonRecall = { status: "degraded", items: [], reason: error.message, authority: "context-only" }; }
   }
 
   if (["PostToolUse", "Stop", "SubagentStop"].includes(event)) {
@@ -343,6 +328,11 @@ async function runHookCore(input, payload, options) {
     try {
       await syncPersonaRosterFromEnvironment({ root, env: process.env, now: input.timestamp || new Date(), catalog });
       scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
+      if (event !== "UserPromptSubmit") {
+        try { resolvedSources.diagnostics.timeline = await captureSessionTimelineLifecycle({ root, event, input, scope,
+          hostHome: resolvedSources.hostHome, catalog }); }
+        catch (error) { resolvedSources.diagnostics.timeline = { status: "degraded", reason: error.message, authority: "context-only" }; }
+      }
       channelEvent = await startChannelEvent(input, event, root, scope, catalog);
       selfstarter = await startSelfstarter(input, event, root, scope, resolvedSources.diagnostics);
       if (selfstarter?.job && !scope.currentTaskId) scope.currentTaskId = selfstarter.job.taskId;
@@ -387,14 +377,20 @@ async function runHookCore(input, payload, options) {
         catalog, userStateRoot: resolvedSources.userStateRoot, sourceDiagnostics: resolvedSources.diagnostics,
         prompt: event === "UserPromptSubmit" ? promptFromInput(input) : null
       });
-      let context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, resolvedSources.diagnostics, preflight);
+      if (event === "PostCompact") {
+        try { lessonRecall = actionLessonRecall({ catalog, event, input, scope }); }
+        catch (error) { lessonRecall = { status: "degraded", items: [], reason: error.message, authority: "context-only" }; }
+      }
+      let context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, resolvedSources.diagnostics, preflight, lessonRecall);
       if (event === "UserPromptSubmit" && Buffer.byteLength(context) > hostContextLimit(preflight)) {
         throw new Error("mandatory preflight context exceeds the host hook injection limit");
       }
-      if (event === "UserPromptSubmit" && !await verifyPreflightReceipt({
-        receipt: preflight.receipt, input, scope, resolvedSources, prompt: promptFromInput(input),
-        now: input.timestamp || new Date(), env: process.env, consume: true
-      })) throw new Error("preflight receipt could not be consumed atomically for this exact turn");
+      if (event === "UserPromptSubmit") {
+        const { preflightConsumed, timeline } = await finalizeUserPromptSessionTimeline({ root, input, scope, resolvedSources, preflight,
+          prompt: promptFromInput(input), now: input.timestamp || new Date() });
+        if (!preflightConsumed) throw new Error("preflight receipt could not be consumed atomically for this exact turn");
+        resolvedSources.diagnostics.timeline = timeline;
+      }
       if (event === "UserPromptSubmit") {
         const activeCanaries = briefing.learning.filter((item) => ["active", "revalidating"].includes(item.outcomeStatus));
         if (!activeCanaries.length) {
@@ -426,15 +422,15 @@ async function runHookCore(input, payload, options) {
           };
         }
         const enriched = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent,
-          resolvedSources.diagnostics, preflight);
+          resolvedSources.diagnostics, preflight, lessonRecall);
         if (Buffer.byteLength(enriched) <= hostContextLimit(preflight)) context = enriched;
         else if (preflight.learningApplications.status === "degraded") {
           preflight.learningApplications = null;
           context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent,
-            resolvedSources.diagnostics, preflight);
+            resolvedSources.diagnostics, preflight, lessonRecall);
         }
       }
-      if (payload) return { blocked: false, context, briefing, preflight, signal, attentionEvent, channelEvent, catalogPath };
+      if (payload) return { blocked: false, context, briefing, preflight, signal, attentionEvent, channelEvent, lessonRecall, catalogPath };
       process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
       return;
     } catch (error) {
@@ -462,7 +458,6 @@ async function runHookCore(input, payload, options) {
       return;
     }
   }
-
   if (artifactGuard?.blocked) {
     if (payload) return { blocked: true, reason: artifactGuard.reason, artifactGuard,
       attentionEvent, selfstarter, learningDelivery, deliveryVerification, premortem };
@@ -470,15 +465,20 @@ async function runHookCore(input, payload, options) {
     return;
   }
   if (payload) return { blocked: false, sourceWarning, artifactGuard, attentionEvent, selfstarter,
-    learningDelivery, deliveryVerification, premortem };
-  process.stdout.write(`${JSON.stringify(lifecycleOutput(event, artifactGuard, premortem, deliveryVerification, process.env, sourceWarning))}\n`);
+    learningDelivery, deliveryVerification, premortem, lessonRecall };
+  process.stdout.write(`${JSON.stringify(lifecycleOutput(event, artifactGuard, premortem, deliveryVerification, process.env, sourceWarning, lessonRecall))}\n`);
 }
 
 export async function runHook(payload = null, options = {}) {
   let input = payload;
   try {
-    input ||= await readStdin(options);
+    input ||= await readHookInput(options);
     if (input === SILENT_OVERSIZE_POST_TOOL_USE) return;
+    if (input.hook_event_name === "PreToolUse" && timelineToolKind(input.tool_name)) {
+      const result = await runTimelineToolGuard(input);
+      if (!payload) emitTimelineToolGuard(result);
+      return result;
+    }
     return await runHookCore(input, payload, options);
   } catch (error) {
     if (!hookScanFailureFailsOpen(error) || input === SILENT_OVERSIZE_POST_TOOL_USE) throw error;

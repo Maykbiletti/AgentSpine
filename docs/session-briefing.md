@@ -46,6 +46,8 @@ The packet contains:
 
 Candidates, rejected or superseded learning, pending shared imports, delegation grants, assignment proof, credentials, adapter configuration, signer material, and private keys are never included. World-model authority predicates are rejected at ingestion, model suggestions never enter `facts`, and an unresolved contradiction removes that predicate from established briefing context.
 
+Historical session timelines are never included in a briefing, prompt, source catalog, or `MEMORY.md`. After compaction, a locally enrolled private session may report only a freshness status and continuation capsule. An agent that needs a measured historic result must make a separate exact-time or two-term `session_timeline_search`; see [bounded session timeline](session-timeline.md).
+
 The voice brief does not claim that the agent has feelings or consciousness. It asks the host to lead with the useful outcome, avoid re-asking known facts, apply the current persona naturally, and acknowledge a relevant correction, blocker, frustration, uncertainty, or success briefly before acting. Its profile keys are limited to warmth, directness, humor, length, rhythm, and formality; arbitrary entity attributes cannot become behavioral instructions.
 
 ## Budget behavior

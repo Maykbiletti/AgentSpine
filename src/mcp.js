@@ -3,6 +3,7 @@ import { isMainModule } from "./lib/runtime.js";
 import { deliveryPremortemRecoveryTool, deliveryPremortemTool } from "./lib/mcp-premortem.js";
 import { deliveryKnowledgeTool, sessionBriefingTool } from "./lib/mcp-delivery-tools.js";
 import { worldModelTools } from "./lib/mcp-world-tools.js";
+import { sessionTimelineTools } from "./lib/mcp-timeline-tools.js";
 import { startMcpProtocol } from "./lib/mcp-runtime.js";
 import { deliveryCompletionTool } from "./lib/mcp-delivery-completion.js";
 
@@ -27,6 +28,7 @@ const tools = [
   sessionBriefingTool,
   deliveryKnowledgeTool,
   ...worldModelTools,
+  ...sessionTimelineTools,
   {
     name: "read_document",
     description: "Read a bounded host-indexed Markdown source byte range with verified SHA-256 provenance; no broad home scan.",
@@ -443,8 +445,8 @@ const tools = [
   deliveryPremortemRecoveryTool
 ];
 
-export function startMcpServer(input = process.stdin, output = process.stdout) {
-  return startMcpProtocol({ input, output, tools, version: VERSION });
+export function startMcpServer(input = process.stdin, output = process.stdout, { environment = process.env } = {}) {
+  return startMcpProtocol({ input, output, tools, version: VERSION, environment });
 }
 
 if (isMainModule(import.meta.url)) {

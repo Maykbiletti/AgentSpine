@@ -235,15 +235,15 @@ test("project-memory binding rollback and purge remove cached snapshots immediat
   assert.equal(Object.keys(cache.roots).length, 0);
 });
 
-test("an oversized direct index fails closed before any fact target is opened", async (t) => {
+test("an index beyond 4,096 direct links fails closed before any fact target is opened", async (t) => {
   const { project, session, memory } = await fixture(t);
-  const links = Array.from({ length: 129 }, (_, index) =>
+  const links = Array.from({ length: 4097 }, (_, index) =>
     `[Fact ${index}](fact-${index}.md) <!-- agentspine:always -->`);
   await writeFile(join(memory, "MEMORY.md"), `# Memory\n\n${links.join("\n")}\n`, "utf8");
   const opened = [];
   await assert.rejects(resolveHostSourceCatalog({
     host: "claude", cwd: project, input: { transcript_path: session },
     memoryHooks: { onOpen: ({ relativePath }) => opened.push(relativePath) }
-  }), /indexes more than 128 direct files/);
+  }), /indexes more than 4096 direct files/);
   assert.deepEqual(opened, ["MEMORY.md"]);
 });
