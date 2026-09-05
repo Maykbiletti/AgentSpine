@@ -4,6 +4,7 @@ import { lstat, mkdir, open, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { replaceFileWithRetry } from "./filesystem-retry.js";
 import { stateRoot } from "./paths.js";
+import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 import { verifyWindowsTimelineDirectoryAcl, verifyWindowsTimelineFileAcl } from "./session-timeline-windows-acl.js";
 
 const KEY_BYTES = 32;
@@ -182,7 +183,7 @@ function timelineFileRole(namespace) {
 export async function sessionTimelinePrivatePaths(root, namespace, { create = true } = {}) {
   if (!/^[a-z-]{1,32}$/.test(namespace || "")) throw new Error("session timeline private namespace is invalid");
   const integrity = await integrityDirectory(create);
-  const identifier = digest(root);
+  const identifier = sessionTimelineRootDigest(root);
   const assertStable = () => assertIntegrityDirectory(integrity);
   const path = join(integrity.path, `session-timeline-${namespace}-${identifier}.json`);
   await assertStable();
@@ -233,13 +234,13 @@ export async function readAuthenticatedTimelineState(path, maximumBytes, assertS
 }
 
 function headPath(integrity, root) {
-  return join(integrity.path, `session-timeline-head-${digest(root)}.json`);
+  return join(integrity.path, `session-timeline-head-${sessionTimelineRootDigest(root)}.json`);
 }
 
 async function saveHead(integrity, root, stateSignature, assertOwned = null) {
   const path = headPath(integrity, root);
   await verifyExistingPrivateTimelineFile(path, "head", HEAD_MAX_BYTES);
-  const head = { schema: HEAD_SCHEMA, rootDigest: digest(root), stateSignature, authority: "state-integrity-only" };
+  const head = { schema: HEAD_SCHEMA, rootDigest: sessionTimelineRootDigest(root), stateSignature, authority: "state-integrity-only" };
   head.signature = signature(head, await signingKey({ create: true }));
   const content = `${JSON.stringify(head)}\n`;
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
@@ -292,7 +293,7 @@ export async function verifySessionTimelineHead({ root, stateSignature }) {
       () => assertIntegrityDirectory(integrity)));
   }
   catch { throw new Error("session timeline state head is unavailable"); }
-  if (head?.schema !== HEAD_SCHEMA || head.rootDigest !== digest(root) || !SIGNATURE_RE.test(head.stateSignature || "")
+  if (head?.schema !== HEAD_SCHEMA || head.rootDigest !== sessionTimelineRootDigest(root) || !SIGNATURE_RE.test(head.stateSignature || "")
     || head.authority !== "state-integrity-only") throw new Error("session timeline state head is invalid");
   await verifySessionTimelineState(head);
   await assertIntegrityDirectory(integrity);

@@ -22,6 +22,7 @@ import {
   sameSessionTimelineSourceLocation, sourcePath, validSessionTimelineSourceMetadata
 } from "./session-timeline-source.js";
 import { validVerifiedTimelineHostOrigin } from "./session-timeline-host-origin.js";
+import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 
 export const PRIVATE_TIMELINE_ENROLLMENT_SCHEMA = "agentspine.session-timeline-private-enrollment/v1";
 export { PRIVATE_TIMELINE_HOST_RECEIPT_ORIGIN, PRIVATE_TIMELINE_HOST_RECEIPT_SCHEMA } from "./session-timeline-host-receipt.js";
@@ -73,7 +74,7 @@ function unavailable(reason) {
 
 function empty(root) {
   return {
-    schema: PRIVATE_TIMELINE_ENROLLMENT_SCHEMA, rootDigest: digest(root),
+    schema: PRIVATE_TIMELINE_ENROLLMENT_SCHEMA, rootDigest: sessionTimelineRootDigest(root),
     enrollments: [], pendingReceipts: [], generation: 0, previousSignature: null, authority: AUTHORITY
   };
 }
@@ -108,11 +109,11 @@ function sameSourceSnapshot(left, right) {
 }
 
 function enrollmentId(root, binding, source) {
-  return `timeline-enrollment:${digest(canonical({ rootDigest: digest(root), binding, sourceDigest: sourceDigest(source) })).slice(0, 32)}`;
+  return `timeline-enrollment:${digest(canonical({ rootDigest: sessionTimelineRootDigest(root), binding, sourceDigest: sourceDigest(source) })).slice(0, 32)}`;
 }
 
 function enrollmentDigest(root, binding, source, expiresAt, transportDigest) {
-  return digest(canonical({ rootDigest: digest(root), binding, sourceDigest: sourceDigest(source), expiresAt,
+  return digest(canonical({ rootDigest: sessionTimelineRootDigest(root), binding, sourceDigest: sourceDigest(source), expiresAt,
     transportDigest, confirmation: LOCAL_TIMELINE_ENROLLMENT_CONFIRMATION, timelineVisibility: TIMELINE_VISIBILITY }));
 }
 
@@ -139,7 +140,7 @@ function unambiguousEnrollments(enrollments) {
 
 function validate(state, root) {
   const receipts = state?.pendingReceipts === undefined ? [] : state.pendingReceipts;
-  if (!state || state.schema !== PRIVATE_TIMELINE_ENROLLMENT_SCHEMA || state.rootDigest !== digest(root)
+  if (!state || state.schema !== PRIVATE_TIMELINE_ENROLLMENT_SCHEMA || state.rootDigest !== sessionTimelineRootDigest(root)
     || state.authority !== AUTHORITY || !Array.isArray(state.enrollments)
     || !validGeneration(state.generation) || !validSignature(state.signature)
     || (state.generation === 1 ? state.previousSignature !== null : !validSignature(state.previousSignature))
@@ -152,7 +153,7 @@ function validate(state, root) {
   return state;
 }
 
-function stateRoot(root) { return { value: root, digest: digest(root) }; }
+function stateRoot(root) { return { value: root, digest: sessionTimelineRootDigest(root) }; }
 
 async function enrollmentPaths(root, options = {}) {
   return privateEnrollmentPaths(root, options);

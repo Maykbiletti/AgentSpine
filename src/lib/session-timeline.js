@@ -24,6 +24,7 @@ import { seekTimelineEvidence, verifyTimelineEvent } from "./session-timeline-se
 import { eventFromTimelineLine, extractTimelineTimestamp } from "./session-timeline-event-extract.js";
 import { matchesSourceMetadata, pathMatchesSource } from "./session-timeline-source.js";
 import { readTimelineState, saveTimelineState } from "./session-timeline-state.js";
+import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 
 export const SESSION_TIMELINE_SCHEMA = "agentspine.session-timeline/v1";
 const STATE_SCHEMA = "agentspine.session-timeline-state/v1";
@@ -46,7 +47,7 @@ function asDate(value) {
 }
 function date(value) { return Number.isFinite(new Date(value).getTime()); }
 
-function empty(root) { return { schema: STATE_SCHEMA, rootDigest: digest(root), sources: [], authority: AUTHORITY }; }
+function empty(root) { return { schema: STATE_SCHEMA, rootDigest: sessionTimelineRootDigest(root), sources: [], authority: AUTHORITY }; }
 function hasOnlyKeys(item, allowed) { return Object.keys(item).every((key) => allowed.has(key)); }
 function validCount(item) {
   return item === null || Boolean(item && typeof item === "object" && Object.keys(item).length === 2
@@ -77,7 +78,7 @@ function validSource(item) {
     && date(item.updatedAt) && item.authority === AUTHORITY;
 }
 function validate(value, root) {
-  if (!value || value.schema !== STATE_SCHEMA || value.rootDigest !== digest(root) || value.authority !== AUTHORITY
+  if (!value || value.schema !== STATE_SCHEMA || value.rootDigest !== sessionTimelineRootDigest(root) || value.authority !== AUTHORITY
     || !Array.isArray(value.sources) || value.sources.length > MAX_SOURCES || value.sources.some((item) => !validSource(item))) {
     throw new Error("session timeline state is invalid");
   }

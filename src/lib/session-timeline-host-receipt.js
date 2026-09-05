@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { completeTimelineBinding, sameTimelineBinding, validTimelineBinding } from "./session-timeline-contract.js";
 import { sameTimelineTransportDigest, validTimelineTransportDigest } from "./session-timeline-transport.js";
+import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 import { validSessionTimelineSourceMetadata } from "./session-timeline-source.js";
 
 export const PRIVATE_TIMELINE_HOST_RECEIPT_SCHEMA = "agentspine.session-timeline-host-receipt/v1";
@@ -49,7 +50,7 @@ function eventDigest(value) {
 }
 
 function receiptDigest(root, value) {
-  return digest(canonical({ schema: value.schema, id: value.id, rootDigest: digest(root), binding: value.binding,
+  return digest(canonical({ schema: value.schema, id: value.id, rootDigest: sessionTimelineRootDigest(root), binding: value.binding,
     source: sourceMetadata(value.source), transportDigest: value.transportDigest, origin: value.origin,
     eventDigest: value.eventDigest, issuedAt: value.issuedAt, expiresAt: value.expiresAt, authority: value.authority }));
 }
@@ -58,7 +59,7 @@ export function validHostTranscriptReceipt(value, root) {
   const issuedAt = new Date(value?.issuedAt).getTime();
   const expiresAt = new Date(value?.expiresAt).getTime();
   return value && value.schema === PRIVATE_TIMELINE_HOST_RECEIPT_SCHEMA && HOST_RECEIPT_RE.test(value.id || "")
-    && value.rootDigest === digest(root) && validTimelineBinding(value.binding) && completeTimelineBinding(value.binding)
+    && value.rootDigest === sessionTimelineRootDigest(root) && validTimelineBinding(value.binding) && completeTimelineBinding(value.binding)
     && value.binding.groupId === null && validSourceSnapshot(value.source)
     && validTimelineTransportDigest(value.transportDigest) && value.origin === PRIVATE_TIMELINE_HOST_RECEIPT_ORIGIN
     && (value.eventDigest === null || /^[a-f0-9]{64}$/.test(value.eventDigest || "")) && Number.isFinite(issuedAt)
@@ -87,7 +88,7 @@ export function purgeExpiredHostReceipts(state, current) {
 export function makeHostTranscriptReceipt({ root, binding, source, transportDigest, current, eventId }) {
   const receipt = {
     schema: PRIVATE_TIMELINE_HOST_RECEIPT_SCHEMA, id: `asthr_${randomBytes(32).toString("base64url")}`,
-    rootDigest: digest(root), binding: { ...binding }, source: sourceMetadata(source), transportDigest,
+    rootDigest: sessionTimelineRootDigest(root), binding: { ...binding }, source: sourceMetadata(source), transportDigest,
     origin: PRIVATE_TIMELINE_HOST_RECEIPT_ORIGIN, eventDigest: eventDigest(eventId),
     issuedAt: current.toISOString(), expiresAt: new Date(current.getTime() + HOST_RECEIPT_TTL_MS).toISOString(),
     authority: AUTHORITY

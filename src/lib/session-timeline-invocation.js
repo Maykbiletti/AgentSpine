@@ -7,6 +7,7 @@ import {
   verifySessionTimelineState
 } from "./session-timeline-auth.js";
 import { sameTimelineTransportDigest, validTimelineTransportDigest } from "./session-timeline-transport.js";
+import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 
 const SCHEMA = "agentspine.session-timeline-invocations/v1";
 const HEAD_SCHEMA = "agentspine.session-timeline-invocation-head/v1";
@@ -29,7 +30,7 @@ function validDate(value) { return Number.isFinite(new Date(value).getTime()); }
 function validSignature(value) { return /^[a-f0-9]{64}$/.test(value || ""); }
 function validGeneration(value) { return Number.isSafeInteger(value) && value > 0; }
 function empty(root) {
-  return { schema: SCHEMA, rootDigest: digest(root), permits: [], generation: 0,
+  return { schema: SCHEMA, rootDigest: sessionTimelineRootDigest(root), permits: [], generation: 0,
     previousSignature: null, authority: AUTHORITY };
 }
 
@@ -39,7 +40,7 @@ function validPermit(item) {
 }
 
 function validate(state, root) {
-  if (!state || state.schema !== SCHEMA || state.rootDigest !== digest(root) || state.authority !== AUTHORITY
+  if (!state || state.schema !== SCHEMA || state.rootDigest !== sessionTimelineRootDigest(root) || state.authority !== AUTHORITY
     || !validGeneration(state.generation) || !validSignature(state.signature)
     || (state.generation === 1 ? state.previousSignature !== null : !validSignature(state.previousSignature))
     || !Array.isArray(state.permits) || state.permits.length > MAX_PERMITS || !state.permits.every(validPermit)) {
@@ -49,7 +50,7 @@ function validate(state, root) {
 }
 
 function validateHead(head, root) {
-  if (!head || head.schema !== HEAD_SCHEMA || head.rootDigest !== digest(root) || head.authority !== AUTHORITY
+  if (!head || head.schema !== HEAD_SCHEMA || head.rootDigest !== sessionTimelineRootDigest(root) || head.authority !== AUTHORITY
     || !validGeneration(head.generation) || !validSignature(head.signature) || !validSignature(head.stateSignature)
     || (head.generation === 1 ? head.previousSignature !== null : !validSignature(head.previousSignature))) {
     throw new Error("session timeline invocation head is invalid");
@@ -113,7 +114,7 @@ async function writeSigned(value, path, maximumBytes, assertOwned, assertStable)
 }
 
 async function saveHead(state, path, root, assertOwned, assertStable) {
-  const head = { schema: HEAD_SCHEMA, rootDigest: digest(root), generation: state.generation,
+  const head = { schema: HEAD_SCHEMA, rootDigest: sessionTimelineRootDigest(root), generation: state.generation,
     stateSignature: state.signature, previousSignature: state.previousSignature, authority: AUTHORITY };
   await writeSigned(head, path, HEAD_MAX_BYTES, assertOwned, assertStable);
 }
@@ -135,7 +136,7 @@ function requestDigest({ root, tool, binding, sourceDigest, request }) {
     || !binding || !request) {
     throw new Error("session timeline invocation binding is invalid");
   }
-  return digest(canonical({ rootDigest: digest(root), tool, binding, sourceDigest, request }));
+  return digest(canonical({ rootDigest: sessionTimelineRootDigest(root), tool, binding, sourceDigest, request }));
 }
 
 function purgeExpired(state, now) {
