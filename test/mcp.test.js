@@ -63,7 +63,8 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   const names = messages[1].result.tools.map((tool) => tool.name);
   assert.deepEqual(names, [
     "scan", "resolve_context", "session_briefing", "delivery_knowledge_query",
-    "record_world_assertion", "world_context", "session_timeline_index", "session_timeline_search", "read_document", "verify",
+    "record_world_assertion", "world_context", "session_timeline_index", "session_timeline_search",
+    "project_portfolio", "record_project_observation", "evaluate_autonomy_action", "read_document", "verify",
     "link_documents", "annotate_document", "upsert_entity",
     "link_entities", "relationship_context", "upsert_attention",
     "record_activity", "attention_context", "resolve_attention",

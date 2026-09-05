@@ -31,6 +31,7 @@ import {
 import { sessionTimelineBinding } from "./session-timeline-contract.js";
 import { timelineTransportDigest } from "./session-timeline-transport.js";
 import { boundBriefingArguments, rejectInternalSourceArguments, resolveMcpSources } from "./mcp-source-context.js";
+import { evaluateAutonomyAction, projectPortfolioContext, recordProjectObservation } from "./autonomy.js";
 
 function textResult(value, isError = false) {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }], isError };
@@ -148,6 +149,9 @@ async function callTool(name, args = {}, environment = process.env) {
   if (name === "shared_context") return textResult(await sharedContext({ ...args, root }));
   if (name === "record_world_assertion") return textResult(await recordWorldAssertion({ ...args, root }));
   if (name === "world_context") return textResult(await worldContext({ ...args, root }));
+  if (name === "project_portfolio") return textResult(await projectPortfolioContext({ ...args, root }));
+  if (name === "record_project_observation") return textResult(await recordProjectObservation({ ...args, root }));
+  if (name === "evaluate_autonomy_action") return textResult(await evaluateAutonomyAction({ ...args, root }));
   if (name === "session_timeline_index") {
     const input = timelineInvocationInput(args);
     if (runtimeTimelineGroup(environment, input)) return textResult(unavailableTimelineInvocation("timeline-group-suppressed"));

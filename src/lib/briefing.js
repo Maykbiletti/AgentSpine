@@ -9,6 +9,7 @@ import { loadPersonaRuntime, personaRuntimeFindings } from "./persona-runtime.js
 import { gatewayRuntimeFindings, loadGatewayRuntime } from "./gateway-runtime.js";
 import { voiceCue } from "./voice-runtime.js";
 import { worldContext } from "./world-model.js";
+import { projectPortfolioContext } from "./project-portfolio.js";
 
 const MIN_BYTES = 4096;
 const MAX_BYTES = 262144;
@@ -134,7 +135,7 @@ export async function sessionBriefing({
       ? { root: userStateRoot, entityId, includePrivate, groupId, catalog: userCatalog }
       : { root: catalog.root, entityId, includePrivate, groupId, catalog })
     : null;
-  const [learned, attention, tasks, shared, userLearned, personas, gateway, world] = await settleReads([
+  const [learned, attention, tasks, shared, userLearned, personas, gateway, world, portfolio] = await settleReads([
     learningContext({ root: catalog.root, includePrivate, groupId, scope: learningScope, maxItems: 50, catalog, now }),
     attentionContext({
       root: catalog.root, includePrivate, entityId, groupId, projectId, currentTaskId,
@@ -148,7 +149,9 @@ export async function sessionBriefing({
       : Promise.resolve({ items: [] }),
     loadPersonaRuntime(catalog.root, catalog),
     loadGatewayRuntime(catalog.root, catalog),
-    worldContext({ root: catalog.root, projectId, groupId, includePrivate, maxItems: 50, now })
+    worldContext({ root: catalog.root, projectId, groupId, includePrivate, maxItems: 50, now }),
+    tenantId ? projectPortfolioContext({ root: catalog.root, tenantId, groupId, markPresented: false, now })
+      : Promise.resolve({ projects: [], observations: [], notice: null, rateLimited: false })
   ]);
   const personaFindings = personaRuntimeFindings(personas.policy, personas.runtime);
   if (personaFindings.length) throw new Error(`persona runtime failed closed: ${personaFindings.join(", ")}`);
@@ -208,12 +211,13 @@ export async function sessionBriefing({
       authority: "context-only"
     },
     attention: { suppressed: attention.suppressed, items: [] },
+    portfolio: { projects: [], observations: [], notice: portfolio.notice, rateLimited: portfolio.rateLimited, authority: "context-only" },
     budget: {
       maxBytes: limit,
       usedBytes: 0,
       remainingBytes: 0,
       measurement: "compact-json-utf8",
-      omitted: { sources: 0, tasks: 0, relationships: 0, voice: 0, learning: 0, shared: 0, world: 0, attention: 0 }
+      omitted: { sources: 0, tasks: 0, relationships: 0, voice: 0, learning: 0, shared: 0, world: 0, attention: 0, portfolio: 0 }
     },
     authority: "context-only",
     note: "This packet is descriptive context only. It grants no delegation, host, tool, file, network, production, spending, or policy rights. Native host rules and explicit local policy remain authoritative."
@@ -323,6 +327,12 @@ export async function sessionBriefing({
   }
   for (const item of attentionItems) {
     if (!tryAdd(result, result.attention.items, item)) countOmitted(result, "attention");
+  }
+  for (const item of portfolio.projects) {
+    if (!tryAdd(result, result.portfolio.projects, item)) countOmitted(result, "portfolio");
+  }
+  for (const item of portfolio.observations) {
+    if (!tryAdd(result, result.portfolio.observations, item)) countOmitted(result, "portfolio");
   }
 
   recalculateBudget(result);

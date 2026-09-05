@@ -62,6 +62,12 @@ export {
 } from "./lib/preflight.js";
 export { runWorker, runWorkerTick } from "./worker.js";
 export {
+  AUTONOMY_ACTIONS, AUTONOMY_CONFIRMATION, AUTONOMY_MODES, AUTONOMY_SCHEMA, EVIDENCE_CLASSES,
+  PUBLISH_CONFIRMATION, autonomyFindings, autonomyStatus, configureAutonomyProject,
+  evaluateAutonomyAction, loadAutonomy, modeAllows, projectPortfolioContext,
+  recordProjectObservation, revokeAutonomyProject, scanProjectPortfolio
+} from "./lib/autonomy.js";
+export {
   createKnowledgeGap, createSelfHelpReport, createSelfHelpRequirement, createSelfHelpResolution,
   KNOWLEDGE_GAP_SCHEMA, pendingSelfHelpRequirement, resolveKnowledgeGapCandidate,
   sameKnowledgeGapResolution, SELF_HELP_REPORT_SCHEMA, SELF_HELP_REQUIREMENT_SCHEMA,

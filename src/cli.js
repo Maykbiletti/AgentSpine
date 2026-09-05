@@ -7,6 +7,7 @@ import { sharingCommands, runSharingCommand } from "./cli-sharing.js";
 import { diagnosticsCommands, runDiagnosticsCommand } from "./cli-diagnostics.js";
 import { premortemCommands, runPremortemCommand } from "./cli-premortem.js";
 import { hostCommands, runHostCommand } from "./cli-host.js";
+import { autonomyCommands, runAutonomyCommand } from "./cli-autonomy.js";
 import { output, parse } from "./cli-common.js";
 import { VERSION } from "./version.js";
 import { isMainModule } from "./lib/runtime.js";
@@ -67,6 +68,13 @@ Usage:
   agentspine preflight-policy <policy.json> --confirm-local-policy
   agentspine preflight-status
   agentspine premortem-recover <predecessor-requirement> [--root path] [--task id] [--json]
+  agentspine autonomy-project-set <id> --project id --tenant id (--local-root path|--public-url url) --mode observe|advise|execute|publish [--capabilities tool:name] --confirm-local-autonomy [--confirm-local-publish]
+  agentspine autonomy-project-revoke <id> --reason text --confirm-local-autonomy
+  agentspine autonomy-scan --tenant id [--group id]
+  agentspine autonomy-observe <id> --tenant id --kind ci|error|idea|goal|state --evidence objective|user-feedback|model-suggestion --summary text --source-digest sha256
+  agentspine autonomy-status [--tenant id --group id]
+  agentspine autonomy-check <id> --tenant id --action observe|advise|execute|publish [--capability tool:name]
+  agentspine portfolio --tenant id [--group id --mark-presented]
   agentspine host-install codex [--codex-home path] [--skills-root path] [--package-root path] --confirm-local-host-install [--json]
   agentspine remember-propose --claim text --user id --tenant id [--project id] [--group id] [--task id]
   agentspine remember-confirm <candidate-id> [--supersedes id] --confirm-local-user
@@ -148,7 +156,8 @@ const ROUTES = [
   [sharingCommands, runSharingCommand],
   [diagnosticsCommands, runDiagnosticsCommand],
   [premortemCommands, runPremortemCommand],
-  [hostCommands, runHostCommand]
+  [hostCommands, runHostCommand],
+  [autonomyCommands, runAutonomyCommand]
 ];
 
 export async function run(argv = process.argv.slice(2)) {

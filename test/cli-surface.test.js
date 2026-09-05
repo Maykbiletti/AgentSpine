@@ -7,9 +7,11 @@ import { coreCommands } from "../src/cli-core.js";
 import { diagnosticsCommands } from "../src/cli-diagnostics.js";
 import { learningCommands } from "../src/cli-learning.js";
 import { sharingCommands } from "../src/cli-sharing.js";
+import { autonomyCommands } from "../src/cli-autonomy.js";
 
 const EXPECTED_COMMANDS = `
-acceptance annotate attention attention-add attention-config attention-delete
+acceptance annotate attention attention-add attention-config attention-delete autonomy-check
+autonomy-observe autonomy-project-revoke autonomy-project-set autonomy-scan autonomy-status
 attention-event-delete attention-events attention-purge attention-resolve attention-touch audit
 briefing channel-bind channel-events channel-policy channel-revoke context continuity-config
 continuity-purge continuity-status delegation-check delegation-grant delegation-policy delegation-revoke
@@ -22,6 +24,7 @@ learn-measurement-purge learn-measurement-revoke learn-outcome learn-outcome-rev
 learn-revalidate learn-revalidation-start learn-review learn-rollback learn-status
 learn-trial-failure-revoke learn-validation-revoke link mcp persona-sync personas preflight-policy
 preflight-status read relate relationships remember-confirm remember-propose remember-purge
+portfolio
 remember-rollback scan share-config share-context share-delete share-feed-publish share-feed-pull
 share-feed-state share-https-publish share-https-pull share-inbox share-init share-keygen
 share-peer-pull share-peer-serve share-publish share-pull share-review share-rollback share-signers
@@ -33,7 +36,7 @@ task-create task-delete task-update tasks timeline-enroll timeline-enrollment-re
 test("CLI domain routes preserve the exact command surface without duplicate ownership", () => {
   const routes = [
     coreCommands, attentionCommands, learningCommands, continuityCommands,
-    agentCommands, sharingCommands, diagnosticsCommands
+    agentCommands, sharingCommands, diagnosticsCommands, autonomyCommands
   ];
   const commands = routes.flatMap((route) => [...route]);
   assert.equal(commands.length, new Set(commands).size);

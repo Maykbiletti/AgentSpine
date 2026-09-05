@@ -4,6 +4,15 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+### Added
+
+- Added provider-neutral, per-project autonomy levels for bounded observation, proactive advice, reversible local execution and publication. Execute/publish decisions remain an additional fail-closed gate over exact existing execution grants; publication also requires a separate local confirmation.
+- Added a restart-safe project portfolio for explicit local roots or public repository references. Bounded source-identity-checked scans, evidence-classified observations, exact tenant/group isolation, deduplication and one-at-a-time rate-limited notices feed the session briefing without discovering sibling projects or changing source bytes.
+
+### Security
+
+- Autonomy configuration cannot create tool, delegation, credential, payment, production, identity or policy authority. Linked roots, credential-bearing URLs, wildcard capabilities, stale evidence, foreign scope and manipulated state are rejected. Public repository references are never fetched by the portfolio scanner.
+
 ### Fixed
 
 - BLUN now routes the two exact King-generated timeline MCP names through AgentSpine's existing host-bound invocation guard. Claude's separately qualified names remain exact, while foreign servers and near aliases still receive no permit.

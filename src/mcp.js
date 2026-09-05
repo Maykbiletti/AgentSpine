@@ -6,6 +6,7 @@ import { worldModelTools } from "./lib/mcp-world-tools.js";
 import { sessionTimelineTools } from "./lib/mcp-timeline-tools.js";
 import { startMcpProtocol } from "./lib/mcp-runtime.js";
 import { deliveryCompletionTool } from "./lib/mcp-delivery-completion.js";
+import { autonomyTools } from "./lib/mcp-autonomy-tools.js";
 
 const tools = [
   {
@@ -29,6 +30,7 @@ const tools = [
   deliveryKnowledgeTool,
   ...worldModelTools,
   ...sessionTimelineTools,
+  ...autonomyTools,
   {
     name: "read_document",
     description: "Read a bounded host-indexed Markdown source byte range with verified SHA-256 provenance; no broad home scan.",
