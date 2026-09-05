@@ -13,6 +13,7 @@ export async function runHostCommand({ command, flags, positional, json }) {
   }
   const result = await installCodexMcp({
     codexHome: flags["codex-home"],
+    skillsRoot: flags["skills-root"],
     packageRoot: flags["package-root"] || fileURLToPath(new URL("..", import.meta.url)),
     nodePath: flags["node-path"] || process.execPath
   });

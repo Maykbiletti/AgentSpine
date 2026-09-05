@@ -99,6 +99,7 @@ async function oldPackage(root, target) {
 export async function checkCodexInstall(root, workspace) {
   root = resolve(root);
   const codexHome = join(workspace, "codex-home");
+  const skillsRoot = join(workspace, "user-home", ".agents", "skills");
   const projectRoot = join(workspace, "project");
   const stateRoot = join(workspace, "state");
   const previousRoot = join(workspace, "cache-0.72.5");
@@ -123,7 +124,7 @@ export async function checkCodexInstall(root, workspace) {
     writeFile(sourcePath, source, "utf8"),
     writeFile(unknownPath, unknown, "utf8")
   ]);
-  const initial = await installCodexMcp({ codexHome, packageRoot: previousRoot });
+  const initial = await installCodexMcp({ codexHome, skillsRoot, packageRoot: previousRoot });
   const requirementId = hookRequirement(previousRoot, projectRoot, stateRoot);
   const oldResponses = await invokeLauncher(initial.launcherPath, projectRoot, {
     AGENTSPINE_STATE_DIR: stateRoot, PLUGIN_ROOT: join(workspace, "wrong-plugin-root")
@@ -139,7 +140,7 @@ export async function checkCodexInstall(root, workspace) {
     throw new Error("pre-update Codex process did not load the registered reader");
   }
 
-  const updated = await installCodexMcp({ codexHome, packageRoot: root });
+  const updated = await installCodexMcp({ codexHome, skillsRoot, packageRoot: root });
   await rm(previousRoot, { recursive: true, force: true });
   const requests = [
     { jsonrpc: "2.0", id: 10, method: "initialize", params: { protocolVersion: "2025-06-18" } },
@@ -176,8 +177,11 @@ export async function checkCodexInstall(root, workspace) {
     throw new Error("updated Codex reader did not preserve the existing session and required calls");
   }
   const config = await readFile(configPath, "utf8");
+  const installedSkill = await readFile(updated.skill.skillPath);
+  const sourceSkill = await readFile(join(root, "skills", "agent-spine", "SKILL.md"));
   if (stripManagedCodexBlock(config) !== foreignConfig
     || (config.match(/^\[mcp_servers\.agent-spine\]$/gm) || []).length !== 1
+    || !installedSkill.equals(sourceSkill)
     || await readFile(sourcePath, "utf8") !== source || await readFile(unknownPath, "utf8") !== unknown) {
     throw new Error("Codex installation changed foreign configuration, source bytes, or unknown state");
   }
@@ -193,6 +197,7 @@ export async function checkCodexInstall(root, workspace) {
     tools: [...toolNames].filter((name) => REQUIRED_TOOL_NAMES.has(name)).sort(),
     existingSessionReadable: true,
     boundRequiredCalls: true,
+    nativeSkillInstalled: true,
     wrongPluginRootIgnored: true,
     authority: "installation-check-only"
   };

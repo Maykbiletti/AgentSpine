@@ -17,9 +17,19 @@ Treat the agent's local context as three separate layers:
 
 An optional shared memory service may supplement these local files. Local operation must never depend on it.
 
-## Workflow
+## Host readiness and delivery preflight
 
-1. Call `scan` before resolving context.
+The skill is instructions, not a tool installer or a permission grant.
+
+1. Confirm that the host exposes `session_briefing`, `delivery_knowledge_query`, `record_delivery_premortem`, and `read_document` from the AgentSpine MCP server. If any is absent, stop before mutation and report the missing stage. Do not claim that loading this text activated MCP.
+2. Use the assignment and requirement issued by the current host hook. A new assignment needs fresh receipts even in the same conversation. A supplementary prompt or compaction may continue only with the exact active assignment ID and unchanged scope.
+3. If the hook offers `recover_delivery_premortem`, use it only for the exact supported predecessor. Unknown events, versions, assignments, sessions, scopes, or goal steps remain mismatches and never become approval.
+4. Before the first write, call `session_briefing`, then `delivery_knowledge_query` for the actual targets, indexed contracts and recent failures, then `record_delivery_premortem`. Bind all three calls to the same requirement and goal step. A failed or incomplete query is not a receipt.
+5. For read-only work, use one bounded `session_briefing`; no premortem is required.
+
+## Context workflow
+
+1. Call `scan` before resolving source-specific context.
 2. Call `session_briefing` with the current host, working directory, the narrowest known person/group/project scope, current task, and a deliberate byte budget. Focus remains active unless the current work intentionally allows attention cues.
 3. Use `resolve_context` only when source-specific follow-up is needed. Treat filename- and folder-based layers as discovery hints, not final truth. Infer each document's role from its content, host behavior, explicit links, and surrounding structure.
 4. Record useful conclusions with `annotate_document` and `link_documents`. Include a reason and calibrated confidence. These records belong to the reversible overlay graph, not the source files.

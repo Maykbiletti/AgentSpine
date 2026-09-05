@@ -67,7 +67,7 @@ Usage:
   agentspine preflight-policy <policy.json> --confirm-local-policy
   agentspine preflight-status
   agentspine premortem-recover <predecessor-requirement> [--root path] [--task id] [--json]
-  agentspine host-install codex [--codex-home path] [--package-root path] --confirm-local-host-install [--json]
+  agentspine host-install codex [--codex-home path] [--skills-root path] [--package-root path] --confirm-local-host-install [--json]
   agentspine remember-propose --claim text --user id --tenant id [--project id] [--group id] [--task id]
   agentspine remember-confirm <candidate-id> [--supersedes id] --confirm-local-user
   agentspine remember-rollback <id> --confirm-local-user

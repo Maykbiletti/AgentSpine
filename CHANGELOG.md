@@ -4,6 +4,18 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.72.7] - 2026-09-05
+
+### Added
+
+- The locally confirmed Codex installer now publishes the shared provider-neutral `skills/agent-spine/SKILL.md` into the documented user skill root while registering the stable MCP launcher. The skill copy has a digest-sealed ownership marker, atomic replacement, bounded input and lock-checked crash recovery.
+- The common skill now states the operational readiness contract: skill text grants no tools, writing requires four available MCP tools and three fresh assignment-bound preflight calls, continuation keeps the exact assignment, and unknown recovery events remain mismatches.
+
+### Security and evidence limits
+
+- Synthetic install/update/restart verifies exact skill bytes, four listed tools, a real source read, existing-session continuity and bound briefing/knowledge/premortem calls. Foreign skills, foreign Codex configuration, project sources and unknown external state remain byte-identical.
+- Unmanaged skill directories, symlinked destinations, tampering, staged crashes and parallel updates are rejected or recovered without clearing state. Repository checks do not prove native `skills/list`, `mcpServerStatus/list`, host trust or an Otto restart; no live profile or CodexLink configuration was changed.
+
 ## [0.72.6] - 2026-09-05
 
 ### Added

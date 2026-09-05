@@ -92,7 +92,7 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
-Version `0.72.6` adds an explicit, locally confirmed Codex MCP installer with a stable profile-owned launcher. It verifies the loaded package version, file digests, MCP identity and required tools before forwarding any state-bearing call, while preserving unrelated Codex configuration bytes. Version `0.72.5` binds delivery-test success to the actual process result. A structured `exit_code: 0` / `exitCode: 0` or the existing command-bound final marker is required; successful transport, an unfinished process, prose output and stale markers cannot verify a write. Codex `Bash`, Work `exec_command` and PowerShell result shapes share the same contract. Version `0.72.4` added [structured MCP completion](docs/structured-completion.md) for ordinary assignments; Stop still rechecks all gates and goal deliveries retain their checkpoint and outcome route.
+Version `0.72.7` makes the locally confirmed Codex installer publish the same provider-neutral `SKILL.md` into Codex's user skill discovery root while it updates the stable MCP launcher. The managed skill copy has sealed ownership, atomic update and crash recovery; unrelated skills and configuration remain byte-identical. Native skill discovery and MCP readiness are still separate host checks. Version `0.72.6` added loaded-reader verification, and version `0.72.5` bound delivery-test success to the actual process result rather than transport success.
 
 Version `0.72.3` allows a host to continue an unfinished delivery across supplementary prompts by carrying the exact active `assignment_id`. The same scope, premortem and open write/test obligations survive; a prompt without that identifier starts a new delivery with fresh preflight calls. Knowledge queries can record a new target as absent without creating it, while checking existing parent paths and rejecting symlinks and escapes. See [the continuation contract](docs/assignment-continuation.md). This is not native host activation or a migration for unknown external state events.
 
@@ -195,11 +195,11 @@ Source discovery is independent of the installation `cwd`: Claude uses `CLAUDE_C
 
 ## Install for Codex
 
-AgentSpine ships a native `.codex-plugin/plugin.json` that selects the Codex-only lifecycle adapter. Add the repository to a configured marketplace, open the Codex plugin browser with `/plugins`, install AgentSpine, review the current hook definition with `/hooks`, and start a fresh session. For development, the CLI and MCP server can be used directly:
+AgentSpine ships a native `.codex-plugin/plugin.json` that selects the Codex-only lifecycle adapter. Add the repository to a configured marketplace, open the Codex plugin browser with `/plugins`, install AgentSpine, review the current hook definition with `/hooks`, and start a fresh session. A direct npm/package installation can register both the common user skill and the stable MCP reader with one locally confirmed command:
 
 ```bash
 npm link
-agentspine-mcp
+agentspine host-install codex --confirm-local-host-install --json
 ```
 
 See [host integration](docs/host-integration.md) for exact component paths and trust behavior.
@@ -378,7 +378,7 @@ New agents that do not have identity files yet can start with the included [`spi
 | Conduct | Working behavior and verification habits | On explicit feedback |
 | Grown history | Dated experience and corrections | Append-only |
 
-The manual [`skill/SKILL.md`](skill/SKILL.md) can scaffold and audit this optional layout. It is only for an agent with no existing spine. AgentSpine never migrates an established agent into the example, and the normal plugin resolver continues to discover and preserve whatever files already exist.
+The common [`skills/agent-spine/SKILL.md`](skills/agent-spine/SKILL.md) documents the bounded readiness and delivery workflow. It does not grant tools or permissions. AgentSpine never migrates an established agent into the example, and the normal plugin resolver continues to discover and preserve whatever files already exist.
 
 ## Design principles
 

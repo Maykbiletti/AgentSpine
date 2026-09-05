@@ -10,7 +10,8 @@ const MAX_UNPACKED_BYTES = 2304 * 1024;
 const REQUIRED_PACKAGE_FILES = [
   "blun.plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".mcp.json",
   "CHANGELOG.md", "LICENSE", "README.md", "bin/agentspine.js", "bin/agentspine-mcp.js",
-  "src/codex-reader-launcher.js", "src/lib/codex-installation.js", "src/cli-host.js",
+  "src/codex-reader-launcher.js", "src/lib/codex-installation.js",
+  "src/lib/codex-skill-installation.js", "src/cli-host.js",
   "docs/acceptance.md", "docs/source-roots.md", "docs/preflight-recall.md", "docs/preservation-contract.md",
   "docs/world-model.md", "scripts/run-acceptance.js", "skills/agent-spine/SKILL.md",
   "src/index.js", "src/mcp.js", "src/lib/mcp-world-tools.js", "src/lib/world-model.js", "src/worker.js",

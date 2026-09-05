@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withOwnedFileLock } from "./owned-file-lock.js";
 import { replaceFileWithRetry } from "./filesystem-retry.js";
+import { defaultCodexSkillsRoot, installCodexSkill } from "./codex-skill-installation.js";
 
 const REGISTRATION_SCHEMA = "agentspine.codex-reader-registration/v1";
 const AUTHORITY = "host-registration-only";
@@ -165,6 +166,7 @@ export function defaultCodexHome(env = process.env) {
 
 export async function installCodexMcp({
   codexHome = defaultCodexHome(),
+  skillsRoot = defaultCodexSkillsRoot(),
   packageRoot = fileURLToPath(new URL("../..", import.meta.url)),
   nodePath = process.execPath,
   faultAfter = null
@@ -193,6 +195,13 @@ export async function installCodexMcp({
     ]);
     const update = updateConfig(before, managedBlock(registration.nodePath, launcherPath));
     if (update.outsideBefore !== update.outsideAfter) throw new Error("unmanaged Codex configuration bytes changed");
+    const skill = await installCodexSkill({
+      skillsRoot, packageRoot,
+      faultAfter: faultAfter === "skill-marker" ? "marker" : faultAfter === "skill" ? "skill" : null
+    });
+    if (skill.version !== registration.expectedVersion || skill.packageRoot !== registration.packageRoot) {
+      throw new Error("Codex skill and MCP reader package identity differ");
+    }
     await atomicWrite(launcherPath, launcher, assertOwned);
     if (faultAfter === "launcher") throw new Error("synthetic crash after launcher publication");
     await atomicWrite(registrationPath, `${JSON.stringify(registration, null, 2)}\n`, assertOwned);
@@ -209,6 +218,7 @@ export async function installCodexMcp({
       unmanagedBeforeDigest: sha256(update.outsideBefore),
       unmanagedAfterDigest: sha256(update.outsideAfter),
       configDigest: sha256(update.text),
+      skill,
       restartRequired: true,
       authority: AUTHORITY
     };

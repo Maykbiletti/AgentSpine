@@ -1,6 +1,6 @@
 {
   "name": "agent-spine",
-  "version": "0.72.6",
+  "version": "0.72.7",
   "description": "A non-destructive identity and memory spine for AI agents.",
   "type": "module",
   "bin": {
@@ -22,7 +22,6 @@
     "!docs/roadmap.md",
     "hooks",
     "scripts",
-    "skill",
     "skills",
     "spine-example",
     "src",
