@@ -35,6 +35,8 @@ CI run 143 exposed a Windows-only defect in the new fault-injection test: its li
 
 CI run 144 exposed a macOS cleanup race after an unsuccessful knowledge query. A deterministic MCP probe confirmed that an invalid target could produce its error response while a sibling target read was still suspended. Knowledge queries now settle every started bounded target, contract and briefing operation before returning an error, preserve the original rejection and produce no success receipt. The delayed-read regression observes the response boundary; it does not retry or suppress cleanup errors.
 
+Separate Windows failures remain under investigation: an installed-hook timeout (run 143), a pre-existing aggregate audit assertion (run 144), and an installed Codex denial-shape assertion (run 145). The synthetic installation check now reports its actual decision, reason and protocol fields; aggregate audit assertions report failed gates. Assertions and deadlines are unchanged. Passing other matrix jobs does not resolve these findings or establish live host compatibility.
+
 ## Unresolved compatibility and host evidence
 
 An externally produced recovery event has been reported but its exact schema and transition semantics have not been supplied. Synthetic unknown events, unknown schemas and corrupted digests are deliberately not migrated or accepted by this change. Their bytes remain unchanged. The existing unsupported-event classification problem remains open; this release is not a recommendation to install or restart that live session.

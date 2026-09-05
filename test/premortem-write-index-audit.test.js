@@ -70,7 +70,7 @@ test("audit proves first, last, and recent writes while ignoring an unrelated or
   await writeFile(orphanPath, "{not-json\n", "utf8");
 
   const result = await runAudit(root);
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, JSON.stringify(result.gates.filter(gate => !gate.ok)));
   assert.equal(result.gates.find((gate) => gate.id === 3).ok, true);
   assert.equal(result.gates.find((gate) => gate.id === 8).ok, true);
   assert.equal(result.premortemDiagnostics.writeIndex.states, 1);
@@ -92,7 +92,7 @@ test("malformed reachable write-index JSON is audited but fails open", async (t)
   await writeFile(rootPath, "{not-json\n", "utf8");
 
   const result = await runAudit(root);
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, JSON.stringify(result.gates.filter(gate => !gate.ok)));
   assert.equal(result.gates.find((gate) => gate.id === 8).ok, true);
   assert.deepEqual(result.premortemDiagnostics.writeIndex.errors, []);
   assert.equal(result.premortemDiagnostics.writeIndex.uncertainties.some((item) =>

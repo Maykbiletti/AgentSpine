@@ -211,7 +211,15 @@ export async function invokeInstalledBlockingProtocols(pluginRoot, projectRoot, 
   if (codexPreTool.decision !== "block" || !codexPreTool.reason?.includes("premortem")
     || codexPreTool.permissionDecision !== null
     || !exactKeys(codexPreTool.protocolKeys, ["decision", "reason"])) {
-    throw new Error("installed Codex denial did not preserve its strict top-level decision/reason schema");
+    const observed = {
+      decision: codexPreTool.decision, reason: codexPreTool.reason,
+      protocolKeys: codexPreTool.protocolKeys, hookSpecificKeys: codexPreTool.hookSpecificKeys,
+      permissionDecision: codexPreTool.permissionDecision,
+      sourceResolution: codexPreTool.sourceResolution, preflight: codexPreTool.preflight,
+      selfstarter: codexPreTool.selfstarter
+    };
+    throw new Error("installed Codex denial did not preserve its strict top-level decision/reason schema: "
+      + JSON.stringify(observed).slice(0, 8192));
   }
   return {
     claude: { preTool: "nested-permission-deny", stop: "top-level-block" },
