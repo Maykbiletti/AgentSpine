@@ -6,6 +6,7 @@ const WRITE_RIGHTS = new Set(["AD", "D", "DC", "DE", "F", "GA", "GW", "M", "W", 
 const SYSTEM_PRINCIPALS = new Set([
   "s-1-5-18", "nt authority\\system", "system", "s-1-5-32-544", "builtin\\administrators", "administrators"
 ]);
+const MANDATORY_LABEL_PREFIX = "mandatory label\\";
 const FILE_ROLES = new Set(["key", "state", "head", "private"]);
 const CACHE = new Map();
 
@@ -55,6 +56,13 @@ function entriesFrom(output, path) {
 function canWrite(entry) { return entry.rights.some((right) => WRITE_RIGHTS.has(right)); }
 function isSelf(principal, identity) { return principal === identity.sid || principal === identity.account; }
 function isTrustedWriter(principal, identity) { return isSelf(principal, identity) || SYSTEM_PRINCIPALS.has(principal); }
+function isMandatoryLabel(entry) {
+  return entry.principal.startsWith(MANDATORY_LABEL_PREFIX)
+    && entry.rights.every((right) => new Set(["I", "IO", "OI", "CI", "NW"]).has(right));
+}
+function isPrivatePrincipal(entry, identity) {
+  return isTrustedWriter(entry.principal, identity) || isMandatoryLabel(entry);
+}
 function isTrustedParentWriter(entry, identity) {
   return isTrustedWriter(entry.principal, identity) || (entry.principal === "creator owner" && entry.rights.includes("IO"));
 }
@@ -66,14 +74,16 @@ function verifyParent(entries, identity) {
 }
 
 function verifyIntegrity(entries, identity) {
-  if (entries.length !== 1 || !isSelf(entries[0].principal, identity) || entries[0].rights.includes("I")
-    || !entries[0].rights.includes("F")) {
+  const owner = entries.find((entry) => isSelf(entry.principal, identity)
+    && entry.rights.includes("F") && !entry.rights.includes("I"));
+  if (!owner || entries.some((entry) => !isPrivatePrincipal(entry, identity))) {
     throw new Error("session timeline Windows integrity ACL is not private to the current SID");
   }
 }
 
 function verifyFile(entries, identity, role) {
-  if (!entries.length || entries.some((entry) => !isSelf(entry.principal, identity) || !entry.rights.includes("F"))) {
+  const owner = entries.find((entry) => isSelf(entry.principal, identity) && entry.rights.includes("F"));
+  if (!owner || entries.some((entry) => !isPrivatePrincipal(entry, identity))) {
     throw new Error(`session timeline Windows ${role} ACL is not private to the current SID`);
   }
 }

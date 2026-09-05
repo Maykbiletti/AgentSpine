@@ -55,8 +55,27 @@ test("a newly created timeline integrity directory receives a SID-only ACL throu
     assert.equal(call.options.windowsHide, true);
     assert.equal(call.options.timeout, 1_500);
   }
-  assert.equal(probe.calls[0].binary, "/Windows/System32/whoami.exe");
-  assert.equal(probe.calls[1].binary, "/Windows/System32/icacls.exe");
+  assert.equal(probe.calls[0].binary, join("/Windows", "System32", "whoami.exe"));
+  assert.equal(probe.calls[1].binary, join("/Windows", "System32", "icacls.exe"));
+});
+
+test("trusted Windows system principals do not make a private timeline ACL unavailable", async () => {
+  const path = "/synthetic/system-owned-integrity";
+  const privateAcl = runner((value) => [
+    `${value} ${ACCOUNT}:(F)`,
+    "        NT AUTHORITY\\SYSTEM:(F)",
+    "        BUILTIN\\Administrators:(F)",
+    "        Mandatory Label\\Medium Mandatory Level:(OI)(CI)(NW)"
+  ].join("\r\n"));
+  await verifier(privateAcl.run)(path, { role: "integrity" });
+  await fileVerifier(privateAcl.run)(`${path}/state.json`, { role: "state" });
+});
+
+test("a foreign read-only ACE is not private timeline access", async () => {
+  const path = "/synthetic/foreign-reader";
+  const foreign = runner((value) => `${value} ${ACCOUNT}:(F)\r\n        BUILTIN\\Users:(RX)\r\n`);
+  await assert.rejects(verifier(foreign.run)(path, { role: "integrity" }), /not private to the current SID/);
+  await assert.rejects(fileVerifier(foreign.run)(`${path}/state.json`, { role: "state" }), /not private to the current SID/);
 });
 
 test("an existing integrity directory with a broad or foreign ACL fails closed and is never rewritten", async () => {
