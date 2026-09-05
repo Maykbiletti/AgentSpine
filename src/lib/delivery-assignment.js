@@ -196,6 +196,22 @@ export async function continueDeliveryAssignment({ root, binding, assignmentId }
   });
 }
 
+export async function withActiveDeliveryAssignment({ root, binding }, action) {
+  const paths = await pathsFor(root, binding);
+  return withOwnedFileLock(paths.lock, async ({ assertOwned }) => {
+    const current = await resolveDeliveryAssignment({ root, binding,
+      assignmentId: binding.assignmentId });
+    if (current.blocked) return current;
+    if (!current.assignment || current.assignmentId !== binding.assignmentId) {
+      return { status: "foreign-assignment", blocked: true,
+        reason: "Completion requires the active assignment for this session and project." };
+    }
+    const result = await action(assertOwned);
+    await assertOwned();
+    return result;
+  });
+}
+
 export function assignmentPremortemBinding(binding, result) {
   if (binding.goalId || binding.queueId) return { ...binding, assignmentId: null };
   if (!result?.assignment) return { ...binding, assignmentId: null };

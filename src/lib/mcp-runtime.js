@@ -12,6 +12,7 @@ import { checkDelegation, createTask, taskContext, updateTask } from "./coordina
 import { readDocument, resolveContext } from "./context.js";
 import { recordDeliveryPremortem } from "./delivery-premortem.js";
 import { recoverDeliveryPremortem } from "./delivery-premortem-correction.js";
+import { completeDelivery } from "./mcp-delivery-completion.js";
 import {
   annotateDocument, linkDocuments, linkEntities,
   relationshipContext, upsertEntity
@@ -98,6 +99,10 @@ async function callTool(name, args = {}) {
   if (name === "record_world_assertion") return textResult(await recordWorldAssertion({ ...args, root }));
   if (name === "world_context") return textResult(await worldContext({ ...args, root }));
   if (name === "audit") return textResult(await runAudit(root));
+  if (name === "complete_delivery") {
+    const completed = await completeDelivery(args);
+    return textResult(completed, completed.blocked || completed.status === "degraded");
+  }
   if (name === "record_delivery_premortem") {
     if (typeof args.root !== "string" || !args.root) {
       throw new Error("record_delivery_premortem requires the exact project root");

@@ -4,6 +4,20 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.72.4] - 2026-09-05
+
+### Added
+
+- Ordinary assignments can store structured completion checks with `complete_delivery` and finish with a normal user-facing summary. Exact assignment and latest-write binding, the three mandatory preflight calls and observed successful post-write tests remain required. Stop rechecks current evidence; goal deliveries keep their existing checkpoint/outcome route.
+- Hook/MCP regressions cover normal-summary red/green, separate-process restart, concurrent retries, actual crash before atomic replacement, stale writes, foreign bindings, replay and manipulated closure metadata without changing source bytes.
+
+### Fixed and evidence limits
+
+- A later failed or unverified test invalidates earlier successful delivery verification. A real child-process test with an incorrect artifact expectation reproduces the previous false acceptance.
+- Child artifact tests now clear inherited `NODE_TEST_CONTEXT` and assert executed TAP test/failure counts. This corrects the 0.72.3 harness, where a skipped recursive child runner could exit successfully; the earlier positive exit status alone was insufficient evidence.
+- Selfstarter audit assertions expose the failed gates. The CI 147 intermittent Windows failure remains unexplained despite a subsequent passing diagnostic matrix; assertions and deadlines are unchanged.
+- Native Codex/PowerShell envelopes, host registration/update acceptance and unknown external recovery events remain open. No live installation, restart, state repair or CodexLink change is included.
+
 ## [0.72.3] - 2026-09-05
 
 ### Fixed

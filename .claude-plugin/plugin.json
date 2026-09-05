@@ -1,6 +1,6 @@
 {
   "name": "agent-spine",
-  "version": "0.72.3",
+  "version": "0.72.4",
   "description": "A non-destructive identity and memory spine for Claude Code agents.",
   "author": {
     "name": "Mayk Biletti",

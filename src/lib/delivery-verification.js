@@ -354,6 +354,10 @@ export async function recordDeliveryToolUse({ root, host, sessionId, scope, inpu
           }
           state.lastTest = receipt(input, identity.eventDigest, action.family);
           state.verifiedWriteDigest = state.lastWrite?.eventDigest || null;
+        } else {
+          // A later failed or unverified test cannot inherit an earlier success.
+          // Preserve that receipt as history, but require fresh post-write evidence.
+          state.verifiedWriteDigest = null;
         }
       }
       state.recentEvents.push({ ...identity, intentDigest: stableIdentity.intentDigest });

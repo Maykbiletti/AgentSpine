@@ -18,11 +18,15 @@ test("explicit continuation keeps one obligation across turns, compaction and MC
     + "  assert.equal(fs.readFileSync('artifact.txt', 'utf8'), process.env.EXPECTED_CONTENT);\n"
     + "});\n");
   const measuredTest = async (expected, id) => {
-    const result = spawnSync(process.execPath, ["--test", "continuation-check.cjs"],
-      { cwd: f.root, encoding: "utf8", env: { ...process.env, EXPECTED_CONTENT: expected } });
+    const env = { ...process.env, EXPECTED_CONTENT: expected };
+    delete env.NODE_TEST_CONTEXT;
+    const result = spawnSync(process.execPath, ["--test", "--test-reporter=tap", "continuation-check.cjs"],
+      { cwd: f.root, encoding: "utf8", env });
     assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /# tests 1\b/);
+    assert.match(result.stdout, /# fail 0\b/);
     return runHook({ ...context(f.root), hook_event_name: "PostToolUse", tool_name: "exec_command",
-      tool_use_id: id, tool_input: { cmd: "node --test continuation-check.cjs" },
+      tool_use_id: id, tool_input: { cmd: "node --test --test-reporter=tap continuation-check.cjs" },
       tool_response: { exit_code: result.status, output: result.stdout } });
   };
   const first = await prompt(f.root, "prompt:first");

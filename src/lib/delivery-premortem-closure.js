@@ -128,12 +128,19 @@ export function reviewPremortemClosure(message, artifact, lastWriteDigest) {
   return { missing: [...new Set(missing)], checks };
 }
 
-export function createPremortemClosure({ requirementId, artifactDigest, lastWriteDigest, checks, closedAt }) {
+export function createPremortemClosure({ requirementId, artifactDigest, lastWriteDigest, checks, closedAt,
+  testStateDigest = null }) {
+  if (testStateDigest !== null && !DIGEST_RE.test(testStateDigest)) {
+    throw new Error("completion test-state digest is invalid");
+  }
   return sealed({ schema: CLOSURE_SCHEMA, requirementId, artifactDigest, lastWriteDigest,
+    ...(testStateDigest ? { completionSource: "mcp", testStateDigest } : {}),
     checks, closedAt, authority: AUTHORITY });
 }
 
 export function validPremortemClosure(value, state) {
+  if (value && (value.completionSource !== undefined || value.testStateDigest !== undefined)
+    && (value.completionSource !== "mcp" || !DIGEST_RE.test(value.testStateDigest || ""))) return false;
   if (!value || !state.artifact || !state.lastWrite || value.schema !== CLOSURE_SCHEMA
     || value.authority !== AUTHORITY || value.requirementId !== state.requirement?.requirementId
     || value.artifactDigest !== state.artifact.digest || value.lastWriteDigest !== state.lastWrite.digest

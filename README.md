@@ -92,6 +92,8 @@ claude --plugin-dir .
 
 Claude Code discovers the bundled skill, hooks, and MCP server. Review and trust executable components when the host asks.
 
+Version `0.72.4` adds [structured MCP completion](docs/structured-completion.md) for ordinary assignments: store the three checks with `complete_delivery`, then report the result normally. The server requires the exact assignment, latest write and observed test evidence; Stop rechecks all gates. Later failed tests invalidate earlier success. Goal deliveries retain their existing checkpoint and outcome route.
+
 Version `0.72.3` allows a host to continue an unfinished delivery across supplementary prompts by carrying the exact active `assignment_id`. The same scope, premortem and open write/test obligations survive; a prompt without that identifier starts a new delivery with fresh preflight calls. Knowledge queries can record a new target as absent without creating it, while checking existing parent paths and rejecting symlinks and escapes. See [the continuation contract](docs/assignment-continuation.md). This is not native host activation or a migration for unknown external state events.
 
 Version `0.72.2` introduced independent assignment-bound delivery lanes. A conflicting premortem retry is preserved as a rejection receipt without poisoning the first valid registration, while `premortem-recover` and `recover_delivery_premortem` move supported legacy 0.72 conflicts into a fresh assignment without deleting history or granting authority.

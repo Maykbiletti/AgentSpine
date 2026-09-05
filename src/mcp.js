@@ -4,6 +4,7 @@ import { deliveryPremortemRecoveryTool, deliveryPremortemTool } from "./lib/mcp-
 import { deliveryKnowledgeTool, sessionBriefingTool } from "./lib/mcp-delivery-tools.js";
 import { worldModelTools } from "./lib/mcp-world-tools.js";
 import { startMcpProtocol } from "./lib/mcp-runtime.js";
+import { deliveryCompletionTool } from "./lib/mcp-delivery-completion.js";
 
 const tools = [
   {
@@ -438,6 +439,7 @@ const tools = [
     inputSchema: { type: "object", properties: { root: { type: "string" } } }
   },
   deliveryPremortemTool,
+  deliveryCompletionTool,
   deliveryPremortemRecoveryTool
 ];
 

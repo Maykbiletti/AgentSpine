@@ -72,7 +72,7 @@ test("MCP server initializes and lists its read and graph tools", async () => {
     "learning_outcome_status", "evaluate_learning", "rollback_learning", "configure_learning",
     "delete_learning", "check_delegation", "create_task", "update_task",
     "task_context", "shared_context", "audit", "record_delivery_premortem",
-    "recover_delivery_premortem"
+    "complete_delivery", "recover_delivery_premortem"
   ]);
   const premortem = messages[1].result.tools.find(tool => tool.name === "record_delivery_premortem");
   assert.deepEqual(premortem.inputSchema.required, ["root", "requirementId", "items"]);

@@ -174,6 +174,7 @@ export async function inspectPremortemState({ root, binding: rawBinding = null,
       requirement: structuredClone(state.requirement),
       binding: structuredClone(state.binding), hasWrite: Boolean(state.firstWrite),
       closed: Boolean(state.closure),
+      completionSource: state.closure?.completionSource || null,
       consumed: state.events.some((event) => event.type === "premortem-consumed"),
       conflicted: Boolean(state.conflict), artifactDigest: state.artifact?.digest || null };
   } catch (error) {
@@ -335,7 +336,8 @@ export async function recordPremortemWriteIntent(input) {
   const result = await recordPremortemWrite({ ...input, phase: "intent" });
   return result.status === "write-recorded" ? { ...result, status: "write-intent-recorded" } : result;
 }
-export async function verifyPremortemStop({ root, binding: rawBinding, message, now = new Date() }) {
+export async function verifyPremortemStop({ root, binding: rawBinding, message, now = new Date(),
+  testStateDigest = null, allowStoredCompletion = false }) {
   try {
     const binding = normalizeBinding(rawBinding);
     const digest = laneDigest(binding);
@@ -356,13 +358,16 @@ export async function verifyPremortemStop({ root, binding: rawBinding, message, 
       const problem = premortemProblem(state, id);
       if (problem) return problem;
       await verifyPremortemWriteIndex({ statePath: paths.path, state });
+      if (allowStoredCompletion && state.closure?.completionSource === "mcp") {
+        return closedResult(state, id);
+      }
       const reviewed = reviewPremortemClosure(message, state.artifact, state.lastWrite.digest);
       if (reviewed.missing.length) return block("unchecked",
         `AgentSpine premortem closure is incomplete: ${reviewed.missing.join(", ")}.`,
         { requirementId: id, unchecked: reviewed.missing });
       const proposed = createPremortemClosure({ requirementId: id,
         artifactDigest: state.artifact.digest, lastWriteDigest: state.lastWrite.digest,
-        checks: reviewed.checks, closedAt: at(now) });
+        checks: reviewed.checks, closedAt: at(now), testStateDigest });
       if (state.closure && canonical(state.closure.checks) !== canonical(proposed.checks)) {
         return block("conflict", `AgentSpine premortem ${id} has conflicting closure results.`, { requirementId: id });
       }

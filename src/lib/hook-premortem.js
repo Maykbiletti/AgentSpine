@@ -8,7 +8,7 @@ import {
 } from "./delivery-premortem.js";
 import { consumeDeliveryAgentUse, deliveryAgentUseGuidance,
   removeDeliveryAgentUse, verifyDeliveryAgentUse } from "./delivery-agent-usage.js";
-import { deliveryToolActions } from "./delivery-verification.js";
+import { deliveryToolActions, verifyDeliveryStop } from "./delivery-verification.js";
 import { boundedId } from "./hook-context.js";
 import { auditGuard } from "./hook-protection.js";
 import { comparablePath, projectId as localProjectId } from "./paths.js";
@@ -95,6 +95,7 @@ function withRegistrationGuidance(result, root, assignmentId = null) {
       "The premortem needs exactly baseline-environment, contract-tests, and delivery-path; each failure starts `this delivery fails because ` and has a concrete check.",
       "Claims, foreign or reused receipts do not count. This is context only and grants no authority.",
       "For an unfinished delivery, the host may send this assignmentId in the next UserPromptSubmit to continue the same exact scope; omit it for a new delivery. Prompt text is not a continuation signal.",
+      "After observed tests, ordinary assignments may store checks with complete_delivery and finish with a normal summary. Goal deliveries retain their checkpoint/outcome route.",
       "Complete with `Premortem closure sha256 <64hex>`, `Premortem latest write sha256 <64hex>`, and:",
       "- <category> <checkId>: PASS — <nonempty result>"
     ].join("\n")
@@ -227,8 +228,16 @@ export async function verifyHookPremortemStop({ input, root, scope, paused = fal
         await verifyDeliveryAgentUse({ root, requirementId: inspection.requirementId }));
       if (usage.blocked) return usage;
     }
+    let allowStoredCompletion = false;
+    if (inspection.completionSource === "mcp") {
+      const tested = await verifyDeliveryStop({ root, host: binding.host,
+        sessionId: binding.sessionId, scope });
+      if (tested.blocked) return diagnostic(input, "completion-test-check", tested);
+      allowStoredCompletion = tested.status === "verified";
+    }
     const result = await diagnostic(input, "premortem-stop", await verifyPremortemStop({
       root, binding, message: message.text,
+      allowStoredCompletion,
       now: input.timestamp || new Date()
     }));
     if (!inspection.hasWrite && inspection.requirementId) {
