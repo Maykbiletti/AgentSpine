@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,7 +83,7 @@ test("Codex install rejects unmanaged registrations, aliases, and symlinked file
     const canonicalized = await installCodexMcp({
       codexHome: join(parentAlias, "nested-home"), packageRoot: ROOT
     });
-    assert.equal(canonicalized.configPath, join(parentTarget, "nested-home", "config.toml"));
+    assert.equal(canonicalized.configPath, join(await realpath(parentTarget), "nested-home", "config.toml"));
   }
 
   const targetPackage = join(workspace, "target-package");
