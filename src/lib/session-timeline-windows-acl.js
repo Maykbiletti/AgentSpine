@@ -5,7 +5,7 @@ import { readWindowsSidAcl } from "./session-timeline-sid-acl.js";
 const SID_RE = /\bS-\d+(?:-\d+)+\b/i;
 const WRITE_RIGHTS = new Set(["AD", "D", "DC", "DE", "F", "GA", "GW", "M", "W", "WA", "WD", "WDAC", "WEA", "WO"]);
 const SYSTEM_PRINCIPALS = new Set([
-  "s-1-5-18", "s-1-5-32-544"
+  "s-1-5-18", "s-1-5-32-544", "sddl:la"
 ]);
 const MANDATORY_LABEL_PREFIX = "mandatory label\\";
 const FILE_ROLES = new Set(["key", "state", "head", "private"]);
@@ -55,16 +55,19 @@ function entriesFrom(output, path) {
 
 function canWrite(entry) { return entry.rights.some((right) => WRITE_RIGHTS.has(right)); }
 function isSelf(principal, identity) { return principal === identity.sid; }
-function isTrustedWriter(principal, identity) { return isSelf(principal, identity) || SYSTEM_PRINCIPALS.has(principal); }
+export function isTrustedWindowsWriter(principal, identity) {
+  return isSelf(principal, identity) || SYSTEM_PRINCIPALS.has(principal);
+}
 function isMandatoryLabel(entry) {
   return entry.principal.startsWith(MANDATORY_LABEL_PREFIX)
     && entry.rights.every((right) => new Set(["I", "IO", "OI", "CI", "NW"]).has(right));
 }
 function isPrivatePrincipal(entry, identity) {
-  return isTrustedWriter(entry.principal, identity) || isMandatoryLabel(entry);
+  return isTrustedWindowsWriter(entry.principal, identity) || isMandatoryLabel(entry);
 }
 function isTrustedParentWriter(entry, identity) {
-  return isTrustedWriter(entry.principal, identity) || (entry.principal === "s-1-3-0" && entry.rights.includes("IO"));
+  return isTrustedWindowsWriter(entry.principal, identity)
+    || (entry.principal === "s-1-3-0" && entry.rights.includes("IO"));
 }
 
 function verifyParent(entries, identity) {

@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWindowsTimelineAclVerifier, createWindowsTimelineFileAclVerifier }
+import {
+  createWindowsTimelineAclVerifier, createWindowsTimelineFileAclVerifier,
+  isTrustedWindowsWriter
+}
   from "../src/lib/session-timeline-windows-acl.js";
 import {
   parseWindowsAclSave, parseWindowsSddlAcl, parseWindowsSidAcl,
@@ -79,13 +82,21 @@ test("path metacharacters stay encoded in the dependency-injected compatibility 
 
 test("SDDL parsing maps trusted aliases to SIDs and retains inheritance semantics", () => {
   assert.deepEqual(parseWindowsSddlAcl(
-    `D:PAI(A;;FA;;;${SELF})(A;ID;0x001f01ff;;;SY)(A;OICIIO;FA;;;CO)(D;;FW;;;WD)`
+    `D:PAI(A;;FA;;;${SELF})(A;ID;0x001f01ff;;;SY)(A;OICIIO;FA;;;CO)(A;;FA;;;LA)(D;;FW;;;WD)`
   ), [
     { principal: SELF.toLowerCase(), rights: ["F", "W"] },
     { principal: "s-1-5-18", rights: ["I", "F", "W"] },
     { principal: "s-1-3-0", rights: ["IO", "F", "W"] },
+    { principal: "sddl:la", rights: ["F", "W"] },
     { principal: "sddl:wd", rights: ["DENY"] }
   ]);
+});
+
+test("only the documented local-administrator SDDL role joins trusted administrative SIDs", () => {
+  const identity = { sid: SELF.toLowerCase() };
+  assert.equal(isTrustedWindowsWriter("sddl:la", identity), true);
+  assert.equal(isTrustedWindowsWriter("sddl:lg", identity), false);
+  assert.equal(isTrustedWindowsWriter(FOREIGN.toLowerCase(), identity), false);
 });
 
 test("every SDDL write form remains visible to the foreign-writer guard", () => {

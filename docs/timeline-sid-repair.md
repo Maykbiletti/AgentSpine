@@ -24,10 +24,13 @@ does not read or rewrite source content.
 
 The parser accepts one UTF-16LE filename/SDDL pair and only ordinary allow or
 deny ACEs without object GUIDs or conditions. It maps fixed SDDL aliases for
-SYSTEM, built-in administrators and creator owner to their well-known SIDs.
-Other well-known aliases remain visibly untrusted. Unsupported ACE types,
-flags, rights, trustees, extra records, malformed data, oversized output, a
-race, symlink or command failure provide no verified ACL.
+SYSTEM, built-in administrators and creator owner to their well-known SIDs. It
+also recognizes Microsoft's `LA` SID-string constant as the local
+Administrator account, whose documented role is `DOMAIN_USER_RID_ADMIN` and
+which is already inside the administrative trust boundary. Other well-known
+aliases remain visibly untrusted. Unsupported ACE types, flags, rights,
+trustees, extra records, malformed data, oversized output, a race, symlink or
+command failure provide no verified ACL.
 
 The dependency-injected compatibility path remains for deterministic
 cross-platform verifier tests. Production no longer starts PowerShell, so

@@ -26,7 +26,8 @@ const WRITE_TOKENS = new Set([
 const TRUSTEE_ALIASES = new Map([
   ["SY", "s-1-5-18"],
   ["BA", "s-1-5-32-544"],
-  ["CO", "s-1-3-0"]
+  ["CO", "s-1-3-0"],
+  ["LA", "sddl:la"]
 ]);
 
 function splitTokens(value, allowed, label) {
