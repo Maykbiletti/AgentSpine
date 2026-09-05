@@ -207,7 +207,8 @@ test("native hooks start, authorize, checkpoint, stop, and resume one exact job 
   assert.equal(state.receipts.filter((receipt) => receipt.event === "effect-succeeded").length, 1);
   assert.equal(state.receipts.filter((receipt) => receipt.event === "lease-closed").length, 1);
   assert.equal(JSON.stringify(state).includes("never stored"), false);
-  assert.equal((await runAudit(root)).ok, true);
+  const audit = await runAudit(root);
+  assert.equal(audit.ok, true, JSON.stringify(audit.gates.filter(gate => !gate.ok)));
   for (const [name, expected] of Object.entries(before)) assert.equal(hash(await readFile(join(root, name))), expected);
 });
 
