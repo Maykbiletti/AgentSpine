@@ -25,6 +25,13 @@ function contractMatches(document, terms) {
   return terms.filter((term) => content.includes(term.toLowerCase()));
 }
 
+async function settledValues(work) {
+  const results = await Promise.allSettled(work);
+  const failed = results.find(result => result.status === "rejected");
+  if (failed) throw failed.reason;
+  return results.map(result => result.value);
+}
+
 export async function deliveryKnowledgeQuery({ root, requirementId, targetPaths,
   contractPaths, recentErrorTerms, maxBytes = 16384 }) {
   const canonicalRoot = await canonicalPath(root);
@@ -37,9 +44,11 @@ export async function deliveryKnowledgeQuery({ root, requirementId, targetPaths,
   const sources = await resolveMcpSources({ root: canonicalRoot, host: binding.host,
     entityId: binding.entityId, groupId: binding.groupId, projectId: binding.projectId,
     currentTaskId: binding.taskId, required: true });
-  const [targetResults, contractDocuments, briefing] = await Promise.all([
-    Promise.all(targets.map((path) => targetSnapshot(canonicalRoot, path))),
-    Promise.all(contracts.map((path) => readDocument({ root: canonicalRoot,
+  // A rejected query must own all started work until it settles. Otherwise its
+  // MCP error can precede catalog/state activity from a sibling operation.
+  const [targetResults, contractDocuments, briefing] = await settledValues([
+    settledValues(targets.map((path) => targetSnapshot(canonicalRoot, path))),
+    settledValues(contracts.map((path) => readDocument({ root: canonicalRoot,
       path, offset: 0, length: 65536, catalog: sources.catalog }))),
     sessionBriefing({ root: canonicalRoot, cwd: canonicalRoot,
       host: binding.host, entityId: binding.entityId, groupId: binding.groupId,

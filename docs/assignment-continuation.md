@@ -33,6 +33,8 @@ Continuation adds no tree traversal. A nine-sample local comparison measured 6.9
 
 CI run 143 exposed a Windows-only defect in the new fault-injection test: its literal forward-slash comparison did not match native paths, so the intended permission exception never occurred. The corrected probe uses native path joining and explicitly asserts both permission injection and parent replacement. No production protection or timeout was relaxed; the initial red CI is not counted as a successful validation.
 
+CI run 144 exposed a macOS cleanup race after an unsuccessful knowledge query. A deterministic MCP probe confirmed that an invalid target could produce its error response while a sibling target read was still suspended. Knowledge queries now settle every started bounded target, contract and briefing operation before returning an error, preserve the original rejection and produce no success receipt. The delayed-read regression observes the response boundary; it does not retry or suppress cleanup errors.
+
 ## Unresolved compatibility and host evidence
 
 An externally produced recovery event has been reported but its exact schema and transition semantics have not been supplied. Synthetic unknown events, unknown schemas and corrupted digests are deliberately not migrated or accepted by this change. Their bytes remain unchanged. The existing unsupported-event classification problem remains open; this release is not a recommendation to install or restart that live session.

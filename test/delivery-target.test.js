@@ -88,3 +88,44 @@ test("MCP rejects escapes, non-directory parents and symlinked parents even for 
   assert.equal(result.deliveryUseReceipt, undefined);
   await f.preserve();
 });
+
+test("MCP error waits for an already started target read before completing", async t => {
+  const f = await fixture(t, { homeRoot: false });
+  const p = await prompt(f.root, "prompt:drain-failed-query");
+  const lstat = fs.lstat;
+  let release;
+  let started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const entered = new Promise(resolve => { started = resolve; });
+  let active = 0;
+  fs.lstat = async (path, ...args) => {
+    if (String(path) === join(f.root, "slow.js")) {
+      active++;
+      started();
+      await gate;
+      try { return await lstat(path, ...args); }
+      finally { active--; }
+    }
+    return lstat(path, ...args);
+  };
+  syncBuiltinESMExports();
+  let completed = false;
+  const pending = query(f.root, p.requirementId, ["../escape.js", "slow.js"])
+    .then(result => { completed = true; return result; });
+  try {
+    await entered;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(active, 1, "a real target read is suspended");
+    assert.equal(completed, false, "MCP must not respond while owned reads remain active");
+  } finally {
+    release();
+    await pending;
+    fs.lstat = lstat;
+    syncBuiltinESMExports();
+  }
+  const result = await pending;
+  assert.equal(result.isError, true);
+  assert.equal(result.deliveryUseReceipt, undefined);
+  assert.equal(active, 0);
+  await f.preserve();
+});
