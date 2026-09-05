@@ -1,15 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { PassThrough, Writable } from "node:stream";
 import { createWindowsTimelineAclVerifier, createWindowsTimelineFileAclVerifier }
   from "../src/lib/session-timeline-windows-acl.js";
-import { createWindowsSidAclReader, parseWindowsSidAcl, windowsSidAclCommand }
-  from "../src/lib/session-timeline-sid-acl.js";
+import {
+  parseWindowsAclSave, parseWindowsSddlAcl, parseWindowsSidAcl,
+  windowsAclSaveCommand, windowsSidAclCommand
+} from "../src/lib/session-timeline-sid-acl.js";
 
 const SELF = "S-1-5-21-111-222-333-1001";
 const FOREIGN = "S-1-5-21-111-222-333-1002";
@@ -60,7 +56,7 @@ test("deny and inherit-only ACEs cannot stand in for an effective owner grant", 
   }
 });
 
-test("empty, localized-name, malformed and oversized ACL responses grant nothing", () => {
+test("empty, localized-name, malformed and oversized legacy responses grant nothing", () => {
   for (const rows of [[], {}, [ace("NT-AUTORITÄT\\SYSTEM")], [ace(SELF, { type: 2 })],
     [ace(SELF, { mask: -1 })], [ace(SELF, { mask: "2032127" })],
     [ace(SELF, { inherited: "false" })], Array.from({ length: 2049 }, () => ace(SELF))]) {
@@ -69,7 +65,7 @@ test("empty, localized-name, malformed and oversized ACL responses grant nothing
   assert.throws(() => parseWindowsSidAcl("unparseable"));
 });
 
-test("path metacharacters stay encoded data and both inherited and explicit SIDs are queried", () => {
+test("path metacharacters stay encoded in the dependency-injected compatibility command", () => {
   const path = "/synthetic/ä '$(); [literal]/state";
   const args = windowsSidAclCommand(path);
   const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
@@ -81,116 +77,55 @@ test("path metacharacters stay encoded data and both inherited and explicit SIDs
   assert.equal(Buffer.from(encoded, "base64").toString("utf8"), path);
 });
 
-function worker({ respond = true, ready = true } = {}) {
-  const state = { spawns: [], paths: [], children: [], kills: 0, respond, ready };
-  state.spawn = (binary, args, options) => {
-    const child = new EventEmitter();
-    child.killed = false;
-    child.stdout = new PassThrough();
-    child.stderr = new PassThrough();
-    child.stdin = new Writable({ write(chunk, _encoding, done) {
-      state.paths.push(Buffer.from(String(chunk).trim(), "base64").toString("utf8"));
-      if (state.respond) {
-        queueMicrotask(() => child.stdout.write(`ACE ${SELF} 2032127 0 0 0 0\nEND\n`));
-      }
-      done();
-    } });
-    child.kill = () => {
-      if (child.killed) return false;
-      child.killed = true;
-      state.kills += 1;
-      queueMicrotask(() => child.emit("close", 0, null));
-      return true;
-    };
-    state.spawns.push({ binary, args, options });
-    state.children.push(child);
-    queueMicrotask(() => {
-      if (state.ready && !child.killed) child.stdout.write("READY\n");
-    });
-    return child;
-  };
-  return state;
-}
-
-test("bounded SID reader serializes a burst through one trusted PowerShell process", async () => {
-  const fake = worker();
-  const reader = createWindowsSidAclReader({ env: { SystemRoot: "/Windows" },
-    spawnProcess: fake.spawn, idleMs: 10 });
-  const results = await Promise.all([reader.read("/synthetic/first"), reader.read("/synthetic/second")]);
-  assert.equal(fake.spawns.length, 1);
-  assert.deepEqual(fake.paths, ["/synthetic/first", "/synthetic/second"]);
-  assert.ok(results.every(result => parseWindowsSidAcl(result).length === 1));
-  const [{ binary, args, options }] = fake.spawns;
-  assert.equal(binary, join("/Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"));
-  assert.deepEqual(args.slice(0, 4), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand"]);
-  const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
-  assert.match(script, /PSModuleAutoLoadingPreference = 'None'/);
-  assert.match(script, /\[Console\]::Out.WriteLine\('READY'\)/);
-  assert.match(script, /while \(\(\$line = \[Console\]::In.ReadLine\(\)\) -ne \$null\)/);
-  assert.match(script, /\[Console\]::Out.WriteLine\('ACE '/);
-  assert.ok(!script.includes("ConvertTo-Json"));
-  assert.ok(!script.includes("/synthetic/first"));
-  assert.equal(options.shell, false);
-  assert.equal(options.windowsHide, true);
-  reader.close();
-  assert.equal(fake.kills, 1);
+test("SDDL parsing maps trusted aliases to SIDs and retains inheritance semantics", () => {
+  assert.deepEqual(parseWindowsSddlAcl(
+    `D:PAI(A;;FA;;;${SELF})(A;ID;0x001f01ff;;;SY)(A;OICIIO;FA;;;CO)(D;;FW;;;WD)`
+  ), [
+    { principal: SELF.toLowerCase(), rights: ["F", "W"] },
+    { principal: "s-1-5-18", rights: ["I", "F", "W"] },
+    { principal: "s-1-3-0", rights: ["IO", "F", "W"] },
+    { principal: "sddl:wd", rights: ["DENY"] }
+  ]);
 });
 
-test("a stalled SID worker fails closed at its own unchanged query deadline", async () => {
-  const fake = worker({ respond: false });
-  const reader = createWindowsSidAclReader({ env: { SystemRoot: "/Windows" },
-    spawnProcess: fake.spawn, timeoutMs: 10, idleMs: 10 });
-  await assert.rejects(reader.read("/synthetic/stalled"), /deadline exceeded/);
-  assert.equal(fake.kills, 1);
-});
-
-test("a stalled SID worker startup fails closed at its own unchanged deadline", async () => {
-  const fake = worker({ ready: false });
-  const reader = createWindowsSidAclReader({ env: { SystemRoot: "/Windows" },
-    spawnProcess: fake.spawn, timeoutMs: 10, idleMs: 10 });
-  await assert.rejects(reader.read("/synthetic/startup-stalled"), /startup deadline exceeded/);
-  assert.equal(fake.paths.length, 0);
-  assert.equal(fake.kills, 1);
-});
-
-test("a crashed SID worker rejects its request and a later request starts cleanly", async () => {
-  const fake = worker({ respond: false });
-  const reader = createWindowsSidAclReader({ env: { SystemRoot: "/Windows" },
-    spawnProcess: fake.spawn, timeoutMs: 100, idleMs: 10 });
-  const interrupted = reader.read("/synthetic/interrupted");
-  await new Promise(resolve => setImmediate(resolve));
-  fake.children[0].emit("close", 17, null);
-  await assert.rejects(interrupted, /process closed \(17\)/);
-  fake.respond = true;
-  assert.equal(parseWindowsSidAcl(await reader.read("/synthetic/recovered")).length, 1);
-  assert.equal(fake.spawns.length, 2);
-  reader.close();
-});
-
-test("native Windows SID reads need no PowerShell modules and preserve source bytes", async t => {
-  if (process.platform !== "win32") return t.skip("requires inbox Windows PowerShell");
-  const root = await mkdtemp(join(tmpdir(), "agentspine-sid-module-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const path = join(root, "source '[literal].txt");
-  const original = Buffer.from("Synthetic source\r\nunchanged ä\r\n");
-  await writeFile(path, original);
-  const binary = join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  for (const target of [root, path]) {
-    const args = windowsSidAclCommand(target);
-    const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
-    args[args.length - 1] = Buffer.from("$PSModuleAutoLoadingPreference = 'None'\n" + script, "utf16le").toString("base64");
-    const result = spawnSync(binary, args, { encoding: "utf8", shell: false, windowsHide: true,
-      timeout: 1500, env: { ...process.env, PSModulePath: join(root, "missing-modules") } });
-    assert.equal(result.status, 0, result.stderr || result.error?.message);
-    assert.ok(parseWindowsSidAcl(result.stdout).length > 0);
+test("every SDDL write form remains visible to the foreign-writer guard", () => {
+  const symbolic = ["GA", "GW", "SD", "WD", "WO", "WP", "CC", "DC", "SW", "DT", "CR",
+    "FA", "FW", "KA", "KW"];
+  for (const right of symbolic) {
+    assert.ok(parseWindowsSddlAcl(`D:(A;;${right};;;${FOREIGN})`)[0].rights.includes("W"), right);
   }
-  const reader = createWindowsSidAclReader({ env: { ...process.env,
-    PSModulePath: join(root, "missing-worker-modules") } });
-  try {
-    const results = await Promise.all([reader.read(root), reader.read(path)]);
-    assert.ok(results.every(result => parseWindowsSidAcl(result).length > 0));
-  } finally {
-    reader.close();
+  for (const bit of [2, 4, 16, 64, 256, 65536, 262144, 524288, 0x10000000, 0x40000000]) {
+    assert.ok(parseWindowsSddlAcl(
+      `D:(A;;0x${bit.toString(16)};;;${FOREIGN})`
+    )[0].rights.includes("W"), bit.toString(16));
   }
-  assert.deepEqual(await readFile(path), original);
+  for (const right of ["FR", "FX", "GR", "GX", "RC", "KR", "KX"]) {
+    assert.equal(parseWindowsSddlAcl(`D:(A;;${right};;;${FOREIGN})`)[0].rights.includes("W"), false);
+  }
+});
+
+test("unsupported or malformed SDDL fails closed", () => {
+  for (const value of ["", "D:", "O:SYG:SYD:(A;;FA;;;SY)", "D:SA(A;;FA;;;SY)",
+    "D:(OA;;FA;00000000-0000-0000-0000-000000000000;;SY)",
+    "D:(A;;QQ;;;SY)", "D:(A;SA;FA;;;SY)", "D:(A;;FA;;;localized name)",
+    "D:(A;;FA;;;SY)trailing", "D:(XA;;FA;;;SY;(condition))"]) {
+    assert.throws(() => parseWindowsSddlAcl(value), value);
+  }
+});
+
+test("icacls save parsing is UTF-16LE, single-target and bounded", () => {
+  const bytes = Buffer.from(`\uFEFFsynthetic\\state\r\nD:AI(A;;FA;;;${SELF})(A;ID;FR;;;SY)\r\n`, "utf16le");
+  assert.deepEqual(parseWindowsAclSave(bytes), [
+    { principal: SELF.toLowerCase(), rights: ["F", "W"] },
+    { principal: "s-1-5-18", rights: ["I"] }
+  ]);
+  assert.throws(() => parseWindowsAclSave(Buffer.from("odd")));
+  assert.throws(() => parseWindowsAclSave(Buffer.from("name\r\nD:(A;;FA;;;SY)\r\nextra\r\nD:(A;;FA;;;SY)", "utf16le")));
+  assert.throws(() => parseWindowsAclSave(Buffer.alloc(1024 * 1024 + 2)));
+});
+
+test("native ACL export uses one literal target and a caller-owned save path", () => {
+  const target = "C:\\Synthetic\\ä '[literal]\\state";
+  const output = "C:\\Temp\\opaque.acl";
+  assert.deepEqual(windowsAclSaveCommand(target, output), [target, "/save", output, "/q"]);
 });

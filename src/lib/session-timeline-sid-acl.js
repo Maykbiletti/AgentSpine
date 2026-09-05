@@ -1,206 +1,180 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { lstat, mkdtemp, open, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Numeric FileSystemRights values are stable across Windows display languages.
-const FULL_CONTROL = 0x1f01ff;
+// Numeric FileSystemRights values and SDDL tokens are stable across Windows
+// display languages. Friendly account names never enter the authorization path.
+const FULL_CONTROL = 0x001f01ff;
 const WRITE_MASK = 0x000d0156;
+const GENERIC_WRITE_MASK = 0x50000000;
+const MAX_ACL_BYTES = 1024 * 1024;
 const SID = /^S-1-\d+(?:-\d+)+$/i;
+const DACL_FLAGS = /^(?:(?:P|AR|AI))*$/;
+const ACE_FLAGS = new Set(["CI", "OI", "NP", "IO", "ID"]);
+const RIGHT_TOKENS = new Set([
+  "GA", "GR", "GW", "GX", "RC", "SD", "WD", "WO",
+  "RP", "WP", "CC", "DC", "LC", "SW", "LO", "DT", "CR",
+  "FA", "FR", "FW", "FX", "KA", "KR", "KW", "KX",
+  "NR", "NW", "NX"
+]);
+const WRITE_TOKENS = new Set([
+  "GA", "GW", "SD", "WD", "WO", "WP", "CC", "DC", "SW", "DT", "CR",
+  "FA", "FW", "KA", "KW"
+]);
+const TRUSTEE_ALIASES = new Map([
+  ["SY", "s-1-5-18"],
+  ["BA", "s-1-5-32-544"],
+  ["CO", "s-1-3-0"]
+]);
 
-function aclScript(targetLine) {
-  return [
-    targetLine,
-    "if ([IO.Directory]::Exists($target)) { $acl = [IO.Directory]::GetAccessControl($target) }",
-    "else { $acl = [IO.File]::GetAccessControl($target) }",
-    "$rules = @(foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {",
-    // Only OS-generated SIDs, integers and booleans enter this fixed JSON wire
-    // format. Avoid module autoload entirely: a pwsh host may export module
-    // paths whose assemblies cannot load in inbox Windows PowerShell 5.1.
-    "  '{\"sid\":\"' + $rule.IdentityReference.Value + '\",\"mask\":' + [int]$rule.FileSystemRights +",
-    "  ',\"inherited\":' + $rule.IsInherited.ToString().ToLowerInvariant() +",
-    "  ',\"propagation\":' + [int]$rule.PropagationFlags +",
-    "  ',\"inheritance\":' + [int]$rule.InheritanceFlags + ',\"type\":' + [int]$rule.AccessControlType + '}'",
-    "})",
-    "$json = '[' + ($rules -join ',') + ']'"
-  ];
+function splitTokens(value, allowed, label) {
+  if (value.length % 2 !== 0) {
+    throw new Error(`session timeline Windows SDDL ${label} is malformed`);
+  }
+  const tokens = value.match(/../g) || [];
+  if (tokens.some(token => !allowed.has(token))) {
+    throw new Error(`session timeline Windows SDDL ${label} is unsupported`);
+  }
+  return tokens;
 }
 
+function principalFromSddl(value) {
+  if (SID.test(value)) return value.toLowerCase();
+  if (TRUSTEE_ALIASES.has(value)) return TRUSTEE_ALIASES.get(value);
+  if (/^[A-Z]{2}$/.test(value)) return `sddl:${value.toLowerCase()}`;
+  throw new Error("session timeline Windows SDDL trustee is malformed");
+}
+
+function numericRights(value) {
+  if (!/^0x[0-9a-f]{1,8}$/i.test(value)) return null;
+  return Number.parseInt(value.slice(2), 16) >>> 0;
+}
+
+function rightsFromSddl(value, type, flags) {
+  const rights = [];
+  if (flags.includes("ID")) rights.push("I");
+  if (flags.includes("IO")) rights.push("IO");
+  if (type === "D") return [...rights, "DENY"];
+  const mask = numericRights(value);
+  if (mask === null) {
+    const tokens = splitTokens(value, RIGHT_TOKENS, "rights");
+    if (tokens.includes("FA") || tokens.includes("GA")) rights.push("F");
+    if (tokens.some(token => WRITE_TOKENS.has(token))) rights.push("W");
+    return rights;
+  }
+  if ((mask & FULL_CONTROL) === FULL_CONTROL || (mask & 0x10000000) !== 0) rights.push("F");
+  if ((mask & WRITE_MASK) !== 0 || (mask & GENERIC_WRITE_MASK) !== 0) rights.push("W");
+  return rights;
+}
+
+export function parseWindowsSddlAcl(sddl) {
+  if (typeof sddl !== "string" || sddl.length > MAX_ACL_BYTES) {
+    throw new Error("session timeline Windows SDDL is unavailable");
+  }
+  const value = sddl.replace(/^\uFEFF/, "").trim();
+  if (!value.startsWith("D:")) throw new Error("session timeline Windows SDDL has no DACL");
+  const firstAce = value.indexOf("(", 2);
+  if (firstAce < 0 || !DACL_FLAGS.test(value.slice(2, firstAce))) {
+    throw new Error("session timeline Windows SDDL flags are malformed");
+  }
+  const entries = [];
+  let offset = firstAce;
+  while (offset < value.length) {
+    const match = /^\(([^()]*)\)/.exec(value.slice(offset));
+    if (!match) throw new Error("session timeline Windows SDDL ACE is malformed");
+    const fields = match[1].split(";");
+    if (fields.length !== 6 || !["A", "D"].includes(fields[0]) || fields[3] || fields[4]) {
+      throw new Error("session timeline Windows SDDL ACE is unsupported");
+    }
+    const flags = splitTokens(fields[1], ACE_FLAGS, "ACE flags");
+    const principal = principalFromSddl(fields[5]);
+    entries.push({ principal, rights: rightsFromSddl(fields[2], fields[0], flags) });
+    if (entries.length > 2048) throw new Error("session timeline Windows SDDL exceeds ACE limit");
+    offset += match[0].length;
+  }
+  if (!entries.length) throw new Error("session timeline Windows SDDL has no ACEs");
+  return entries;
+}
+
+export function parseWindowsAclSave(bytes) {
+  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > MAX_ACL_BYTES || bytes.length % 2 !== 0) {
+    throw new Error("session timeline Windows ACL save is unavailable");
+  }
+  const lines = bytes.toString("utf16le").replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
+  if (lines.length !== 2 || !lines[0].trim() || !lines[1].trim().startsWith("D:")) {
+    throw new Error("session timeline Windows ACL save is malformed");
+  }
+  return parseWindowsSddlAcl(lines[1].trim());
+}
+
+export function windowsAclSaveCommand(path, outputPath) {
+  return [path, "/save", outputPath, "/q"];
+}
+
+async function readStableAclFile(path) {
+  const pathname = await lstat(path, { bigint: true });
+  if (!pathname.isFile() || pathname.isSymbolicLink() || pathname.nlink !== 1n
+    || pathname.size <= 0n || pathname.size > BigInt(MAX_ACL_BYTES)) {
+    throw new Error("session timeline Windows ACL save is unsafe");
+  }
+  const handle = await open(path, "r");
+  try {
+    const before = await handle.stat({ bigint: true });
+    const bytes = await handle.readFile();
+    const after = await handle.stat({ bigint: true });
+    const current = await lstat(path, { bigint: true });
+    if (!current.isFile() || current.isSymbolicLink() || current.nlink !== 1n) {
+      throw new Error("session timeline Windows ACL save changed while reading");
+    }
+    for (const field of ["dev", "ino", "size", "mtimeNs", "ctimeNs"]) {
+      if (before[field] !== after[field] || after[field] !== current[field]) {
+        throw new Error("session timeline Windows ACL save changed while reading");
+      }
+    }
+    return parseWindowsAclSave(bytes);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readNativeWindowsAcl(path, env, runCommand, run) {
+  const directory = await mkdtemp(join(tmpdir(), "agentspine-timeline-sddl-"));
+  const outputPath = join(directory, `${randomUUID()}.acl`);
+  try {
+    const claim = await open(outputPath, "wx", 0o600);
+    await claim.close();
+    const binary = join(env.SystemRoot, "System32", "icacls.exe");
+    runCommand(run, binary, windowsAclSaveCommand(path, outputPath), env);
+    return await readStableAclFile(outputPath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+// Retained only for dependency-injected compatibility tests. Production uses
+// icacls /save and parses its SID/SDDL export without starting PowerShell.
 export function windowsSidAclCommand(path) {
   const encodedPath = Buffer.from(path, "utf8").toString("base64");
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    ...aclScript(`$target = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'))`),
-    "[Console]::Out.WriteLine($json)"
+    `$target = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'))`,
+    "if ([IO.Directory]::Exists($target)) { $acl = [IO.Directory]::GetAccessControl($target) }",
+    "else { $acl = [IO.File]::GetAccessControl($target) }",
+    "$rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object {",
+    "  [PSCustomObject]@{ sid=$_.IdentityReference.Value; mask=[int]$_.FileSystemRights; inherited=$_.IsInherited; propagation=[int]$_.PropagationFlags; inheritance=[int]$_.InheritanceFlags; type=[int]$_.AccessControlType }",
+    "})",
+    "$rules | ConvertTo-Json -Compress -AsArray"
   ].join("\n");
   return ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
     Buffer.from(script, "utf16le").toString("base64")];
 }
-
-function windowsSidAclWorkerCommand() {
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "$PSModuleAutoLoadingPreference = 'None'",
-    "[Console]::Out.WriteLine('READY')",
-    "while (($line = [Console]::In.ReadLine()) -ne $null) {",
-    "  try {",
-    "    $target = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line))",
-    "    if ([IO.Directory]::Exists($target)) { $acl = [IO.Directory]::GetAccessControl($target) }",
-    "    else { $acl = [IO.File]::GetAccessControl($target) }",
-    "    foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {",
-    // A compact, fixed record avoids JSON/module startup work in the latency-
-    // sensitive worker. Every field is emitted by Windows as a SID, integer or
-    // boolean and is validated again by parseWindowsSidAcl in JavaScript.
-    "      [Console]::Out.WriteLine('ACE ' + $rule.IdentityReference.Value + ' ' +",
-    "        [int]$rule.FileSystemRights + ' ' + [int]$rule.IsInherited + ' ' +",
-    "        [int]$rule.PropagationFlags + ' ' + [int]$rule.InheritanceFlags + ' ' +",
-    "        [int]$rule.AccessControlType)",
-    "    }",
-    "    [Console]::Out.WriteLine('END')",
-    "  } catch {",
-    "    $errorReply = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_.Exception.Message))",
-    "    [Console]::Out.WriteLine('ERR ' + $errorReply)",
-    "  }",
-    "}"
-  ].join("\n");
-  return ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
-    Buffer.from(script, "utf16le").toString("base64")];
-}
-
-export function createWindowsSidAclReader({ env = process.env, spawnProcess = spawn,
-  timeoutMs = 1_500, idleMs = 500 } = {}) {
-  let child = null;
-  let active = null;
-  let buffer = "";
-  let diagnostics = "";
-  let idleTimer = null;
-  let startupTimer = null;
-  let ready = false;
-  const pending = [];
-
-  function rejectAll(error) {
-    if (active) { clearTimeout(active.timer); active.reject(error); active = null; }
-    while (pending.length) pending.shift().reject(error);
-  }
-  function stop(error = null) {
-    const current = child;
-    child = null;
-    buffer = "";
-    ready = false;
-    if (idleTimer) clearTimeout(idleTimer);
-    if (startupTimer) clearTimeout(startupTimer);
-    idleTimer = null;
-    startupTimer = null;
-    if (error) rejectAll(error);
-    if (current && !current.killed) current.kill();
-  }
-  function scheduleIdle() {
-    if (pending.length || active || !child) return;
-    idleTimer = setTimeout(() => stop(), idleMs);
-    idleTimer.unref?.();
-  }
-  function fail(message) {
-    stop(new Error(`session timeline Windows SID ACL reader failed: ${message}${diagnostics ? `: ${diagnostics}` : ""}`));
-  }
-  function consume(line) {
-    const value = line.replace(/^\uFEFF/, "");
-    if (!active && !ready && value === "READY") {
-      ready = true;
-      clearTimeout(startupTimer);
-      startupTimer = null;
-      pump();
-      return;
-    }
-    if (!active) return fail("unexpected response");
-    const ace = value.match(/^ACE (S-1-\d+(?:-\d+)+) (-?\d+) ([01]) ([0-3]) ([0-3]) ([01])$/i);
-    if (ace) {
-      if (active.rows.length >= 2048) return fail("response exceeded ACE limit");
-      active.rows.push({ sid: ace[1], mask: Number(ace[2]), inherited: ace[3] === "1",
-        propagation: Number(ace[4]), inheritance: Number(ace[5]), type: Number(ace[6]) });
-      return;
-    }
-    const request = active;
-    if (value === "END") {
-      active = null;
-      clearTimeout(request.timer);
-      request.resolve(JSON.stringify(request.rows));
-      pump();
-      return;
-    }
-    try {
-      const match = value.match(/^ERR ([A-Za-z0-9+/=]+)$/);
-      if (!match) return fail("malformed response");
-      active = null;
-      clearTimeout(request.timer);
-      throw new Error(Buffer.from(match[1], "base64").toString("utf8").slice(0, 240));
-    } catch (error) {
-      request.reject(new Error(`session timeline Windows SID ACL is unavailable: ${error.message}`));
-    }
-    pump();
-  }
-  function start() {
-    const binary = join(env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-    const current = spawnProcess(binary, windowsSidAclWorkerCommand(), {
-      encoding: "utf8", env, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"]
-    });
-    child = current;
-    diagnostics = "";
-    current.stdout.setEncoding("utf8");
-    current.stderr.setEncoding("utf8");
-    current.stdout.on("data", chunk => {
-      if (child !== current) return;
-      buffer += chunk;
-      if (buffer.length > 1024 * 1024) return fail("response exceeded limit");
-      let end;
-      while ((end = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, end).replace(/\r$/, "");
-        buffer = buffer.slice(end + 1);
-        consume(line);
-      }
-    });
-    current.stderr.on("data", chunk => {
-      if (child === current) diagnostics = (diagnostics + chunk).slice(-240);
-    });
-    current.once("error", error => { if (child === current) fail(error.message); });
-    current.once("close", (code, signal) => {
-      if (child === current) fail(`process closed (${code ?? signal ?? "unknown"})`);
-    });
-    startupTimer = setTimeout(() => fail("startup deadline exceeded"), timeoutMs);
-  }
-  function pump() {
-    if (active || !pending.length) return scheduleIdle();
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = null;
-    if (!child) start();
-    if (!ready) return;
-    active = pending.shift();
-    active.timer = setTimeout(() => fail("deadline exceeded"), timeoutMs);
-    child.stdin.write(`${Buffer.from(active.path, "utf8").toString("base64")}\n`, error => {
-      if (error) fail(error.message);
-    });
-  }
-  return {
-    read(path) {
-      if (pending.length >= 64) return Promise.reject(new Error("session timeline Windows SID ACL queue is full"));
-      return new Promise((resolve, reject) => {
-        pending.push({ path, resolve, reject, timer: null, rows: [] });
-        pump();
-      });
-    },
-    close() { stop(new Error("session timeline Windows SID ACL reader closed")); }
-  };
-}
-
-let sharedReader = null;
-let sharedSystemRoot = null;
 
 export async function readWindowsSidAcl(path, env, runCommand, run) {
+  if (run === spawnSync) return readNativeWindowsAcl(path, env, runCommand, run);
   const binary = join(env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  if (run !== spawnSync) return parseWindowsSidAcl(runCommand(run, binary, windowsSidAclCommand(path), env));
-  if (!sharedReader || sharedSystemRoot !== env.SystemRoot) {
-    sharedReader?.close();
-    sharedReader = createWindowsSidAclReader({ env });
-    sharedSystemRoot = env.SystemRoot;
-  }
-  return parseWindowsSidAcl(await sharedReader.read(path));
+  return parseWindowsSidAcl(runCommand(run, binary, windowsSidAclCommand(path), env));
 }
 
 export function parseWindowsSidAcl(output) {
