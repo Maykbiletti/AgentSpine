@@ -4,6 +4,18 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.72.6] - 2026-09-05
+
+### Added
+
+- `agentspine host-install codex --confirm-local-host-install` installs one stable, managed MCP launcher under the selected Codex home. The `config.toml` entry no longer points at a versioned package cache; updates atomically replace a sealed registration behind the same launcher path while preserving every byte outside AgentSpine's marked block.
+- The launcher verifies the canonical package root, regular non-symlink entrypoint, package and runtime digests, exact AgentSpine version, MCP server identity and the four required delivery/read tools before it completes `initialize`. No state-bearing tool call is forwarded before that check.
+
+### Security and evidence limits
+
+- Synthetic install/update/restart exercises a 0.72.5 cache followed by 0.72.6, removes the old cache, lists tools, reads an existing session source and performs the bound briefing, knowledge and premortem calls. A wrong `PLUGIN_ROOT` is ignored; foreign Codex configuration, unknown external state and source bytes remain unchanged.
+- Unmanaged duplicate registrations, malformed managed blocks, symlinked homes/configuration/package roots, tampered registrations, staged crashes and parallel updates are rejected or recovered without deleting state. This is repository evidence only: no live Codex profile, Otto session, trust decision or CodexLink configuration was changed.
+
 ## [0.72.5] - 2026-09-05
 
 ### Fixed

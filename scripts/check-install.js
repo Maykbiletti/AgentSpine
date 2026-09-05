@@ -6,6 +6,7 @@ import { basename, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkHosts } from "./check-hosts.js";
+import { checkCodexInstall } from "./check-codex-install.js";
 import { releaseCheck } from "./release-check.js";
 import {
   invokeInstalledBlockingProtocols, invokeInstalledBlunPostWriteDigest, invokeInstalledHook
@@ -423,6 +424,7 @@ export async function checkInstall(root = process.cwd()) {
     const upgradedGateway = await invokeInstalledGateway(installed, userProject, upgradeState);
     const upgradedAcceptance = await invokeInstalledAcceptance(installed);
     const upgradedLiveRoots = await invokeInstalledLiveRoots(installed, join(workspace, "upgrade-live"), join(workspace, "state-live-upgrade"));
+    const codexRegistration = await checkCodexInstall(installed, join(workspace, "codex-registration"));
 
     await removeTree(fresh);
     await removeTree(installed);
@@ -443,6 +445,7 @@ export async function checkInstall(root = process.cwd()) {
       automaticGateway: { fresh: freshGateway, upgrade: upgradedGateway },
       visibleAcceptance: { fresh: freshAcceptance, upgrade: upgradedAcceptance },
       liveRootResolution: { fresh: freshLiveRoots, upgrade: upgradedLiveRoots },
+      codexRegistration,
       canonicalAliasLaunch: aliasResult.ok,
       previousCacheRejected: true,
       previousCache: { version: previousVersion,
