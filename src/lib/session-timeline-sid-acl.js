@@ -164,7 +164,6 @@ export function createWindowsSidAclReader({ env = process.env, spawnProcess = sp
       if (child === current) fail(`process closed (${code ?? signal ?? "unknown"})`);
     });
     startupTimer = setTimeout(() => fail("startup deadline exceeded"), timeoutMs);
-    startupTimer.unref?.();
   }
   function pump() {
     if (active || !pending.length) return scheduleIdle();
