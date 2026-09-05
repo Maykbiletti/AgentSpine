@@ -49,7 +49,14 @@ async function runOne(file, mode, index) {
 }
 
 async function runMode(mode) {
-  const queue = testFiles.map((file, index) => ({ file, index })); const results = [];
+  const indexed = testFiles.map((file, index) => ({ file, index }));
+  const results = [];
+  // Installation copies complete bundles and checks real 2-second source / 5-second
+  // child-hook deadlines. Keep that healthy-baseline probe off the shared I/O pool.
+  // Both profiles still run it once, with identical assertions and time limits.
+  const isolated = indexed.filter(item => item.file === "package.test.js");
+  const queue = indexed.filter(item => item.file !== "package.test.js");
+  for (const item of isolated) results.push(await runOne(item.file, mode, item.index));
   async function worker() { while (queue.length) { const item = queue.shift(); results.push(await runOne(item.file, mode, item.index)); } }
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
   for (const result of results.sort((a, b) => a.file.localeCompare(b.file))) {

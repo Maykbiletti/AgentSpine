@@ -37,6 +37,8 @@ CI run 144 exposed a macOS cleanup race after an unsuccessful knowledge query. A
 
 Separate Windows failures remain under investigation: an installed-hook timeout (run 143), a pre-existing aggregate audit assertion (run 144), and an installed Codex denial-shape assertion (run 145). The synthetic installation check now reports its actual decision, reason and protocol fields; aggregate audit assertions report failed gates. Assertions and deadlines are unchanged. Passing other matrix jobs does not resolve these findings or establish live host compatibility.
 
+Run 146 identified a concrete installed-hook degradation: native source resolution exceeded its existing 2,000 ms deadline while the package probe competed with other file-intensive suites. The hermetic runner now executes that package probe alone once in each profile, then runs all remaining files with the existing worker count. Its 2,000 ms source budget, 5,000 ms child deadline, assertions and complete test inventory remain unchanged. This tests the resource-contention hypothesis without claiming faster live execution or a proven cause for every earlier intermittent failure.
+
 ## Unresolved compatibility and host evidence
 
 An externally produced recovery event has been reported but its exact schema and transition semantics have not been supplied. Synthetic unknown events, unknown schemas and corrupted digests are deliberately not migrated or accepted by this change. Their bytes remain unchanged. The existing unsupported-event classification problem remains open; this release is not a recommendation to install or restart that live session.
