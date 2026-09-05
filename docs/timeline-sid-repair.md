@@ -45,3 +45,16 @@ then reads both directory and file ACLs under the unchanged 1,500 ms deadline.
 See Microsoft's [.NET Framework file ACL API](https://learn.microsoft.com/en-us/dotnet/api/system.io.file.getaccesscontrol?view=netframework-4.8.1),
 checked 2026-09-05. The exact cause of the runner's module-load failure beyond
 the recorded Get-Acl error is not established.
+
+The next exact-head Windows run (33970773678) proved the SID reader and both
+native tamper tests, but repeated fresh Windows PowerShell startup stretched
+individual timeline MCP tests to 18–49 seconds and caused all three Windows
+profiles to miss their existing deadlines. The reader now keeps one fixed,
+no-profile system PowerShell process for a bounded activity burst. Requests are
+base64 path lines, are serialized, retain an individual 1,500 ms deadline and
+return bounded base64 JSON lines. A stalled, malformed, oversized or crashed
+worker rejects pending ACL checks; it never turns them into permission. The
+worker is terminated when idle. Native tests query a directory and file through
+the real worker with module lookup unavailable and continue to assert source
+bytes unchanged. This performance repair still requires exact-head Windows CI;
+the previous failing run is baseline evidence, not acceptance evidence.

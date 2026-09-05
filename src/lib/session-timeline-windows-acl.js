@@ -110,7 +110,7 @@ export function createWindowsTimelineAclVerifier({ platform = process.platform, 
     if (role === "integrity" && created) {
       runCommand(run, icacls, [path, "/inheritance:r", "/grant:r", `*${identity.sid}:(OI)(CI)(F)`], env);
     }
-    const entries = readWindowsSidAcl(path, env, runCommand, run);
+    const entries = await readWindowsSidAcl(path, env, runCommand, run);
     if (role === "integrity") verifyIntegrity(entries, identity); else verifyParent(entries, identity);
     if (!created && fingerprint(metadata)) cache.set(cached, true);
   };
@@ -133,7 +133,7 @@ export function createWindowsTimelineFileAclVerifier({ platform = process.platfo
     const icacls = executable("icacls.exe", env);
     identity ||= identityFrom(runCommand(run, whoami, ["/user", "/fo", "csv", "/nh"], env));
     if (created) runCommand(run, icacls, [path, "/inheritance:r", "/grant:r", `*${identity.sid}:(F)`], env);
-    verifyFile(readWindowsSidAcl(path, env, runCommand, run), identity, role);
+    verifyFile(await readWindowsSidAcl(path, env, runCommand, run), identity, role);
     if (!created && fingerprint(metadata)) cache.set(cached, true);
   };
 }

@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough, Writable } from "node:stream";
 import { createWindowsTimelineAclVerifier, createWindowsTimelineFileAclVerifier }
   from "../src/lib/session-timeline-windows-acl.js";
-import { parseWindowsSidAcl, windowsSidAclCommand } from "../src/lib/session-timeline-sid-acl.js";
+import { createWindowsSidAclReader, parseWindowsSidAcl, windowsSidAclCommand }
+  from "../src/lib/session-timeline-sid-acl.js";
 
 const SELF = "S-1-5-21-111-222-333-1001";
 const FOREIGN = "S-1-5-21-111-222-333-1002";
@@ -78,6 +81,77 @@ test("path metacharacters stay encoded data and both inherited and explicit SIDs
   assert.equal(Buffer.from(encoded, "base64").toString("utf8"), path);
 });
 
+function worker({ respond = true } = {}) {
+  const state = { spawns: [], paths: [], children: [], kills: 0, respond };
+  state.spawn = (binary, args, options) => {
+    const child = new EventEmitter();
+    child.killed = false;
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = new Writable({ write(chunk, _encoding, done) {
+      state.paths.push(Buffer.from(String(chunk).trim(), "base64").toString("utf8"));
+      if (state.respond) {
+        const json = JSON.stringify([ace(SELF)]);
+        queueMicrotask(() => child.stdout.write(`OK ${Buffer.from(json).toString("base64")}\n`));
+      }
+      done();
+    } });
+    child.kill = () => {
+      if (child.killed) return false;
+      child.killed = true;
+      state.kills += 1;
+      queueMicrotask(() => child.emit("close", 0, null));
+      return true;
+    };
+    state.spawns.push({ binary, args, options });
+    state.children.push(child);
+    return child;
+  };
+  return state;
+}
+
+test("bounded SID reader serializes a burst through one trusted PowerShell process", async () => {
+  const fake = worker();
+  const reader = createWindowsSidAclReader({ env: { SystemRoot: "/Windows" },
+    spawnProcess: fake.spawn, idleMs: 10 });
+  const results = await Promise.all([reader.read("/synthetic/first"), reader.read("/synthetic/second")]);
+  assert.equal(fake.spawns.length, 1);
+  assert.deepEqual(fake.paths, ["/synthetic/first", "/synthetic/second"]);
+  assert.ok(results.every(result => parseWindowsSidAcl(result).length === 1));
+  const [{ binary, args, options }] = fake.spawns;
+  assert.ok(binary.endsWith("WindowsPowerShell/v1.0/powershell.exe"));
+  assert.deepEqual(args.slice(0, 4), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand"]);
+  const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
+  assert.match(script, /PSModuleAutoLoadingPreference = 'None'/);
+  assert.match(script, /while \(\(\$line = \[Console\]::In.ReadLine\(\)\) -ne \$null\)/);
+  assert.ok(!script.includes("/synthetic/first"));
+  assert.equal(options.shell, false);
+  assert.equal(options.windowsHide, true);
+  reader.close();
+  assert.equal(fake.kills, 1);
+});
+
+test("a stalled SID worker fails closed at its own unchanged query deadline", async () => {
+  const fake = worker({ respond: false });
+  const reader = createWindowsSidAclReader({ env: { SystemRoot: "/Windows" },
+    spawnProcess: fake.spawn, timeoutMs: 10, idleMs: 10 });
+  await assert.rejects(reader.read("/synthetic/stalled"), /deadline exceeded/);
+  assert.equal(fake.kills, 1);
+});
+
+test("a crashed SID worker rejects its request and a later request starts cleanly", async () => {
+  const fake = worker({ respond: false });
+  const reader = createWindowsSidAclReader({ env: { SystemRoot: "/Windows" },
+    spawnProcess: fake.spawn, timeoutMs: 100, idleMs: 10 });
+  const interrupted = reader.read("/synthetic/interrupted");
+  fake.children[0].emit("close", 17, null);
+  await assert.rejects(interrupted, /process closed \(17\)/);
+  fake.respond = true;
+  assert.equal(parseWindowsSidAcl(await reader.read("/synthetic/recovered")).length, 1);
+  assert.equal(fake.spawns.length, 2);
+  reader.close();
+});
+
 test("native Windows SID reads need no PowerShell modules and preserve source bytes", async t => {
   if (process.platform !== "win32") return t.skip("requires inbox Windows PowerShell");
   const root = await mkdtemp(join(tmpdir(), "agentspine-sid-module-"));
@@ -94,6 +168,14 @@ test("native Windows SID reads need no PowerShell modules and preserve source by
       timeout: 1500, env: { ...process.env, PSModulePath: join(root, "missing-modules") } });
     assert.equal(result.status, 0, result.stderr || result.error?.message);
     assert.ok(parseWindowsSidAcl(result.stdout).length > 0);
+  }
+  const reader = createWindowsSidAclReader({ env: { ...process.env,
+    PSModulePath: join(root, "missing-worker-modules") } });
+  try {
+    const results = await Promise.all([reader.read(root), reader.read(path)]);
+    assert.ok(results.every(result => parseWindowsSidAcl(result).length > 0));
+  } finally {
+    reader.close();
   }
   assert.deepEqual(await readFile(path), original);
 });
