@@ -87,7 +87,7 @@ async function complete(root, session, taskId, registered, suffix) {
   await runHook({ ...context(root, session, taskId),
     hook_event_name: "PostToolUse", tool_name: "exec_command",
     tool_use_id: `test:${suffix}`, tool_input: { cmd: "node --test test/synthetic.test.js" },
-    success: true, tool_response: { ok: true } });
+    success: true, tool_response: { exit_code: 0 } });
   const stopped = await runHook({ ...context(root, session, taskId),
     hook_event_name: "Stop", event_id: `stop:${suffix}`,
     final_assistant_message: closure(registered.artifact, post.premortem.writeDigest) });

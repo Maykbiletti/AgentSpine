@@ -246,7 +246,7 @@ test("one host session keeps write evidence when Stop omits turn metadata", asyn
   assert.match(denied.reason, /successful test after the latest write/);
   const testInput = { hook_event_name: "PostToolUse", tool_name: "exec_command",
     tool_input: { cmd: "node --test test/synthetic.test.js" }, success: true,
-    tool_response: { isError: false } };
+    tool_response: { exit_code: 0 } };
   await runHook({ ...lane(root, "session:other", "turn:sibling", "agent:beta"), ...testInput,
     tool_use_id: "tool:test:other-session" });
   const session = deliveryActorSession(writer);
@@ -280,8 +280,10 @@ test("redirection and PowerShell mutations share the premortem and delivery cont
 
 test("only explicit delivery outcome evidence satisfies a recognized test", () => {
   assert.equal(deliverySuccessEvidence({ tool_response: { ok: true } }), false);
-  assert.equal(deliverySuccessEvidence({ success: true }), true);
-  assert.equal(deliverySuccessEvidence({ tool_response: { isError: false } }), true);
+  assert.equal(deliverySuccessEvidence({ success: true }), false,
+    "successful hook transport is not a successful test");
+  assert.equal(deliverySuccessEvidence({ tool_response: { isError: false } }), false,
+    "successful result transport is not a successful test");
   assert.equal(deliverySuccessEvidence({ tool_response: { exit_code: 0 } }), true);
   assert.equal(deliverySuccessEvidence({
     tool_input: { cmd: "node --test test/synthetic.test.js && printf AGENTSPINE_TEST_OK" },
