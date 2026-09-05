@@ -1,6 +1,6 @@
 # Structured delivery completion
 
-AgentSpine 0.72.4 adds `complete_delivery` for ordinary assignment-bound writing deliveries. An agent can store its three completed premortem checks through MCP and then give the user a normal summary. The operation does not execute a test, create host identity, authorize a write, consume the assignment or bypass Stop.
+AgentSpine 0.72.4 adds `complete_delivery` for ordinary assignment-bound writing deliveries. Version 0.72.5 requires the actual test process result: structured exit code zero or the existing command-bound final marker. Transport success, a still-running process and prose output are not test evidence. An agent can store its three completed premortem checks through MCP and then give the user a normal summary. The operation does not execute a test, create host identity, authorize a write, consume the assignment or bypass Stop.
 
 ## Call sequence
 
@@ -51,7 +51,7 @@ Before the MCP call, a normal Stop summary is blocked for missing check referenc
 
 Child tests clear inherited `NODE_TEST_CONTEXT` and require TAP evidence of one executed test and zero failures. An actual wrong artifact expectation must produce one failed test and exit 1. This corrects a 0.72.3 test-harness weakness: a recursive child test runner could skip its test while returning exit 0. Earlier positive exit status alone is not counted as proof that the artifact assertion ran.
 
-The reported native Codex/PowerShell envelope is still unavailable. These probes exercise repository Hook and MCP paths using observed child-process results, not a captured native-host envelope. Native installation/update registration, loaded-reader compatibility, external recovery-event semantics and the live F79 task remain unverified. CodexLink and live session configuration are outside this change.
+Version 0.72.5 exercises the official Codex `PostToolUse` fields (`Bash`, `tool_input.command`, `tool_response`), the measured Work `exec_command` result and PowerShell `exitCode`. This establishes the parser contract but not a live Otto restart or installed-reader migration. Native installation/update registration, loaded-reader compatibility, external recovery-event semantics and the live F79 task remain unverified. CodexLink and live session configuration are outside this change.
 
 CI 147's Windows aggregate audit failure was not reproduced by the diagnostic branch's ten passing matrix jobs. The assertion now reports failed gates without relaxing it or changing deadlines. Passing a later run does not establish that intermittent failure's cause.
 

@@ -242,7 +242,7 @@ test("a downstream artifact denial cannot replay a persisted premortem closure",
     tool_use_id: "write:artifact-retry", tool_input: toolInput, success: true });
   await runHook({ ...common, hook_event_name: "PostToolUse", tool_name: "exec_command",
     tool_use_id: "test:artifact-retry", tool_input: { cmd: "node --test test/synthetic.test.js" },
-    success: true, tool_response: { ok: true } });
+    success: true, tool_response: { exit_code: 0 } });
   const denied = await runHook({ ...common, hook_event_name: "Stop",
     final_assistant_message: `Delivered \`missing.zip\` sha256 ${"d".repeat(16)}\n${
       premortemClosure(recorded.artifact, written.premortem.writeDigest)}` });

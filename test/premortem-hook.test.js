@@ -85,7 +85,8 @@ function preWrite(root, session, id = `write:${session}`) {
 async function post(root, session, toolName, toolInput, id, scope = {}) {
   return runHook({
     ...common(root, session, scope), hook_event_name: "PostToolUse", tool_name: toolName,
-    tool_use_id: id, tool_input: toolInput, success: true, tool_response: { ok: true }
+    tool_use_id: id, tool_input: toolInput, success: true,
+    tool_response: toolName === "exec_command" ? { exit_code: 0 } : { ok: true }
   });
 }
 
@@ -307,7 +308,7 @@ test("installed PostToolUse exposes the latest write digest beside identifier wa
   installedHook(root, state, {
     ...common(root, session), hook_event_name: "PostToolUse", tool_name: "exec_command",
     tool_use_id: "test:installed-receipt", tool_input: { cmd: "node --test test/synthetic.test.js" },
-    success: true, tool_response: { ok: true }
+    success: true, tool_response: { exit_code: 0 }
   });
   const stopped = installedHook(root, state, {
     ...common(root, session), hook_event_name: "Stop", event_id: "stop:installed-receipt",
@@ -398,7 +399,7 @@ test("read-only Session B is not mistaken for Session A on the same task lane", 
   await runHook({
     ...common(root, session, lane), hook_event_name: "PostToolUse", tool_name: "exec_command",
     tool_use_id: "test:writer-a", tool_input: { cmd: "node --test test/synthetic.test.js" },
-    success: true, tool_response: { ok: true }
+    success: true, tool_response: { exit_code: 0 }
   });
   const reader = await runHook({
     ...common(root, "session:reader-b", lane), hook_event_name: "Stop", event_id: "stop:reader-b",

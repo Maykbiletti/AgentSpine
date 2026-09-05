@@ -186,9 +186,10 @@ export function deliverySuccessEvidence(input) {
   if (input?.success === false || input?.is_error === true || input?.tool_error) return false;
   if (resultValues(input).some((value) => value && typeof value === "object"
     && (value.isError === true || value.exit_code > 0 || value.exitCode > 0))) return false;
-  if (input?.success === true || input?.is_error === false) return true;
+  // Host transport success means only that the tool invocation returned. A
+  // test is verified by its own structured process exit or the bound marker.
   return resultValues(input).some((value) => value && typeof value === "object"
-    && (value.isError === false || value.exit_code === 0 || value.exitCode === 0))
+    && (value.exit_code === 0 || value.exitCode === 0))
     || hasBoundSuccessMarker(input);
 }
 

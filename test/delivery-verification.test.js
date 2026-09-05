@@ -34,7 +34,7 @@ function post(root, session, toolName, toolInput, success, toolUseId) {
   return runHook({
     hook_event_name: "PostToolUse", host: "codex", cwd: root, session_id: session,
     tool_name: toolName, tool_input: toolInput, tool_use_id: toolUseId,
-    success, tool_response: success ? { ok: true } : { isError: true }
+    success, tool_response: success ? { exit_code: 0 } : { exit_code: 1 }
   });
 }
 

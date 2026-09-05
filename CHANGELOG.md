@@ -4,6 +4,17 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+## [0.72.5] - 2026-09-05
+
+### Fixed
+
+- Delivery verification now distinguishes a successful hook/tool transport from a successful test process. The current write is verified only by a structured `exit_code: 0` / `exitCode: 0` result or the existing command-bound final success marker. `success: true`, `isError: false`, a still-running session, prose claiming tests passed and an old unbound marker remain unverified.
+- Native-shaped Codex `PostToolUse` probes cover canonical `Bash` with `tool_input.command`, the Work `exec_command` result, and PowerShell-style `exitCode`. Exit 1, interrupted execution, transport-only results and text-embedded exit claims stay blocked; synthetic source bytes remain unchanged.
+
+### Evidence limits
+
+- The probes reproduce the documented Codex hook wire contract and measured Work tool result shape. They do not claim a live Otto restart, installation or state migration. CodexLink remains outside AgentSpine.
+
 ## [0.72.4] - 2026-09-05
 
 ### Added

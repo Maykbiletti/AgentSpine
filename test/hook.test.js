@@ -442,7 +442,8 @@ test("Claude prompts in one raw session receive separate assignment premortems",
   const written = await runHook({ ...base, hook_event_name: "PostToolUse", tool_name: "Write",
     tool_use_id: "write:session:one", tool_input: writeInput, success: true });
   await runHook({ ...base, hook_event_name: "PostToolUse", tool_name: "exec_command",
-    tool_use_id: "test:session:one", tool_input: { cmd: "node --test test/synthetic.test.js" }, success: true });
+    tool_use_id: "test:session:one", tool_input: { cmd: "node --test test/synthetic.test.js" },
+    success: true, tool_response: { exit_code: 0 } });
   const closing = [
     `Premortem closure sha256 ${recorded.digest}`,
     `Premortem latest write sha256 ${written.premortem.writeDigest}`,
@@ -466,7 +467,8 @@ test("Claude prompts in one raw session receive separate assignment premortems",
   const nextPost = await runHook({ ...base, hook_event_name: "PostToolUse", tool_name: "Write",
     tool_use_id: "write:session:two", tool_input: nextInput, success: true });
   await runHook({ ...base, hook_event_name: "PostToolUse", tool_name: "exec_command",
-    tool_use_id: "test:session:two", tool_input: { cmd: "node --test test/synthetic.test.js" }, success: true });
+    tool_use_id: "test:session:two", tool_input: { cmd: "node --test test/synthetic.test.js" },
+    success: true, tool_response: { exit_code: 0 } });
   assert.equal((await runHook({ ...base, hook_event_name: "Stop",
     final_assistant_message: closing })).blocked, true, "the old write closure is stale");
   const reclosed = [
