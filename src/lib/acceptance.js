@@ -181,7 +181,11 @@ process.stdin.on("end", () => {
       session_id: "session:lucia:prompt", event_id: "prompt:lucia:style", timestamp: FIXED_TIME,
       prompt: "Responde siempre de forma clara y breve."
     });
-    requireCondition(swedish.signal?.accepted && spanish.signal?.accepted, "multilingual style signals were not accepted");
+    requireCondition(swedish.signal?.accepted && spanish.signal?.accepted,
+      "multilingual style signals were not accepted: " + JSON.stringify({
+        swedish: { signal: swedish.signal, blocked: swedish.blocked, reason: swedish.reason },
+        spanish: { signal: spanish.signal, blocked: spanish.blocked, reason: spanish.reason }
+      }));
     requireCondition(swedish.preflight?.briefing.instructions.some((item) => item.content === sources["CLAUDE.md"]),
       "mandatory CLAUDE.md bytes were not present before the turn");
     requireCondition(swedish.preflight?.briefing.retrieval[0]?.items[0]?.id === "mnemo:aurora-finding",
