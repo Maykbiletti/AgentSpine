@@ -75,6 +75,17 @@ test("Codex install rejects unmanaged registrations, aliases, and symlinked file
   await symlink(targetHome, aliasHome, process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(installCodexMcp({ codexHome: aliasHome, packageRoot: ROOT }), /symlink/);
 
+  if (process.platform !== "win32") {
+    const parentTarget = join(workspace, "parent-target");
+    const parentAlias = join(workspace, "parent-alias");
+    await mkdir(join(parentTarget, "nested-home"), { recursive: true });
+    await symlink(parentTarget, parentAlias, "dir");
+    const canonicalized = await installCodexMcp({
+      codexHome: join(parentAlias, "nested-home"), packageRoot: ROOT
+    });
+    assert.equal(canonicalized.configPath, join(parentTarget, "nested-home", "config.toml"));
+  }
+
   const targetPackage = join(workspace, "target-package");
   const aliasPackage = join(workspace, "alias-package");
   await mkdir(targetPackage);
