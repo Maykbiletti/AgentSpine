@@ -118,8 +118,8 @@ test("oversized mutating PostToolUse leaves a durable intent until an objective 
     ...identity, hook_event_name: "Stop", event_id: "stop:oversized-write",
     final_assistant_message: "Synthetic delivery complete."
   });
-  assert.equal(stop.blocked, true);
-  assert.match(stop.reason, /write intent\(s\).*no auditable PostToolUse result/);
+  assert.equal(stop.completionVerified, false);
+  assert.match(stop.deliveryVerification.reason, /write intent\(s\).*no auditable PostToolUse result/);
 
   await runHook({
     ...identity, hook_event_name: "PostToolUse", tool_name: "exec_command",
@@ -168,8 +168,8 @@ test("a write without tool_use_id shares one durable intent and an omitted Post 
     ...identity, hook_event_name: "Stop", event_id: "stop:fallback-write:denied",
     final_assistant_message: closure(recorded, pre.premortem.writeDigest)
   });
-  assert.equal(denied.blocked, true);
-  assert.match(denied.reason, /write intent\(s\).*no auditable PostToolUse result/);
+  assert.equal(denied.completionVerified, false);
+  assert.match(denied.deliveryVerification.reason, /write intent\(s\).*no auditable PostToolUse result/);
 
   await runHook({ ...identity, hook_event_name: "PostToolUse", tool_name: "exec_command",
     tool_use_id: "tool:fallback-write:test", tool_input: { cmd: "node --test test/synthetic.test.js" },
@@ -242,8 +242,8 @@ test("one host session keeps write evidence when Stop omits turn metadata", asyn
     ...noTurnStop, hook_event_name: "Stop", event_id: "stop:without-turn",
     final_assistant_message: closure(recorded, pre.premortem.writeDigest)
   });
-  assert.equal(denied.blocked, true);
-  assert.match(denied.reason, /successful test after the latest write/);
+  assert.equal(denied.completionVerified, false);
+  assert.match(denied.deliveryVerification.reason, /successful test after the latest write/);
   const testInput = { hook_event_name: "PostToolUse", tool_name: "exec_command",
     tool_input: { cmd: "node --test test/synthetic.test.js" }, success: true,
     tool_response: { exit_code: 0 } };
@@ -268,8 +268,8 @@ test("redirection and PowerShell mutations share the premortem and delivery cont
     const tool = { tool_name: toolName, tool_use_id: `tool:${name}:write`, tool_input: { command } };
     const missing = lane(root, `session:${name}:missing`, `turn:${name}:missing`);
     const denied = await runHook({ ...missing, ...tool, hook_event_name: "PreToolUse" });
-    assert.equal(denied.blocked, true);
-    assert.match(denied.reason, /stage 1: session_briefing/);
+    assert.equal(denied.completionVerified, false);
+    assert.match(denied.premortem.reason, /stage 1: session_briefing/);
     const identity = lane(root, `session:${name}:closed`, `turn:${name}:closed`);
     await registerPremortem(root, identity);
     assert.equal((await runHook({ ...identity, ...tool, hook_event_name: "PreToolUse" })).blocked, false);
@@ -368,8 +368,8 @@ test("normal unknown test outcome gives actionable proof guidance and can recove
     ...identity, hook_event_name: "Stop", event_id: "stop:normal-proof:denied",
     final_assistant_message: closure(recorded, pre.premortem.writeDigest)
   });
-  assert.equal(denied.blocked, true);
-  assert.match(denied.reason, /structured exit_code 0/);
+  assert.equal(denied.completionVerified, false);
+  assert.match(denied.deliveryVerification.reason, /structured exit_code 0/);
 
   await runHook({
     ...identity, hook_event_name: "PostToolUse", tool_name: "exec_command",
@@ -463,7 +463,7 @@ test("a consumed goal-step premortem blocks a stale worker before its effect", a
     ...identity, hook_event_name: "PreToolUse", tool_name: "Write",
     tool_use_id: "tool:goal:stale", tool_input: { file_path: "late.txt", content: "late\n" }
   });
-  assert.equal(stale.blocked, true);
+  assert.equal(stale.completionVerified, false);
   assert.equal(stale.premortem.status, "finalized");
-  assert.match(stale.reason, /already consumed/);
+  assert.match(stale.premortem.reason, /already consumed/);
 });

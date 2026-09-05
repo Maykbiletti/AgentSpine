@@ -181,7 +181,7 @@ export async function invokeInstalledBlockingProtocols(pluginRoot, projectRoot, 
     project_id: "project:installed-protocol",
     session_id: `session:installed-${host}-protocol`, tool_name: "Write",
     tool_use_id: `tool:installed-${host}-protocol`,
-    tool_input: { file_path: `installed-${host}-protocol.txt`, content: "synthetic\n" }
+    tool_input: { file_path: "AGENTS.md", content: "synthetic\n" }
   });
   const claudePreTool = await invokeInstalledHook(
     pluginRoot, projectRoot, stateRoot, "claude", writePayload("claude"), { requireBriefing: false }
@@ -197,18 +197,16 @@ export async function invokeInstalledBlockingProtocols(pluginRoot, projectRoot, 
     pluginRoot, projectRoot, stateRoot, "codex", writePayload("codex"), { requireBriefing: false }
   );
   if (claudePreTool.decision !== null || claudePreTool.permissionDecision !== "deny"
-    || !claudePreTool.permissionDecisionReason?.includes("premortem")
+    || !claudePreTool.permissionDecisionReason?.includes("protected source")
     || !exactKeys(claudePreTool.protocolKeys, ["hookSpecificOutput"])
     || !exactKeys(claudePreTool.hookSpecificKeys,
       ["hookEventName", "permissionDecision", "permissionDecisionReason"])) {
     throw new Error("installed Claude PreToolUse denial did not use its nested permissionDecision schema");
   }
-  if (claudeStop.decision !== "block" || !claudeStop.reason?.includes("delivery artifact verification")
-    || claudeStop.permissionDecision !== null
-    || !exactKeys(claudeStop.protocolKeys, ["decision", "reason"])) {
-    throw new Error("installed Claude Stop block did not use its top-level decision/reason schema");
+  if (claudeStop.decision !== null || claudeStop.permissionDecision !== null) {
+    throw new Error("installed Claude Stop must not block replies for artifact evidence");
   }
-  if (codexPreTool.decision !== "block" || !codexPreTool.reason?.includes("premortem")
+  if (codexPreTool.decision !== "block" || !codexPreTool.reason?.includes("protected source")
     || codexPreTool.permissionDecision !== null
     || !exactKeys(codexPreTool.protocolKeys, ["decision", "reason"])) {
     const observed = {
@@ -222,7 +220,7 @@ export async function invokeInstalledBlockingProtocols(pluginRoot, projectRoot, 
       + JSON.stringify(observed).slice(0, 8192));
   }
   return {
-    claude: { preTool: "nested-permission-deny", stop: "top-level-block" },
+    claude: { preTool: "nested-permission-deny", stop: "advisory" },
     codex: { preTool: "top-level-block" }
   };
 }

@@ -1,5 +1,14 @@
 # Structured delivery completion
 
+Process assistance is advisory. Missing, consumed, late or unverified delivery
+receipts do not prevent authorized programming, analysis or ordinary replies.
+Do not reset evidence or repeat tests solely to dismiss a warning. The hook
+records mutation intent before allowing work and emits a bounded, deduplicated
+warning. An unverified Stop does not close a job or record successful learning.
+Access, protected-source, scope and effect-authorization checks remain enforced.
+`complete_delivery` still rejects invalid evidence; permitting a reply does not
+certify a successful delivery or grant publication authority.
+
 AgentSpine 0.72.4 adds `complete_delivery` for ordinary assignment-bound writing deliveries. Version 0.72.5 requires the actual test process result: structured exit code zero or the existing command-bound final marker. Transport success, a still-running process and prose output are not test evidence. An agent can store its three completed premortem checks through MCP and then give the user a normal summary. The operation does not execute a test, create host identity, authorize a write, consume the assignment or bypass Stop.
 
 ## Call sequence
@@ -47,7 +56,7 @@ Goal- or queue-bound deliveries must use their existing checkpoint and outcome r
 
 Run `node --test test/delivery-completion.test.js test/assignment-continuation.test.js test/delivery-verification.test.js test/mcp.test.js`.
 
-Before the MCP call, a normal Stop summary is blocked for missing check references. Afterwards the same summary succeeds, including after a separate MCP process restart. Negative probes cover absent tests, later failed tests, new writes, foreign bindings, replay, malformed checks, secret-shaped values, concurrent calls and manipulated closure metadata. Synthetic source bytes remain unchanged.
+Before the MCP call, a normal Stop summary is allowed with unverified completion and an advisory. Afterwards the same summary can carry verified completion, including after a separate MCP process restart. Negative probes cover absent tests, later failed tests, new writes, foreign bindings, replay, malformed checks, secret-shaped values, concurrent calls and manipulated closure metadata: these never become valid evidence merely because the host can reply. Synthetic source bytes remain unchanged.
 
 Child tests clear inherited `NODE_TEST_CONTEXT` and require TAP evidence of one executed test and zero failures. An actual wrong artifact expectation must produce one failed test and exit 1. This corrects a 0.72.3 test-harness weakness: a recursive child test runner could skip its test while returning exit 0. Earlier positive exit status alone is not counted as proof that the artifact assertion ran.
 

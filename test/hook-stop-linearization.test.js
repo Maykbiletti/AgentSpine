@@ -147,9 +147,10 @@ test("Stop rechecks test evidence after artifact verification", async (t) => {
     gate.release();
   }
   const stopped = await stopping;
-  assert.equal(stopped.blocked, true);
+  assert.equal(stopped.blocked, false);
+  assert.equal(stopped.completionVerified, false);
   assert.equal(stopped.deliveryVerification.status, "blocked");
-  assert.match(stopped.reason, /successful test after the latest write/);
+  assert.match(stopped.deliveryVerification.reason, /successful test after the latest write/);
   assert.equal(Object.hasOwn(stopped, "learningDelivery"), false);
   assert.equal(Object.hasOwn(stopped, "selfstarter"), false);
 });
@@ -170,10 +171,11 @@ test("Stop rechecks premortem after a tested write races artifact verification",
     gate.release();
   }
   const stopped = await stopping;
-  assert.equal(stopped.blocked, true);
+  assert.equal(stopped.blocked, false);
+  assert.equal(stopped.completionVerified, false);
   assert.equal(stopped.deliveryVerification.status, "verified");
   assert.equal(stopped.premortem.status, "unchecked");
-  assert.match(stopped.reason, /latest-write-digest/);
+  assert.match(stopped.premortem.reason, /latest-write-digest/);
   assert.equal(Object.hasOwn(stopped, "learningDelivery"), false);
 });
 
@@ -196,9 +198,10 @@ test("the final delivery fence catches an intent between delivery and premortem 
   writeGate.release();
   await writing;
 
-  assert.equal(stopped.blocked, true);
+  assert.equal(stopped.blocked, false);
+  assert.equal(stopped.completionVerified, false);
   assert.equal(stopped.deliveryVerification.status, "blocked");
-  assert.match(stopped.reason, /write intent/);
+  assert.match(stopped.deliveryVerification.reason, /write intent/);
   assert.equal(stopped.premortem.status, "closed");
   assert.equal(Object.hasOwn(stopped, "learningDelivery"), false);
 });
@@ -220,9 +223,10 @@ test("the final state digest catches a Post-only compound write and test", async
     gate.release();
   }
   const stopped = await stopping;
-  assert.equal(stopped.blocked, true);
+  assert.equal(stopped.blocked, false);
+  assert.equal(stopped.completionVerified, false);
   assert.equal(stopped.deliveryVerification.status, "changed");
-  assert.match(stopped.reason, /delivery evidence changed during Stop/);
+  assert.match(stopped.deliveryVerification.reason, /delivery evidence changed during Stop/);
   assert.equal(stopped.premortem.status, "closed");
   assert.equal(Object.hasOwn(stopped, "learningDelivery"), false);
 });

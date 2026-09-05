@@ -56,7 +56,7 @@ test("explicit continuation keeps one obligation across turns, compaction and MC
   assert.deepEqual(await readFile(statePath), openWriteState);
   const untested = await runHook({ ...context(f.root), hook_event_name: "Stop",
     final_assistant_message: closure(artifact, post.premortem.writeDigest) });
-  assert.equal(untested.blocked, true, "supplement must preserve the open test obligation");
+  assert.equal(untested.completionVerified, false, "supplement preserves the open test obligation");
   await measuredTest("continued\n", "test:continued");
   const stopped = await runHook({ ...context(f.root), hook_event_name: "Stop",
     final_assistant_message: closure(artifact, post.premortem.writeDigest) });
@@ -68,7 +68,7 @@ test("explicit continuation keeps one obligation across turns, compaction and MC
   const next = await prompt(f.root, "prompt:new-delivery");
   assert.notEqual(next.requirementId, first.requirementId);
   const blocked = await runHook({ ...input, hook_event_name: "PreToolUse", tool_use_id: "write:new" });
-  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.completionVerified, false);
   const secondArtifact = await register(f.root, next.requirementId);
   const secondInput = { ...input, tool_use_id: "write:second-delivery",
     tool_input: { file_path: "artifact.txt", content: "second delivery\n" } };
@@ -77,7 +77,7 @@ test("explicit continuation keeps one obligation across turns, compaction and MC
   const secondPost = await runHook({ ...secondInput, hook_event_name: "PostToolUse", success: true });
   const premature = await runHook({ ...context(f.root), hook_event_name: "Stop",
     final_assistant_message: closure(secondArtifact, secondPost.premortem.writeDigest) });
-  assert.equal(premature.blocked, true, "first delivery's test must not satisfy the second write");
+  assert.equal(premature.completionVerified, false, "first delivery's test must not satisfy the second write");
   await measuredTest("second delivery\n", "test:second-delivery");
   const secondStop = await runHook({ ...context(f.root), hook_event_name: "Stop",
     final_assistant_message: closure(secondArtifact, secondPost.premortem.writeDigest) });
@@ -155,6 +155,6 @@ test("parallel continuation and a new prompt serialize without reactivating old 
   const blocked = await runHook({ ...context(f.root), hook_event_name: "PreToolUse",
     tool_name: "Write", tool_use_id: "write:missing-artifact",
     tool_input: { file_path: "target.js", content: "synthetic" } });
-  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.completionVerified, false);
   await f.preserve();
 });

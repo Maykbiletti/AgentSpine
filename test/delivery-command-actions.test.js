@@ -167,8 +167,8 @@ test("PreToolUse allows comparisons but requires a premortem for real redirectio
     ...common, tool_use_id: "tool:redirection",
     tool_input: { command: "printf synthetic > artifact.txt" }
   });
-  assert.equal(redirection.blocked, true);
-  assert.match(redirection.reason, /stage 1: session_briefing/);
+  assert.equal(redirection.blocked, false);
+  assert.match(redirection.premortem.reason, /stage 1: session_briefing/);
 });
 
 test("wrapped protected-source writes are blocked while wrapper reads remain allowed", async (t) => {

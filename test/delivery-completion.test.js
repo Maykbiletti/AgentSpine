@@ -57,7 +57,7 @@ test("MCP completion stores exact checks and permits a normal summary after proc
   await d.mutate("measured output\n");
   await d.measure("measured output\n");
   const before = await d.stop();
-  assert.equal(before.blocked, true);
+  assert.equal(before.completionVerified, false);
   assert.equal(before.premortem.status, "unchecked");
   const completed = await d.call("complete_delivery", d.args);
   assert.equal(completed.isError, false, JSON.stringify(completed));
@@ -109,7 +109,7 @@ test("another write invalidates stored completion and requires its own observed 
   assert.equal((await d.call("complete_delivery", d.args)).isError, false);
   const old = structuredClone(d.args);
   await d.mutate("second\n");
-  assert.equal((await d.stop()).blocked, true);
+  assert.equal((await d.stop()).completionVerified, false);
   assert.equal((await d.call("complete_delivery", d.args)).isError, true);
   await d.measure("second\n");
   assert.equal((await d.call("complete_delivery", old)).isError, true);
@@ -140,7 +140,7 @@ test("an observed failing test supersedes an earlier success for both MCP and St
   assert.equal((await d.call("complete_delivery", d.args)).isError, false);
   await d.measure("wrong expectation\n", 1);
   assert.equal((await d.call("complete_delivery", d.args)).isError, true);
-  assert.equal((await d.stop()).blocked, true);
+  assert.equal((await d.stop()).completionVerified, false);
   await d.preserve();
 });
 
@@ -155,7 +155,7 @@ test("parallel completions are idempotent and tampered stored evidence never rel
   state.closure.testStateDigest = "d".repeat(64);
   await writeFile(d.statePath, JSON.stringify(state));
   const tampered = await readFile(d.statePath);
-  assert.equal((await d.stop()).blocked, true);
+  assert.equal((await d.stop()).completionVerified, false);
   assert.equal((await d.call("complete_delivery", d.args)).isError, true);
   assert.deepEqual(await readFile(d.statePath), tampered);
   await d.preserve();

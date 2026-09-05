@@ -154,7 +154,7 @@ test("installed BLUN hook keeps the full briefing out of the runtime message", a
   });
   assert.match(output.hookSpecificOutput.message,
     /^AgentSpine ready: 145 sources indexed\. Load detailed continuity only on demand through session_briefing\./);
-  assert.match(output.hookSpecificOutput.message, /Before the first Write\/Edit\/apply_patch/);
+  assert.match(output.hookSpecificOutput.message, /advisory; does not block coding or replies/);
   assert.match(output.hookSpecificOutput.message, /Premortem closure sha256 <64hex>/);
   assert.equal(output.hookSpecificOutput.message.startsWith("{"), false);
   assert.equal(output.hookSpecificOutput.message.includes("agentspine.blun-runtime-context"), false);
@@ -470,7 +470,7 @@ test("Claude prompts in one raw session receive separate assignment premortems",
     tool_use_id: "test:session:two", tool_input: { cmd: "node --test test/synthetic.test.js" },
     success: true, tool_response: { exit_code: 0 } });
   assert.equal((await runHook({ ...base, hook_event_name: "Stop",
-    final_assistant_message: closing })).blocked, true, "the old write closure is stale");
+    final_assistant_message: closing })).completionVerified, false, "the old write closure is stale");
   const reclosed = [
     `Premortem closure sha256 ${secondRecorded.digest}`,
     `Premortem latest write sha256 ${nextPost.premortem.writeDigest}`,

@@ -40,9 +40,9 @@ test("an ordinary session derives one project-bound premortem without project_id
   const write = { ...base, cwd: nested, hook_event_name: "PreToolUse", tool_name: "Write",
     tool_use_id: "write:derived-project", tool_input: { file_path: "artifact.txt", content: "synthetic\n" } };
   const denied = await runHook(write);
-  assert.equal(denied.blocked, true);
+  assert.equal(denied.completionVerified, false);
   assert.equal(denied.premortem.requirementId, requirement.requirementId);
-  assert.match(denied.reason, new RegExp(requirement.requirementId));
+  assert.match(denied.premortem.reason, new RegExp(requirement.requirementId));
   await seedDeliveryAgentUse(root, requirement.requirementId);
   assert.equal((await recordDeliveryPremortem({ root, requirementId: requirement.requirementId,
     items: ITEMS })).blocked, false);

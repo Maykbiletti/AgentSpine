@@ -223,12 +223,13 @@ test("goal retry attempt is immutable in the premortem lane", () => {
   assert.equal(binding.gatewayAttempt, 5);
 });
 
-test("first write blocks on a verified missing premortem", async (t) => {
+test("first write warns on a verified missing premortem", async (t) => {
   const { root, source } = await fixture(t);
   const result = await runHook(preWrite(root, "session:missing"));
-  assert.equal(result.blocked, true);
+  assert.equal(result.blocked, false);
+  assert.equal(result.completionVerified, false);
   assert.equal(result.premortem.status, "missing-briefing");
-  assert.match(result.reason, /stage 1: session_briefing/);
+  assert.match(result.premortem.reason, /stage 1: session_briefing/);
   const requirementId = result.premortem.requirementId;
   const recorded = await recordPreparedPremortem(root, requirementId);
   assert.equal(recorded.blocked, false, "the first-write denial must prepare a usable requirement");
@@ -253,8 +254,9 @@ test("a premortem follows its session across turns but not into another session"
   const foreign = await runHook({
     ...preWrite(root, "session:foreign"), turn_id: "turn:write"
   });
-  assert.equal(foreign.blocked, true);
-  assert.match(foreign.reason, /stage 1: session_briefing/);
+  assert.equal(foreign.blocked, false);
+  assert.equal(foreign.completionVerified, false);
+  assert.match(foreign.premortem.reason, /stage 1: session_briefing/);
 });
 
 test("premortem before the first write and three closed checks allow Stop", async (t) => {
@@ -317,7 +319,7 @@ test("installed PostToolUse exposes the latest write digest beside identifier wa
   assert.equal(stopped.decision, undefined);
 });
 
-test("a premortem registered after the first actual write stays blocked", async (t) => {
+test("a late premortem stays unverified without blocking programming", async (t) => {
   const { root } = await fixture(t);
   const session = "session:late";
   const prompted = await prepare(root, session);
@@ -326,9 +328,10 @@ test("a premortem registered after the first actual write stays blocked", async 
     prompted.preflight.premortem.requirementId);
   assert.equal(recorded.status, "late");
   const denied = await runHook(preWrite(root, session, "write:late:second"));
-  assert.equal(denied.blocked, true);
+  assert.equal(denied.blocked, false);
+  assert.equal(denied.completionVerified, false);
   assert.equal(denied.premortem.status, "late");
-  assert.match(denied.reason, /recorded after the first write/);
+  assert.match(denied.premortem.reason, /recorded after the first write/);
 });
 
 test("read-only Stop passes without creating a premortem", async (t) => {
@@ -343,7 +346,7 @@ test("read-only Stop passes without creating a premortem", async (t) => {
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
 });
 
-test("unknown final-message transport fails open but a known empty message blocks", async (t) => {
+test("unknown and empty final messages do not block replies", async (t) => {
   const { root, state } = await fixture(t);
   const session = "session:message-transport";
   const prompted = await prepare(root, session);
@@ -372,7 +375,8 @@ test("unknown final-message transport fails open but a known empty message block
     ...common(root, session), hook_event_name: "Stop", event_id: "stop:known-empty",
     final_assistant_message: ""
   });
-  assert.equal(verifiedEmpty.blocked, true);
+  assert.equal(verifiedEmpty.blocked, false);
+  assert.equal(verifiedEmpty.completionVerified, false);
   assert.equal(verifiedEmpty.premortem.status, "unchecked");
 });
 
@@ -441,7 +445,7 @@ test("normal and condensed BLUN prompt context expose the exact requirement", as
     requirementId: result.preflight.premortem.requirementId
   });
   const compact = blunRuntimeMessage(result.context);
-  assert.match(compact, /Before the first Write\/Edit\/apply_patch/);
+  assert.match(compact, /advisory; does not block coding or replies/);
   assert.match(compact, new RegExp(result.preflight.premortem.requirementId));
   assert.equal(compact.includes(`root ${JSON.stringify(canonicalRoot)}`), true);
   assert.deepEqual(JSON.parse(blunRuntimeContext(result.context)).premortem.registration,

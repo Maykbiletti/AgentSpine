@@ -119,9 +119,9 @@ test("PostToolUse accepts declared method parameters and blocks a new default ca
   const before = "class Runner { run(callback) { callback(); } }\n";
   const after = "class Runner { run(callback = missingFactory()) { callback(); } }\n";
   const result = await editLifecycle(root, before, after);
-  assert.equal(result.blocked, true);
+  assert.equal(result.completionVerified, false);
   assert.deepEqual(result.artifactGuard.newFindings.map((item) => item.name), ["missingFactory"]);
-  assert.doesNotMatch(result.reason, /\b(?:run|callback)\b.*undeclared/);
+  assert.doesNotMatch(result.artifactGuard.reason, /\b(?:run|callback)\b.*undeclared/);
 });
 
 test("PostToolUse does not treat object methods or their parameters as calls", async (t) => {

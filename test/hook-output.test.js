@@ -18,7 +18,7 @@ test("long-path BLUN messages retain mandatory premortem text and bound optional
   const message = blunRuntimeMessage(context);
   assert.equal(Buffer.byteLength(message) <= 1200, true);
   assert.match(message, /^AgentSpine ready: 145 sources indexed\./);
-  assert.match(message, /make exactly three AgentSpine calls in order/);
+  assert.match(message, /advisory; does not block coding or replies/);
   assert.match(message, /session_briefing, delivery_knowledge_query, then record_delivery_premortem/);
   assert.match(message, /Premortem closure sha256 <64hex>/);
   assert.match(message, new RegExp(requirementId));

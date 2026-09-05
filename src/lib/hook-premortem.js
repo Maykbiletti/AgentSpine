@@ -89,11 +89,11 @@ function withRegistrationGuidance(result, root, assignmentId = null) {
   return {
     ...result, assignmentId, registration, agentSpineUse,
     instruction: [
-      "Before the first Write/Edit/apply_patch or shell mutation, make three stored calls bound to this session, assignment and goal step:",
+      "Recommended preparation: three stored calls bound to this session, assignment and goal step. Missing process evidence does not block authorized coding, analysis or replies.",
       "1. session_briefing; 2. delivery_knowledge_query (targets, contracts, recent errors); 3. record_delivery_premortem.",
-      `Use registration.root; Requirement: ${requirementId || "<unavailable; retry the hook>"}.`,
+      `Use registration.root; Requirement: ${requirementId || "<unavailable; continue the authorized task>"}.`,
       "Premortem: exactly baseline-environment, contract-tests, delivery-path; each `this delivery fails because ` statement needs a concrete check.",
-      "Claims, foreign/reused receipts grant nothing. Context only; no authority.",
+      "Claims, foreign/reused receipts grant nothing. Do not reset receipts or repeat tests without a technical reason. Context only; no authority.",
       "To continue unfinished work in the same scope, the host sends assignmentId in UserPromptSubmit; omit it for new work. Prompt text cannot select continuation.",
       "After observed tests: ordinary assignments use complete_delivery; goals retain checkpoints/outcomes. Legacy closure:",
       "`Premortem closure sha256 <64hex>`, `Premortem latest write sha256 <64hex>`, and:",

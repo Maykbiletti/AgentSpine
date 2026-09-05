@@ -153,10 +153,10 @@ test("adding a new undeclared call blocks with only the new name", async (t) => 
   const before = "legacyAction();\n";
   const result = await writeLifecycle(root, path, before,
     `${before}newAction();\n`, "tool:identifier:new", context);
-  assert.equal(result.blocked, true);
+  assert.equal(result.completionVerified, false);
   assert.deepEqual(result.artifactGuard.newFindings.map((item) => item.name), ["newAction"]);
-  assert.match(result.reason, /new undeclared calls:[\s\S]*newAction/);
-  assert.match(result.reason, /Pre-existing warnings:[\s\S]*legacyAction/);
+  assert.match(result.artifactGuard.reason, /new undeclared calls:[\s\S]*newAction/);
+  assert.match(result.artifactGuard.reason, /Pre-existing warnings:[\s\S]*legacyAction/);
 });
 
 test("removing an undeclared call is accepted", async (t) => {
@@ -176,9 +176,9 @@ test("a brand-new file with an undeclared call blocks", async (t) => {
   const path = join(root, "new-output.js");
   const result = await writeLifecycle(root, path, null,
     "brandNewAction();\n", "tool:identifier:new-file", context);
-  assert.equal(result.blocked, true);
+  assert.equal(result.completionVerified, false);
   assert.deepEqual(result.artifactGuard.newFindings.map((item) => item.name), ["brandNewAction"]);
-  assert.match(result.reason, /new-output\.js:1: brandNewAction/);
+  assert.match(result.artifactGuard.reason, /new-output\.js:1: brandNewAction/);
 });
 
 test("the last audited identifier set remains a restart-safe comparison baseline", async (t) => {
@@ -195,7 +195,7 @@ test("the last audited identifier set remains a restart-safe comparison baseline
     hook_event_name: "PostToolUse", host: "codex", cwd: root, tool_name: "Edit",
     tool_use_id: "tool:identifier:after-restart", tool_input: { file_path: path }, success: true
   });
-  assert.equal(restarted.blocked, true);
+  assert.equal(restarted.completionVerified, false);
   assert.deepEqual(restarted.artifactGuard.newFindings.map((item) => item.name), ["afterRestart"]);
   assert.deepEqual(restarted.artifactGuard.existingFindings.map((item) => item.name), ["legacyAction"]);
 });
@@ -208,8 +208,8 @@ test("delivery guard blocks a missing claim and allows a matching digest prefix"
     final_assistant_message: `Delivered \`missing.zip\` sha256 ${"d".repeat(16)}`
   });
   assert.equal(missing.deliveryVerification.status, "not-applicable");
-  assert.equal(missing.blocked, true);
-  assert.match(missing.reason, /missing\.zip.*actual missing/s);
+  assert.equal(missing.completionVerified, false);
+  assert.match(missing.artifactGuard.reason, /missing\.zip.*actual missing/s);
 
   const content = Buffer.from("synthetic artifact\n");
   const actual = digest(content);
@@ -247,7 +247,7 @@ test("a downstream artifact denial cannot replay a persisted premortem closure",
     final_assistant_message: `Delivered \`missing.zip\` sha256 ${"d".repeat(16)}\n${
       premortemClosure(recorded.artifact, written.premortem.writeDigest)}` });
   assert.equal(denied.artifactGuard.status, "mismatch");
-  assert.equal(denied.blocked, true);
+  assert.equal(denied.completionVerified, false);
   const [persisted] = (await inspectDeliveryPremortems(root)).states;
   assert.match(persisted.closure.digest, /^[a-f0-9]{64}$/);
 
@@ -257,5 +257,5 @@ test("a downstream artifact denial cannot replay a persisted premortem closure",
   const retry = await runHook({ ...common, hook_event_name: "Stop",
     final_assistant_message: `Delivered \`artifact.bin\` sha256 ${actual.slice(0, 16)}` });
   assert.equal(retry.premortem.status, "unchecked");
-  assert.equal(retry.blocked, true);
+  assert.equal(retry.completionVerified, false);
 });

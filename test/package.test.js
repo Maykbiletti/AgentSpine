@@ -112,7 +112,7 @@ test("staged install, stale-cache upgrade, and uninstall preserve one bundle and
   );
   assert.ok(result.automaticBriefing.upgrade.sources >= 1, "the staged project source is included");
   const blockingProtocols = {
-    claude: { preTool: "nested-permission-deny", stop: "top-level-block" },
+    claude: { preTool: "nested-permission-deny", stop: "advisory" },
     codex: { preTool: "top-level-block" }
   };
   assert.deepEqual(result.blockingProtocols.fresh, blockingProtocols);

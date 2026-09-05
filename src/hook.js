@@ -36,7 +36,8 @@ import {
 } from "./lib/hook-artifact-guards.js";
 import { isPremortemWrite, prepareHookPremortem, recordHookPremortemWrite,
   recordHookPremortemWriteIntent, verifyHookPremortemWrite } from "./lib/hook-premortem.js";
-import { denyHookStop, verifyHookStopContracts } from "./lib/hook-stop-verification.js";
+import { verifyHookStopContracts } from "./lib/hook-stop-verification.js";
+import { processAdvisory } from "./lib/hook-process-advisory.js";
 export { blunRuntimeContext, blunRuntimeMessage } from "./lib/hook-output.js";
 const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
 const KNOWN_EVENTS = new Set([
@@ -194,9 +195,14 @@ async function runHookCore(input, payload, options) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     premortem = await verifyHookPremortemWrite({ input, root, scope });
     if (premortem.blocked) {
-      if (payload) return { blocked: true, reason: premortem.reason, premortem };
-      denyTool(premortem.reason);
-      return;
+      if (premortem.status === "invalid-session") {
+        if (payload) return { blocked: true, reason: premortem.reason, premortem };
+        return denyTool(premortem.reason);
+      }
+      deliveryVerification = await recordDeliveryWriteIntent({
+        root, host: scope.host, sessionId: deliveryActorSession(input), scope, input
+      });
+      return processAdvisory(input, payload, root, scope, { premortem, deliveryVerification });
     }
   }
   if (event === "PreToolUse") {
@@ -205,21 +211,18 @@ async function runHookCore(input, payload, options) {
       root, host: scope.host, sessionId: deliveryActorSession(input), scope, input
     });
     if (deliveryVerification.blocked) {
-      if (payload) return { blocked: true, reason: deliveryVerification.reason, deliveryVerification };
-      denyTool(deliveryVerification.reason); return;
+      return processAdvisory(input, payload, root, scope, { deliveryVerification });
     }
     if (typeof options.afterDeliveryWriteIntent === "function") await options.afterDeliveryWriteIntent();
     const premortemIntent = await recordHookPremortemWriteIntent({ input, root, scope });
     if (premortemIntent.blocked) {
-      if (payload) return { blocked: true, reason: premortemIntent.reason, deliveryVerification, premortem: premortemIntent };
-      denyTool(premortemIntent.reason); return;
+      return processAdvisory(input, payload, root, scope, { deliveryVerification, premortem: premortemIntent });
     }
     premortem = { ...premortem, writeIntent: premortemIntent.status,
       writeDigest: premortemIntent.writeDigest || null };
     try { lessonRecall = actionLessonRecall({ catalog, event, input, scope }); }
     catch (error) { lessonRecall = { status: "degraded", items: [], reason: error.message, authority: "context-only" }; }
   }
-
   if (["PostToolUse", "Stop", "SubagentStop"].includes(event)) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     if (event === "PostToolUse") {
@@ -250,13 +253,13 @@ async function runHookCore(input, payload, options) {
       });
       ({ deliveryVerification, premortem } = contracts);
       if (contracts.blocked) {
-        return denyHookStop(payload, event, contracts.reason, { deliveryVerification, premortem });
+        return processAdvisory(input, payload, root, scope, { deliveryVerification, premortem });
       }
 
       try {
         artifactGuard = await verifyDeliveredArtifacts({ input, cwd });
         if (artifactGuard.blocked) {
-          return denyHookStop(payload, event, artifactGuard.reason, { deliveryVerification, artifactGuard });
+          return processAdvisory(input, payload, root, scope, { deliveryVerification, artifactGuard });
         }
       } catch (error) {
         artifactGuard = { status: "scan-failed-open", blocked: false, path: error.path || cwd, reason: error.message };
@@ -274,12 +277,11 @@ async function runHookCore(input, payload, options) {
       });
       ({ deliveryVerification, premortem } = contracts);
       if (contracts.blocked) {
-        return denyHookStop(payload, event, contracts.reason,
+        return processAdvisory(input, payload, root, scope,
           { deliveryVerification, premortem, artifactGuard });
       }
     }
   }
-
   let attentionEvent = null;
   if (ATTENTION_WRITE_EVENTS.has(event) && !CONTEXT_EVENTS.has(event)) {
     scope = await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
@@ -459,10 +461,8 @@ async function runHookCore(input, payload, options) {
     }
   }
   if (artifactGuard?.blocked) {
-    if (payload) return { blocked: true, reason: artifactGuard.reason, artifactGuard,
-      attentionEvent, selfstarter, learningDelivery, deliveryVerification, premortem };
-    blockStop(event, artifactGuard.reason);
-    return;
+    return processAdvisory(input, payload, root, scope, { artifactGuard,
+      attentionEvent, selfstarter, learningDelivery, deliveryVerification, premortem });
   }
   if (payload) return { blocked: false, sourceWarning, artifactGuard, attentionEvent, selfstarter,
     learningDelivery, deliveryVerification, premortem, lessonRecall };

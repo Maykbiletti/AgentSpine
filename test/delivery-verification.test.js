@@ -43,7 +43,7 @@ function stop(root, session, event = "Stop") {
     session_id: session, event_id: `stop:${session}:${event}` });
 }
 
-test("Stop blocks delivery until a successful test follows the latest write", async (t) => {
+test("Stop permits replies while delivery remains unverified until a later successful test", async (t) => {
   const { root, source } = await fixture(t);
   const session = "session:verification";
   const untouched = await stop(root, "session:no-write");
@@ -55,13 +55,14 @@ test("Stop blocks delivery until a successful test follows the latest write", as
   assert.equal(written.deliveryVerification.status, "write-recorded");
   assert.equal(written.deliveryVerification.pending, true);
   const denied = await stop(root, session);
-  assert.equal(denied.blocked, true);
-  assert.match(denied.reason, /successful test after the latest write/);
+  assert.equal(denied.blocked, false);
+  assert.equal(denied.completionVerified, false);
+  assert.match(denied.deliveryVerification.reason, /successful test after the latest write/);
 
   const failed = await post(root, session, "exec_command", { cmd: "node --test test/synthetic.test.js" },
     false, "tool:test:failed");
   assert.equal(failed.deliveryVerification.status, "test-failed");
-  assert.equal((await stop(root, session)).blocked, true);
+  assert.equal((await stop(root, session)).completionVerified, false);
 
   const passed = await post(root, session, "exec_command", { cmd: "node --test test/synthetic.test.js" },
     true, "tool:test:passed");
@@ -74,7 +75,7 @@ test("Stop blocks delivery until a successful test follows the latest write", as
   await post(root, session, "Bash", { command: "rg TODO src" }, true, "tool:read:after-test");
   assert.equal((await stop(root, session)).blocked, false, "read-only inspection must not invalidate tests");
   await post(root, session, "apply_patch", { patch: "synthetic" }, true, "tool:write:two");
-  assert.equal((await stop(root, session, "SubagentStop")).blocked, true);
+  assert.equal((await stop(root, session, "SubagentStop")).completionVerified, false);
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
 });
 
@@ -149,7 +150,7 @@ test("compound shell order, task restart, and concurrent duplicate delivery stay
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
 });
 
-test("tampered state and conflicting tool receipts block cleanly instead of killing Stop", async (t) => {
+test("tampered state stays unverified without preventing Stop", async (t) => {
   const { root, state, host, source } = await fixture(t);
   const session = "session:tamper";
   await post(root, session, "Write", { file_path: "artifact.txt" }, true, "tool:tamper:write");
@@ -159,8 +160,9 @@ test("tampered state and conflicting tool receipts block cleanly instead of kill
   stored.lastWrite.eventDigest = "f".repeat(64);
   await writeFile(path, `${JSON.stringify(stored, null, 2)}\n`);
   const blocked = await stop(root, session);
-  assert.equal(blocked.blocked, true);
-  assert.match(blocked.reason, /integrity validation/);
+  assert.equal(blocked.blocked, false);
+  assert.equal(blocked.completionVerified, false);
+  assert.match(blocked.deliveryVerification.reason, /integrity validation/);
 
   const installed = spawnSync(process.execPath, [join(pluginRoot, "src", "hook.js")], {
     cwd: root, encoding: "utf8",
@@ -169,7 +171,7 @@ test("tampered state and conflicting tool receipts block cleanly instead of kill
     env: { ...process.env, AGENTSPINE_STATE_DIR: state, CODEX_HOME: host }
   });
   assert.equal(installed.status, 0, installed.stderr);
-  assert.equal(JSON.parse(installed.stdout).decision, "block");
+  assert.equal(JSON.parse(installed.stdout).decision, undefined);
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), source);
 });
 

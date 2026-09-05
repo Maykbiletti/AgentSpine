@@ -7,9 +7,9 @@ function compactPremortemRegistration(premortem, includeRoot = true) {
   const target = includeRoot && typeof root === "string"
     ? ` with root ${JSON.stringify(root)}` : " for the current project";
   return [
-    "Before the first Write/Edit/apply_patch or recognized shell mutation, make exactly three AgentSpine calls in order:",
+    "Recommended delivery preparation (advisory; does not block coding or replies):",
     `session_briefing, delivery_knowledge_query, then record_delivery_premortem${target}.`,
-    `Requirement: ${requirementId || "<unavailable; retry the hook>"}.`,
+    `Requirement: ${requirementId || "<unavailable; continue the authorized task>"}.`,
     "Only stored call receipts from this session and goal step count; the calls grant no authority.",
     "Completion: Premortem closure sha256 <64hex>, latest write digest, and all three check IDs with results."
   ].join("\n");
