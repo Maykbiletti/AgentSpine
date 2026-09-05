@@ -22,9 +22,11 @@ import {
 import { timelineContinuationCapsule, timelineSearchResult } from "./session-timeline-results.js";
 import { seekTimelineEvidence, verifyTimelineEvent } from "./session-timeline-search.js";
 import { eventFromTimelineLine, extractTimelineTimestamp } from "./session-timeline-event-extract.js";
+import { verifiedTimelineEventFromLine } from "./session-timeline-event-extract.js";
 import { matchesSourceMetadata, pathMatchesSource } from "./session-timeline-source.js";
 import { readTimelineState, saveTimelineState } from "./session-timeline-state.js";
 import { sessionTimelineRootDigest } from "./session-timeline-root.js";
+import { priorTimelineHint, selectPriorTimelineSource, timelineSessionReference } from "./session-timeline-prior.js";
 
 export const SESSION_TIMELINE_SCHEMA = "agentspine.session-timeline/v1";
 const STATE_SCHEMA = "agentspine.session-timeline-state/v1";
@@ -201,6 +203,7 @@ export async function sessionTimelineLifecycleHint({
     const source = sourceFor(state, scoped);
     if (!source) return status({ status: "unavailable", reason: "timeline-not-registered" });
     return status({ status: source.indexedBytes >= source.size ? "indexed" : "partial", ...sourceMetadata(source),
+      priorSessions: priorTimelineHint(state, scoped, (item) => sourceMetadata(item).sourceDigest),
       freshness: "source-not-read", instruction: "Use session_timeline_index before search when this snapshot is partial." });
   } catch {
     return status({ status: "unavailable", reason: "timeline-state-unavailable" });
@@ -350,9 +353,13 @@ export async function authorizeSessionTimelineInvocation({
     await ensureSessionTimelineTrust();
     const names = await paths(root);
     const state = await readState(names.path, root, names.assertStable);
-    const source = sourceFor(state, scoped);
-    if (!source || !await pathMatchesSource(source, hostHome)
-      || !await confirmedSourceEnrollment({ root, scoped, source, hostHome })) return null;
+    const currentSource = sourceFor(state, scoped);
+    if (!currentSource || !await pathMatchesSource(currentSource, hostHome)
+      || !await confirmedSourceEnrollment({ root, scoped, source: currentSource, hostHome })) return null;
+    const query = tool === "search" ? timelineQuery({ at: request?.at, query: request?.query }) : null;
+    const source = request?.includePriorSessions === true
+      ? selectPriorTimelineSource(state, scoped, { ...query, windowMs: request.windowSeconds * 1000 }) : currentSource;
+    if (!source || !await pathMatchesSource(source, hostHome)) return null;
     const sourceDigest = sourceMetadata(source).sourceDigest;
     if (!await timelineTransportEnrollmentMatches({ root, binding: scoped, enrollmentDigest, transportDigest, hostHome })) return null;
     await issueSessionTimelineInvocation({
@@ -364,12 +371,14 @@ export async function authorizeSessionTimelineInvocation({
 
 function searchResult(source, target, wanted, mode, events, extra = {}) {
   const index = sourceMetadata(source);
-  return timelineSearchResult({ sourceDigest: index.sourceDigest, target, wanted, mode, events, index,
+  return timelineSearchResult({ sourceDigest: index.sourceDigest, sessionRef: timelineSessionReference(source.binding),
+    target, wanted, mode, events, index,
     roomBytes: ROOM_BYTES, authority: AUTHORITY, extra });
 }
 
 export async function searchSessionTimeline({
   root, host, sessionId, scope, at, query, windowSeconds = undefined,
+  includePriorSessions = false,
   invocationRequest = null, transportDigest = null, enrollmentDigest = null, hostHome = null
 }) {
   const scoped = sessionTimelineBinding({ host, sessionId, scope });
@@ -381,6 +390,7 @@ export async function searchSessionTimeline({
   if (!Number.isInteger(boundedWindowSeconds) || boundedWindowSeconds < 0 || boundedWindowSeconds > 900) {
     throw new Error("timeline window is invalid");
   }
+  if (typeof includePriorSessions !== "boolean") throw new Error("prior session selection is invalid");
   try { await ensureSessionTimelineTrust(); }
   catch { return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY }; }
   let names; let state;
@@ -389,9 +399,15 @@ export async function searchSessionTimeline({
     state = await readState(names.path, root, names.assertStable);
   }
   catch { return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY }; }
-  const source = sourceFor(state, scoped);
-  if (!source) return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY };
-  if (!await confirmedSourceEnrollment({ root, scoped, source, hostHome })) {
+  const currentSource = sourceFor(state, scoped);
+  if (!currentSource) return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY };
+  if (!await confirmedSourceEnrollment({ root, scoped, source: currentSource, hostHome })) {
+    return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY };
+  }
+  const source = includePriorSessions
+    ? selectPriorTimelineSource(state, scoped, { target, wanted, windowMs: boundedWindowSeconds * 1000 })
+    : currentSource;
+  if (!source || !await pathMatchesSource(source, hostHome)) {
     return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY };
   }
   const sourceDigest = sourceMetadata(source).sourceDigest;
@@ -400,25 +416,30 @@ export async function searchSessionTimeline({
       request: invocationRequest, transportDigest })) {
     return { blocked: true, reason: "session timeline invocation is unavailable", authority: AUTHORITY };
   }
+  const indexed = rankTimelineEvents(source.events
+    .filter((event) => matchesTimelineEvent(event, wanted, target, boundedWindowSeconds * 1000)), wanted, target).slice(0, 8);
+  if (includePriorSessions && !indexed.length) {
+    return searchResult(source, target, wanted, "prior-index", [], { priorSession: true });
+  }
   const opened = await validatedHandle(source, hostHome);
   if (opened.status !== "open") return { blocked: true, reason: opened.reason, authority: AUTHORITY };
   try {
-    const indexed = rankTimelineEvents(source.events
-      .filter((event) => matchesTimelineEvent(event, wanted, target, boundedWindowSeconds * 1000)), wanted, target).slice(0, 8);
     const verified = [];
     for (const event of indexed) {
       const current = await verifyTimelineEvent({ handle: opened.handle, event, readRange, digest,
-        eventFromLine: (line, offset) => eventFromTimelineLine(line, offset, AUTHORITY) });
+        eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY) });
       if (!current || !matchesTimelineEvent(current, wanted, target, boundedWindowSeconds * 1000)) return { blocked: true, reason: "timeline evidence changed", authority: AUTHORITY };
       verified.push(current);
     }
     if (verified.length) {
       if (!await unchangedHandle(opened.handle, source, hostHome)) return { blocked: true, reason: "transcript-changed", authority: AUTHORITY };
-      return searchResult(source, target, wanted, "verified-index", verified);
+      return searchResult(source, target, wanted, includePriorSessions ? "prior-verified-index" : "verified-index", verified,
+        includePriorSessions ? { priorSession: true } : {});
     }
     if (!target) return searchResult(source, target, wanted, "verified-index", []);
     const sought = await seekTimelineEvidence({ handle: opened.handle, size: opened.size, target, wanted,
-      windowMs: boundedWindowSeconds * 1000, readRange, eventFromLine: (line, offset) => eventFromTimelineLine(line, offset, AUTHORITY),
+      windowMs: boundedWindowSeconds * 1000, readRange,
+      eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY),
       extractTimestamp: extractTimelineTimestamp,
       matches: matchesTimelineEvent, rank: rankTimelineEvents });
     if (sought.status === "searched") {

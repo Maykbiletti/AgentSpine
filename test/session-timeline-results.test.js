@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { eventFromTimelineLine } from "../src/lib/session-timeline-event-extract.js";
+import { eventFromTimelineLine, verifiedTimelineEventFromLine } from "../src/lib/session-timeline-event-extract.js";
 import { timelineSearchResult } from "../src/lib/session-timeline-results.js";
 import { verifyTimelineEvent } from "../src/lib/session-timeline-search.js";
 
@@ -12,7 +12,8 @@ function toolLine(content, extra = {}) {
   } });
 }
 function publicCard(event) {
-  return timelineSearchResult({ sourceDigest: "a".repeat(64), target: new Date("2026-09-04T12:41:12.000Z"),
+  return timelineSearchResult({ sourceDigest: "a".repeat(64), sessionRef: `session-ref:${"b".repeat(32)}`,
+    target: new Date("2026-09-04T12:41:12.000Z"),
     wanted: ["suite", "pass"], mode: "exact", events: [event], index: "indexed", roomBytes: 1024,
     authority: "context-only" }).events[0];
 }
@@ -35,14 +36,21 @@ test("timeline public cards persist and return only allowlisted objective fields
   const rightCard = publicCard(right);
   assert.deepEqual(leftCard, rightCard);
   assert.deepEqual(Object.keys(leftCard).sort(), [
-    "at", "authority", "count", "id", "kind", "outcome", "roomId", "sourceDigest", "testLabel", "trust"
+    "at", "authority", "count", "id", "kind", "messageRef", "outcome", "roomId", "sessionRef",
+    "sourceDigest", "testLabel", "trust"
   ]);
+  assert.equal(leftCard.messageRef, leftCard.id);
+  assert.match(leftCard.sessionRef, /^session-ref:[a-f0-9]{32}$/);
   assert.equal("offset" in leftCard, false);
   assert.equal("bytes" in leftCard, false);
   assert.equal("sha256" in leftCard, false);
   assert.equal("terms" in leftCard, false);
   assert.equal("summary" in leftCard, false);
   assert.doesNotMatch(JSON.stringify(leftCard), /alpha narrative|beta narrative/i);
+
+  const excerptCard = publicCard(verifiedTimelineEventFromLine(leftLine, 4096));
+  assert.equal(excerptCard.excerpt, "Measured oracle Suite 0; result: PASS 1/1.");
+  assert.doesNotMatch(excerptCard.excerpt, /narrative/i);
 
   const verify = (raw, event = left) => verifyTimelineEvent({ handle: null, event, readRange: async () => Buffer.from(raw),
     digest, eventFromLine: eventFromTimelineLine });

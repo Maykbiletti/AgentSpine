@@ -106,6 +106,12 @@ function structuredTerms({ outcome, count, testLabel }) {
     count ? String(count.value) : "", count ? String(count.total) : ""].join(" "));
 }
 
+function objectiveExcerpt(body) {
+  const segments = body.split(/(?:\r?\n)+|(?<=[.!?])\s+/u).map((item) => item.trim()).filter(Boolean);
+  const selected = segments.find((item) => OBJECTIVE_RE.test(item) && normalizedOutcome(item));
+  return (selected || "").replace(/\s+/g, " ").slice(0, 320);
+}
+
 function candidateFromToolResult(value) {
   if (!isToolResult(value) || unsafeObject(value)) return null;
   const body = objectiveText(value);
@@ -117,7 +123,7 @@ function candidateFromToolResult(value) {
   return { kind: "objective-result", outcome, count, testLabel, terms: structuredTerms({ outcome, count, testLabel }) };
 }
 
-export function eventFromTimelineLine(line, offset, authority = "context-only") {
+function timelineEventFromLine(line, offset, authority, includeExcerpt) {
   const source = Buffer.from(line);
   if (source.byteLength > MAX_LINE_BYTES) return null;
   let parsed;
@@ -127,6 +133,16 @@ export function eventFromTimelineLine(line, offset, authority = "context-only") 
   const candidate = candidateFromToolResult(parsed) || candidateFromToolResult(parsed.message);
   if (!candidate) return null;
   const stable = JSON.stringify({ at, ...candidate });
-  return { id: `timeline-event:${digest(`${offset}\0${stable}`).slice(0, 32)}`, at, offset, bytes: source.byteLength,
+  const event = { id: `timeline-event:${digest(`${offset}\0${stable}`).slice(0, 32)}`, at, offset, bytes: source.byteLength,
     sha256: digest(source), ...candidate, authority };
+  if (includeExcerpt) event.excerpt = objectiveExcerpt(objectiveText(parsed));
+  return event;
+}
+
+export function eventFromTimelineLine(line, offset, authority = "context-only") {
+  return timelineEventFromLine(line, offset, authority, false);
+}
+
+export function verifiedTimelineEventFromLine(line, offset, authority = "context-only") {
+  return timelineEventFromLine(line, offset, authority, true);
 }

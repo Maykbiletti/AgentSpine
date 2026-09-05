@@ -62,6 +62,7 @@ is a bound, on-demand MCP call:
 ```text
 session_timeline_index(maxBytes)
 session_timeline_search(at | terms)
+session_timeline_search(at | terms, includePriorSessions: true)
 ```
 
 Indexing is serialized and bounded to 64 KiB–16 MiB per call. A search needs
@@ -71,6 +72,15 @@ explicitly requests a valid window. There is no broad-text fallback and no
 whole-transcript MCP tool. Timestamp seeking reads only bounded byte probes and
 a selected bounded range; term search uses only already indexed cards.
 
+After a restart, the lifecycle hint may report only the number of already
+indexed prior sessions and objective events for the exact same private task.
+It does not contain transcript text. When a concrete question is relevant,
+`includePriorSessions: true` restricts candidate sources to the same host,
+entity, user, tenant, project, task and compatible goal. It ranks their signed
+sidecar cards before opening a source, selects at most one prior immutable
+snapshot, and verifies only matching original lines. A missing match does not
+fall back to scanning old transcripts.
+
 A matching host guard replaces all MCP-provided binding fields with its exact
 one-use invocation. Raw stdio, a reused invocation, a changed argument,
 foreign host/session/scope, a group claim, an expired receipt, a changed source,
@@ -78,8 +88,8 @@ or an unsafe sidecar returns no cards. Plain stdio is not a cross-process
 identity channel: the feature remains unavailable without the protected local
 host transport capability. None of these records is a permission or approval.
 
-At most eight cards return. Each carries a timestamp, redacted objective result
-summary, source digest, deterministic room ID, and the
+At most eight cards return. Each carries a timestamp, bounded redacted excerpt,
+stable opaque session and message references, source digest, deterministic room ID, and the
 `untrusted-session-history` trust marker. No public event digest or raw
 transcript byte is returned. Secret-shaped values and instruction-like archive
 text are redacted or discarded before state is written or a card is returned.
@@ -107,12 +117,12 @@ transcript bytes.
 
 ## Measured boundary
 
-The synthetic acceptance source contains 2,500 `MEMORY.md` links, four old
-CSS-archive error lessons, and a multi-megabyte JSONL transcript. Before this
-feature, no API could answer a later time-bound result question. After
-PostCompact and restart, the concrete `12:40` query retrieves only the matching
-structured objective result from bounded evidence; it does not load unrelated
-links or full history. The probes cover source-byte preservation, exact scope
+The synthetic acceptance sources contain 2,500 memory links, four old
+CSS-archive error lessons, and a multi-megabyte prior-session JSONL transcript.
+Before explicit prior-session selection, the restarted session finds no matching
+current result. After selection, the concrete `12:40` query retrieves only the
+matching verified objective result and stable source references; it does not
+load unrelated links or full history. The probes cover source-byte preservation, exact scope
 and group denial, expired and reused records, source/state tampering, profile
 changes, crashes, concurrency, final JSONL records, redaction, and bounded
 results.

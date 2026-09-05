@@ -6,12 +6,18 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Added same-task prior-session evidence recall to the existing timeline search tool. Restart and compaction hooks expose only a small sidecar availability hint; an explicit `includePriorSessions` query ranks the signed index first, then verifies at most one matching immutable source and returns bounded redacted evidence with stable session and message references.
 - Added provider-neutral, per-project autonomy levels for bounded observation, proactive advice, reversible local execution and publication. Execute/publish decisions remain an additional fail-closed gate over exact existing execution grants; publication also requires a separate local confirmation.
 - Added a restart-safe project portfolio for explicit local roots or public repository references. Bounded source-identity-checked scans, evidence-classified observations, exact tenant/group isolation, deduplication and one-at-a-time rate-limited notices feed the session briefing without discovering sibling projects or changing source bytes.
 
 ### Security
 
+- Prior-session recall requires the current private host enrollment and exact host, entity, user, tenant, project, task and compatible goal binding. Current-session, foreign-task, foreign-project and group sources are excluded; changed prior snapshots, replayed invocations and tampered sidecars return no history.
 - Autonomy configuration cannot create tool, delegation, credential, payment, production, identity or policy authority. Linked roots, credential-bearing URLs, wildcard capabilities, stale evidence, foreign scope and manipulated state are rejected. Public repository references are never fetched by the portfolio scanner.
+
+### Tests
+
+- A multi-megabyte synthetic prior session with 2,500 unrelated memory links and four old failure lessons proves the Before/After boundary: current-session search finds nothing after restart, while the explicit prior-session query returns only the `12:40` Suite 0 result and its source references. Lifecycle latency, compaction, replay, foreign task/group scope, changed-source rejection and byte preservation are covered.
 
 ### Fixed
 

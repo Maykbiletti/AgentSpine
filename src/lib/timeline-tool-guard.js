@@ -111,8 +111,10 @@ async function matchesRoot(value, root) {
 function requestInput(tool, args) {
   if (tool === "index") return args.maxBytes === undefined ? {} : { maxBytes: args.maxBytes };
   if (args.at === undefined && args.query === undefined) return null;
+  if (args.includePriorSessions !== undefined && typeof args.includePriorSessions !== "boolean") return null;
   return { ...(args.at === undefined ? {} : { at: args.at }), ...(args.query === undefined ? {} : { query: args.query }),
-    ...(args.windowSeconds === undefined ? {} : { windowSeconds: args.windowSeconds }) };
+    ...(args.windowSeconds === undefined ? {} : { windowSeconds: args.windowSeconds }),
+    ...(args.includePriorSessions === undefined ? {} : { includePriorSessions: args.includePriorSessions }) };
 }
 
 function denied(reason) {

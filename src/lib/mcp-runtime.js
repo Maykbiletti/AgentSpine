@@ -177,7 +177,8 @@ async function callTool(name, args = {}, environment = process.env) {
     const invocationRequest = timelineInvocationRequest("search", args, root);
     if (!invocationRequest) return textResult(unavailableTimelineInvocation("timeline-invocation-unavailable"));
     return textResult(await searchSessionTimeline({ root, host: "claude", sessionId: input.request.sessionId, scope: timeline.scope,
-      at: args.at, query: args.query, windowSeconds: args.windowSeconds, enrollmentDigest: input.request.enrollmentDigest,
+      at: args.at, query: args.query, windowSeconds: args.windowSeconds, includePriorSessions: args.includePriorSessions,
+      enrollmentDigest: input.request.enrollmentDigest,
       hostHome: environment.CLAUDE_CONFIG_DIR ?? null, transportDigest: timeline.transportDigest,
       invocationRequest }));
   }

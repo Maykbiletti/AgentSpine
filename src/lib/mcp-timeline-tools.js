@@ -117,7 +117,8 @@ export function timelineInvocationRequest(tool, args, root) {
     enrollmentDigest: input.request.enrollmentDigest };
   if (tool === "index") return { ...request, maxBytes: args.maxBytes ?? 4 * 1024 * 1024 };
   return { ...request, at: args.at ?? null, query: args.query ?? null,
-    windowSeconds: args.windowSeconds === undefined ? 0 : args.windowSeconds };
+    windowSeconds: args.windowSeconds === undefined ? 0 : args.windowSeconds,
+    includePriorSessions: args.includePriorSessions === true };
 }
 
 const scopeProperties = {
@@ -140,7 +141,7 @@ export const sessionTimelineTools = [
   },
   {
     name: "session_timeline_search",
-    description: "Search one explicitly enrolled immutable Claude transcript snapshot for redacted objective evidence by exact UTC time or at least two concrete terms. The matching hook and locally bound transport supply the private binding; it returns no raw transcript and never grants authority.",
+    description: "Search the current or a same-task prior explicitly enrolled immutable Claude transcript snapshot for redacted objective evidence by exact UTC time or at least two concrete terms. Prior-session search uses the signed sidecar index first, opens only one relevant source, and never grants authority.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: [],
@@ -149,7 +150,8 @@ export const sessionTimelineTools = [
         enrollmentDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
         timelineVisibility: { const: "private-verified" }, groupId: { anyOf: [stableId, { type: "null" }] },
         at: { type: "string", format: "date-time" }, query: { type: "string", minLength: 3, maxLength: 512 },
-        windowSeconds: { type: "integer", minimum: 0, maximum: 900 } }
+        windowSeconds: { type: "integer", minimum: 0, maximum: 900 },
+        includePriorSessions: { type: "boolean" } }
     }
   }
 ];
