@@ -6,6 +6,7 @@ import { agentCommands, runAgentCommand } from "./cli-agent.js";
 import { sharingCommands, runSharingCommand } from "./cli-sharing.js";
 import { diagnosticsCommands, runDiagnosticsCommand } from "./cli-diagnostics.js";
 import { premortemCommands, runPremortemCommand } from "./cli-premortem.js";
+import { hostCommands, runHostCommand } from "./cli-host.js";
 import { output, parse } from "./cli-common.js";
 import { VERSION } from "./version.js";
 import { isMainModule } from "./lib/runtime.js";
@@ -66,6 +67,7 @@ Usage:
   agentspine preflight-policy <policy.json> --confirm-local-policy
   agentspine preflight-status
   agentspine premortem-recover <predecessor-requirement> [--root path] [--task id] [--json]
+  agentspine host-install codex [--codex-home path] [--package-root path] --confirm-local-host-install [--json]
   agentspine remember-propose --claim text --user id --tenant id [--project id] [--group id] [--task id]
   agentspine remember-confirm <candidate-id> [--supersedes id] --confirm-local-user
   agentspine remember-rollback <id> --confirm-local-user
@@ -142,7 +144,8 @@ const ROUTES = [
   [agentCommands, runAgentCommand],
   [sharingCommands, runSharingCommand],
   [diagnosticsCommands, runDiagnosticsCommand],
-  [premortemCommands, runPremortemCommand]
+  [premortemCommands, runPremortemCommand],
+  [hostCommands, runHostCommand]
 ];
 
 export async function run(argv = process.argv.slice(2)) {
