@@ -100,14 +100,14 @@ function safePrivateFile(metadata, maximumBytes = null) {
 
 async function verifyPrivateTimelineFile(path, metadata, role = "private", { created = false } = {}) {
   if (!safePrivateFile(metadata)) throw new Error("session timeline private file is invalid");
-  await verifyWindowsTimelineFileAcl(path, { created, role });
+  await verifyWindowsTimelineFileAcl(path, { created, metadata, role });
 }
 
 async function verifyExistingPrivateTimelineFile(path, role = "private", maximumBytes = null) {
   try {
     const metadata = await lstat(path, { bigint: true });
     if (!safePrivateFile(metadata, maximumBytes)) throw new Error("session timeline private file is invalid");
-    await verifyWindowsTimelineFileAcl(path, { role });
+    await verifyWindowsTimelineFileAcl(path, { metadata, role });
     return metadata;
   } catch (error) {
     if (error.code === "ENOENT") return null;
@@ -122,18 +122,18 @@ async function existingKey(path, integrity) {
     || privateMode(metadata) || !ownerMatches(metadata)) {
     throw new Error("session timeline signing key is invalid");
   }
-  await verifyWindowsTimelineFileAcl(path, { role: "key" });
+  await verifyWindowsTimelineFileAcl(path, { metadata, role: "key" });
   const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
   try {
     const before = await handle.stat({ bigint: true });
     if (!sameFile(metadata, before)) throw new Error("session timeline signing key is invalid");
-    await verifyWindowsTimelineFileAcl(path, { role: "key" });
+    await verifyWindowsTimelineFileAcl(path, { metadata: before, role: "key" });
     const value = await handle.readFile();
     const after = await handle.stat({ bigint: true });
     if (!sameFile(before, after) || after.nlink !== 1n || value.byteLength !== KEY_BYTES) {
       throw new Error("session timeline signing key is invalid");
     }
-    await verifyWindowsTimelineFileAcl(path, { role: "key" });
+    await verifyWindowsTimelineFileAcl(path, { metadata: after, role: "key" });
     await assertIntegrityDirectory(integrity);
     return value;
   } finally { await handle.close(); }
@@ -216,18 +216,18 @@ export async function readAuthenticatedTimelineState(path, maximumBytes, assertS
   if (!pathname.isFile() || pathname.isSymbolicLink() || pathname.nlink !== 1n || pathname.size > BigInt(maximumBytes)) {
     throw new Error("session timeline state is invalid");
   }
-  await verifyWindowsTimelineFileAcl(path, { role: "private" });
+  await verifyWindowsTimelineFileAcl(path, { metadata: pathname, role: "private" });
   const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
   try {
     const before = await handle.stat({ bigint: true });
     if (!sameFile(pathname, before) || before.nlink !== 1n) throw new Error("session timeline state is invalid");
-    await verifyWindowsTimelineFileAcl(path, { role: "private" });
+    await verifyWindowsTimelineFileAcl(path, { metadata: before, role: "private" });
     const content = await handle.readFile();
     const after = await handle.stat({ bigint: true });
     if (!sameFile(before, after) || after.nlink !== 1n || content.byteLength !== Number(after.size)) {
       throw new Error("session timeline state changed during read");
     }
-    await verifyWindowsTimelineFileAcl(path, { role: "private" });
+    await verifyWindowsTimelineFileAcl(path, { metadata: after, role: "private" });
     await assertStable?.();
     return content.toString("utf8");
   } finally { await handle.close(); }

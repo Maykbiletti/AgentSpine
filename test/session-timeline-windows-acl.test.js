@@ -48,7 +48,7 @@ test("a newly created timeline integrity directory receives a SID-only ACL throu
   assert.deepEqual(probe.calls.map((call) => call.args), [
     ["/user", "/fo", "csv", "/nh"],
     [path, "/inheritance:r", "/grant:r", `*${SID.toLowerCase()}:(OI)(CI)(F)`],
-    [path, "/verify"], [path]
+    [path]
   ]);
   for (const call of probe.calls) {
     assert.equal(call.options.shell, false);
@@ -83,7 +83,7 @@ test("an existing integrity directory with a broad or foreign ACL fails closed a
   const probe = runner((value) => `${value} Everyone:(F)\r\n`);
   await assert.rejects(verifier(probe.run)(path, { role: "integrity" }), /not private to the current SID/);
   assert.equal(probe.calls.some((call) => call.args.includes("/grant:r")), false);
-  assert.deepEqual(probe.calls.map((call) => call.args), [["/user", "/fo", "csv", "/nh"], [path, "/verify"], [path]]);
+  assert.deepEqual(probe.calls.map((call) => call.args), [["/user", "/fo", "csv", "/nh"], [path]]);
 });
 
 test("a newly created signing key receives a SID-only file ACL through trusted system binaries", async () => {
@@ -93,8 +93,28 @@ test("a newly created signing key receives a SID-only file ACL through trusted s
   assert.deepEqual(probe.calls.map((call) => call.args), [
     ["/user", "/fo", "csv", "/nh"],
     [path, "/inheritance:r", "/grant:r", `*${SID.toLowerCase()}:(F)`],
-    [path, "/verify"], [path]
+    [path]
   ]);
+});
+
+test("unchanged file metadata reuses an ACL while a changed ctime forces a fresh denial", async () => {
+  const path = "/synthetic/timeline-state.json";
+  const calls = [];
+  let aclReads = 0;
+  const verify = fileVerifier((binary, args, options) => {
+    calls.push({ binary, args, options });
+    if (binary.endsWith("whoami.exe")) return { status: 0, stdout: `"${ACCOUNT}","${SID}"\r\n` };
+    aclReads += 1;
+    const foreign = aclReads > 1 ? "        Everyone:(RX)\r\n" : "";
+    return { status: 0, stdout: `${path} ${ACCOUNT}:(F)\r\n${foreign}` };
+  });
+  const original = { dev: 1n, ino: 2n, mtimeNs: 3n, ctimeNs: 4n };
+  await verify(path, { metadata: original, role: "state" });
+  await verify(path, { metadata: original, role: "state" });
+  assert.equal(aclReads, 1);
+  await assert.rejects(verify(path, { metadata: { ...original, ctimeNs: 5n }, role: "state" }),
+    /state ACL is not private/);
+  assert.deepEqual(calls.map((call) => call.args), [["/user", "/fo", "csv", "/nh"], [path], [path]]);
 });
 
 test("a foreign write ACE on a state, head, or inherited private file fails closed without repair", async () => {

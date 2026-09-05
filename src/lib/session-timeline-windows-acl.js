@@ -8,7 +8,6 @@ const SYSTEM_PRINCIPALS = new Set([
 ]);
 const MANDATORY_LABEL_PREFIX = "mandatory label\\";
 const FILE_ROLES = new Set(["key", "state", "head", "private"]);
-const CACHE = new Map();
 
 function failure(message, result = null) {
   const detail = result?.error?.message || result?.stderr || result?.stdout || "no diagnostic";
@@ -94,41 +93,46 @@ function fingerprint(metadata) {
 }
 
 export function createWindowsTimelineAclVerifier({ platform = process.platform, env = process.env, run = spawnSync } = {}) {
+  const cache = new Map();
+  let identity = null;
   return async function verifyWindowsTimelineDirectoryAcl(path, { created = false, metadata = null, role = "integrity" } = {}) {
     if (platform !== "win32") return;
     if (!isAbsolute(path) || !["integrity", "parent"].includes(role)) {
       throw new Error("session timeline Windows ACL request is invalid");
     }
     const cached = `${role}:${path.toLowerCase()}:${fingerprint(metadata)}`;
-    if (!created && fingerprint(metadata) && CACHE.has(cached)) return;
+    if (!created && fingerprint(metadata) && cache.has(cached)) return;
     const whoami = executable("whoami.exe", env);
     const icacls = executable("icacls.exe", env);
-    const identity = identityFrom(runCommand(run, whoami, ["/user", "/fo", "csv", "/nh"], env));
+    identity ||= identityFrom(runCommand(run, whoami, ["/user", "/fo", "csv", "/nh"], env));
     if (role === "integrity" && created) {
       runCommand(run, icacls, [path, "/inheritance:r", "/grant:r", `*${identity.sid}:(OI)(CI)(F)`], env);
     }
-    runCommand(run, icacls, [path, "/verify"], env);
     const entries = entriesFrom(runCommand(run, icacls, [path], env), path);
     if (role === "integrity") verifyIntegrity(entries, identity); else verifyParent(entries, identity);
-    if (fingerprint(metadata)) CACHE.set(cached, true);
+    if (!created && fingerprint(metadata)) cache.set(cached, true);
   };
 }
 
-// File ACLs are checked on every timeline integrity read/write boundary. The
-// directory's SID-only ACL protects new children, while this denies a later
-// direct ACL grant on a key, state, or authenticated head/sidecar.
+// Every boundary supplies fresh file metadata. On Windows, changing a security
+// descriptor changes ctime, so only an identical file identity/change-time can
+// reuse a parsed ACL. A changed DACL therefore misses this cache and is denied.
 export function createWindowsTimelineFileAclVerifier({ platform = process.platform, env = process.env, run = spawnSync } = {}) {
-  return async function verifyWindowsTimelineFileAcl(path, { created = false, role = "private" } = {}) {
+  const cache = new Map();
+  let identity = null;
+  return async function verifyWindowsTimelineFileAcl(path, { created = false, metadata = null, role = "private" } = {}) {
     if (platform !== "win32") return;
     if (!isAbsolute(path) || !FILE_ROLES.has(role)) {
       throw new Error("session timeline Windows file ACL request is invalid");
     }
+    const cached = `${role}:${path.toLowerCase()}:${fingerprint(metadata)}`;
+    if (!created && fingerprint(metadata) && cache.has(cached)) return;
     const whoami = executable("whoami.exe", env);
     const icacls = executable("icacls.exe", env);
-    const identity = identityFrom(runCommand(run, whoami, ["/user", "/fo", "csv", "/nh"], env));
+    identity ||= identityFrom(runCommand(run, whoami, ["/user", "/fo", "csv", "/nh"], env));
     if (created) runCommand(run, icacls, [path, "/inheritance:r", "/grant:r", `*${identity.sid}:(F)`], env);
-    runCommand(run, icacls, [path, "/verify"], env);
     verifyFile(entriesFrom(runCommand(run, icacls, [path], env), path), identity, role);
+    if (!created && fingerprint(metadata)) cache.set(cached, true);
   };
 }
 
