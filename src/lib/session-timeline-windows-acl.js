@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { isAbsolute, join } from "node:path";
+import { readWindowsSidAcl } from "./session-timeline-sid-acl.js";
 
 const SID_RE = /\bS-\d+(?:-\d+)+\b/i;
 const WRITE_RIGHTS = new Set(["AD", "D", "DC", "DE", "F", "GA", "GW", "M", "W", "WA", "WD", "WDAC", "WEA", "WO"]);
 const SYSTEM_PRINCIPALS = new Set([
-  "s-1-5-18", "nt authority\\system", "system", "s-1-5-32-544", "builtin\\administrators", "administrators"
+  "s-1-5-18", "s-1-5-32-544"
 ]);
 const MANDATORY_LABEL_PREFIX = "mandatory label\\";
 const FILE_ROLES = new Set(["key", "state", "head", "private"]);
@@ -53,7 +54,7 @@ function entriesFrom(output, path) {
 }
 
 function canWrite(entry) { return entry.rights.some((right) => WRITE_RIGHTS.has(right)); }
-function isSelf(principal, identity) { return principal === identity.sid || principal === identity.account; }
+function isSelf(principal, identity) { return principal === identity.sid; }
 function isTrustedWriter(principal, identity) { return isSelf(principal, identity) || SYSTEM_PRINCIPALS.has(principal); }
 function isMandatoryLabel(entry) {
   return entry.principal.startsWith(MANDATORY_LABEL_PREFIX)
@@ -63,7 +64,7 @@ function isPrivatePrincipal(entry, identity) {
   return isTrustedWriter(entry.principal, identity) || isMandatoryLabel(entry);
 }
 function isTrustedParentWriter(entry, identity) {
-  return isTrustedWriter(entry.principal, identity) || (entry.principal === "creator owner" && entry.rights.includes("IO"));
+  return isTrustedWriter(entry.principal, identity) || (entry.principal === "s-1-3-0" && entry.rights.includes("IO"));
 }
 
 function verifyParent(entries, identity) {
@@ -74,14 +75,15 @@ function verifyParent(entries, identity) {
 
 function verifyIntegrity(entries, identity) {
   const owner = entries.find((entry) => isSelf(entry.principal, identity)
-    && entry.rights.includes("F") && !entry.rights.includes("I"));
+    && entry.rights.includes("F") && !entry.rights.includes("I") && !entry.rights.includes("IO"));
   if (!owner || entries.some((entry) => !isPrivatePrincipal(entry, identity))) {
     throw new Error("session timeline Windows integrity ACL is not private to the current SID");
   }
 }
 
 function verifyFile(entries, identity, role) {
-  const owner = entries.find((entry) => isSelf(entry.principal, identity) && entry.rights.includes("F"));
+  const owner = entries.find((entry) => isSelf(entry.principal, identity)
+    && entry.rights.includes("F") && !entry.rights.includes("IO"));
   if (!owner || entries.some((entry) => !isPrivatePrincipal(entry, identity))) {
     throw new Error(`session timeline Windows ${role} ACL is not private to the current SID`);
   }
@@ -108,7 +110,7 @@ export function createWindowsTimelineAclVerifier({ platform = process.platform, 
     if (role === "integrity" && created) {
       runCommand(run, icacls, [path, "/inheritance:r", "/grant:r", `*${identity.sid}:(OI)(CI)(F)`], env);
     }
-    const entries = entriesFrom(runCommand(run, icacls, [path], env), path);
+    const entries = readWindowsSidAcl(path, env, runCommand, run);
     if (role === "integrity") verifyIntegrity(entries, identity); else verifyParent(entries, identity);
     if (!created && fingerprint(metadata)) cache.set(cached, true);
   };
@@ -131,7 +133,7 @@ export function createWindowsTimelineFileAclVerifier({ platform = process.platfo
     const icacls = executable("icacls.exe", env);
     identity ||= identityFrom(runCommand(run, whoami, ["/user", "/fo", "csv", "/nh"], env));
     if (created) runCommand(run, icacls, [path, "/inheritance:r", "/grant:r", `*${identity.sid}:(F)`], env);
-    verifyFile(entriesFrom(runCommand(run, icacls, [path], env), path), identity, role);
+    verifyFile(readWindowsSidAcl(path, env, runCommand, run), identity, role);
     if (!created && fingerprint(metadata)) cache.set(cached, true);
   };
 }

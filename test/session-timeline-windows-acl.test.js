@@ -15,9 +15,27 @@ import {
   createWindowsTimelineAclVerifier, createWindowsTimelineFileAclVerifier, parseWindowsIcaclsEntries
 } from "../src/lib/session-timeline-windows-acl.js";
 import { boundTimelineInvocation, enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
+import { windowsSidAclCommand } from "../src/lib/session-timeline-sid-acl.js";
 
 const SID = "S-1-5-21-111-222-333-1001";
 const ACCOUNT = "SYNTHETIC\\TimelineAgent";
+
+function sidOutput(text, path) {
+  const principals = {
+    [ACCOUNT.toLowerCase()]: SID,
+    "nt authority\\system": "S-1-5-18",
+    "builtin\\administrators": "S-1-5-32-544",
+    "builtin\\users": "S-1-5-32-545",
+    "everyone": "S-1-1-0",
+    "creator owner": "S-1-3-0"
+  };
+  return JSON.stringify(parseWindowsIcaclsEntries(text, path)
+    .filter(e => !e.principal.startsWith("mandatory label\\"))
+    .map(e => ({ sid: principals[e.principal] || e.principal,
+      mask: e.rights.includes("F") ? 0x1f01ff : e.rights.includes("M") ? 0x301bf : 0x200a9,
+      inherited: e.rights.includes("I"), propagation: e.rights.includes("IO") ? 2 : 0,
+      inheritance: 0, type: 0 })));
+}
 
 function runner(query) {
   const calls = [];
@@ -26,6 +44,11 @@ function runner(query) {
     run(binary, args, options) {
       calls.push({ binary, args, options });
       if (binary.endsWith("whoami.exe")) return { status: 0, stdout: `"${ACCOUNT}","${SID}"\r\n` };
+      if (binary.endsWith("powershell.exe")) {
+        const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
+        const path = Buffer.from(script.match(/FromBase64String\('([^']+)'\)/)[1], "base64").toString("utf8");
+        return { status: 0, stdout: sidOutput(query(path), path) };
+      }
       if (args.includes("/verify")) return { status: 0, stdout: "Successfully processed 1 files; Failed processing 0 files\r\n" };
       if (args.length === 1) return { status: 0, stdout: query(args[0]) };
       return { status: 0, stdout: "Successfully processed 1 files; Failed processing 0 files\r\n" };
@@ -48,7 +71,7 @@ test("a newly created timeline integrity directory receives a SID-only ACL throu
   assert.deepEqual(probe.calls.map((call) => call.args), [
     ["/user", "/fo", "csv", "/nh"],
     [path, "/inheritance:r", "/grant:r", `*${SID.toLowerCase()}:(OI)(CI)(F)`],
-    [path]
+    windowsSidAclCommand(path)
   ]);
   for (const call of probe.calls) {
     assert.equal(call.options.shell, false);
@@ -83,7 +106,7 @@ test("an existing integrity directory with a broad or foreign ACL fails closed a
   const probe = runner((value) => `${value} Everyone:(F)\r\n`);
   await assert.rejects(verifier(probe.run)(path, { role: "integrity" }), /not private to the current SID/);
   assert.equal(probe.calls.some((call) => call.args.includes("/grant:r")), false);
-  assert.deepEqual(probe.calls.map((call) => call.args), [["/user", "/fo", "csv", "/nh"], [path]]);
+  assert.deepEqual(probe.calls.map((call) => call.args), [["/user", "/fo", "csv", "/nh"], windowsSidAclCommand(path)]);
 });
 
 test("a newly created signing key receives a SID-only file ACL through trusted system binaries", async () => {
@@ -93,7 +116,7 @@ test("a newly created signing key receives a SID-only file ACL through trusted s
   assert.deepEqual(probe.calls.map((call) => call.args), [
     ["/user", "/fo", "csv", "/nh"],
     [path, "/inheritance:r", "/grant:r", `*${SID.toLowerCase()}:(F)`],
-    [path]
+    windowsSidAclCommand(path)
   ]);
 });
 
@@ -106,7 +129,7 @@ test("unchanged file metadata reuses an ACL while a changed ctime forces a fresh
     if (binary.endsWith("whoami.exe")) return { status: 0, stdout: `"${ACCOUNT}","${SID}"\r\n` };
     aclReads += 1;
     const foreign = aclReads > 1 ? "        Everyone:(RX)\r\n" : "";
-    return { status: 0, stdout: `${path} ${ACCOUNT}:(F)\r\n${foreign}` };
+    return { status: 0, stdout: sidOutput(`${path} ${ACCOUNT}:(F)\r\n${foreign}`, path) };
   });
   const original = { dev: 1n, ino: 2n, mtimeNs: 3n, ctimeNs: 4n };
   await verify(path, { metadata: original, role: "state" });
@@ -114,7 +137,7 @@ test("unchanged file metadata reuses an ACL while a changed ctime forces a fresh
   assert.equal(aclReads, 1);
   await assert.rejects(verify(path, { metadata: { ...original, ctimeNs: 5n }, role: "state" }),
     /state ACL is not private/);
-  assert.deepEqual(calls.map((call) => call.args), [["/user", "/fo", "csv", "/nh"], [path], [path]]);
+  assert.deepEqual(calls.map((call) => call.args), [["/user", "/fo", "csv", "/nh"], windowsSidAclCommand(path), windowsSidAclCommand(path)]);
 });
 
 test("a foreign write ACE on a state, head, or inherited private file fails closed without repair", async () => {
@@ -132,7 +155,7 @@ test("a foreign write ACE on a state, head, or inherited private file fails clos
 test("a parent with a foreign write ACE fails closed while a read-only observer cannot replace the integrity directory", async () => {
   const badPath = "/synthetic/foreign-parent";
   const bad = runner((value) => `${value} ${ACCOUNT}:(F)\r\n        Everyone:(M)\r\n`);
-  await assert.rejects(verifier(bad.run)(badPath, { role: "parent" }), /grants write access to everyone/);
+  await assert.rejects(verifier(bad.run)(badPath, { role: "parent" }), /grants write access to s-1-1-0/);
 
   const safePath = "/synthetic/read-only-parent";
   const safe = runner((value) => `${value} ${ACCOUNT}:(F)\r\n        Everyone:(RX)\r\n        CREATOR OWNER:(OI)(CI)(IO)(F)\r\n`);
