@@ -31,11 +31,12 @@ async function invokeLauncher(launcher, cwd, env, requests, timeoutMs = 10000) {
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let complete = false;
     const finish = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.kill();
+      if (error) child.kill();
       if (error) reject(error);
       else resolveResult(responses);
     };
@@ -53,12 +54,16 @@ async function invokeLauncher(launcher, cwd, env, requests, timeoutMs = 10000) {
         let response;
         try { response = JSON.parse(line); } catch (error) { return finish(error); }
         if (expected.has(response.id)) responses.set(response.id, response);
-        if (responses.size === expected.size) finish(null);
+        if (responses.size === expected.size && !complete) {
+          complete = true;
+          child.stdin.end();
+        }
       }
     });
     child.on("error", finish);
     child.on("close", (code) => {
-      if (!settled) finish(new Error(`Codex launcher exited with ${code}${stderr ? `: ${stderr}` : ""}`));
+      if (!settled) finish(complete ? null
+        : new Error(`Codex launcher exited with ${code}${stderr ? `: ${stderr}` : ""}`));
     });
     for (const request of requests) child.stdin.write(`${JSON.stringify(request)}\n`);
   });

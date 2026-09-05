@@ -22,20 +22,37 @@ async function launchResult(launcher, cwd, env = {}) {
       cwd, env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "";
+    let response = null;
+    let settled = false;
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error("synthetic launcher timed out"));
+      if (!settled) {
+        settled = true;
+        reject(new Error("synthetic launcher timed out"));
+      }
     }, 3000);
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
       const newline = stdout.indexOf("\n");
-      if (newline < 0) return;
-      clearTimeout(timer);
-      child.kill();
-      resolveResult(JSON.parse(stdout.slice(0, newline)));
+      if (newline < 0 || response) return;
+      response = JSON.parse(stdout.slice(0, newline));
+      child.stdin.end();
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (response) resolveResult(response);
+      else reject(new Error(`synthetic launcher exited with ${code} before responding`));
+    });
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
   });
 }
@@ -116,7 +133,7 @@ test("Codex host-install CLI requires local confirmation and reaches the stable 
   const result = JSON.parse(installed.stdout);
   assert.equal(result.version, "0.72.6");
   assert.equal(result.restartRequired, true);
-  assert.equal((await readFile(result.configPath, "utf8")).includes(result.launcherPath), true);
+  assert.equal((await readFile(result.configPath, "utf8")).includes(JSON.stringify(result.launcherPath)), true);
 });
 
 test("Codex install recovers after a staged crash and serializes parallel updates", async (t) => {
