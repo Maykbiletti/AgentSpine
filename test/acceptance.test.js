@@ -46,7 +46,7 @@ test("acceptance CLI emits a reproducible machine-readable receipt", () => {
 test("long host paths keep all mandatory preflight stages inside the unchanged injection budget", async () => {
   const directory = await mkdtemp(join(tmpdir(), "agentspine-long-host-"));
   try {
-    const padding = "x".repeat(Math.max(1, 138 - Buffer.byteLength(directory) - 1));
+    const padding = "x".repeat(Math.max(1, 160 - Buffer.byteLength(directory) - 1));
     const nested = join(directory, padding);
     await mkdir(nested);
     const result = spawnSync(process.execPath, [join(root, "bin/agentspine.js"), "acceptance", "--json"], {

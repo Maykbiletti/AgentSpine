@@ -445,7 +445,7 @@ test("normal and condensed BLUN prompt context expose the exact requirement", as
     requirementId: result.preflight.premortem.requirementId
   });
   const compact = blunRuntimeMessage(result.context);
-  assert.match(compact, /advisory; does not block coding or replies/);
+  assert.match(compact, /advisory; does not block coding or replies|Advisory preparation; never blocks authorized coding or replies/);
   assert.match(compact, new RegExp(result.preflight.premortem.requirementId));
   assert.equal(compact.includes(`root ${JSON.stringify(canonicalRoot)}`), true);
   assert.deepEqual(JSON.parse(blunRuntimeContext(result.context)).premortem.registration,

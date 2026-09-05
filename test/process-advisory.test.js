@@ -31,7 +31,11 @@ test("real restarted hooks allow unverified programming and replies without cert
     tool_input: { file_path: "artifact.txt", content: "synthetic" } };
   const allowed = invoke("PreToolUse", write);
   assert.equal(allowed.decision, undefined);
-  assert.match(JSON.stringify(allowed), /incomplete/);
+  const diagnostic = JSON.parse(allowed.hookSpecificOutput.additionalContext);
+  assert.equal(diagnostic.presentation, "internal-only");
+  assert.equal(diagnostic.completionVerified, false);
+  assert.equal(diagnostic.automaticRetry, false);
+  assert.equal(diagnostic.action, "continue-authorized-task");
   assert.deepEqual(invoke("PreToolUse", write), {}, "restart does not repeat the warning");
   await writeFile(join(root, "artifact.txt"), "synthetic");
   invoke("PostToolUse", { ...write, success: true, tool_response: { ok: true } });

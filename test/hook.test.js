@@ -154,7 +154,7 @@ test("installed BLUN hook keeps the full briefing out of the runtime message", a
   });
   assert.match(output.hookSpecificOutput.message,
     /^AgentSpine ready: 145 sources indexed\. Load detailed continuity only on demand through session_briefing\./);
-  assert.match(output.hookSpecificOutput.message, /advisory; does not block coding or replies/);
+  assert.match(output.hookSpecificOutput.message, /advisory; does not block coding or replies|Advisory preparation; never blocks authorized coding or replies/);
   assert.match(output.hookSpecificOutput.message, /Premortem closure sha256 <64hex>/);
   assert.equal(output.hookSpecificOutput.message.startsWith("{"), false);
   assert.equal(output.hookSpecificOutput.message.includes("agentspine.blun-runtime-context"), false);
