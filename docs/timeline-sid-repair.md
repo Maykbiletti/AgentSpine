@@ -27,7 +27,9 @@ deny ACEs without object GUIDs or conditions. It maps fixed SDDL aliases for
 SYSTEM, built-in administrators and creator owner to their well-known SIDs. It
 also recognizes Microsoft's `LA` SID-string constant as the local
 Administrator account, whose documented role is `DOMAIN_USER_RID_ADMIN` and
-which is already inside the administrative trust boundary. Other well-known
+which is already inside the administrative trust boundary. `LA` counts as the
+current owner only when the verified account domain equals `COMPUTERNAME` and
+the current SID ends in the reserved Administrator RID 500. Other well-known
 aliases remain visibly untrusted. Unsupported ACE types, flags, rights,
 trustees, extra records, malformed data, oversized output, a race, symlink or
 command failure provide no verified ACL.

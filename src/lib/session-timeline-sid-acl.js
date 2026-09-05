@@ -41,8 +41,12 @@ function splitTokens(value, allowed, label) {
   return tokens;
 }
 
-function principalFromSddl(value) {
+function principalFromSddl(value, localAdministratorSid) {
   if (SID.test(value)) return value.toLowerCase();
+  if (value === "LA" && SID.test(localAdministratorSid || "")
+    && localAdministratorSid.toLowerCase().endsWith("-500")) {
+    return localAdministratorSid.toLowerCase();
+  }
   if (TRUSTEE_ALIASES.has(value)) return TRUSTEE_ALIASES.get(value);
   if (/^[A-Z]{2}$/.test(value)) return `sddl:${value.toLowerCase()}`;
   throw new Error("session timeline Windows SDDL trustee is malformed");
@@ -70,7 +74,7 @@ function rightsFromSddl(value, type, flags) {
   return rights;
 }
 
-export function parseWindowsSddlAcl(sddl) {
+export function parseWindowsSddlAcl(sddl, { localAdministratorSid = null } = {}) {
   if (typeof sddl !== "string" || sddl.length > MAX_ACL_BYTES) {
     throw new Error("session timeline Windows SDDL is unavailable");
   }
@@ -90,7 +94,7 @@ export function parseWindowsSddlAcl(sddl) {
       throw new Error("session timeline Windows SDDL ACE is unsupported");
     }
     const flags = splitTokens(fields[1], ACE_FLAGS, "ACE flags");
-    const principal = principalFromSddl(fields[5]);
+    const principal = principalFromSddl(fields[5], localAdministratorSid);
     entries.push({ principal, rights: rightsFromSddl(fields[2], fields[0], flags) });
     if (entries.length > 2048) throw new Error("session timeline Windows SDDL exceeds ACE limit");
     offset += match[0].length;
@@ -99,7 +103,7 @@ export function parseWindowsSddlAcl(sddl) {
   return entries;
 }
 
-export function parseWindowsAclSave(bytes) {
+export function parseWindowsAclSave(bytes, options = {}) {
   if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > MAX_ACL_BYTES || bytes.length % 2 !== 0) {
     throw new Error("session timeline Windows ACL save is unavailable");
   }
@@ -107,14 +111,14 @@ export function parseWindowsAclSave(bytes) {
   if (lines.length !== 2 || !lines[0].trim() || !lines[1].trim().startsWith("D:")) {
     throw new Error("session timeline Windows ACL save is malformed");
   }
-  return parseWindowsSddlAcl(lines[1].trim());
+  return parseWindowsSddlAcl(lines[1].trim(), options);
 }
 
 export function windowsAclSaveCommand(path, outputPath) {
   return [path, "/save", outputPath, "/q"];
 }
 
-async function readStableAclFile(path) {
+async function readStableAclFile(path, options) {
   const pathname = await lstat(path, { bigint: true });
   if (!pathname.isFile() || pathname.isSymbolicLink() || pathname.nlink !== 1n
     || pathname.size <= 0n || pathname.size > BigInt(MAX_ACL_BYTES)) {
@@ -134,13 +138,21 @@ async function readStableAclFile(path) {
         throw new Error("session timeline Windows ACL save changed while reading");
       }
     }
-    return parseWindowsAclSave(bytes);
+    return parseWindowsAclSave(bytes, options);
   } finally {
     await handle.close();
   }
 }
 
-async function readNativeWindowsAcl(path, env, runCommand, run) {
+export function windowsLocalAdministratorSid(identity, env) {
+  if (!identity || !SID.test(identity.sid || "") || typeof identity.account !== "string") return null;
+  const computer = typeof env?.COMPUTERNAME === "string" ? env.COMPUTERNAME.trim().toLowerCase() : "";
+  const [domain] = identity.account.trim().toLowerCase().split("\\");
+  if (!computer || domain !== computer || !identity.sid.toLowerCase().endsWith("-500")) return null;
+  return identity.sid.toLowerCase();
+}
+
+async function readNativeWindowsAcl(path, env, runCommand, run, identity) {
   const directory = await mkdtemp(join(tmpdir(), "agentspine-timeline-sddl-"));
   const outputPath = join(directory, `${randomUUID()}.acl`);
   try {
@@ -148,7 +160,9 @@ async function readNativeWindowsAcl(path, env, runCommand, run) {
     await claim.close();
     const binary = join(env.SystemRoot, "System32", "icacls.exe");
     runCommand(run, binary, windowsAclSaveCommand(path, outputPath), env);
-    return await readStableAclFile(outputPath);
+    return await readStableAclFile(outputPath, {
+      localAdministratorSid: windowsLocalAdministratorSid(identity, env)
+    });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -172,8 +186,8 @@ export function windowsSidAclCommand(path) {
     Buffer.from(script, "utf16le").toString("base64")];
 }
 
-export async function readWindowsSidAcl(path, env, runCommand, run) {
-  if (run === spawnSync) return readNativeWindowsAcl(path, env, runCommand, run);
+export async function readWindowsSidAcl(path, env, runCommand, run, identity = null) {
+  if (run === spawnSync) return readNativeWindowsAcl(path, env, runCommand, run, identity);
   const binary = join(env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   return parseWindowsSidAcl(runCommand(run, binary, windowsSidAclCommand(path), env));
 }

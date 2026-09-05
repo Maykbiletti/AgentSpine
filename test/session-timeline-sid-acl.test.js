@@ -7,11 +7,12 @@ import {
   from "../src/lib/session-timeline-windows-acl.js";
 import {
   parseWindowsAclSave, parseWindowsSddlAcl, parseWindowsSidAcl,
-  windowsAclSaveCommand, windowsSidAclCommand
+  windowsAclSaveCommand, windowsLocalAdministratorSid, windowsSidAclCommand
 } from "../src/lib/session-timeline-sid-acl.js";
 
 const SELF = "S-1-5-21-111-222-333-1001";
 const FOREIGN = "S-1-5-21-111-222-333-1002";
+const LOCAL_ADMIN = "S-1-5-21-111-222-333-500";
 function ace(sid, extra = {}) {
   return { sid, mask: 0x1f01ff, inherited: false, propagation: 0,
     inheritance: 0, type: 0, ...extra };
@@ -99,6 +100,21 @@ test("only the documented local-administrator SDDL role joins trusted administra
   assert.equal(isTrustedWindowsWriter(FOREIGN.toLowerCase(), identity), false);
 });
 
+test("LA becomes self only for the verified local COMPUTERNAME account with RID 500", () => {
+  const env = { COMPUTERNAME: "SYNTHETIC-HOST" };
+  const local = { sid: LOCAL_ADMIN, account: "synthetic-host\\RenamedAdministrator" };
+  assert.equal(windowsLocalAdministratorSid(local, env), LOCAL_ADMIN.toLowerCase());
+  assert.equal(windowsLocalAdministratorSid({ ...local, account: "FOREIGN\\Administrator" }, env), null);
+  assert.equal(windowsLocalAdministratorSid({ ...local, sid: SELF }, env), null);
+  assert.equal(windowsLocalAdministratorSid(local, {}), null);
+  assert.deepEqual(parseWindowsSddlAcl("D:(A;;FA;;;LA)", {
+    localAdministratorSid: windowsLocalAdministratorSid(local, env)
+  }), [{ principal: LOCAL_ADMIN.toLowerCase(), rights: ["F", "W"] }]);
+  assert.deepEqual(parseWindowsSddlAcl("D:(A;;FA;;;LA)", {
+    localAdministratorSid: SELF
+  }), [{ principal: "sddl:la", rights: ["F", "W"] }]);
+});
+
 test("every SDDL write form remains visible to the foreign-writer guard", () => {
   const symbolic = ["GA", "GW", "SD", "WD", "WO", "WP", "CC", "DC", "SW", "DT", "CR",
     "FA", "FW", "KA", "KW"];
@@ -133,6 +149,10 @@ test("icacls save parsing is UTF-16LE, single-target and bounded", () => {
   assert.throws(() => parseWindowsAclSave(Buffer.from("odd")));
   assert.throws(() => parseWindowsAclSave(Buffer.from("name\r\nD:(A;;FA;;;SY)\r\nextra\r\nD:(A;;FA;;;SY)", "utf16le")));
   assert.throws(() => parseWindowsAclSave(Buffer.alloc(1024 * 1024 + 2)));
+  const localAdmin = Buffer.from("synthetic\\state\r\nD:(A;;FA;;;LA)\r\n", "utf16le");
+  assert.deepEqual(parseWindowsAclSave(localAdmin, { localAdministratorSid: LOCAL_ADMIN }), [
+    { principal: LOCAL_ADMIN.toLowerCase(), rights: ["F", "W"] }
+  ]);
 });
 
 test("native ACL export uses one literal target and a caller-owned save path", () => {
