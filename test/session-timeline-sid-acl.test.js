@@ -91,8 +91,7 @@ function worker({ respond = true } = {}) {
     child.stdin = new Writable({ write(chunk, _encoding, done) {
       state.paths.push(Buffer.from(String(chunk).trim(), "base64").toString("utf8"));
       if (state.respond) {
-        const json = JSON.stringify([ace(SELF)]);
-        queueMicrotask(() => child.stdout.write(`OK ${Buffer.from(json).toString("base64")}\n`));
+        queueMicrotask(() => child.stdout.write(`ACE ${SELF} 2032127 0 0 0 0\nEND\n`));
       }
       done();
     } });
@@ -119,11 +118,13 @@ test("bounded SID reader serializes a burst through one trusted PowerShell proce
   assert.deepEqual(fake.paths, ["/synthetic/first", "/synthetic/second"]);
   assert.ok(results.every(result => parseWindowsSidAcl(result).length === 1));
   const [{ binary, args, options }] = fake.spawns;
-  assert.ok(binary.endsWith("WindowsPowerShell/v1.0/powershell.exe"));
+  assert.equal(binary, join("/Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"));
   assert.deepEqual(args.slice(0, 4), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand"]);
   const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
   assert.match(script, /PSModuleAutoLoadingPreference = 'None'/);
   assert.match(script, /while \(\(\$line = \[Console\]::In.ReadLine\(\)\) -ne \$null\)/);
+  assert.match(script, /\[Console\]::Out.WriteLine\('ACE '/);
+  assert.ok(!script.includes("ConvertTo-Json"));
   assert.ok(!script.includes("/synthetic/first"));
   assert.equal(options.shell, false);
   assert.equal(options.windowsHide, true);

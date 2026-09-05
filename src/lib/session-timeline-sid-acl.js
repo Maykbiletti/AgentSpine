@@ -41,10 +41,19 @@ function windowsSidAclWorkerCommand() {
     "$PSModuleAutoLoadingPreference = 'None'",
     "while (($line = [Console]::In.ReadLine()) -ne $null) {",
     "  try {",
-    ...aclScript("    $target = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line))")
-      .map(line => `  ${line}`),
-    "    $reply = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))",
-    "    [Console]::Out.WriteLine('OK ' + $reply)",
+    "    $target = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line))",
+    "    if ([IO.Directory]::Exists($target)) { $acl = [IO.Directory]::GetAccessControl($target) }",
+    "    else { $acl = [IO.File]::GetAccessControl($target) }",
+    "    foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {",
+    // A compact, fixed record avoids JSON/module startup work in the latency-
+    // sensitive worker. Every field is emitted by Windows as a SID, integer or
+    // boolean and is validated again by parseWindowsSidAcl in JavaScript.
+    "      [Console]::Out.WriteLine('ACE ' + $rule.IdentityReference.Value + ' ' +",
+    "        [int]$rule.FileSystemRights + ' ' + [int]$rule.IsInherited + ' ' +",
+    "        [int]$rule.PropagationFlags + ' ' + [int]$rule.InheritanceFlags + ' ' +",
+    "        [int]$rule.AccessControlType)",
+    "    }",
+    "    [Console]::Out.WriteLine('END')",
     "  } catch {",
     "    $errorReply = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_.Exception.Message))",
     "    [Console]::Out.WriteLine('ERR ' + $errorReply)",
@@ -87,15 +96,28 @@ export function createWindowsSidAclReader({ env = process.env, spawnProcess = sp
   }
   function consume(line) {
     if (!active) return fail("unexpected response");
+    const ace = line.replace(/^\uFEFF/, "").match(/^ACE (S-1-\d+(?:-\d+)+) (-?\d+) ([01]) ([0-3]) ([0-3]) ([01])$/i);
+    if (ace) {
+      if (active.rows.length >= 2048) return fail("response exceeded ACE limit");
+      active.rows.push({ sid: ace[1], mask: Number(ace[2]), inherited: ace[3] === "1",
+        propagation: Number(ace[4]), inheritance: Number(ace[5]), type: Number(ace[6]) });
+      return;
+    }
     const request = active;
-    active = null;
-    clearTimeout(request.timer);
+    const value = line.replace(/^\uFEFF/, "");
+    if (value === "END") {
+      active = null;
+      clearTimeout(request.timer);
+      request.resolve(JSON.stringify(request.rows));
+      pump();
+      return;
+    }
     try {
-      const match = line.replace(/^\uFEFF/, "").match(/^(OK|ERR) ([A-Za-z0-9+/=]+)$/);
-      if (!match) throw new Error("malformed response");
-      const value = Buffer.from(match[2], "base64").toString("utf8");
-      if (match[1] === "ERR") throw new Error(value.slice(0, 240));
-      request.resolve(value);
+      const match = value.match(/^ERR ([A-Za-z0-9+/=]+)$/);
+      if (!match) return fail("malformed response");
+      active = null;
+      clearTimeout(request.timer);
+      throw new Error(Buffer.from(match[1], "base64").toString("utf8").slice(0, 240));
     } catch (error) {
       request.reject(new Error(`session timeline Windows SID ACL is unavailable: ${error.message}`));
     }
@@ -140,7 +162,10 @@ export function createWindowsSidAclReader({ env = process.env, spawnProcess = sp
   return {
     read(path) {
       if (pending.length >= 64) return Promise.reject(new Error("session timeline Windows SID ACL queue is full"));
-      return new Promise((resolve, reject) => { pending.push({ path, resolve, reject, timer: null }); pump(); });
+      return new Promise((resolve, reject) => {
+        pending.push({ path, resolve, reject, timer: null, rows: [] });
+        pump();
+      });
     },
     close() { stop(new Error("session timeline Windows SID ACL reader closed")); }
   };

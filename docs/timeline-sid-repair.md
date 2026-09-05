@@ -52,9 +52,18 @@ individual timeline MCP tests to 18–49 seconds and caused all three Windows
 profiles to miss their existing deadlines. The reader now keeps one fixed,
 no-profile system PowerShell process for a bounded activity burst. Requests are
 base64 path lines, are serialized, retain an individual 1,500 ms deadline and
-return bounded base64 JSON lines. A stalled, malformed, oversized or crashed
+return bounded SID/integer/boolean records. JavaScript reconstructs and
+validates the same ACL row schema; the worker no longer performs JSON
+conversion. A stalled, malformed, oversized or crashed
 worker rejects pending ACL checks; it never turns them into permission. The
 worker is terminated when idle. Native tests query a directory and file through
 the real worker with module lookup unavailable and continue to assert source
-bytes unchanged. This performance repair still requires exact-head Windows CI;
-the previous failing run is baseline evidence, not acceptance evidence.
+bytes unchanged.
+
+Exact-head run 33974374882 reduced the native Windows ACL test from the earlier
+39–50 seconds to 3.7–5.8 seconds. It also exposed two remaining issues rather
+than providing acceptance: a test compared a Windows path with POSIX separators,
+and some cold workers still missed the unchanged 1,500 ms deadline when four
+Windows test processes started PowerShell together. The portable path assertion
+and compact record protocol address those measured failures. A new exact-head
+Windows run remains required; neither earlier failing run is acceptance evidence.
