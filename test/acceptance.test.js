@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { renderAcceptanceReport, runVisibleAcceptance } from "../src/lib/acceptance.js";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -39,4 +41,23 @@ test("acceptance CLI emits a reproducible machine-readable receipt", () => {
   assert.equal(report.version, "0.72.4");
   assert.equal(report.total, 15);
   assert.equal(report.mcpCalls, 0);
+});
+
+test("long host paths keep all mandatory preflight stages inside the unchanged injection budget", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agentspine-long-host-"));
+  try {
+    const padding = "x".repeat(Math.max(1, 138 - Buffer.byteLength(directory) - 1));
+    const nested = join(directory, padding);
+    await mkdir(nested);
+    const result = spawnSync(process.execPath, [join(root, "bin/agentspine.js"), "acceptance", "--json"], {
+      cwd: root, encoding: "utf8", env: { ...process.env, TMPDIR: nested, TMP: nested, TEMP: nested }
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.passed, 15);
+    assert.equal(report.total, 15);
+    assert.equal(report.checks.find(check => check.id === "source-bytes").status, "PASS");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

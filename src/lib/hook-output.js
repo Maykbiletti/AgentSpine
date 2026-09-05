@@ -72,7 +72,11 @@ export function blunRuntimeMessage(context) {
   const details = Object.keys(active).length === 0
     ? ""
     : `\nActive AgentSpine runtime data: ${JSON.stringify(active)}`;
-  const premortem = runtime.premortem?.instruction ? `\n${runtime.premortem.instruction}` : "";
+  const root = runtime.premortem?.registration?.root;
+  const instruction = typeof root === "string"
+    ? runtime.premortem?.instruction?.replace("registration.root", () => `root ${JSON.stringify(root)}`)
+    : runtime.premortem?.instruction;
+  const premortem = instruction ? `\n${instruction}` : "";
   const message = `${base}${details}${premortem}`;
   if (Buffer.byteLength(message) <= BLUN_MESSAGE_MAX_BYTES) return message;
   const compact = `${base}${BLUN_BOUND_MARKER}\n${compactPremortemRegistration(runtime.premortem)}`;

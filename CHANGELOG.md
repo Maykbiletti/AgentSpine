@@ -16,6 +16,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 - A later failed or unverified test invalidates earlier successful delivery verification. A real child-process test with an incorrect artifact expectation reproduces the previous false acceptance.
 - Child artifact tests now clear inherited `NODE_TEST_CONTEXT` and assert executed TAP test/failure counts. This corrects the 0.72.3 harness, where a skipped recursive child runner could exit successfully; the earlier positive exit status alone was insufficient evidence.
 - Selfstarter audit assertions expose the failed gates. The CI 147 intermittent Windows failure remains unexplained despite a subsequent passing diagnostic matrix; assertions and deadlines are unchanged.
+- The initial completion guidance exceeded the existing preflight injection limit on long host paths. Shorter equivalent guidance and a long-path Acceptance regression keep all mandatory stages within the unchanged budget; user source bytes are not truncated.
 - Native Codex/PowerShell envelopes, host registration/update acceptance and unknown external recovery events remain open. No live installation, restart, state repair or CodexLink change is included.
 
 ## [0.72.3] - 2026-09-05

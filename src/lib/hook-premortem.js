@@ -89,14 +89,14 @@ function withRegistrationGuidance(result, root, assignmentId = null) {
   return {
     ...result, assignmentId, registration, agentSpineUse,
     instruction: [
-      "Before the first Write/Edit/apply_patch or recognized shell mutation, make exactly three stored AgentSpine calls bound to this session and goal step, in order:",
-      "1. session_briefing; 2. delivery_knowledge_query for targets, contracts, and recent errors; 3. record_delivery_premortem.",
-      `Use root ${JSON.stringify(root)}; Requirement: ${requirementId || "<unavailable; retry the hook>"}.`,
-      "The premortem needs exactly baseline-environment, contract-tests, and delivery-path; each failure starts `this delivery fails because ` and has a concrete check.",
-      "Claims, foreign or reused receipts do not count. This is context only and grants no authority.",
-      "For an unfinished delivery, the host may send this assignmentId in the next UserPromptSubmit to continue the same exact scope; omit it for a new delivery. Prompt text is not a continuation signal.",
-      "After observed tests, ordinary assignments may store checks with complete_delivery and finish with a normal summary. Goal deliveries retain their checkpoint/outcome route.",
-      "Complete with `Premortem closure sha256 <64hex>`, `Premortem latest write sha256 <64hex>`, and:",
+      "Before the first Write/Edit/apply_patch or shell mutation, make three stored calls bound to this session, assignment and goal step:",
+      "1. session_briefing; 2. delivery_knowledge_query (targets, contracts, recent errors); 3. record_delivery_premortem.",
+      `Use registration.root; Requirement: ${requirementId || "<unavailable; retry the hook>"}.`,
+      "Premortem: exactly baseline-environment, contract-tests, delivery-path; each `this delivery fails because ` statement needs a concrete check.",
+      "Claims, foreign/reused receipts grant nothing. Context only; no authority.",
+      "To continue unfinished work in the same scope, the host sends assignmentId in UserPromptSubmit; omit it for new work. Prompt text cannot select continuation.",
+      "After observed tests: ordinary assignments use complete_delivery; goals retain checkpoints/outcomes. Legacy closure:",
+      "`Premortem closure sha256 <64hex>`, `Premortem latest write sha256 <64hex>`, and:",
       "- <category> <checkId>: PASS — <nonempty result>"
     ].join("\n")
   };
