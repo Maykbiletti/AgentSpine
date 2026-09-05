@@ -44,8 +44,7 @@ async function exactDirectory(path, label, { create = false } = {}) {
   if (create) await mkdir(target, { recursive: true, mode: 0o700 });
   const metadata = await lstat(target);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error(`${label} must be a regular non-symlink directory`);
-  if (await realpath(target) !== target) throw new Error(`${label} must not resolve through a symlink alias`);
-  return target;
+  return realpath(target);
 }
 
 async function optionalText(path) {
