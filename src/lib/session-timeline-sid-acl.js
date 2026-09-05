@@ -10,13 +10,18 @@ export function windowsSidAclCommand(path) {
   const script = [
     "$ErrorActionPreference = 'Stop'",
     `$target = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'))`,
-    "$acl = Get-Acl -LiteralPath $target",
-    "$rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object {",
-    "  @{ sid = $_.IdentityReference.Value; mask = [int]$_.FileSystemRights;",
-    "     inherited = [bool]$_.IsInherited; propagation = [int]$_.PropagationFlags;",
-    "     inheritance = [int]$_.InheritanceFlags; type = [int]$_.AccessControlType }",
+    "if ([IO.Directory]::Exists($target)) { $acl = [IO.Directory]::GetAccessControl($target) }",
+    "else { $acl = [IO.File]::GetAccessControl($target) }",
+    "$rules = @(foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {",
+    // Only OS-generated SIDs, integers and booleans enter this fixed JSON wire
+    // format. Avoid module autoload entirely: a pwsh host may export module
+    // paths whose assemblies cannot load in inbox Windows PowerShell 5.1.
+    "  '{\"sid\":\"' + $rule.IdentityReference.Value + '\",\"mask\":' + [int]$rule.FileSystemRights +",
+    "  ',\"inherited\":' + $rule.IsInherited.ToString().ToLowerInvariant() +",
+    "  ',\"propagation\":' + [int]$rule.PropagationFlags +",
+    "  ',\"inheritance\":' + [int]$rule.InheritanceFlags + ',\"type\":' + [int]$rule.AccessControlType + '}'",
     "})",
-    "ConvertTo-Json -InputObject $rules -Compress"
+    "[Console]::Out.WriteLine('[' + ($rules -join ',') + ']')"
   ].join("\n");
   return ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
     Buffer.from(script, "utf16le").toString("base64")];

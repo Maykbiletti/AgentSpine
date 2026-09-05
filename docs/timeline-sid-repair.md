@@ -36,3 +36,12 @@ was copied; this implementation retains the repository's Apache-2.0 license.
 The King tool-name mapping and host enforcement of `decision: block` require
 separate evidence. This ACL repair does not establish either host behavior or
 live installation acceptance.
+
+The first draft's Windows CI (33969228358) failed to load the Get-Acl module.
+The corrected reader uses the .NET Framework Directory/File GetAccessControl
+methods and fixed JSON output without cmdlet module dependencies. The native
+regression disables module autoload and supplies an unavailable module path,
+then reads both directory and file ACLs under the unchanged 1,500 ms deadline.
+See Microsoft's [.NET Framework file ACL API](https://learn.microsoft.com/en-us/dotnet/api/system.io.file.getaccesscontrol?view=netframework-4.8.1),
+checked 2026-09-05. The exact cause of the runner's module-load failure beyond
+the recorded Get-Acl error is not established.
