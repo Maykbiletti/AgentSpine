@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,7 +11,7 @@ import { upsertEntity } from "../src/lib/graph.js";
 import { grantExecution } from "../src/lib/selfstarter.js";
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), "agentspine-autonomy-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agentspine-autonomy-")));
   const state = await mkdtemp(join(tmpdir(), "agentspine-autonomy-state-"));
   const previous = process.env.AGENTSPINE_STATE_DIR;
   process.env.AGENTSPINE_STATE_DIR = state;

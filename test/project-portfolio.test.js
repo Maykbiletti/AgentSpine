@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configureAutonomyProject, loadAutonomy, projectPortfolioContext,
@@ -11,7 +11,7 @@ import { sessionBriefing } from "../src/lib/briefing.js";
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), "agentspine-portfolio-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "agentspine-portfolio-")));
   const state = await mkdtemp(join(tmpdir(), "agentspine-portfolio-state-"));
   const alpha = join(root, "alpha");
   const quiet = join(root, "quiet");
