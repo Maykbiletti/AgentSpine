@@ -4,6 +4,14 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ## [Unreleased]
 
+### Fixed
+
+- BLUN now routes the two exact King-generated timeline MCP names through AgentSpine's existing host-bound invocation guard. Claude's separately qualified names remain exact, while foreign servers and near aliases still receive no permit.
+
+### Evidence limits
+
+- Public BLUN Code 1.0.109 naming evidence and synthetic hook/MCP tests establish the repository contract only. The separate King host bug that ignores a returned `{decision:"block"}` and Fredrik's live installation remain unverified external boundaries.
+
 ## [0.73.0] - 2026-09-05
 
 ### Added

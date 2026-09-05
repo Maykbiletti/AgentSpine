@@ -5,10 +5,16 @@ const stableId = {
 
 const optionalId = { anyOf: [stableId, { type: "null" }] };
 
-// Claude qualifies plugin MCP tools with the plugin and configured server
-// names. This must stay exact: a foreign MCP server can expose an identically
-// named tool but must never receive a timeline invocation permit.
+// Hosts qualify MCP tools differently. These prefixes must stay exact: a
+// foreign MCP server can expose an identically named tool but must never
+// receive a timeline invocation permit.
 export const AGENTSPINE_TIMELINE_TOOL_PREFIX = "mcp__plugin_agent-spine_agent-spine__";
+export const BLUN_TIMELINE_TOOL_PREFIX = "mcp__agent-spine__";
+
+const TIMELINE_TOOL_PREFIXES = [
+  AGENTSPINE_TIMELINE_TOOL_PREFIX,
+  BLUN_TIMELINE_TOOL_PREFIX
+];
 
 const SCOPE_FIELDS = [
   ["entityId", ["entityId", "entity_id"]],
@@ -96,8 +102,8 @@ export function timelineScope(args = {}) {
 
 export function timelineToolKind(name) {
   const qualified = String(name || "");
-  if (qualified === `${AGENTSPINE_TIMELINE_TOOL_PREFIX}session_timeline_index`) return "index";
-  if (qualified === `${AGENTSPINE_TIMELINE_TOOL_PREFIX}session_timeline_search`) return "search";
+  if (TIMELINE_TOOL_PREFIXES.some((prefix) => qualified === `${prefix}session_timeline_index`)) return "index";
+  if (TIMELINE_TOOL_PREFIXES.some((prefix) => qualified === `${prefix}session_timeline_search`)) return "search";
   return null;
 }
 

@@ -103,9 +103,9 @@ async function fixture(t) {
   return { project, state, profile, transcript };
 }
 
-function guardInput(project, toolUseId, overrides = {}) {
+function guardInput(project, toolUseId, overrides = {}, toolName = "mcp__agent-spine__session_timeline_search") {
   return { hook_event_name: "PreToolUse", host: "claude", cwd: project, session_id: "session:permit",
-    tool_use_id: toolUseId, tool_name: "mcp__plugin_agent-spine_agent-spine__session_timeline_search",
+    tool_use_id: toolUseId, tool_name: toolName,
     tool_input: argumentsFor(project), ...scope(overrides) };
 }
 
@@ -128,8 +128,8 @@ test("timeline extraction retains a normalized objective result and drops unsafe
   assert.equal(injectionOnly, null);
 });
 
-async function permit(project, toolUseId, overrides = {}) {
-  const guarded = await runHook(guardInput(project, toolUseId, overrides));
+async function permit(project, toolUseId, overrides = {}, toolName) {
+  const guarded = await runHook(guardInput(project, toolUseId, overrides, toolName));
   assert.equal(guarded.blocked, false, guarded.reason);
   assert.deepEqual(Object.keys(guarded.hostOutput.hookSpecificOutput).sort(),
     ["hookEventName", "permissionDecision", "permissionDecisionReason", "updatedInput"]);
@@ -186,6 +186,31 @@ test("timeline MCP evidence needs one real host-bound PreToolUse permit", async 
   const installedFound = await client()("session_timeline_search", installed.hookSpecificOutput.updatedInput);
   assert.equal(installedFound.events.length, 1);
   assert.equal(digest(await readFile(transcript)), before);
+});
+
+test("exact King timeline names reach the same bound hook guard", async (t) => {
+  const { project } = await fixture(t);
+  const indexName = "mcp__agent-spine__session_timeline_index";
+  const searchName = "mcp__agent-spine__session_timeline_search";
+
+  const indexedArgs = await permit(project, "tool:king-name:index", {}, indexName);
+  const indexed = await client()("session_timeline_index", indexedArgs);
+  assert.equal(indexed.status, "indexed");
+
+  const searchArgs = await permit(project, "tool:king-name:search", {}, searchName);
+  const found = await client()("session_timeline_search", searchArgs);
+  assert.equal(found.status, "found");
+  assert.equal(found.events.length, 1);
+
+  for (const name of [
+    "mcp__agent-spine__session_timeline_index_extra",
+    "mcp__agent_spine__session_timeline_search",
+    "mcp__foreign__session_timeline_search"
+  ]) {
+    const result = await runHook(guardInput(project, `tool:near-name:${name}`, {}, name));
+    assert.equal(result.updatedInput, undefined, name);
+    assert.equal(result.hostOutput?.hookSpecificOutput?.updatedInput, undefined, name);
+  }
 });
 
 test("timeline permits reject changed bindings, group scope, enrollment changes, duplicate host delivery, and races", async (t) => {

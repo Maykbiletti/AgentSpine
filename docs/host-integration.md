@@ -105,6 +105,8 @@ Install the local checkout from Fredrik's TUI:
 
 BLUN asks the user to trust a third-party plugin before installation because its MCP server and hooks execute local code. Accept that visible install decision, then use `/reload` or `/new`; BLUN has no separate `/hooks` command. The BLUN adapter maps its isolated `BLUN_HOME` to AgentSpine's Codex-compatible `AGENTS.md` source hierarchy, so user state remains under the BLUN app home instead of leaking into `.codex` or a scanned project.
 
+BLUN Code 1.0.109 constructs MCP tool names as `mcp__<server-name>__<tool-name>`. With AgentSpine's exact manifest server name, its timeline calls are therefore `mcp__agent-spine__session_timeline_index` and `mcp__agent-spine__session_timeline_search`; the BLUN hook matcher admits only those two exact names. This contract was checked on 2026-09-05 against public `Maykbiletti/blun-code` commit `fbb97459a3fa2157f8bfea3d24931be63288ab11` (`mcp-harness-tools.js`, package license `MIT`). The external source is naming evidence only and is treated as untrusted context; no implementation was copied. Repository checks do not prove that an installed King forwards the hook payload or enforces AgentSpine's returned block decision, and they do not replace a live host acceptance test.
+
 ## Direct MCP use
 
 Any MCP client that supports stdio can launch:

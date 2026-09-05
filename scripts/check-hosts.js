@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { installedHostEnvironment } from "./check-install-hook.js";
 
 const TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search))$";
-const BLUN_TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|exec_command|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search))$";
+const BLUN_TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|exec_command|mcp__agent-spine__session_timeline_(?:index|search))$";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);

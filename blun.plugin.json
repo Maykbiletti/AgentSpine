@@ -17,7 +17,7 @@
   "hooks": [
     { "event": "SessionStart", "command": "node \"./src/hook.js\"", "timeout": 15 },
     { "event": "UserPromptSubmit", "command": "node \"./src/hook.js\"", "timeout": 15 },
-    { "event": "PreToolUse", "matcher": "^(?:Edit|Write|apply_patch|Bash|PowerShell|exec_command|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search))$", "command": "node \"./src/hook.js\"", "timeout": 15 },
+    { "event": "PreToolUse", "matcher": "^(?:Edit|Write|apply_patch|Bash|PowerShell|exec_command|mcp__agent-spine__session_timeline_(?:index|search))$", "command": "node \"./src/hook.js\"", "timeout": 15 },
     { "event": "PostToolUse", "command": "node \"./src/hook.js\" --silent-oversize-post-tool-use", "timeout": 15 },
     { "event": "PreCompact", "command": "node \"./src/hook.js\"", "timeout": 15 },
     { "event": "PostCompact", "command": "node \"./src/hook.js\"", "timeout": 15 },
