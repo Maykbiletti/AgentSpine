@@ -30,6 +30,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Fixed
 
+- Integrated the preserved attention refactoring: six modules (each below 500 lines), unchanged function bodies and public API, and removal of its legacy line-budget exception. Package allowance grows by 4 KiB for explicit module boundaries.
 - BLUN now routes the two exact King-generated timeline MCP names through AgentSpine's existing host-bound invocation guard. Claude's separately qualified names remain exact, while foreign servers and near aliases still receive no permit.
 
 ### Evidence limits
