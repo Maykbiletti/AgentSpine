@@ -23,7 +23,7 @@ import {
 
 export async function recordLearningMeasurement({
   root = process.cwd(), id = `measurement:${randomUUID()}`, learningId, evaluationId, phase, scope, metric,
-  measurement, coverage, measuredAt, confirmLocalMeasurement = false, now = new Date()
+  measurement, coverage, measuredAt, confirmLocalMeasurement = false, now = new Date(), catalog: providedCatalog = null
 }) {
   if (!confirmLocalMeasurement) throw new Error("measurement registration requires explicit local confirmation");
   if (!ID_RE.test(id || "") || !ID_RE.test(learningId || "") || !ID_RE.test(evaluationId || "")) {
@@ -205,7 +205,7 @@ export async function recordLearningMeasurement({
     state.measurementLineage.push(lineage);
     state.measurementLineage.sort((a, b) => a.measurementReceiptId.localeCompare(b.measurementReceiptId));
     return { receipt, lineage, learningPath, unchanged: false };
-  });
+  }, providedCatalog);
 }
 
 export async function revokeLearningMeasurement({

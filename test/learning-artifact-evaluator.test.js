@@ -284,3 +284,28 @@ test("interrupted, denied and racing artifact reads leave no successful measurem
   assert.equal(restarted.receipt.metric.value, 1 / 3);
   assert.equal(restarted.automaticRetry, false);
 });
+
+test("artifact measurement reads only named targets and state, without directory discovery", async (t) => {
+  const f = await setup(t);
+  const script = `
+    import fs from "node:fs/promises";
+    import { syncBuiltinESMExports } from "node:module";
+    fs.opendir = fs.readdir = async () => { throw new Error("forbidden directory discovery"); };
+    syncBuiltinESMExports();
+    const { measureLearningArtifacts } = await import(process.env.EVALUATOR_URL);
+    const result = await measureLearningArtifacts(JSON.parse(process.env.EVALUATOR_INPUT));
+    process.stdout.write(JSON.stringify(result));
+  `;
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf8", timeout: 5000,
+    env: { ...process.env, AGENTSPINE_STATE_DIR: f.state,
+      EVALUATOR_URL: pathToFileURL(join(process.cwd(), "src/lib/learning-artifact-evaluator.js")).href,
+      EVALUATOR_INPUT: JSON.stringify(f.input()) }
+  });
+  assert.equal(child.error, undefined);
+  assert.equal(child.status, 0, child.stderr);
+  const result = JSON.parse(child.stdout);
+  assert.equal(result.receipt.metric.value, 1 / 3);
+  assert.equal(result.diagnostics.broadScan, false);
+  assert.deepEqual(await readFile(join(f.root, "AGENTS.md")), f.source);
+});

@@ -6,6 +6,7 @@ import { targetSnapshot } from "./delivery-target.js";
 import { loadLearning } from "./learning-storage.js";
 import { digest, exactScope, normalizeScope, activeEvaluationBinding } from "./learning-scope-targets.js";
 import { recordLearningMeasurement } from "./learning-measurements.js";
+import { CATALOG_SCHEMA, catalogScanPolicy } from "./catalog.js";
 
 const SCHEMA = "agentspine.artifact-checks/v1";
 const PROTOCOL = "agentspine.artifact-evaluator/v1:sha256-or-absent:two-pass:16-cases:2-mib-per-file";
@@ -49,7 +50,12 @@ export async function measureLearningArtifacts({ root = process.cwd(), spec, id,
   const plan = artifactEvaluationPlan(spec);
   const canonical = await realpath(root);
   if (canonical !== resolve(root)) throw new Error("artifact project root must be canonical and non-symbolic");
-  const { learning } = await loadLearning(canonical);
+  // State-only catalog: measurement contracts need no document discovery.
+  // Never take this catalog from the caller; its root is resolved above.
+  const catalog = { schema: CATALOG_SCHEMA, root: canonical, generatedAt: new Date().toISOString(),
+    scanPolicy: catalogScanPolicy(canonical), preservation: "source-files-are-read-only",
+    documents: [], conflicts: [], summary: { total: 0, protected: 0, conflicts: 0, byLayer: {} } };
+  const { learning } = await loadLearning(canonical, catalog);
   const evaluation = learning.evaluations.find((entry) => entry.id === evaluationId && entry.learningId === learningId);
   const binding = normalizeScope(scope);
   if (!evaluation || !exactScope(evaluation.scope, binding) || !activeEvaluationBinding(learning, evaluation)) {
@@ -99,7 +105,7 @@ export async function measureLearningArtifacts({ root = process.cwd(), spec, id,
   const recorded = await recordLearningMeasurement({ root: canonical, id, learningId, evaluationId, phase,
     scope: binding, metric, measurement: { kind: "objective", evaluatorId, runId, sourceDigest },
     coverage: { datasetDigest: plan.datasetDigest, caseCount: checks.length },
-    measuredAt, confirmLocalMeasurement: true });
+    measuredAt, confirmLocalMeasurement: true, catalog });
   return { ...recorded, report, sourceDigest,
     diagnostics: { elapsedMs: performance.now() - started,
       inspectedFiles: checks.length, inspectedBytes: snapshots.reduce((sum, item) => sum + item.bytes, 0) * 2,
