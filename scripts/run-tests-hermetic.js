@@ -59,6 +59,13 @@ async function runMode(mode) {
   // 2-second startup deadlines. Keep those healthy-baseline probes off the shared
   // I/O pool. Both profiles still run them once, with unchanged assertions and limits.
   const isolatedNames = new Set([
+    "assignment-continuation-boundaries.test.js",
+    "assignment-continuation.test.js",
+    "codex-history.test.js",
+    "cross-provider-history.test.js",
+    "delivery-completion.test.js",
+    "king-history.test.js",
+    "mcp-bounded-recovery.test.js",
     "package.test.js",
     "mcp.test.js",
     "session-timeline-invocation.test.js"
