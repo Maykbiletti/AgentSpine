@@ -1,3 +1,4 @@
+import { codexTimelineToolResult } from "./session-timeline-codex.js";
 import { createHash } from "node:crypto";
 import { timelineTerms } from "./session-timeline-query.js";
 
@@ -123,26 +124,32 @@ function candidateFromToolResult(value) {
   return { kind: "objective-result", outcome, count, testLabel, terms: structuredTerms({ outcome, count, testLabel }) };
 }
 
-function timelineEventFromLine(line, offset, authority, includeExcerpt) {
+function timelineEventFromLine(line, offset, authority, includeExcerpt, host) {
   const source = Buffer.from(line);
   if (source.byteLength > MAX_LINE_BYTES) return null;
   let parsed;
-  try { parsed = JSON.parse(line.trim()); } catch { return null; }
+  try { parsed = JSON.parse(line.trim()); } catch {
+    if (host === "codex") throw new Error("codex-history-format-mismatch");
+    return null;
+  }
+  const tool = host === "codex" ? codexTimelineToolResult(parsed) : null;
   const at = extractTimelineTimestamp(parsed);
   if (!at || unsafeObject(parsed)) return null;
-  const candidate = candidateFromToolResult(parsed) || candidateFromToolResult(parsed.message);
+  const candidate = host === "codex" ? candidateFromToolResult(tool)
+    : candidateFromToolResult(parsed) || candidateFromToolResult(parsed.message);
   if (!candidate) return null;
   const stable = JSON.stringify({ at, ...candidate });
   const event = { id: `timeline-event:${digest(`${offset}\0${stable}`).slice(0, 32)}`, at, offset, bytes: source.byteLength,
     sha256: digest(source), ...candidate, authority };
-  if (includeExcerpt) event.excerpt = objectiveExcerpt(objectiveText(parsed));
+  if (tool) event.nativeMessageId = tool.nativeMessageId;
+  if (includeExcerpt) event.excerpt = objectiveExcerpt(objectiveText(tool || parsed));
   return event;
 }
 
-export function eventFromTimelineLine(line, offset, authority = "context-only") {
-  return timelineEventFromLine(line, offset, authority, false);
+export function eventFromTimelineLine(line, offset, authority = "context-only", host = "claude") {
+  return timelineEventFromLine(line, offset, authority, false, host);
 }
 
-export function verifiedTimelineEventFromLine(line, offset, authority = "context-only") {
-  return timelineEventFromLine(line, offset, authority, true);
+export function verifiedTimelineEventFromLine(line, offset, authority = "context-only", host = "claude") {
+  return timelineEventFromLine(line, offset, authority, true, host);
 }

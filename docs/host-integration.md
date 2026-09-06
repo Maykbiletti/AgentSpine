@@ -11,7 +11,7 @@ Provider names are not interchangeable. Shared retrieval, structured knowledge a
 | Project instructions | `CLAUDE.md` hierarchy | `AGENTS.md` hierarchy | `AGENTS.md` through the isolated BLUN profile |
 | Hook package | Native `hooks/hooks.json` | Explicit `hooks/codex.json` | Manifest lifecycle hooks |
 | Verified hook briefing → delivery knowledge | Shared signed preflight bridge | Shared signed preflight bridge; synthetic Codex regression | Shared bridge only if the actual host delivers the verified lifecycle; live acceptance remains open |
-| Historical transcript enrollment | Existing Claude adapter, bounded registered source | Not yet implemented; `host-not-supported` is honest | Not yet implemented; corrected tool names do not provide a history adapter |
+| Historical transcript enrollment | Existing Claude adapter, bounded registered source | Explicit native Codex rollout snapshot; bounded `sessions` source, verified project/session header; synthetic A/B acceptance | Not yet implemented; corrected tool names do not provide a history adapter |
 | Native permissions/trust | Host-owned | Host-owned | Host-owned; enforcement of returned block decisions remains externally unverified |
 
 A successful `SessionStart` alone is not assignment-bound proof. On `UserPromptSubmit`, the exact signed source snapshot is verified and consumed once, then its briefing use is recorded for the current requirement. MCP knowledge and premortem reuse that recorded observation without refetching content. Serialized `loaded: true` claims cannot create the process-local verification capability. Missing or consumed usage evidence yields useful context with `verified: false`, `completionVerified: false` and `automaticRetry: false`; it does not certify delivery or trigger a mandatory fetch. An optional explicit MCP briefing read reports `satisfied-by-host` when the original verified hook observation already exists, preserving that first receipt.
@@ -72,6 +72,8 @@ claude mcp list
 Open `/mcp` in the new interactive session and approve or reconnect `agent-spine`. `Pending approval` means discovery succeeded but Claude Code still needs the user's trust decision. A missing entry after reinstall should be diagnosed from `claude plugin validate .`, `npm run host:check`, and Claude Code's plugin diagnostics; AgentSpine does not write to Claude's user configuration or silently approve itself.
 
 ## Codex
+
+History uses the native Codex adapter described in [session timeline](session-timeline.md#codex-native-rollout-contract). It does not use Claude enrollment or a Claude-shaped transcript. Installed-host acceptance remains separate from the repository fixtures.
 
 | Component | Path | Purpose |
 |---|---|---|

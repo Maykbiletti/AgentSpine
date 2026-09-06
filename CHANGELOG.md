@@ -6,6 +6,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Added an explicitly enrolled native Codex rollout adapter for bounded same-task historical tool-result recall, with project/session header verification, native message references, unchanged source bytes and independent provider contracts. King history and live-host acceptance remain open.
+
 - Added bounded, sourced structured recall for one exact continued task.
 - Added restart- and compaction-safe normal-task continuation capsules to structured knowledge. A bounded confirmed checkpoint carries the current objective, last verified step with source reference, open questions and next step; terminal checkpoints prevent completed work from being resumed.
 - Added an evidence-derived structured knowledge view over the durable world model. Facts, user preferences, decisions with rationale, task state, and error lessons retain source/time/scope plus optional stable session/message references across restart; explicit corrections preserve superseded history while briefing carries only bounded current entries.

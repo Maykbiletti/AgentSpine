@@ -5,6 +5,7 @@ function publicEvent(event, sourceDigest, sessionRef, roomBytes, authority) {
     roomId: `room:${sourceDigest.slice(0, 24)}:${Math.floor(event.offset / roomBytes) + 1}`,
     trust: "untrusted-session-history", authority
   };
+  if (event.nativeMessageId) result.nativeMessageId = event.nativeMessageId;
   if (event.excerpt) result.excerpt = event.excerpt;
   return result;
 }

@@ -110,7 +110,7 @@ test("optional or excluded timeline origins never block a consumed normal prompt
       input.group_id = "group:synthetic";
       delete input.task_id;
     } },
-    { id: "codex", expect: { status: "unavailable", reason: "host-not-supported" }, change: (input) => { input.host = "codex"; } }
+    { id: "codex", expect: { status: "unavailable", reason: "private-enrollment-unavailable" }, change: (input) => { input.host = "codex"; } }
   ];
   for (const itemCase of cases) {
     const input = promptInput(item, { eventId: `event:optional-${itemCase.id}`, now });

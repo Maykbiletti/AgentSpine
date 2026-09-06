@@ -29,7 +29,7 @@ async function validateEntrypoint(root, value) {
   assert(metadata.isFile(), "MCP entrypoint must be a regular file");
 }
 
-function validateHooks(root, hooks, { required, commandRoot }) {
+function validateHooks(root, hooks, { required, commandRoot, matcher = TIMELINE_PRE_TOOL_MATCHER }) {
   assert(hooks && typeof hooks === "object" && !Array.isArray(hooks), "hook bundle is missing");
   assert(Object.keys(hooks).every((key) => ["description", "hooks"].includes(key)), "hook bundle contains unsupported top-level metadata");
   assert(hooks.description && typeof hooks.description === "string", "hook bundle description is missing");
@@ -43,7 +43,7 @@ function validateHooks(root, hooks, { required, commandRoot }) {
       ? " --silent-oversize-post-tool-use" : ""}`;
     assert(command.command === expected, `${event} must use the bundled lifecycle adapter`);
     assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} timeout is unsafe`);
-    if (event === "PreToolUse") assert(registrations[0].matcher === TIMELINE_PRE_TOOL_MATCHER,
+    if (event === "PreToolUse") assert(registrations[0].matcher === matcher,
       "PreToolUse must route only exact mutations and timeline MCP calls through one guard");
   }
   const extras = Object.keys(hooks.hooks || {}).filter((event) => !required.includes(event));
@@ -167,7 +167,8 @@ export async function checkHosts(root = process.cwd()) {
   const claudeHookInventory = validateHooks(root, claudeHooks, {
     required: [...commonEvents, "InstructionsLoaded"], commandRoot: "CLAUDE_PLUGIN_ROOT"
   });
-  const codexHookInventory = validateHooks(root, codexHooks, { required: commonEvents, commandRoot: "PLUGIN_ROOT" });
+  const codexHookInventory = validateHooks(root, codexHooks, { required: commonEvents, commandRoot: "PLUGIN_ROOT",
+    matcher: "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__(?:plugin_agent-spine_agent-spine|agent-spine)__session_timeline_(?:index|search))$" });
   const blunHookInventory = validateBlunHooks(root, blunManifest.hooks);
   const registrations = await Promise.all([
     initializeServer({ label: "blun", root, variable: "BLUN_PLUGIN_ROOT", server: blunManifest.mcpServers["agent-spine"], version: pkg.version }),

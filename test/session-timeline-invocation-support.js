@@ -64,7 +64,7 @@ export async function requestTimelineHostReceipt({
   root, host = "claude", sessionId, scope, transcriptPath, hostHome, eventId = undefined,
   clock = null, environment = process.env, prompt = "Prepare the synthetic timeline enrollment."
 }) {
-  if (host !== "claude" || process.env.CLAUDE_CONFIG_DIR !== hostHome) return unavailable("test-host-profile-mismatch");
+  if (!["claude", "codex"].includes(host) || (host === "codex" ? process.env.CODEX_HOME : process.env.CLAUDE_CONFIG_DIR) !== hostHome) return unavailable("test-host-profile-mismatch");
   if (!completePrivateScope(scope)) return unavailable("test-host-scope-invalid");
   await prepareHostPromptScope(root, scope);
   const result = await runHook(hostPrompt({ root, host, sessionId, scope, transcriptPath,

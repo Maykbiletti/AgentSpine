@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, realpath } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
-import { isInside } from "./paths.js";
+import { isAbsolute, join, resolve } from "node:path";
+import { comparablePath, isInside } from "./paths.js";
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 
@@ -27,7 +27,8 @@ export function sameSessionTimelineSourceLocation(left, right) {
     && SOURCE_LOCATION_KEYS.every((key) => left[key] === right[key]);
 }
 
-export async function sourcePath(value, hostHome) {
+export async function sourcePath(value, hostHome, host = "claude") {
+  if (!["claude", "codex"].includes(host)) return { status: "unavailable", reason: "unknown-timeline-host" };
   if (typeof value !== "string" || !isAbsolute(value)) return { status: "unavailable", reason: "no-validated-transcript" };
   let profileRoot; let projectsRoot;
   try {
@@ -35,7 +36,8 @@ export async function sourcePath(value, hostHome) {
     const profile = await lstat(hostHome);
     if (!profile.isDirectory() || profile.isSymbolicLink()) throw new Error("invalid-host-root");
     profileRoot = await realpath(hostHome);
-    const projectsPath = join(profileRoot, "projects");
+    const directory = host === "codex" ? "sessions" : "projects";
+    const projectsPath = join(profileRoot, directory);
     const projects = await lstat(projectsPath);
     if (!projects.isDirectory() || projects.isSymbolicLink()) throw new Error("invalid-host-root");
     projectsRoot = await realpath(projectsPath);
@@ -51,6 +53,9 @@ export async function sourcePath(value, hostHome) {
   let canonical;
   try { canonical = await realpath(value); }
   catch { return { status: "unavailable", reason: "transcript-unreadable" }; }
+  if (host === "codex" && comparablePath(canonical) !== comparablePath(resolve(value))) {
+    return { status: "unavailable", reason: "transcript-symlink-path" };
+  }
   if (!isInside(projectsRoot, canonical)) return { status: "unavailable", reason: "transcript-outside-host-projects" };
   return { status: "registered", path: canonical, profileRoot, projectsRoot, pathDigest: digest(canonical),
     identity: [metadata.dev, metadata.ino].join(":"), size: Number(metadata.size),
@@ -70,7 +75,7 @@ export async function pathMatchesSource(source, hostHome = null) {
   // configuration must never redirect a previously bound transcript.
   const trustedHome = isAbsolute(hostHome || "") ? hostHome : source?.profileRoot;
   if (!isAbsolute(trustedHome || "")) return false;
-  const current = await sourcePath(source.path, trustedHome);
+  const current = await sourcePath(source.path, trustedHome, source.binding?.host || "claude");
   return current.status === "registered" && current.profileRoot === source.profileRoot && current.projectsRoot === source.projectsRoot
     && current.pathDigest === source.pathDigest && current.identity === source.identity
     && current.size === source.size && current.mtimeNs === source.mtimeNs && current.ctimeNs === source.ctimeNs;

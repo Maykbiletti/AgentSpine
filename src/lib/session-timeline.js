@@ -39,7 +39,7 @@ const MAX_INDEX_BYTES = 16 * 1024 * 1024;
 const ROOM_BYTES = 1024 * 1024;
 const EVENT_OUTCOMES = new Set(["pass", "fail", "blocked", "timeout", "error", "skipped"]);
 const EVENT_LABEL_RE = /^(?:suite-(?:0|[1-9]\d{0,3})|acceptance|audit|npm-check|ci|test)$/;
-const EVENT_KEYS = new Set(["id", "at", "offset", "bytes", "sha256", "kind", "outcome", "count", "testLabel", "terms", "authority"]);
+const EVENT_KEYS = new Set(["nativeMessageId", "id", "at", "offset", "bytes", "sha256", "kind", "outcome", "count", "testLabel", "terms", "authority"]);
 const MUTATION_TAILS = new Map();
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
@@ -65,6 +65,7 @@ function validEvent(item) {
     && EVENT_OUTCOMES.has(item.outcome) && validCount(item.count)
     && (item.testLabel === null || typeof item.testLabel === "string" && EVENT_LABEL_RE.test(item.testLabel))
     && Array.isArray(item.terms) && item.terms.length <= 24 && item.terms.every((term) => /^[\p{L}\p{N}]{3,}$/u.test(term))
+    && (item.nativeMessageId === undefined || typeof item.nativeMessageId === "string" && TIMELINE_ID_RE.test(item.nativeMessageId))
     && item.authority === AUTHORITY;
 }
 function validSource(item) {
@@ -246,7 +247,7 @@ async function readRange(handle, offset, length) {
   const { bytesRead } = await handle.read(buffer, 0, length, offset);
   return buffer.subarray(0, bytesRead);
 }
-function parsedEvents(buffer, start, dropFirst = false) {
+function parsedEvents(buffer, start, dropFirst = false, host = "claude") {
   const result = [];
   let index = 0;
   while (index < buffer.byteLength) {
@@ -254,7 +255,7 @@ function parsedEvents(buffer, start, dropFirst = false) {
     const end = newline < 0 ? buffer.byteLength : newline + 1;
     const line = buffer.subarray(index, end);
     if (!(dropFirst && index === 0) && line.byteLength) {
-      const event = eventFromTimelineLine(line.toString("utf8"), start + index, AUTHORITY);
+      const event = eventFromTimelineLine(line.toString("utf8"), start + index, AUTHORITY, host);
       if (event) result.push(event);
     }
     index = end;
@@ -275,7 +276,7 @@ async function indexRange(source, start, maximum, hostHome = null) {
     const before = start > 0 ? await readRange(opened.handle, start - 1, 1) : Buffer.alloc(0);
     if (!await unchangedHandle(opened.handle, source, hostHome)) return { status: "unavailable", reason: "transcript-changed" };
     return { status: "indexed", next: start + selected.byteLength,
-      events: parsedEvents(selected, start, start > 0 && before[0] !== 0x0a), size: opened.size };
+      events: parsedEvents(selected, start, start > 0 && before[0] !== 0x0a, source.binding.host), size: opened.size };
   } finally { await opened.handle.close(); }
 }
 
@@ -427,7 +428,7 @@ export async function searchSessionTimeline({
     const verified = [];
     for (const event of indexed) {
       const current = await verifyTimelineEvent({ handle: opened.handle, event, readRange, digest,
-        eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY) });
+        eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY, source.binding.host) });
       if (!current || !matchesTimelineEvent(current, wanted, target, boundedWindowSeconds * 1000)) return { blocked: true, reason: "timeline evidence changed", authority: AUTHORITY };
       verified.push(current);
     }
@@ -439,7 +440,7 @@ export async function searchSessionTimeline({
     if (!target) return searchResult(source, target, wanted, "verified-index", []);
     const sought = await seekTimelineEvidence({ handle: opened.handle, size: opened.size, target, wanted,
       windowMs: boundedWindowSeconds * 1000, readRange,
-      eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY),
+      eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY, source.binding.host),
       extractTimestamp: extractTimelineTimestamp,
       matches: matchesTimelineEvent, rank: rankTimelineEvents });
     if (sought.status === "searched") {

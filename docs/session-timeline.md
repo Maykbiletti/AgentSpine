@@ -8,10 +8,10 @@ transcript.
 
 ## Enrollment contract
 
-The Claude adapter is deny-by-default. A regular `UserPromptSubmit` hook first
+The Claude and Codex adapters are deny-by-default. A regular `UserPromptSubmit` hook first
 creates a short-lived opaque receipt only after its exact host preflight has
 been verified. The receipt binds one regular, non-symlinked transcript below a
-verified host `projects` root to the exact host, session, entity, user, tenant,
+verified host `projects` (Claude) or `sessions` (Codex) root to the exact host, session, entity, user, tenant,
 project, task, and optional goal step. It is not exposed in hook context or to
 the model.
 
@@ -31,7 +31,7 @@ creates no identity, permission, delegation, tool access, approval, or policy
 exception.
 
 Every capture and retrieval checks the exact binding again. The profile and
-`projects` root must be real non-symlinked directories; the source must be a
+provider-specific transcript root must be real non-symlinked directories; the source must be a
 single-link regular non-symlinked file below that root. `groupId` must be
 exactly `null`; groups and unknown visibility are excluded from enrollment,
 capture, and recall. Another provider needs its own equivalent verified host
@@ -142,3 +142,59 @@ architectural context only:
 No external code or script was copied or executed. License, architecture, and
 the current AgentSpine contracts were reviewed before independently implemented
 synthetic tests.
+
+
+## Codex native rollout contract
+
+The `codex-rollout-jsonl/v1` adapter accepts only an explicitly enrolled,
+uncompressed native rollout below the verified Codex profile's `sessions`
+directory. It never lists that directory or discovers neighboring sessions.
+Before enrollment, a bounded first-line read (at most 64 KiB) validates the
+`session_meta` record: native session identity, canonical project `cwd`, CLI
+version syntax, and absent/legacy history mode. The per-session transport,
+owner-confirmed enrollment and one-use PreToolUse invocation remain required.
+A Codex lookup leaves native permission decisions to Codex; the lookup adds no
+prompt or permission grant. King/BLUN cannot reuse this adapter through its
+Codex-compatible instruction hierarchy.
+
+Only native `response_item` tool outputs (`function_call_output`,
+`custom_tool_call_output`, `mcp_tool_call_output`) become historical result
+candidates. User and assistant messages do not. Results include timestamp,
+content digest, stable session/message references, native `call_id`, and a
+bounded original excerpt. They remain **untrusted historical context**, never
+current test verification, completion evidence or a learning authorization.
+Structured facts and corrections remain in the separate structured knowledge
+view; raw transcripts are not copied there. Conflicting historical outcomes
+are retained rather than combined into a new claim.
+
+The search ranks the existing bounded index before opening one selected source.
+Sources must match the same host, project, tenant, user and task; groups,
+unregistered private files, symlink escapes and modified snapshots are excluded.
+A source change makes the snapshot unavailable, including after restart. No
+automatic enrollment refresh, receipt reset or retry follows. Missing history
+must be stated honestly while ordinary authorized work remains possible.
+
+Unsupported: compressed, paginated or inherited/forked history; unknown record
+or explicit schema versions; automatic import of a real user's sessions; King
+history. `cli_version` is header provenance, not proof that every version of a
+Codex installation is compatible. The supported structural contract is pinned
+below. A changed host format requires a reviewed adapter and fresh synthetic
+acceptance, not unchecked migration. No Otto/Fredrik live acceptance is implied.
+
+### Primary source provenance
+
+Inspected 2026-09-06: official [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks)
+provides `session_id` and optional `transcript_path`, and explicitly states that
+the transcript format is not a stable interface. The adapter was independently
+implemented against [openai/codex commit 6af345407d9c2a568da9d01b6c4b81a9e61495c0](https://github.com/openai/codex/tree/6af345407d9c2a568da9d01b6c4b81a9e61495c0),
+Apache-2.0: `codex-rs/rollout/src/lib.rs`,
+`codex-rs/history/src/rollout_payload.rs`, and the protocol definitions
+`protocol.rs` / `models.rs`. That source workspace reports `0.0.0`; it is not an
+installed release-version claim. External sources supplied format evidence
+only; no implementation was copied or executed.
+
+Synthetic acceptance exercises native hooks and restarted MCP processes:
+session A stores a measured failure, session B retrieves its exact source after
+compaction, replay/races admit only one invocation, and foreign scope, changed
+sources, model claims, secret-bearing outputs and unknown formats yield no
+verified historical result. Fixtures create their own profiles and sessions.

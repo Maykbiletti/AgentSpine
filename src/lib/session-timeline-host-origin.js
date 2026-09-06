@@ -26,7 +26,7 @@ function consumedResult(origin, briefingUse) { return { consumed: true, origin, 
 
 function eligibleTimelineOrigin(binding, input) {
   const transcriptPath = input?.transcript_path ?? input?.transcriptPath;
-  return binding.host === "claude" && binding.groupId === null
+  return ["claude", "codex"].includes(binding.host) && binding.groupId === null
     && typeof transcriptPath === "string" && transcriptPath.length > 0;
 }
 
@@ -45,7 +45,8 @@ export async function consumeTimelineHostOrigin({
   const briefingUse = await recordHookBriefingUse({ origin: briefingOrigin,
     root: resolvedSources.projectRoot, now });
   const binding = timelineBinding(input, scope);
-  if (receipt.host !== "claude" || receipt.hookEvent !== USER_PROMPT_SUBMIT || receipt.sessionId !== binding.sessionId
+  if (!["claude", "codex"].includes(receipt.host) || environment.BLUN_HOME || environment.BLUN_PLUGIN_ROOT
+    || receipt.hookEvent !== USER_PROMPT_SUBMIT || receipt.sessionId !== binding.sessionId
     || receipt.agentId !== binding.entityId || receipt.userId !== binding.userId || receipt.tenantId !== binding.tenantId
     || receipt.projectId !== binding.projectId || receipt.groupId !== binding.groupId || receipt.taskId !== binding.taskId) {
     return consumedResult(null, briefingUse);

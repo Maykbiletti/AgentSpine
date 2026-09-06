@@ -1,3 +1,4 @@
+import { validateCodexTimelineHeader } from "./session-timeline-codex.js";
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { canonicalPath } from "./paths.js";
@@ -193,14 +194,14 @@ async function loadStateWithRecovery(rootPath, { create = false } = {}) {
 
 function validHostReceiptInput({ host, sessionId, scope }) {
   const binding = sessionTimelineBinding({ host, sessionId, scope });
-  if (host !== "claude") return { reason: "unknown-timeline-host" };
+  if (!["claude", "codex"].includes(host)) return { reason: "unknown-timeline-host" };
   if (scope?.groupId !== null || hasTimelineGroupScope(scope)) return { reason: "group-suppressed" };
   if (!completeTimelineBinding(binding) || binding.groupId !== null) return { reason: "missing-or-unknown-session-scope" };
   return { binding };
 }
 
 function validResolverInput({ host, sessionId }) {
-  if (host !== "claude") return null;
+  if (!["claude", "codex"].includes(host)) return null;
   return safeTimelineId(sessionId);
 }
 
@@ -229,8 +230,11 @@ export async function issueHostTranscriptReceipt({
     binding: input.binding, hostHome, event })) return hostReceiptUnavailable("host-lifecycle-receipt-required");
   const transportDigest = timelineTransportDigest({ root: rootPath, binding: input.binding, environment });
   if (!transportDigest) return hostReceiptUnavailable("local-transport-capability-required");
-  const source = await sourcePath(transcriptPath, hostHome);
+  const source = await sourcePath(transcriptPath, hostHome, host);
   if (source.status !== "registered") return hostReceiptUnavailable(source.reason || "transcript-unavailable");
+  if (host === "codex" && !await validateCodexTimelineHeader({ source, root: rootPath, sessionId })) {
+    return hostReceiptUnavailable("codex-history-format-or-binding-mismatch");
+  }
   // This bounded 4 KiB digest is an immutable source binding, not transcript
   // capture: receipt issuance never retains or injects the source text.
   const snapshot = await normalizePrivateTimelineSource(source);
@@ -353,7 +357,7 @@ export async function inspectPrivateSessionTimelineEnrollment({
       ? candidates.length === 1 ? candidates[0].source.profileRoot : null
       : isAbsolute(hostHome) ? hostHome : null;
     if (!requestedPath || !trustedHome) return inspectUnavailable("private-enrollment-unavailable");
-    const active = await sourcePath(requestedPath, trustedHome);
+    const active = await sourcePath(requestedPath, trustedHome, host);
     if (active.status !== "registered") return inspectUnavailable(active.reason || "transcript-unavailable");
     const matches = candidates.filter((item) => sameSource(item.source, active));
     if (matches.length !== 1) return inspectUnavailable("private-enrollment-unavailable");
@@ -445,7 +449,7 @@ export async function enrollPrivateSessionTimeline(options = {}) {
       if (!transportDigest || !sameTimelineTransportDigest(receipt.transportDigest, transportDigest)) {
         result = unavailable("local-transport-capability-required"); return;
       }
-      const source = await sourcePath(receipt.source.path, receipt.source.profileRoot);
+      const source = await sourcePath(receipt.source.path, receipt.source.profileRoot, receipt.binding.host);
       const normalized = source.status === "registered" ? await normalizePrivateTimelineSource(source) : null;
       state.pendingReceipts.splice(receiptIndex, 1);
       if (!normalized || !sameHostReceiptSource(receipt, normalized)) {

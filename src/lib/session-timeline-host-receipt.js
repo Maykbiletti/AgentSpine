@@ -61,7 +61,7 @@ export function validHostTranscriptReceipt(value, root) {
   return value && value.schema === PRIVATE_TIMELINE_HOST_RECEIPT_SCHEMA && HOST_RECEIPT_RE.test(value.id || "")
     && value.rootDigest === sessionTimelineRootDigest(root) && validTimelineBinding(value.binding) && completeTimelineBinding(value.binding)
     && value.binding.groupId === null && validSourceSnapshot(value.source)
-    && validTimelineTransportDigest(value.transportDigest) && value.origin === PRIVATE_TIMELINE_HOST_RECEIPT_ORIGIN
+    && validTimelineTransportDigest(value.transportDigest) && value.origin === (value.binding.host === "codex" ? "codex-user-prompt-v1" : PRIVATE_TIMELINE_HOST_RECEIPT_ORIGIN)
     && (value.eventDigest === null || /^[a-f0-9]{64}$/.test(value.eventDigest || "")) && Number.isFinite(issuedAt)
     && Number.isFinite(expiresAt) && expiresAt > issuedAt && expiresAt - issuedAt <= HOST_RECEIPT_TTL_MS + 1000
     && value.authority === AUTHORITY && /^[a-f0-9]{64}$/.test(value.receiptDigest || "")
@@ -89,7 +89,7 @@ export function makeHostTranscriptReceipt({ root, binding, source, transportDige
   const receipt = {
     schema: PRIVATE_TIMELINE_HOST_RECEIPT_SCHEMA, id: `asthr_${randomBytes(32).toString("base64url")}`,
     rootDigest: sessionTimelineRootDigest(root), binding: { ...binding }, source: sourceMetadata(source), transportDigest,
-    origin: PRIVATE_TIMELINE_HOST_RECEIPT_ORIGIN, eventDigest: eventDigest(eventId),
+    origin: binding.host === "codex" ? "codex-user-prompt-v1" : PRIVATE_TIMELINE_HOST_RECEIPT_ORIGIN, eventDigest: eventDigest(eventId),
     issuedAt: current.toISOString(), expiresAt: new Date(current.getTime() + HOST_RECEIPT_TTL_MS).toISOString(),
     authority: AUTHORITY
   };

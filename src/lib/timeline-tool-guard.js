@@ -122,14 +122,17 @@ function denied(reason) {
 }
 
 function allowed(updatedInput) {
+  const permission = updatedInput.host === "codex" ? {} : {
+    permissionDecision: "ask",
+    permissionDecisionReason: "AgentSpine binds this one context-only timeline lookup to the current host session and local transport."
+  };
   return {
     blocked: false,
     updatedInput,
     hostOutput: {
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
-        permissionDecision: "ask",
-        permissionDecisionReason: "AgentSpine binds this one context-only timeline lookup to the current Claude session and local transport.",
+        ...permission,
         updatedInput
       }
     }
@@ -139,20 +142,22 @@ function allowed(updatedInput) {
 export async function runTimelineToolGuard(input) {
   try {
     const tool = timelineToolKind(input?.tool_name);
-    if (input?.hook_event_name !== "PreToolUse" || !tool || hostFromInput(input) !== "claude" || !plainObject(input.tool_input)) {
-      return denied("AgentSpine session timeline requires a verified Claude PreToolUse payload.");
+    const host = hostFromInput(input || {});
+    if (input?.hook_event_name !== "PreToolUse" || !tool || !["claude", "codex"].includes(host)
+      || process.env.BLUN_HOME || process.env.BLUN_PLUGIN_ROOT || !plainObject(input.tool_input)) {
+      return denied("AgentSpine session timeline requires a verified supported-host PreToolUse payload.");
     }
-    const resolved = await resolveHostSourceCatalog({ host: "claude", cwd: input.cwd || process.cwd(), input });
+    const resolved = await resolveHostSourceCatalog({ host, cwd: input.cwd || process.cwd(), input });
     const root = resolved.projectRoot;
     const hostSession = sessionId(input);
     const gateway = gatewayEnvironmentContext();
     if (rawGroupClaim(input, gateway)) return denied("AgentSpine session timeline is unavailable for group-scoped activity.");
-    const provisionalBinding = sessionTimelineBinding({ host: "claude", sessionId: hostSession, scope: claimedScope(input) });
+    const provisionalBinding = sessionTimelineBinding({ host, sessionId: hostSession, scope: claimedScope(input) });
     const transportDigest = timelineTransportDigest({ root, binding: provisionalBinding });
     if (!transportDigest) {
       return denied("AgentSpine session timeline requires a locally configured per-session transport capability.");
     }
-    const enrollment = await resolvePrivateSessionTimelineEnrollment({ root, host: "claude", sessionId: hostSession,
+    const enrollment = await resolvePrivateSessionTimelineEnrollment({ root, host, sessionId: hostSession,
       transcriptPath: input.transcript_path ?? input.transcriptPath, hostHome: resolved.hostHome,
       expectedTransportDigest: transportDigest });
     if (enrollment.status !== "enrolled") {
@@ -167,14 +172,15 @@ export async function runTimelineToolGuard(input) {
     const scope = bindingScope(enrollment.binding, enrollment);
     const requestFields = requestInput(tool, input.tool_input);
     if (!requestFields) return denied("AgentSpine session timeline search needs an exact time or a concrete query.");
-    const updatedInput = { ...requestFields, root, sessionId: enrollment.binding.sessionId,
+    if (input.tool_input.host && input.tool_input.host !== host) return denied("Timeline provider binding mismatch.");
+    const updatedInput = { ...requestFields, ...(host === "codex" ? { host } : {}), root, sessionId: enrollment.binding.sessionId,
       entityId: enrollment.binding.entityId, userId: enrollment.binding.userId, tenantId: enrollment.binding.tenantId,
       projectId: enrollment.binding.projectId, taskId: enrollment.binding.taskId, groupId: null,
       goalId: enrollment.binding.goalId, goalStepId: enrollment.binding.goalStepId,
       timelineVisibility: enrollment.timelineVisibility, enrollmentDigest: enrollment.enrollmentDigest };
     const request = timelineInvocationRequest(tool, updatedInput, root);
     const authorization = await authorizeSessionTimelineInvocation({
-      root, host: "claude", sessionId: hostSession, scope, hostHome: resolved.hostHome,
+      root, host, sessionId: hostSession, scope, hostHome: resolved.hostHome,
       tool, request, toolUseId: hookDeliveryId(input), transportDigest, enrollmentDigest: enrollment.enrollmentDigest
     });
     if (!authorization) return denied("AgentSpine session timeline invocation is unavailable for this bound source.");

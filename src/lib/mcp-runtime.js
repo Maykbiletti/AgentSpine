@@ -40,8 +40,9 @@ function textResult(value, isError = false) {
 
 function timelineTransport(input, root, environment) {
   const { scope } = input;
-  return { scope, transportDigest: timelineTransportDigest({ root,
-    binding: sessionTimelineBinding({ host: "claude", sessionId: input.request.sessionId, scope }), environment }) };
+  const host = input.request.host || "claude";
+  return { scope, host, transportDigest: timelineTransportDigest({ root,
+    binding: sessionTimelineBinding({ host, sessionId: input.request.sessionId, scope }), environment }) };
 }
 
 function absent(value) { return value === undefined || value === null || value === ""; }
@@ -155,6 +156,7 @@ async function callTool(name, args = {}, environment = process.env) {
   if (name === "evaluate_autonomy_action") return textResult(await evaluateAutonomyAction({ ...args, root }));
   if (name === "session_timeline_index") {
     const input = timelineInvocationInput(args);
+    if (environment.BLUN_HOME || environment.BLUN_PLUGIN_ROOT) return textResult(unavailableTimelineInvocation("host-not-supported"));
     if (runtimeTimelineGroup(environment, input)) return textResult(unavailableTimelineInvocation("timeline-group-suppressed"));
     if (!input.valid) return textResult(unavailableTimelineInvocation(input.reason || "timeline-scope-invalid"));
     const timeline = timelineTransport(input, root, environment);
@@ -163,12 +165,13 @@ async function callTool(name, args = {}, environment = process.env) {
     }
     const invocationRequest = timelineInvocationRequest("index", args, root);
     if (!invocationRequest) return textResult(unavailableTimelineInvocation("timeline-invocation-unavailable"));
-    return textResult(await indexSessionTimeline({ root, host: "claude", sessionId: input.request.sessionId, scope: timeline.scope,
+    return textResult(await indexSessionTimeline({ root, host: timeline.host, sessionId: input.request.sessionId, scope: timeline.scope,
       maxBytes: args.maxBytes, enrollmentDigest: input.request.enrollmentDigest,
-      hostHome: environment.CLAUDE_CONFIG_DIR ?? null, transportDigest: timeline.transportDigest, invocationRequest }));
+      hostHome: (timeline.host === "codex" ? environment.CODEX_HOME : environment.CLAUDE_CONFIG_DIR) ?? null, transportDigest: timeline.transportDigest, invocationRequest }));
   }
   if (name === "session_timeline_search") {
     const input = timelineInvocationInput(args);
+    if (environment.BLUN_HOME || environment.BLUN_PLUGIN_ROOT) return textResult(unavailableTimelineInvocation("host-not-supported"));
     if (runtimeTimelineGroup(environment, input)) return textResult(unavailableTimelineInvocation("timeline-group-suppressed"));
     if (!input.valid) return textResult(unavailableTimelineInvocation(input.reason || "timeline-scope-invalid"));
     const timeline = timelineTransport(input, root, environment);
@@ -177,10 +180,10 @@ async function callTool(name, args = {}, environment = process.env) {
     }
     const invocationRequest = timelineInvocationRequest("search", args, root);
     if (!invocationRequest) return textResult(unavailableTimelineInvocation("timeline-invocation-unavailable"));
-    return textResult(await searchSessionTimeline({ root, host: "claude", sessionId: input.request.sessionId, scope: timeline.scope,
+    return textResult(await searchSessionTimeline({ root, host: timeline.host, sessionId: input.request.sessionId, scope: timeline.scope,
       at: args.at, query: args.query, windowSeconds: args.windowSeconds, includePriorSessions: args.includePriorSessions,
       enrollmentDigest: input.request.enrollmentDigest,
-      hostHome: environment.CLAUDE_CONFIG_DIR ?? null, transportDigest: timeline.transportDigest,
+      hostHome: (timeline.host === "codex" ? environment.CODEX_HOME : environment.CLAUDE_CONFIG_DIR) ?? null, transportDigest: timeline.transportDigest,
       invocationRequest }));
   }
   if (name === "audit") return textResult(await runAudit(root));

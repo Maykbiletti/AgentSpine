@@ -57,8 +57,8 @@ export async function captureSessionTimelineLifecycle({ root, event, input, scop
     }
   }
   const result = (value) => hostReceipt ? { ...value, hostReceipt } : value;
-  if (scope.host !== "claude") return unavailable("host-not-supported");
-  return result(await sessionTimelineLifecycleHint({ root, host: "claude",
+  if (!["claude", "codex"].includes(scope.host) || process.env.BLUN_HOME || process.env.BLUN_PLUGIN_ROOT) return unavailable("host-not-supported");
+  return result(await sessionTimelineLifecycleHint({ root, host: scope.host,
     sessionId: input.session_id ?? input.sessionId, scope, environment: process.env }));
 }
 
