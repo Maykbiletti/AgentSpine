@@ -12,6 +12,11 @@ export const MAX_PENDING_RECEIPTS = 32;
 const AUTHORITY = "context-only";
 const HOST_RECEIPT_RE = /^asthr_[A-Za-z0-9_-]{43}$/;
 
+function receiptOrigin(host) {
+  return host === "king" ? "king-user-prompt-v1"
+    : host === "codex" ? "codex-user-prompt-v1" : PRIVATE_TIMELINE_HOST_RECEIPT_ORIGIN;
+}
+
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") {
@@ -61,7 +66,7 @@ export function validHostTranscriptReceipt(value, root) {
   return value && value.schema === PRIVATE_TIMELINE_HOST_RECEIPT_SCHEMA && HOST_RECEIPT_RE.test(value.id || "")
     && value.rootDigest === sessionTimelineRootDigest(root) && validTimelineBinding(value.binding) && completeTimelineBinding(value.binding)
     && value.binding.groupId === null && validSourceSnapshot(value.source)
-    && validTimelineTransportDigest(value.transportDigest) && value.origin === (value.binding.host === "codex" ? "codex-user-prompt-v1" : PRIVATE_TIMELINE_HOST_RECEIPT_ORIGIN)
+    && validTimelineTransportDigest(value.transportDigest) && value.origin === receiptOrigin(value.binding.host)
     && (value.eventDigest === null || /^[a-f0-9]{64}$/.test(value.eventDigest || "")) && Number.isFinite(issuedAt)
     && Number.isFinite(expiresAt) && expiresAt > issuedAt && expiresAt - issuedAt <= HOST_RECEIPT_TTL_MS + 1000
     && value.authority === AUTHORITY && /^[a-f0-9]{64}$/.test(value.receiptDigest || "")
@@ -89,7 +94,7 @@ export function makeHostTranscriptReceipt({ root, binding, source, transportDige
   const receipt = {
     schema: PRIVATE_TIMELINE_HOST_RECEIPT_SCHEMA, id: `asthr_${randomBytes(32).toString("base64url")}`,
     rootDigest: sessionTimelineRootDigest(root), binding: { ...binding }, source: sourceMetadata(source), transportDigest,
-    origin: binding.host === "codex" ? "codex-user-prompt-v1" : PRIVATE_TIMELINE_HOST_RECEIPT_ORIGIN, eventDigest: eventDigest(eventId),
+    origin: receiptOrigin(binding.host), eventDigest: eventDigest(eventId),
     issuedAt: current.toISOString(), expiresAt: new Date(current.getTime() + HOST_RECEIPT_TTL_MS).toISOString(),
     authority: AUTHORITY
   };

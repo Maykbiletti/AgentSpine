@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { comparablePath, isInside } from "./paths.js";
+import { validTimelineHost } from "./session-timeline-provider.js";
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 
@@ -28,7 +29,7 @@ export function sameSessionTimelineSourceLocation(left, right) {
 }
 
 export async function sourcePath(value, hostHome, host = "claude") {
-  if (!["claude", "codex"].includes(host)) return { status: "unavailable", reason: "unknown-timeline-host" };
+  if (!validTimelineHost(host)) return { status: "unavailable", reason: "unknown-timeline-host" };
   if (typeof value !== "string" || !isAbsolute(value)) return { status: "unavailable", reason: "no-validated-transcript" };
   let profileRoot; let projectsRoot;
   try {
@@ -36,7 +37,7 @@ export async function sourcePath(value, hostHome, host = "claude") {
     const profile = await lstat(hostHome);
     if (!profile.isDirectory() || profile.isSymbolicLink()) throw new Error("invalid-host-root");
     profileRoot = await realpath(hostHome);
-    const directory = host === "codex" ? "sessions" : "projects";
+    const directory = ["codex", "king"].includes(host) ? "sessions" : "projects";
     const projectsPath = join(profileRoot, directory);
     const projects = await lstat(projectsPath);
     if (!projects.isDirectory() || projects.isSymbolicLink()) throw new Error("invalid-host-root");
@@ -53,7 +54,7 @@ export async function sourcePath(value, hostHome, host = "claude") {
   let canonical;
   try { canonical = await realpath(value); }
   catch { return { status: "unavailable", reason: "transcript-unreadable" }; }
-  if (host === "codex" && comparablePath(canonical) !== comparablePath(resolve(value))) {
+  if (["codex", "king"].includes(host) && comparablePath(canonical) !== comparablePath(resolve(value))) {
     return { status: "unavailable", reason: "transcript-symlink-path" };
   }
   if (!isInside(projectsRoot, canonical)) return { status: "unavailable", reason: "transcript-outside-host-projects" };

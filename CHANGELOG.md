@@ -6,7 +6,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
-- Added an explicitly enrolled native Codex rollout adapter for bounded same-task historical tool-result recall, with project/session header verification, native message references, unchanged source bytes and independent provider contracts. King history and live-host acceptance remain open.
+- Added a native King agent-wire history adapter with an explicit protected source/protocol mapping, provider-separated lifecycle binding, bounded objective `tool.result` extraction, and stable session/message references. It never scans `BLUN_HOME`, reuses Codex rollout parsing, or changes King permissions.
+- Added an explicitly enrolled native Codex rollout adapter for bounded same-task historical tool-result recall, with project/session header verification, native message references, unchanged source bytes and independent provider contracts. Live-host acceptance remains open.
 
 - Added bounded, sourced structured recall for one exact continued task.
 - Added restart- and compaction-safe normal-task continuation capsules to structured knowledge. A bounded confirmed checkpoint carries the current objective, last verified step with source reference, open questions and next step; terminal checkpoints prevent completed work from being resumed.
@@ -25,6 +26,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Tests
 
+- Synthetic King sessions A/B prove measured `FAIL 0/15` recall after restart and compaction while exact gateway binding, wrong protocol/path/scope/provider, replay/race, source mutation, unknown records, and source-byte preservation remain enforced.
 - A CSS-archive Before/After restores its sourced backup lesson after restart and `PostCompact`; boundary tests remain green.
 - Synthetic Before/After probes show that a legacy task-state cannot reconstruct work, while the structured checkpoint restores exactly one sourced next step after a separate-process restart and `PostCompact`. Correction, completion, MCP, scope, conflict, proposal, tamper, bounds and source-byte tests prevent false continuation.
 - Synthetic restart, correction, contradiction, repetition, MCP, briefing-budget, group/project/privacy, tamper and byte-preservation probes show that the new view reduces reconstruction ambiguity without promoting guesses or rereading historical state into every briefing.
@@ -39,6 +41,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Evidence limits
 
+- The King repository adapter is pinned to public BLUN Code `1.0.109` commit `fbb97459` and vendored King SDK `0.12.1` format evidence. Fredrik's actual source/protocol mapping, installed format, live A/B recall, and host block enforcement remain unverified; no live configuration was changed.
 - Public BLUN Code 1.0.109 naming evidence and synthetic hook/MCP tests establish the repository contract only. The separate King host bug that ignores a returned `{decision:"block"}` and Fredrik's live installation remain unverified external boundaries.
 
 ## [0.73.0] - 2026-09-05

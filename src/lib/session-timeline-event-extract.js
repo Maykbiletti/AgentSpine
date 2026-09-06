@@ -1,4 +1,5 @@
 import { codexTimelineToolResult } from "./session-timeline-codex.js";
+import { kingTimelineToolResult } from "./session-timeline-king.js";
 import { createHash } from "node:crypto";
 import { timelineTerms } from "./session-timeline-query.js";
 
@@ -129,13 +130,14 @@ function timelineEventFromLine(line, offset, authority, includeExcerpt, host) {
   if (source.byteLength > MAX_LINE_BYTES) return null;
   let parsed;
   try { parsed = JSON.parse(line.trim()); } catch {
-    if (host === "codex") throw new Error("codex-history-format-mismatch");
+    if (["codex", "king"].includes(host)) throw new Error(`${host}-history-format-mismatch`);
     return null;
   }
-  const tool = host === "codex" ? codexTimelineToolResult(parsed) : null;
-  const at = extractTimelineTimestamp(parsed);
+  const tool = host === "codex" ? codexTimelineToolResult(parsed)
+    : host === "king" ? kingTimelineToolResult(parsed) : null;
+  const at = tool?.at || extractTimelineTimestamp(parsed);
   if (!at || unsafeObject(parsed)) return null;
-  const candidate = host === "codex" ? candidateFromToolResult(tool)
+  const candidate = ["codex", "king"].includes(host) ? candidateFromToolResult(tool)
     : candidateFromToolResult(parsed) || candidateFromToolResult(parsed.message);
   if (!candidate) return null;
   const stable = JSON.stringify({ at, ...candidate });

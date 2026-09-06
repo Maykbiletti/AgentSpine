@@ -1,4 +1,6 @@
 import { consumeHookBriefingOrigin, recordHookBriefingUse } from "./hook-briefing-use.js";
+import { runtimeHostForTimeline, timelineHostForRuntime, timelineHostHome, timelineProtocolFromRuntime, timelineSourceFromRuntime,
+  validTimelineHost } from "./session-timeline-provider.js";
 
 const verifiedOrigins = new WeakSet();
 const USER_PROMPT_SUBMIT = "UserPromptSubmit";
@@ -19,14 +21,15 @@ function sameBinding(left, right) {
 
 function sameInput(left, right) {
   return (left?.transcript_path ?? left?.transcriptPath) === (right?.transcript_path ?? right?.transcriptPath)
-    && (left?.event_id ?? left?.hook_event_id ?? null) === (right?.event_id ?? right?.hook_event_id ?? null);
+    && (left?.event_id ?? left?.hook_event_id ?? null) === (right?.event_id ?? right?.hook_event_id ?? null)
+    && (left?.protocol_version ?? null) === (right?.protocol_version ?? null);
 }
 
 function consumedResult(origin, briefingUse) { return { consumed: true, origin, briefingUse }; }
 
 function eligibleTimelineOrigin(binding, input) {
   const transcriptPath = input?.transcript_path ?? input?.transcriptPath;
-  return ["claude", "codex"].includes(binding.host) && binding.groupId === null
+  return validTimelineHost(binding.host) && binding.groupId === null
     && typeof transcriptPath === "string" && transcriptPath.length > 0;
 }
 
@@ -44,18 +47,22 @@ export async function consumeTimelineHostOrigin({
   const receipt = preflight.receipt;
   const briefingUse = await recordHookBriefingUse({ origin: briefingOrigin,
     root: resolvedSources.projectRoot, now });
-  const binding = timelineBinding(input, scope);
-  if (!["claude", "codex"].includes(receipt.host) || environment.BLUN_HOME || environment.BLUN_PLUGIN_ROOT
+  const timelineHost = timelineHostForRuntime(scope.host, environment);
+  const binding = timelineBinding(input, { ...scope, host: timelineHost });
+  const expectedReceiptHost = runtimeHostForTimeline(timelineHost);
+  if (receipt.host !== expectedReceiptHost
     || receipt.hookEvent !== USER_PROMPT_SUBMIT || receipt.sessionId !== binding.sessionId
     || receipt.agentId !== binding.entityId || receipt.userId !== binding.userId || receipt.tenantId !== binding.tenantId
     || receipt.projectId !== binding.projectId || receipt.groupId !== binding.groupId || receipt.taskId !== binding.taskId) {
     return consumedResult(null, briefingUse);
   }
-  if (!eligibleTimelineOrigin(binding, input)) return consumedResult(null, briefingUse);
+  const sourceInput = { transcript_path: timelineSourceFromRuntime(timelineHost, input, environment),
+    event_id: input.event_id ?? input.hook_event_id ?? null,
+    protocol_version: timelineProtocolFromRuntime(timelineHost, environment) };
+  if (!eligibleTimelineOrigin(binding, sourceInput)) return consumedResult(null, briefingUse);
   const origin = Object.freeze({ binding, input: Object.freeze({
-    transcript_path: input.transcript_path ?? input.transcriptPath,
-    event_id: input.event_id ?? input.hook_event_id ?? null
-  }), root: resolvedSources.projectRoot, hostHome: resolvedSources.hostHome, event });
+    ...sourceInput,
+  }), root: resolvedSources.projectRoot, hostHome: timelineHostHome(timelineHost, environment), event });
   verifiedOrigins.add(origin);
   return consumedResult(origin, briefingUse);
 }

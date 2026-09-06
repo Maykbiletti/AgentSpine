@@ -1,3 +1,5 @@
+import { validTimelineHost } from "./session-timeline-provider.js";
+
 export const TIMELINE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
 
 export function safeTimelineId(value) {
@@ -6,7 +8,7 @@ export function safeTimelineId(value) {
 
 export function sessionTimelineBinding({ host, sessionId, scope }) {
   return {
-    host: ["claude", "codex"].includes(host) ? host : null,
+    host: validTimelineHost(host) ? host : null,
     sessionId: safeTimelineId(sessionId),
     entityId: safeTimelineId(scope?.entityId),
     userId: safeTimelineId(scope?.userId),
@@ -28,7 +30,7 @@ export function hasVerifiedTimelinePrivateScope(scope) {
 }
 
 export function completeTimelineBinding(value) {
-  return ["claude", "codex"].includes(value.host) && !value.groupId
+  return validTimelineHost(value.host) && !value.groupId
     && ["sessionId", "entityId", "userId", "tenantId", "projectId", "taskId"].every((key) => value[key]);
 }
 
@@ -38,7 +40,7 @@ export function sameTimelineBinding(left, right) {
 }
 
 export function validTimelineBinding(value) {
-  return value && ["claude", "codex"].includes(value.host)
+  return value && validTimelineHost(value.host)
     && [value.sessionId, value.entityId, value.userId, value.tenantId, value.projectId, value.taskId]
       .every((item) => typeof item === "string" && TIMELINE_ID_RE.test(item))
     && [value.groupId, value.goalId, value.goalStepId]

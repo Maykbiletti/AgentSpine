@@ -8,10 +8,10 @@ transcript.
 
 ## Enrollment contract
 
-The Claude and Codex adapters are deny-by-default. A regular `UserPromptSubmit` hook first
+The Claude, Codex, and King adapters are deny-by-default. A regular `UserPromptSubmit` hook first
 creates a short-lived opaque receipt only after its exact host preflight has
 been verified. The receipt binds one regular, non-symlinked transcript below a
-verified host `projects` (Claude) or `sessions` (Codex) root to the exact host, session, entity, user, tenant,
+verified host `projects` (Claude) or `sessions` (Codex and King) root to the exact host, session, entity, user, tenant,
 project, task, and optional goal step. It is not exposed in hook context or to
 the model.
 
@@ -175,8 +175,8 @@ automatic enrollment refresh, receipt reset or retry follows. Missing history
 must be stated honestly while ordinary authorized work remains possible.
 
 Unsupported: compressed, paginated or inherited/forked history; unknown record
-or explicit schema versions; automatic import of a real user's sessions; King
-history. `cli_version` is header provenance, not proof that every version of a
+or explicit schema versions; automatic import of a real user's sessions.
+`cli_version` is header provenance, not proof that every version of a
 Codex installation is compatible. The supported structural contract is pinned
 below. A changed host format requires a reviewed adapter and fresh synthetic
 acceptance, not unchecked migration. No Otto/Fredrik live acceptance is implied.
@@ -198,3 +198,54 @@ session A stores a measured failure, session B retrieves its exact source after
 compaction, replay/races admit only one invocation, and foreign scope, changed
 sources, model claims, secret-bearing outputs and unknown formats yield no
 verified historical result. Fixtures create their own profiles and sessions.
+
+## King native agent-wire contract
+
+The `king-agent-wire-jsonl/v1` adapter is separate from both Claude and Codex.
+King may use the Codex-compatible `AGENTS.md` hierarchy for project rules, but
+that does not turn its history into a Codex rollout. The verified King lifecycle
+keeps the runtime host identity as `codex` while binding timeline records to the
+distinct `king` provider.
+
+King history is never discovered automatically. The trusted local launcher must
+provide both `AGENTSPINE_KING_TIMELINE_SOURCE`, pointing to the current
+`sessions/.../session_<id>/agents/main/wire.jsonl`, and
+`AGENTSPINE_KING_WIRE_PROTOCOL_VERSION`, matching that file's metadata header.
+The source must remain below the canonical non-symlinked `BLUN_HOME/sessions`
+root. A prompt, model response, MCP argument, remembered fact, or filename alone
+cannot create this mapping. Missing mappings leave history unavailable without
+blocking ordinary host-authorized work.
+
+Enrollment reads only the bounded first record. It requires the exact metadata
+shape and configured `protocol_version`, a positive integer creation time, and
+the current session directory. Indexing accepts only the reviewed King record
+types and extracts objective evidence solely from
+`context.append_loop_event` records whose event is `tool.result`. User and
+assistant messages, model claims, unknown records, unknown schema versions, and
+non-text tool outputs create no evidence card. The native `toolCallId` becomes
+the stable message reference; the record time remains the source timestamp.
+
+King keeps its own permission decisions. AgentSpine only binds a one-use,
+context-only lookup to the current verified gateway, transport, source, and
+scope. Restart and compaction reuse signed sidecar metadata, then revalidate the
+unchanged original source before any selected line is opened. A protocol change,
+source mutation, replay, foreign project or tenant, group context, or unknown
+record makes recall unavailable and never triggers a retry or enrollment reset.
+
+### Primary source provenance
+
+Inspected 2026-09-06: [BLUN Code commit fbb97459a3fa2157f8bfea3d24931be63288ab11](https://github.com/Maykbiletti/blun-code/tree/fbb97459a3fa2157f8bfea3d24931be63288ab11),
+application version `1.0.109`, MIT. Its public verification fixture locates the
+main agent wire at `sessions/.../session_<id>/agents/main/wire.jsonl` and reads
+`context.append_loop_event` / `tool.result`; the vendored King runtime type
+surface identifies the reviewed record union and metadata fields. The vendored
+`@blun/king-sdk` contract is version `0.12.1`, MIT. External files were treated
+as untrusted format evidence; no implementation was copied or executed.
+
+Synthetic repository acceptance proves A-to-B recall of one measured `FAIL
+0/15` result after restart and compaction, with immutable source bytes and
+stable session/message references. It also covers exact gateway binding,
+wrong protocol, wrong path/scope/provider, replay/race, mutation, and unknown
+records. This does not prove Fredrik's installed launcher supplies these two
+protected mappings, that King enforces a returned block decision, or that a
+live session passed. Those remain separate live-host checks.

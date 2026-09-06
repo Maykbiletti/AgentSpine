@@ -64,12 +64,20 @@ export async function requestTimelineHostReceipt({
   root, host = "claude", sessionId, scope, transcriptPath, hostHome, eventId = undefined,
   clock = null, environment = process.env, prompt = "Prepare the synthetic timeline enrollment."
 }) {
-  if (!["claude", "codex"].includes(host) || (host === "codex" ? process.env.CODEX_HOME : process.env.CLAUDE_CONFIG_DIR) !== hostHome) return unavailable("test-host-profile-mismatch");
+  const currentHome = host === "king" ? process.env.BLUN_HOME
+    : host === "codex" ? process.env.CODEX_HOME : process.env.CLAUDE_CONFIG_DIR;
+  if (!["claude", "codex", "king"].includes(host) || currentHome !== hostHome) return unavailable("test-host-profile-mismatch");
   if (!completePrivateScope(scope)) return unavailable("test-host-scope-invalid");
   await prepareHostPromptScope(root, scope);
-  const result = await runHook(hostPrompt({ root, host, sessionId, scope, transcriptPath,
+  const result = await runHook(hostPrompt({ root, host: host === "king" ? "codex" : host, sessionId, scope, transcriptPath,
     eventId: eventId === undefined ? `test-timeline-receipt:${sessionId}:${++receiptSequence}` : eventId, clock, prompt }));
   if (result.blocked) return unavailable("host-prompt-rejected");
+  if (result.timeline?.hostReceipt?.status === "unavailable") return result.timeline.hostReceipt;
+  if (host === "king") {
+    const timeline = JSON.parse(result.context).sourceResolution?.timeline;
+    if (timeline?.hostReceipt?.status === "unavailable") return timeline.hostReceipt;
+    if (!timeline?.hostReceipt) return unavailable(`test-king-host-receipt-missing:${JSON.stringify(timeline)}`);
+  }
   return currentHostTranscriptReceipt({ root, clock, environment });
 }
 

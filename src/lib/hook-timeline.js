@@ -1,6 +1,9 @@
 import { sessionTimelineLifecycleHint } from "./session-timeline.js";
 import { issueHostTranscriptReceipt } from "./session-timeline-enrollment.js";
 import { consumeTimelineHostOrigin } from "./session-timeline-host-origin.js";
+import {
+  timelineHostForRuntime, timelineHostHome, timelineProtocolFromRuntime, timelineSourceFromRuntime
+} from "./session-timeline-provider.js";
 
 const AUTHORITY = "context-only";
 
@@ -33,14 +36,16 @@ function receiptObservation(receipt) {
     expiresAt: receipt.expiresAt || null, authority: AUTHORITY };
 }
 
-// This observes a host-provided Claude hook payload but never returns the
+// This observes a provider hook payload but never returns the
 // opaque enrollment token through model-visible context.
 export async function observeHostTranscriptReceipt({ root, event, input, scope, hostHome, hostOrigin = null, clock = null }) {
   if (event !== "UserPromptSubmit") return receiptObservation({ status: "not-applicable" });
   if (hasRawTimelineGroupSignal(input)) return receiptObservation({ status: "unavailable", reason: "raw-group-scope" });
   if (!scope || scope.groupId !== null) return receiptObservation({ status: "unavailable", reason: "computed-group-scope" });
-  const receipt = await issueHostTranscriptReceipt({ root, host: scope.host, sessionId: input.session_id ?? input.sessionId,
-    scope, transcriptPath: input.transcript_path ?? input.transcriptPath, hostHome, event, eventId: input.event_id ?? input.hook_event_id,
+  const host = timelineHostForRuntime(scope.host, process.env);
+  const receipt = await issueHostTranscriptReceipt({ root, host, sessionId: input.session_id ?? input.sessionId,
+    scope, transcriptPath: timelineSourceFromRuntime(host, input), hostHome: timelineHostHome(host) ?? hostHome,
+    event, eventId: input.event_id ?? input.hook_event_id,
     hostOrigin, clock, environment: process.env });
   return receiptObservation(receipt);
 }
@@ -57,8 +62,9 @@ export async function captureSessionTimelineLifecycle({ root, event, input, scop
     }
   }
   const result = (value) => hostReceipt ? { ...value, hostReceipt } : value;
-  if (!["claude", "codex"].includes(scope.host) || process.env.BLUN_HOME || process.env.BLUN_PLUGIN_ROOT) return unavailable("host-not-supported");
-  return result(await sessionTimelineLifecycleHint({ root, host: scope.host,
+  const host = timelineHostForRuntime(scope.host, process.env);
+  if (!host || (host === "king" && !timelineProtocolFromRuntime(host))) return unavailable("host-not-supported");
+  return result(await sessionTimelineLifecycleHint({ root, host,
     sessionId: input.session_id ?? input.sessionId, scope, environment: process.env }));
 }
 

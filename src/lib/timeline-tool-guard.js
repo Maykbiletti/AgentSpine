@@ -7,6 +7,7 @@ import { blockedHookOutput } from "./hook-output.js";
 import { sessionTimelineBinding } from "./session-timeline-contract.js";
 import { resolvePrivateSessionTimelineEnrollment } from "./session-timeline-enrollment.js";
 import { timelineTransportDigest } from "./session-timeline-transport.js";
+import { runtimeHostForTimeline, timelineHostForRuntime, timelineHostHome } from "./session-timeline-provider.js";
 
 function plainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -29,7 +30,8 @@ function gatewayMatchesEnrollment(gateway, binding) {
     ["host", "host"], ["entityId", "entityId"], ["projectId", "projectId"],
     ["taskId", "taskId"], ["goalId", "goalId"], ["goalStepId", "goalStepId"]
   ];
-  return fields.every(([gatewayField, bindingField]) => gateway[gatewayField] === binding[bindingField])
+  return gateway.host === runtimeHostForTimeline(binding.host)
+    && fields.slice(1).every(([gatewayField, bindingField]) => gateway[gatewayField] === binding[bindingField])
     && process.env.AGENTSPINE_USER_ID === binding.userId && process.env.AGENTSPINE_TENANT_ID === binding.tenantId;
 }
 
@@ -122,7 +124,7 @@ function denied(reason) {
 }
 
 function allowed(updatedInput) {
-  const permission = updatedInput.host === "codex" ? {} : {
+  const permission = ["codex", "king"].includes(updatedInput.host) ? {} : {
     permissionDecision: "ask",
     permissionDecisionReason: "AgentSpine binds this one context-only timeline lookup to the current host session and local transport."
   };
@@ -142,13 +144,14 @@ function allowed(updatedInput) {
 export async function runTimelineToolGuard(input) {
   try {
     const tool = timelineToolKind(input?.tool_name);
-    const host = hostFromInput(input || {});
-    if (input?.hook_event_name !== "PreToolUse" || !tool || !["claude", "codex"].includes(host)
-      || process.env.BLUN_HOME || process.env.BLUN_PLUGIN_ROOT || !plainObject(input.tool_input)) {
+    const runtimeHost = hostFromInput(input || {});
+    const host = timelineHostForRuntime(runtimeHost, process.env);
+    if (input?.hook_event_name !== "PreToolUse" || !tool || !host || !plainObject(input.tool_input)) {
       return denied("AgentSpine session timeline requires a verified supported-host PreToolUse payload.");
     }
-    const resolved = await resolveHostSourceCatalog({ host, cwd: input.cwd || process.cwd(), input });
+    const resolved = await resolveHostSourceCatalog({ host: runtimeHost, cwd: input.cwd || process.cwd(), input });
     const root = resolved.projectRoot;
+    const historyHome = timelineHostHome(host) ?? resolved.hostHome;
     const hostSession = sessionId(input);
     const gateway = gatewayEnvironmentContext();
     if (rawGroupClaim(input, gateway)) return denied("AgentSpine session timeline is unavailable for group-scoped activity.");
@@ -158,12 +161,16 @@ export async function runTimelineToolGuard(input) {
       return denied("AgentSpine session timeline requires a locally configured per-session transport capability.");
     }
     const enrollment = await resolvePrivateSessionTimelineEnrollment({ root, host, sessionId: hostSession,
-      transcriptPath: input.transcript_path ?? input.transcriptPath, hostHome: resolved.hostHome,
+      transcriptPath: input.transcript_path ?? input.transcriptPath, hostHome: historyHome,
       expectedTransportDigest: transportDigest });
     if (enrollment.status !== "enrolled") {
       return denied("AgentSpine session timeline has no active private local enrollment for this host session.");
     }
-    if (!gatewayMatchesEnrollment(gateway, enrollment.binding) || !matchesHostBinding(input, enrollment.binding)) {
+    const hostClaimsMatch = host === "king"
+      ? scopeClaimsMatch(input, ["host", "provider"], runtimeHost)
+      : matchesHostBinding(input, enrollment.binding);
+    if (!gatewayMatchesEnrollment(gateway, enrollment.binding) || !hostClaimsMatch
+      || !matchesScopeBinding(input, enrollment.binding)) {
       return denied("AgentSpine session timeline binding does not match the authenticated gateway scope.");
     }
     if (!await matchesRoot(input.tool_input.root, root) || !matchesBinding(input.tool_input, enrollment.binding)) {
@@ -173,14 +180,14 @@ export async function runTimelineToolGuard(input) {
     const requestFields = requestInput(tool, input.tool_input);
     if (!requestFields) return denied("AgentSpine session timeline search needs an exact time or a concrete query.");
     if (input.tool_input.host && input.tool_input.host !== host) return denied("Timeline provider binding mismatch.");
-    const updatedInput = { ...requestFields, ...(host === "codex" ? { host } : {}), root, sessionId: enrollment.binding.sessionId,
+    const updatedInput = { ...requestFields, ...(["codex", "king"].includes(host) ? { host } : {}), root, sessionId: enrollment.binding.sessionId,
       entityId: enrollment.binding.entityId, userId: enrollment.binding.userId, tenantId: enrollment.binding.tenantId,
       projectId: enrollment.binding.projectId, taskId: enrollment.binding.taskId, groupId: null,
       goalId: enrollment.binding.goalId, goalStepId: enrollment.binding.goalStepId,
       timelineVisibility: enrollment.timelineVisibility, enrollmentDigest: enrollment.enrollmentDigest };
     const request = timelineInvocationRequest(tool, updatedInput, root);
     const authorization = await authorizeSessionTimelineInvocation({
-      root, host, sessionId: hostSession, scope, hostHome: resolved.hostHome,
+      root, host, sessionId: hostSession, scope, hostHome: historyHome,
       tool, request, toolUseId: hookDeliveryId(input), transportDigest, enrollmentDigest: enrollment.enrollmentDigest
     });
     if (!authorization) return denied("AgentSpine session timeline invocation is unavailable for this bound source.");

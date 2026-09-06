@@ -1,4 +1,6 @@
 import { validateCodexTimelineHeader } from "./session-timeline-codex.js";
+import { validateKingTimelineHeader } from "./session-timeline-king.js";
+import { timelineProtocolFromRuntime, validTimelineHost } from "./session-timeline-provider.js";
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { canonicalPath } from "./paths.js";
@@ -38,7 +40,6 @@ const HEAD_SCHEMA = "agentspine.session-timeline-private-enrollment-head/v1";
 const HEAD_AUTHORITY = "state-integrity-only";
 const MAX_STATE_BYTES = 256 * 1024;
 const MAX_ENROLLMENTS = 16;
-
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") {
@@ -194,14 +195,14 @@ async function loadStateWithRecovery(rootPath, { create = false } = {}) {
 
 function validHostReceiptInput({ host, sessionId, scope }) {
   const binding = sessionTimelineBinding({ host, sessionId, scope });
-  if (!["claude", "codex"].includes(host)) return { reason: "unknown-timeline-host" };
+  if (!validTimelineHost(host)) return { reason: "unknown-timeline-host" };
   if (scope?.groupId !== null || hasTimelineGroupScope(scope)) return { reason: "group-suppressed" };
   if (!completeTimelineBinding(binding) || binding.groupId !== null) return { reason: "missing-or-unknown-session-scope" };
   return { binding };
 }
 
 function validResolverInput({ host, sessionId }) {
-  if (!["claude", "codex"].includes(host)) return null;
+  if (!validTimelineHost(host)) return null;
   return safeTimelineId(sessionId);
 }
 
@@ -211,7 +212,7 @@ async function canonicalRoot(root) {
   catch { return null; }
 }
 
-// This is called only by the Claude UserPromptSubmit lifecycle adapter.  It
+// This is called only by a verified provider UserPromptSubmit lifecycle adapter. It
 // records a signed, short-lived observation; the opaque token itself is never
 // returned through hook context or a briefing.
 export async function issueHostTranscriptReceipt({
@@ -225,7 +226,8 @@ export async function issueHostTranscriptReceipt({
   if (!rootPath) return hostReceiptUnavailable("unknown-project-root");
   const input = validHostReceiptInput({ host, sessionId, scope });
   if (!input.binding) return hostReceiptUnavailable(input.reason);
-  const hookInput = { transcript_path: transcriptPath, event_id: eventId };
+  const hookInput = { transcript_path: transcriptPath, event_id: eventId,
+    protocol_version: timelineProtocolFromRuntime(host, environment) };
   if (!validVerifiedTimelineHostOrigin({ origin: hostOrigin, root: rootPath, input: hookInput,
     binding: input.binding, hostHome, event })) return hostReceiptUnavailable("host-lifecycle-receipt-required");
   const transportDigest = timelineTransportDigest({ root: rootPath, binding: input.binding, environment });
@@ -234,6 +236,10 @@ export async function issueHostTranscriptReceipt({
   if (source.status !== "registered") return hostReceiptUnavailable(source.reason || "transcript-unavailable");
   if (host === "codex" && !await validateCodexTimelineHeader({ source, root: rootPath, sessionId })) {
     return hostReceiptUnavailable("codex-history-format-or-binding-mismatch");
+  }
+  if (host === "king" && !await validateKingTimelineHeader({ source, sessionId,
+    protocolVersion: timelineProtocolFromRuntime(host, environment) })) {
+    return hostReceiptUnavailable("king-history-format-version-or-binding-mismatch");
   }
   // This bounded 4 KiB digest is an immutable source binding, not transcript
   // capture: receipt issuance never retains or injects the source text.

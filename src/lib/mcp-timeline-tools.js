@@ -1,3 +1,5 @@
+import { TIMELINE_HOSTS } from "./session-timeline-provider.js";
+
 const stableId = {
   type: "string",
   pattern: "^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$"
@@ -77,7 +79,7 @@ function resolvedClaims(args) {
   for (const [field, aliases] of [...SCOPE_FIELDS, ...REQUEST_FIELDS]) {
     const resolved = claim(values, aliases);
     if (field === "groupId") result.groupClaim = resolved.present;
-    if (!resolved.valid || (field === "host" && resolved.value !== null && !["claude", "codex"].includes(resolved.value))
+    if (!resolved.valid || (field === "host" && resolved.value !== null && !TIMELINE_HOSTS.includes(resolved.value))
       || (field !== "timelineVisibility" && !validId(resolved.value))
       || (field === "timelineVisibility" && resolved.value !== null && resolved.value !== "private-verified")
       || (field === "enrollmentDigest" && resolved.value !== null && !/^[a-f0-9]{64}$/.test(resolved.value))) {
@@ -124,7 +126,7 @@ export function timelineInvocationRequest(tool, args, root) {
 }
 
 const scopeProperties = {
-  host: { enum: ["claude", "codex"] },
+  host: { enum: TIMELINE_HOSTS },
   entityId: stableId, userId: stableId, tenantId: stableId, projectId: stableId,
   taskId: stableId, goalId: optionalId, goalStepId: optionalId
 };
@@ -132,7 +134,7 @@ const scopeProperties = {
 export const sessionTimelineTools = [
   {
     name: "session_timeline_index",
-    description: "Index bounded evidence from one explicitly enrolled immutable Claude or Codex transcript snapshot. The matching hook and locally bound transport supply the private binding; changed sources require a renewed host receipt and this tool never copies a transcript or grants authority.",
+    description: "Index bounded evidence from one explicitly enrolled immutable provider transcript snapshot. Claude, Codex and King use separate format adapters; changed sources require a renewed host receipt and this tool never copies a transcript or grants authority.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: [],
@@ -144,7 +146,7 @@ export const sessionTimelineTools = [
   },
   {
     name: "session_timeline_search",
-    description: "Search the current or a same-task prior explicitly enrolled immutable Claude or Codex transcript snapshot for redacted objective evidence by exact UTC time or at least two concrete terms. Prior-session search uses the signed sidecar index first, opens only one relevant source, and never grants authority.",
+    description: "Search the current or a same-task prior explicitly enrolled immutable Claude, Codex or King source for redacted objective evidence by exact UTC time or at least two concrete terms. Prior-session search opens only one indexed source and never grants authority.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: [],
