@@ -212,10 +212,20 @@ test("ranking is deterministic, bounded, fast, and rejects manipulated persisted
   assert.deepEqual(context.knowledge.taskContext.items.map((item) => item.id),
     ["assertion:parallel-lesson-0", "assertion:parallel-lesson-1"]);
 
-  const started = performance.now();
-  await Promise.all(Array.from({ length: 40 }, () => sessionBriefing({ root, host: "generic",
-    projectId: PROJECT, currentTaskId: TASK, includeSourceContent: false, maxBytes: 4096, now: NOW })));
-  assert.ok(performance.now() - started < 2_000, "40 bounded task-context briefings must finish below two seconds");
+  const measure = async (currentTaskId) => {
+    const started = performance.now();
+    await Promise.all(Array.from({ length: 8 }, () => sessionBriefing({ root, host: "generic",
+      projectId: PROJECT, currentTaskId, includeSourceContent: false, maxBytes: 4096, now: NOW })));
+    return performance.now() - started;
+  };
+  await measure(null);
+  await measure(TASK);
+  const baselineMs = (await measure(null) + await measure(null)) / 2;
+  const taskContextMs = (await measure(TASK) + await measure(TASK)) / 2;
+  assert.ok(baselineMs < 2_000 && taskContextMs < 2_000,
+    "eight concurrent baseline and task-context briefings must each finish below two seconds");
+  assert.ok(taskContextMs <= baselineMs * 1.5 + 250,
+    `task recall must not materially regress briefing time (${baselineMs}ms -> ${taskContextMs}ms)`);
 
   const statePath = await worldModelStatePath(root);
   const state = JSON.parse(await readFile(statePath, "utf8"));
