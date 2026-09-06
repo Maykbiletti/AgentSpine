@@ -4,9 +4,6 @@ import { join } from "node:path";
 import { replaceFileWithRetry } from "./filesystem-retry.js";
 import { withOwnedFileLock } from "./owned-file-lock.js";
 import { canonicalPath, projectStateDir } from "./paths.js";
-import {
-  normalizeKnowledgeFields, structuredKnowledgeView, validKnowledgeFields
-} from "./world-knowledge.js";
 
 const SCHEMA = "agentspine.world-model/v1";
 const ASSERTION_SCHEMA = "agentspine.world-assertion/v1";
@@ -66,7 +63,7 @@ function emptyModel(root) {
   return { schema: SCHEMA, root, revision: 0, assertions: [], events: [], authority: "context-only" };
 }
 
-function validateStoredAssertion(assertion) {
+function validateStoredAssertion(assertion, validKnowledgeFields) {
   if (!assertion || assertion.schema !== ASSERTION_SCHEMA || assertion.authority !== "context-only") return false;
   if (!STABLE_ID.test(assertion.id || "") || !STABLE_ID.test(assertion.subjectId || "")) return false;
   if (!PREDICATE.test(assertion.predicate || "") || FORBIDDEN.test(assertion.predicate)
@@ -89,10 +86,10 @@ function validateStoredAssertion(assertion) {
   return assertion.status === (assertion.evidenceKind === "model-suggestion" ? "proposed" : "established");
 }
 
-function normalizeModel(value, root) {
+function normalizeModel(value, root, validKnowledgeFields) {
   if (!value || value.schema !== SCHEMA || value.root !== root || value.authority !== "context-only"
     || !Number.isInteger(value.revision) || value.revision < 0 || !Array.isArray(value.assertions)
-    || !Array.isArray(value.events) || value.assertions.some((item) => !validateStoredAssertion(item))
+    || !Array.isArray(value.events) || value.assertions.some((item) => !validateStoredAssertion(item, validKnowledgeFields))
     || value.events.some((item) => !item || item.authority !== "context-only")) {
     throw new Error("world model state is invalid");
   }
@@ -110,7 +107,8 @@ async function readModel(names) {
   try {
     const metadata = await stat(names.path);
     if (metadata.size > MAX_STATE_BYTES) throw new Error("world model exceeds the 5 MiB read limit");
-    return normalizeModel(JSON.parse(await readFile(names.path, "utf8")), names.root);
+    const { validKnowledgeFields } = await import("./world-knowledge.js");
+    return normalizeModel(JSON.parse(await readFile(names.path, "utf8")), names.root, validKnowledgeFields);
   } catch (error) {
     if (error.code === "ENOENT") return emptyModel(names.root);
     if (error instanceof SyntaxError) throw new Error("world model state is not valid JSON");
@@ -126,7 +124,7 @@ async function writeModel(model, names, assertOwned) {
   await replaceFileWithRetry(temporary, names.path, { beforeAttempt: assertOwned });
 }
 
-function assertionInput(input, now) {
+function assertionInput(input, now, normalizeKnowledgeFields) {
   const id = stableId(input.id, "id");
   const subjectId = stableId(input.subjectId, "subjectId");
   if (typeof input.predicate !== "string" || !PREDICATE.test(input.predicate)) {
@@ -171,7 +169,8 @@ function assertionDigest(assertion) {
 
 export async function recordWorldAssertion(input = {}) {
   const now = input.now || new Date();
-  const candidate = assertionInput(input, now);
+  const { normalizeKnowledgeFields } = await import("./world-knowledge.js");
+  const candidate = assertionInput(input, now, normalizeKnowledgeFields);
   const names = await stateNames(input.root || process.cwd());
   return withOwnedFileLock(names.lockPath, async ({ assertOwned }) => {
     const model = await readModel(names);
@@ -218,6 +217,7 @@ export async function worldContext({
   groupId = optionalStableId(groupId, "groupId");
   const names = await stateNames(root);
   const model = await readModel(names);
+  const { structuredKnowledgeView } = await import("./world-knowledge.js");
   const cutoff = new Date(now).getTime();
   if (!Number.isFinite(cutoff)) throw new Error("now is invalid");
   const candidates = model.assertions.filter((item) => visible(item, { includePrivate, groupId, projectId })
