@@ -181,6 +181,7 @@ async function callTool(name, args = {}, environment = process.env) {
     if (!invocationRequest) return textResult(unavailableTimelineInvocation("timeline-invocation-unavailable"));
     return textResult(await searchSessionTimeline({ root, host: timeline.host, sessionId: input.request.sessionId, scope: timeline.scope,
       at: args.at, query: args.query, windowSeconds: args.windowSeconds, includePriorSessions: args.includePriorSessions,
+      includePriorProviders: args.includePriorProviders, environment,
       enrollmentDigest: input.request.enrollmentDigest,
       hostHome: timelineHostHome(timeline.host, environment), transportDigest: timeline.transportDigest,
       invocationRequest }));

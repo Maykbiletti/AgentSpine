@@ -1,9 +1,14 @@
 export const TIMELINE_HOSTS = Object.freeze(["claude", "codex", "king"]);
 export const KING_TIMELINE_SOURCE_ENV = "AGENTSPINE_KING_TIMELINE_SOURCE";
 export const KING_WIRE_PROTOCOL_ENV = "AGENTSPINE_KING_WIRE_PROTOCOL_VERSION";
+export const TIMELINE_CROSS_PROVIDER_ENV = "AGENTSPINE_TIMELINE_CROSS_PROVIDER";
 
 export function validTimelineHost(value) {
   return TIMELINE_HOSTS.includes(value);
+}
+
+export function crossProviderTimelineEnabled(environment = process.env) {
+  return environment?.[TIMELINE_CROSS_PROVIDER_ENV] === "1";
 }
 
 // BLUN currently shares the Codex-compatible AGENTS.md hierarchy, but its

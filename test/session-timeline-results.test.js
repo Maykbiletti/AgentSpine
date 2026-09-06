@@ -13,6 +13,7 @@ function toolLine(content, extra = {}) {
 }
 function publicCard(event) {
   return timelineSearchResult({ sourceDigest: "a".repeat(64), sessionRef: `session-ref:${"b".repeat(32)}`,
+    sourceProvider: "codex",
     target: new Date("2026-09-04T12:41:12.000Z"),
     wanted: ["suite", "pass"], mode: "exact", events: [event], index: "indexed", roomBytes: 1024,
     authority: "context-only" }).events[0];
@@ -37,8 +38,9 @@ test("timeline public cards persist and return only allowlisted objective fields
   assert.deepEqual(leftCard, rightCard);
   assert.deepEqual(Object.keys(leftCard).sort(), [
     "at", "authority", "count", "id", "kind", "messageRef", "outcome", "roomId", "sessionRef",
-    "sourceDigest", "testLabel", "trust"
+    "sourceDigest", "sourceProvider", "testLabel", "trust"
   ]);
+  assert.equal(leftCard.sourceProvider, "codex");
   assert.equal(leftCard.messageRef, leftCard.id);
   assert.match(leftCard.sessionRef, /^session-ref:[a-f0-9]{32}$/);
   assert.equal("offset" in leftCard, false);

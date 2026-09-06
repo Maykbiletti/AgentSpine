@@ -122,7 +122,8 @@ export function timelineInvocationRequest(tool, args, root) {
   if (tool === "index") return { ...request, maxBytes: args.maxBytes ?? 4 * 1024 * 1024 };
   return { ...request, at: args.at ?? null, query: args.query ?? null,
     windowSeconds: args.windowSeconds === undefined ? 0 : args.windowSeconds,
-    includePriorSessions: args.includePriorSessions === true };
+    includePriorSessions: args.includePriorSessions === true,
+    includePriorProviders: args.includePriorProviders === true };
 }
 
 const scopeProperties = {
@@ -146,7 +147,7 @@ export const sessionTimelineTools = [
   },
   {
     name: "session_timeline_search",
-    description: "Search the current or a same-task prior explicitly enrolled immutable Claude, Codex or King source for redacted objective evidence by exact UTC time or at least two concrete terms. Prior-session search opens only one indexed source and never grants authority.",
+    description: "Search the current or a same-task prior explicitly enrolled immutable Claude, Codex or King source for redacted objective evidence by exact UTC time or at least two concrete terms. Cross-provider recall additionally needs a local host capability and explicit selection; one indexed source is opened and no authority is granted.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: [],
@@ -156,7 +157,7 @@ export const sessionTimelineTools = [
         timelineVisibility: { const: "private-verified" }, groupId: { anyOf: [stableId, { type: "null" }] },
         at: { type: "string", format: "date-time" }, query: { type: "string", minLength: 3, maxLength: 512 },
         windowSeconds: { type: "integer", minimum: 0, maximum: 900 },
-        includePriorSessions: { type: "boolean" } }
+        includePriorSessions: { type: "boolean" }, includePriorProviders: { type: "boolean" } }
     }
   }
 ];

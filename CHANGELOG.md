@@ -6,6 +6,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Added a disabled-by-default cross-provider objective-evidence handoff across separately enrolled Claude, Codex and King sources. It requires a protected local host capability plus an explicit prior-provider search, ranks the bounded index first, opens at most one immutable snapshot and returns provider/session/message provenance.
 - Added a native King agent-wire history adapter with an explicit protected source/protocol mapping, provider-separated lifecycle binding, bounded objective `tool.result` extraction, and stable session/message references. It never scans `BLUN_HOME`, reuses Codex rollout parsing, or changes King permissions.
 - Added an explicitly enrolled native Codex rollout adapter for bounded same-task historical tool-result recall, with project/session header verification, native message references, unchanged source bytes and independent provider contracts. Live-host acceptance remains open.
 
@@ -18,6 +19,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Security
 
+- Cross-provider recall requires exact private entity, user, tenant, project, task and compatible-goal continuity. The current provider keeps its own transport binding while the selected source is revalidated with its original signed provider enrollment and profile root; missing opt-in, foreign/group scope, expiry, mutation and replay return no content or authority.
 - Task recall opens no source, grants no authority, excludes unsafe state, and returns at most six entries.
 - Task continuation is context-only and derived only from current, confirmed, conflict-free, exactly scoped checkpoints. Proposed, stale, conflicting, foreign and malformed checkpoints are never resumable; completed checkpoints require a passed verified step and no remaining work.
 - Structured knowledge remains context-only: repeated model suggestions stay assumptions, unresolved conflicting values cannot enter facts, foreign project/group/private records remain excluded, and secret-shaped values or rationales fail both ingestion and persisted-state validation.
@@ -26,6 +28,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Tests
 
+- A synthetic Claude-to-Codex Before/After proves that provider history is absent by default and exactly one measured `FAIL 0/15` becomes available after both opt-ins and restart/compaction. Provider provenance, source bytes, invocation replay, scope/group isolation and changed-source rejection are covered.
 - Synthetic King sessions A/B prove measured `FAIL 0/15` recall after restart and compaction while exact gateway binding, wrong protocol/path/scope/provider, replay/race, source mutation, unknown records, and source-byte preservation remain enforced.
 - A CSS-archive Before/After restores its sourced backup lesson after restart and `PostCompact`; boundary tests remain green.
 - Synthetic Before/After probes show that a legacy task-state cannot reconstruct work, while the structured checkpoint restores exactly one sourced next step after a separate-process restart and `PostCompact`. Correction, completion, MCP, scope, conflict, proposal, tamper, bounds and source-byte tests prevent false continuation.
@@ -41,6 +44,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Evidence limits
 
+- MemPalace `v3.9.0` commit `d9f05907` (MIT) and Claude-Mem commit `3939fbb2` (Apache-2.0), inspected 2026-09-06, informed only the separate-adapter and progressive-retrieval architecture. No external code or script was copied or executed. Repository tests do not establish an Otto or Fredrik live handoff.
+- The finite release ceiling grows by 4 KiB packed and 8 KiB unpacked for the provider-handoff implementation, provenance fields and contract; file-count and forbidden-source gates are unchanged.
 - The King repository adapter is pinned to public BLUN Code `1.0.109` commit `fbb97459` and vendored King SDK `0.12.1` format evidence. Fredrik's actual source/protocol mapping, installed format, live A/B recall, and host block enforcement remain unverified; no live configuration was changed.
 - Public BLUN Code 1.0.109 naming evidence and synthetic hook/MCP tests establish the repository contract only. The separate King host bug that ignores a returned `{decision:"block"}` and Fredrik's live installation remain unverified external boundaries.
 

@@ -7,7 +7,9 @@ import { blockedHookOutput } from "./hook-output.js";
 import { sessionTimelineBinding } from "./session-timeline-contract.js";
 import { resolvePrivateSessionTimelineEnrollment } from "./session-timeline-enrollment.js";
 import { timelineTransportDigest } from "./session-timeline-transport.js";
-import { runtimeHostForTimeline, timelineHostForRuntime, timelineHostHome } from "./session-timeline-provider.js";
+import {
+  crossProviderTimelineEnabled, runtimeHostForTimeline, timelineHostForRuntime, timelineHostHome
+} from "./session-timeline-provider.js";
 
 function plainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -114,9 +116,12 @@ function requestInput(tool, args) {
   if (tool === "index") return args.maxBytes === undefined ? {} : { maxBytes: args.maxBytes };
   if (args.at === undefined && args.query === undefined) return null;
   if (args.includePriorSessions !== undefined && typeof args.includePriorSessions !== "boolean") return null;
+  if (args.includePriorProviders !== undefined && typeof args.includePriorProviders !== "boolean") return null;
+  if (args.includePriorProviders === true && args.includePriorSessions !== true) return null;
   return { ...(args.at === undefined ? {} : { at: args.at }), ...(args.query === undefined ? {} : { query: args.query }),
     ...(args.windowSeconds === undefined ? {} : { windowSeconds: args.windowSeconds }),
-    ...(args.includePriorSessions === undefined ? {} : { includePriorSessions: args.includePriorSessions }) };
+    ...(args.includePriorSessions === undefined ? {} : { includePriorSessions: args.includePriorSessions }),
+    ...(args.includePriorProviders === undefined ? {} : { includePriorProviders: args.includePriorProviders }) };
 }
 
 function denied(reason) {
@@ -179,6 +184,9 @@ export async function runTimelineToolGuard(input) {
     const scope = bindingScope(enrollment.binding, enrollment);
     const requestFields = requestInput(tool, input.tool_input);
     if (!requestFields) return denied("AgentSpine session timeline search needs an exact time or a concrete query.");
+    if (requestFields.includePriorProviders && !crossProviderTimelineEnabled(process.env)) {
+      return denied("AgentSpine cross-provider timeline recall is not enabled by this local host.");
+    }
     if (input.tool_input.host && input.tool_input.host !== host) return denied("Timeline provider binding mismatch.");
     const updatedInput = { ...requestFields, ...(["codex", "king"].includes(host) ? { host } : {}), root, sessionId: enrollment.binding.sessionId,
       entityId: enrollment.binding.entityId, userId: enrollment.binding.userId, tenantId: enrollment.binding.tenantId,

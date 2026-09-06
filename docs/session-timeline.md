@@ -63,6 +63,7 @@ is a bound, on-demand MCP call:
 session_timeline_index(maxBytes)
 session_timeline_search(at | terms)
 session_timeline_search(at | terms, includePriorSessions: true)
+session_timeline_search(at | terms, includePriorSessions: true, includePriorProviders: true)
 ```
 
 Indexing is serialized and bounded to 64 KiB–16 MiB per call. A search needs
@@ -80,6 +81,24 @@ entity, user, tenant, project, task and compatible goal. It ranks their signed
 sidecar cards before opening a source, selects at most one prior immutable
 snapshot, and verifies only matching original lines. A missing match does not
 fall back to scanning old transcripts.
+
+Provider handoff is an additional, disabled-by-default continuity mode. The
+local host must set `AGENTSPINE_TIMELINE_CROSS_PROVIDER=1`, and the one bounded
+search must explicitly combine `includePriorSessions: true` with
+`includePriorProviders: true`. Neither choice alone works. Candidate sources
+must still match the exact entity, user, tenant, project, task and compatible
+goal with no group. The current session is revalidated against its own host
+transport and enrollment; the selected prior snapshot is separately
+revalidated against its original provider, signed enrollment and profile root.
+The result names that `sourceProvider` on both the response and each card.
+
+This is evidence continuity, not shared provider identity. It does not convert
+Claude JSONL into Codex rollouts, Codex rollouts into King wires, or any memory
+into a current test, permission, delegation, publication approval or learning
+authorization. With the local capability absent, same-provider behavior is
+unchanged and another provider is not even eligible for ranking. Expired
+enrollment, changed bytes, unknown formats, a foreign scope or a group returns
+no historical content and triggers no retry or enrollment reset.
 
 A matching host guard replaces all MCP-provided binding fields with its exact
 one-use invocation. Raw stdio, a reused invocation, a changed argument,
@@ -127,21 +146,19 @@ and group denial, expired and reused records, source/state tampering, profile
 changes, crashes, concurrency, final JSONL records, redaction, and bounded
 results.
 
+The provider-handoff Before/After yields no Claude result in Codex before both
+opt-ins, then verifies one Claude `FAIL 0/15` after restart. Replay, foreign
+scope, groups and mutation return none; source bytes stay identical.
+
 ## Research inputs
 
-On 2026-09-04, AgentSpine reviewed two public repositories as untrusted
-architectural context only:
-
-- [Claude-Mem](https://github.com/thedotmack/claude-mem), `v13.24.0` at
-  `1df66c2`, Apache-2.0: the search → timeline → observation split informed
-  bounded retrieval.
-- [MemPalace](https://github.com/MemPalace/mempalace), `v3.9.0` at `d5250c7`,
-  MIT: raw-source ownership plus indexed time anchors informed the sidecar
-  boundary.
-
-No external code or script was copied or executed. License, architecture, and
-the current AgentSpine contracts were reviewed before independently implemented
-synthetic tests.
+Reviewed as untrusted architecture on 2026-09-06: Claude-Mem
+[`3939fbb2`](https://github.com/thedotmack/claude-mem/tree/3939fbb2debe73e74a295553636e776e110df90a)
+(Apache-2.0) and MemPalace `v3.9.0`
+[`d9f05907`](https://github.com/MemPalace/mempalace/tree/d9f059076c866fa6f29195679d75712436986024)
+(MIT). Staged retrieval, source ownership and separate adapters informed the
+design. AgentSpine keeps stricter host-bound enrollment and one-source
+verification; no external code or script ran or was copied.
 
 
 ## Codex native rollout contract
