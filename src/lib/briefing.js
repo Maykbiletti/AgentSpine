@@ -136,7 +136,8 @@ export async function sessionBriefing({
       : { root: catalog.root, entityId, includePrivate, groupId, catalog })
     : null;
   const [learned, attention, tasks, shared, userLearned, personas, gateway, world, portfolio] = await settleReads([
-    learningContext({ root: catalog.root, includePrivate, groupId, scope: learningScope, maxItems: 50, catalog, now }),
+    learningContext({ root: catalog.root, includePrivate, groupId, scope: learningScope, maxItems: 50,
+      catalog, now, taskFocus: currentTaskId }),
     attentionContext({
       root: catalog.root, includePrivate, entityId, groupId, projectId, currentTaskId,
       focusActive, markPresented: false, maxItems: 20, now, catalog
@@ -145,7 +146,7 @@ export async function sessionBriefing({
     sharedContext({ root: catalog.root, includePrivate, groupId, maxItems: 50, catalog }),
     userStateRoot && userStateRoot !== catalog.root
       ? learningContext({ root: userStateRoot, includePrivate, groupId, scope: learningScope, maxItems: 50, now,
-        catalog: userCatalog })
+        catalog: userCatalog, taskFocus: currentTaskId })
       : Promise.resolve({ items: [] }),
     loadPersonaRuntime(catalog.root, catalog),
     loadGatewayRuntime(catalog.root, catalog),
@@ -232,6 +233,11 @@ export async function sessionBriefing({
   recalculateBudget(result);
   if (result.budget.usedBytes > limit) throw new Error(`maxBytes is too small for the briefing envelope; use at least ${MIN_BYTES}`);
 
+  const portableKinds = new Set(["preference", "no-go", "correction", "reference"]);
+  const portableItems = userLearned.items.filter((item) => portableKinds.has(item.kind) && matchesScope(item, entityId, null));
+  const localItems = [...portableItems, ...learned.items.filter((item) => matchesScope(item, entityId, projectId))];
+  const attemptedLearning = new Set();
+
   const continuationIds = new Set();
   for (const item of world.knowledge.continuation.tasks) {
     if (tryAdd(result, result.world.knowledge.continuation.tasks, item)) continuationIds.add(item.assertionId);
@@ -248,6 +254,10 @@ export async function sessionBriefing({
       result.world.knowledge.taskContext.omitted += 1;
       countOmitted(result, "world");
     }
+  }
+  for (const item of localItems.filter((entry) => entry.relevance)) {
+    attemptedLearning.add(item);
+    if (!tryAdd(result, result.learning, item)) countOmitted(result, "learning");
   }
   for (const section of ["facts", "conflicts", "proposals", "stale"]) {
     const items = section === "facts"
@@ -317,9 +327,6 @@ export async function sessionBriefing({
     }
   }
 
-  const portableKinds = new Set(["preference", "no-go", "correction", "reference"]);
-  const portableItems = userLearned.items.filter((item) => portableKinds.has(item.kind) && matchesScope(item, entityId, null));
-  const localItems = [...portableItems, ...learned.items.filter((item) => matchesScope(item, entityId, projectId))];
   const voiceCollections = {
     preference: result.voiceBrief.preferences,
     correction: result.voiceBrief.corrections,
@@ -329,7 +336,7 @@ export async function sessionBriefing({
     if (!tryAdd(result, voiceCollections[item.kind], item.claim)) countOmitted(result, "voice");
   }
   const localKeys = new Set(localItems.map(normalizeKey));
-  for (const item of localItems) {
+  for (const item of localItems.filter((entry) => !attemptedLearning.has(entry))) {
     if (!tryAdd(result, result.learning, item)) countOmitted(result, "learning");
   }
   for (const item of shared.items.filter((entry) => matchesScope(entry, entityId, projectId))) {

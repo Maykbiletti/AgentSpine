@@ -37,7 +37,8 @@ export function visible(candidate, entities, audience, includePrivate, groupId) 
 
 export async function learningContext({
   root = process.cwd(), includePrivate = false, groupId = null, kinds = null,
-  subjectIds = null, scope = null, maxItems = null, catalog: providedCatalog = null, now = new Date()
+  subjectIds = null, scope = null, maxItems = null, catalog: providedCatalog = null, now = new Date(),
+  taskFocus = null
 } = {}) {
   const catalog = providedCatalog || await buildCatalog(root);
   const { learning } = await loadLearning(catalog.root, catalog);
@@ -75,10 +76,14 @@ export async function learningContext({
     .filter((candidate) => !subjectFilter || subjectFilter.has(candidate.subjectId))
     .filter((candidate) => candidate.privacy !== "group" || (groupId && candidate.groupId === groupId))
     .filter((candidate) => visible(candidate, entities, audience, includePrivate, groupId));
-  const items = applicable
+  const candidates = applicable
     .filter((candidate) => !invalidCanaries.has(candidate.id))
-    .filter((candidate) => visible(candidate, entities, audience, includePrivate, groupId))
-    .sort((a, b) => b.confidence - a.confidence || b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
+    .filter((candidate) => visible(candidate, entities, audience, includePrivate, groupId));
+  const focusedTaskId = typeof taskFocus === "string" && taskFocus === runtimeScope.taskId ? taskFocus : null;
+  const items = candidates
+    .sort((a, b) => Number(Boolean(focusedTaskId && b.scope?.taskId === focusedTaskId))
+      - Number(Boolean(focusedTaskId && a.scope?.taskId === focusedTaskId))
+      || b.confidence - a.confidence || b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
     .slice(0, limit)
     .map((candidate) => ({
       id: candidate.id,
@@ -97,6 +102,8 @@ export async function learningContext({
           && new Date(candidate.promotion.canary.revalidation.expiresAt).getTime() >= new Date(timestamp).getTime()
           ? "revalidating" : candidate.promotion.canary.status)
         : "not-required",
+      ...(focusedTaskId && candidate.scope?.taskId === focusedTaskId
+        ? { relevance: { taskId: focusedTaskId, match: "exact-task" } } : {}),
       authority: "context-only"
     }));
   return {
