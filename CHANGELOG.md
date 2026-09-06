@@ -40,6 +40,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Fixed
 
+- The hermetic runner isolates the real host-origin source-attestation probe from concurrent Windows filesystem pressure, preserving its existing fail-closed result and timing boundaries without increasing a timeout.
 - Reuse host-verified, assignment-bound briefing observations in MCP delivery preparation without a second content fetch; keep missing proof advisory and document provider-specific history limits.
 
 - Integrated the preserved attention refactoring: six modules (each below 500 lines), unchanged function bodies and public API, and removal of its legacy line-budget exception. Package allowance grows by 4 KiB for explicit module boundaries.
