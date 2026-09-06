@@ -2,6 +2,22 @@
 
 AgentSpine uses native plugin surfaces instead of asking users to paste a large system prompt into every project.
 
+## Provider contracts and evidence
+
+Provider names are not interchangeable. Shared retrieval, structured knowledge and task continuation remain context-only. Each adapter must separately establish native lifecycle events, instruction roots, transcript format/version, session/message identifiers and authenticated invocation binding. Unknown formats remain unavailable; adapters must not impersonate another host or infer access from remembered text.
+
+| Surface | Claude Code | Codex | BLUN King |
+|---|---|---|---|
+| Project instructions | `CLAUDE.md` hierarchy | `AGENTS.md` hierarchy | `AGENTS.md` through the isolated BLUN profile |
+| Hook package | Native `hooks/hooks.json` | Explicit `hooks/codex.json` | Manifest lifecycle hooks |
+| Verified hook briefing → delivery knowledge | Shared signed preflight bridge | Shared signed preflight bridge; synthetic Codex regression | Shared bridge only if the actual host delivers the verified lifecycle; live acceptance remains open |
+| Historical transcript enrollment | Existing Claude adapter, bounded registered source | Not yet implemented; `host-not-supported` is honest | Not yet implemented; corrected tool names do not provide a history adapter |
+| Native permissions/trust | Host-owned | Host-owned | Host-owned; enforcement of returned block decisions remains externally unverified |
+
+A successful `SessionStart` alone is not assignment-bound proof. On `UserPromptSubmit`, the exact signed source snapshot is verified and consumed once, then its briefing use is recorded for the current requirement. MCP knowledge and premortem reuse that recorded observation without refetching content. Serialized `loaded: true` claims cannot create the process-local verification capability. Missing or consumed usage evidence yields useful context with `verified: false`, `completionVerified: false` and `automaticRetry: false`; it does not certify delivery or trigger a mandatory fetch. An optional explicit MCP briefing read reports `satisfied-by-host` when the original verified hook observation already exists, preserving that first receipt.
+
+Adapter acceptance must use synthetic sessions A/B, a bounded registered project root, exact source bytes and stable provenance, and cover restart, changed sources, foreign project/tenant/group, private-source exclusion and service failure. Report repository tests separately from the installed provider version and live-host observations. Never claim cross-provider history support from package validation, matching tool names or another provider's passing test.
+
 ## Claude Code
 
 | Component | Path | Purpose |
@@ -21,7 +37,7 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
-Version `0.73.0` keeps the `0.72.7` managed common Codex skill, stable launcher, loaded-reader verification, assignment continuation and structured completion contracts, and adds bounded post-compaction session-evidence recall. It leaves host transcripts in place, never injects their full content, and exposes only explicit, scope-bound redacted cards. A verified `UserPromptSubmit` creates an opaque receipt; a direct Claude session stays excluded until the local owner runs `timeline-receipt --root …` and `timeline-enroll --root … --receipt asthr_… --confirm-local-timeline`. Groups stay excluded. Writing deliveries must call `session_briefing`, `delivery_knowledge_query` and `record_delivery_premortem` in that order with the exact hook-issued requirement before their first mutation.
+Version `0.73.0` keeps the `0.72.7` managed common Codex skill, stable launcher, loaded-reader verification, assignment continuation and structured completion contracts, and adds bounded post-compaction session-evidence recall. It leaves host transcripts in place, never injects their full content, and exposes only explicit, scope-bound redacted cards. A verified `UserPromptSubmit` creates an opaque receipt; a direct Claude session stays excluded until the local owner runs `timeline-receipt --root …` and `timeline-enroll --root … --receipt asthr_… --confirm-local-timeline`. Groups stay excluded. Writing deliveries can reuse the verified hook briefing for `delivery_knowledge_query` and `record_delivery_premortem` with the exact hook-issued requirement. These are advisory preparation; missing proof never blocks ordinary authorized work.
 
 Ordinary assignments may now call [`complete_delivery`](structured-completion.md) after observed tests to store the three completion checks and use a normal final summary. Stop still checks the latest write and current test evidence. Goal and queue deliveries retain their existing completion route. This repository operation does not itself register MCP in a native host or validate a live update.
 
@@ -84,7 +100,7 @@ Verify the live host in a newly started Codex CLI session:
 Trust all and continue
 ```
 
-Acceptance requires four separate observations from that new host process: `skills/list` includes `agent-spine`, `mcpServerStatus/list` shows the configured server, MCP `tools/list` exposes the required tools, and one real `session_briefing` read plus the three assignment-bound delivery calls succeeds. These are distinct Codex [app-server APIs](https://developers.openai.com/codex/app-server); an isolated server handshake or the presence of `SKILL.md` alone is not native host proof.
+Acceptance requires four separate observations from that new host process: `skills/list` includes `agent-spine`, `mcpServerStatus/list` shows the configured server, MCP `tools/list` exposes the required tools, and a real hook briefing followed by assignment-bound knowledge and premortem succeeds without another briefing fetch. These are distinct Codex [app-server APIs](https://developers.openai.com/codex/app-server); an isolated server handshake or the presence of `SKILL.md` alone is not native host proof.
 
 `npm run host:check` proves manifest shape, package containment, and a real MCP handshake. `npm run host:install-check` stages an update, verifies the copied skill bytes, restarts the managed reader, lists tools, reads the existing synthetic session and performs the three bound calls. Neither command can manufacture Codex's user-controlled discovery, trust or process state; only those observations in the actual host prove the final boundary.
 

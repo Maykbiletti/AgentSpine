@@ -90,7 +90,7 @@ function withRegistrationGuidance(result, root, assignmentId = null) {
     ...result, assignmentId, registration, agentSpineUse,
     instruction: [
       "Advisory preparation; never blocks authorized coding or replies. Bind calls to session, assignment and step:",
-      "1. session_briefing; 2. delivery_knowledge_query (targets, contracts, recent errors); 3. record_delivery_premortem.",
+      "Reuse the host-verified briefing; delivery_knowledge_query and record_delivery_premortem need no second briefing fetch.",
       `Use registration.root; Requirement: ${requirementId || "<unavailable; continue the authorized task>"}.`,
       "Premortem: exactly baseline-environment, contract-tests, delivery-path; each `this delivery fails because ` statement needs a concrete check.",
       "Context only; no authority. Never reset receipts or repeat tests merely to dismiss a warning.",

@@ -17,9 +17,10 @@ const MAX_BYTES = 32 * 1024;
 const DIGEST_RE = /^[a-f0-9]{64}$/;
 
 export const DELIVERY_AGENT_USE_TEXT = [
-  "Before the first mutation, make exactly three AgentSpine calls with this root and Requirement:",
-  "1. session_briefing; 2. delivery_knowledge_query for targets, contracts, and recent errors; 3. record_delivery_premortem.",
-  "Only matching stored MCP receipts count; claims, foreign or reused receipts do not. Context-only; no authority."
+  "Reuse a host-verified briefing for this requirement; no second content fetch is needed.",
+  "Use delivery_knowledge_query and record_delivery_premortem for relevant preparation.",
+  "Without a verified briefing, report uncertainty; session_briefing is optional. No automatic retry or work restriction.",
+  "Only matching host or MCP evidence counts; claims, foreign or reused receipts do not. Context-only; no authority."
 ].join("\n");
 
 function stateMaterial(state) {
@@ -35,6 +36,7 @@ function sealState(state) {
 function validReceipt(value, stage, requirementId) {
   return value && value.schema === RECEIPT_SCHEMA && value.stage === stage
     && value.requirementId === requirementId && value.authority === AUTHORITY
+    && (value.origin === undefined || value.origin === "verified-host-preflight")
     && DIGEST_RE.test(value.inputDigest || "") && DIGEST_RE.test(value.resultDigest || "")
     && validTime(value.recordedAt) && validSeal(value);
 }
@@ -101,13 +103,15 @@ async function currentRequirement(root, requirementId) {
   return current;
 }
 
-function receipt(stage, requirementId, input, result, now) {
+function receipt(stage, requirementId, input, result, now, verifiedHostBriefing) {
   return seal({ schema: RECEIPT_SCHEMA, stage, requirementId,
+    ...(verifiedHostBriefing ? { origin: "verified-host-preflight" } : {}),
     inputDigest: sha256(input), resultDigest: sha256(result),
     recordedAt: at(now), authority: AUTHORITY });
 }
 
-async function recordStage({ root, requirementId, stage, input, result, now = new Date() }) {
+async function recordStage({ root, requirementId, stage, input, result,
+  verifiedHostBriefing = false, preserveConsumed = false, now = new Date() }) {
   try {
     const current = await currentRequirement(root, requirementId);
     if (current.status === "degraded" || current.blocked) return current;
@@ -115,13 +119,18 @@ async function recordStage({ root, requirementId, stage, input, result, now = ne
     return await withOwnedFileLock(paths.lockPath, async ({ assertOwned }) => {
       let state = await readState(paths.path, paths.parsed)
         || emptyState(requirementId, paths.parsed);
-      if (state.consumedAt && stage === "briefing" && current.closed && !current.consumed) {
+      if (!preserveConsumed && state.briefing?.origin !== "verified-host-preflight"
+        && state.consumedAt && stage === "briefing" && current.closed && !current.consumed) {
         state = emptyState(requirementId, paths.parsed);
       } else if (state.consumedAt) return block("reused",
         `AgentSpine usage receipts for ${requirementId} were already consumed.`, { requirementId });
       if (stage === "knowledge" && !state.briefing) return block("missing-briefing",
         "AgentSpine delivery preflight is missing stage 1: session_briefing.", { requirementId });
-      const proposed = receipt(stage, requirementId, input, result, now);
+      if (stage === "briefing" && !verifiedHostBriefing && state.briefing?.origin === "verified-host-preflight") {
+        return { status: "satisfied-by-host", blocked: false, requirementId,
+          receipt: structuredClone(state.briefing), digest: state.briefing.digest };
+      }
+      const proposed = receipt(stage, requirementId, input, result, now, verifiedHostBriefing);
       if (state[stage]) {
         if (state[stage].inputDigest !== proposed.inputDigest
           || state[stage].resultDigest !== proposed.resultDigest) {

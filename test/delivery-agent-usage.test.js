@@ -127,7 +127,7 @@ test("real ordered MCP calls unlock only their exact delivery and are single-use
     tool_name: "Write", tool_use_id: "write:before-calls",
     tool_input: { file_path: "target.js", content: "synthetic\n" }
   }));
-  assert.equal(denied.premortem.status, "missing-briefing");
+  assert.equal(denied.premortem.status, "missing-knowledge");
   const call = mcpClient();
   const recorded = await actualPreflight(call, root, requirementId);
   assert.match(recorded.agentSpineUse.briefingReceipt.digest, /^[a-f0-9]{64}$/);
@@ -143,7 +143,8 @@ test("real ordered MCP calls unlock only their exact delivery and are single-use
   assert.equal((await verifyDeliveryAgentUse({ root, requirementId })).status, "reused");
   const replay = await call("session_briefing", { root, cwd: root, host: "codex",
     requirementId, includeSourceContent: false });
-  assert.equal(replay.isError, true);
+  assert.equal(replay.isError, false);
+  assert.equal(body(replay).deliveryUseReceipt.verified, false);
   assert.equal(body(replay).deliveryUseReceipt.status, "reused");
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), source);
 });
@@ -158,13 +159,14 @@ test("foreign session, foreign goal step, and text claims cannot satisfy the gat
     root, requirementId: second.requirementId, items: items(),
     claimedBriefingReceipt: first.requirementId
   });
-  assert.equal(foreign.isError, true);
-  assert.match(body(foreign).error || body(foreign).reason, /additional properties|session_briefing/);
+  assert.equal(foreign.isError, false);
+  assert.equal(body(foreign).agentSpineUse.verified, false);
   const textOnly = await call("record_delivery_premortem", {
     root, requirementId: second.requirementId, items: items()
   });
-  assert.equal(textOnly.isError, true);
-  assert.equal(body(textOnly).status, "missing-briefing");
+  assert.equal(textOnly.isError, false);
+  assert.equal(body(textOnly).status, "unverified");
+  assert.equal(body(textOnly).agentSpineUse.status, "missing-briefing");
 });
 
 test("concurrency deduplicates receipts, verification stays bounded, and uncertainty fails open", async (t) => {

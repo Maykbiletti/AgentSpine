@@ -5,6 +5,7 @@ import {
 } from "./attention.js";
 import { sessionBriefing } from "./briefing.js";
 import { deliveryKnowledgeQuery } from "./delivery-knowledge.js";
+import { advisoryDeliveryUse } from "./hook-briefing-use.js";
 import { recordDeliveryBriefingUse, recordDeliveryKnowledgeUse,
   verifyDeliveryAgentUse } from "./delivery-agent-usage.js";
 import { scanAndSave, verifyCatalog } from "./catalog.js";
@@ -103,7 +104,7 @@ async function callTool(name, args = {}, environment = process.env) {
     if (!args.requirementId) return textResult(briefing);
     const receipt = await recordDeliveryBriefingUse({ root,
       requirementId: args.requirementId, input: args, result: briefing });
-    return textResult({ ...briefing, deliveryUseReceipt: receipt }, receipt.blocked);
+    return textResult({ ...briefing, deliveryUseReceipt: advisoryDeliveryUse(receipt) });
   }
   if (name === "delivery_knowledge_query") {
     rejectInternalSourceArguments(args);
@@ -111,7 +112,7 @@ async function callTool(name, args = {}, environment = process.env) {
     if (knowledge.blocked) return textResult(knowledge, true);
     const receipt = await recordDeliveryKnowledgeUse({ root,
       requirementId: args.requirementId, input: args, result: knowledge });
-    return textResult({ ...knowledge, deliveryUseReceipt: receipt }, receipt.blocked);
+    return textResult({ ...knowledge, deliveryUseReceipt: advisoryDeliveryUse(receipt) });
   }
   if (name === "read_document") {
     rejectInternalSourceArguments(args);
@@ -193,7 +194,10 @@ async function callTool(name, args = {}, environment = process.env) {
     }
     const usage = await verifyDeliveryAgentUse({ root: args.root,
       requirementId: args.requirementId });
-    if (usage.blocked) return textResult(usage, true);
+    if (usage.status === "mismatch") return textResult(usage, true);
+    if (usage.blocked || usage.status === "degraded") return textResult({ status: "unverified",
+      blocked: false, items: args.items, agentSpineUse: advisoryDeliveryUse(usage),
+      completionVerified: false, automaticRetry: false });
     const premortem = await recordDeliveryPremortem({
       root: args.root,
       requirementId: args.requirementId,

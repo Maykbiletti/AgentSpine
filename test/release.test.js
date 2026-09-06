@@ -54,7 +54,7 @@ test("release check validates every host version and the exact safe package boun
   assert.match(result.package.integrity, /^sha512-/);
   assert.equal(result.package.files > 40, true);
   assert.equal(result.package.packedSize > 0 && result.package.packedSize <= 512 * 1024, true);
-  assert.equal(result.package.unpackedSize > 0 && result.package.unpackedSize <= 2308 * 1024, true);
+  assert.equal(result.package.unpackedSize > 0 && result.package.unpackedSize <= 2320 * 1024, true);
   assert.equal(sha(await readFile(join(root, "AGENTS.md"))), before);
 });
 

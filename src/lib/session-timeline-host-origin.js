@@ -1,4 +1,4 @@
-import { verifyPreflightReceipt } from "./preflight.js";
+import { consumeHookBriefingOrigin, recordHookBriefingUse } from "./hook-briefing-use.js";
 
 const verifiedOrigins = new WeakSet();
 const USER_PROMPT_SUBMIT = "UserPromptSubmit";
@@ -22,7 +22,7 @@ function sameInput(left, right) {
     && (left?.event_id ?? left?.hook_event_id ?? null) === (right?.event_id ?? right?.hook_event_id ?? null);
 }
 
-function consumedResult(origin = null) { return { consumed: true, origin }; }
+function consumedResult(origin, briefingUse) { return { consumed: true, origin, briefingUse }; }
 
 function eligibleTimelineOrigin(binding, input) {
   const transcriptPath = input?.transcript_path ?? input?.transcriptPath;
@@ -38,26 +38,25 @@ export async function consumeTimelineHostOrigin({
   event, input, scope, resolvedSources, preflight, prompt, environment = process.env, now = new Date()
 }) {
   if (event !== USER_PROMPT_SUBMIT || !input || !scope || !resolvedSources || typeof prompt !== "string") return null;
-  const receipt = preflight?.receipt;
-  try {
-    if (!await verifyPreflightReceipt({ receipt, input, scope, resolvedSources, prompt, now,
-      env: environment, consume: true })) return null;
-  } catch {
-    return null;
-  }
+  const briefingOrigin = await consumeHookBriefingOrigin({ event, input, scope,
+    resolvedSources, preflight, prompt, environment, now });
+  if (!briefingOrigin) return null;
+  const receipt = preflight.receipt;
+  const briefingUse = await recordHookBriefingUse({ origin: briefingOrigin,
+    root: resolvedSources.projectRoot, now });
   const binding = timelineBinding(input, scope);
   if (receipt.host !== "claude" || receipt.hookEvent !== USER_PROMPT_SUBMIT || receipt.sessionId !== binding.sessionId
     || receipt.agentId !== binding.entityId || receipt.userId !== binding.userId || receipt.tenantId !== binding.tenantId
     || receipt.projectId !== binding.projectId || receipt.groupId !== binding.groupId || receipt.taskId !== binding.taskId) {
-    return consumedResult();
+    return consumedResult(null, briefingUse);
   }
-  if (!eligibleTimelineOrigin(binding, input)) return consumedResult();
+  if (!eligibleTimelineOrigin(binding, input)) return consumedResult(null, briefingUse);
   const origin = Object.freeze({ binding, input: Object.freeze({
     transcript_path: input.transcript_path ?? input.transcriptPath,
     event_id: input.event_id ?? input.hook_event_id ?? null
   }), root: resolvedSources.projectRoot, hostHome: resolvedSources.hostHome, event });
   verifiedOrigins.add(origin);
-  return consumedResult(origin);
+  return consumedResult(origin, briefingUse);
 }
 
 export function validVerifiedTimelineHostOrigin({ origin, root, input, binding, hostHome, event }) {
