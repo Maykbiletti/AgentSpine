@@ -3,7 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { lstat, open, opendir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { buildCatalog } from "./catalog.js";
-import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
+import { isFileLockContention, isTransientLockMetadataError, replaceFileWithRetry } from "./filesystem-retry.js";
 import { linkEntities, loadGraph, unlinkEntities, upsertEntity } from "./graph.js";
 import { isInside, projectStateDir } from "./paths.js";
 
@@ -175,7 +175,7 @@ async function withLock(paths, task) {
       try {
         const metadata = await stat(lockPath);
         if (Date.now() - metadata.mtimeMs > 90000) await unlink(lockPath);
-      } catch (lockError) { if (lockError.code !== "ENOENT") throw lockError; }
+      } catch (lockError) { if (!isTransientLockMetadataError(lockError)) throw lockError; }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
   }
