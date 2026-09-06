@@ -69,6 +69,7 @@ async function runMode(mode) {
     "delivery-completion.test.js",
     "king-history.test.js",
     "lesson-recall.test.js",
+    "mcp-bounded-preflight.test.js",
     "mcp-bounded-recovery.test.js",
     "package.test.js",
     "mcp.test.js",
