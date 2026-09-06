@@ -42,6 +42,30 @@ Contradictory entries never enter `facts`. A newer explicit correction names eve
 
 The session briefing carries only the bounded current structured view. Detailed correction history remains opt-in through `world_context`, preventing restarts from loading an ever-growing record. Secret-shaped structured values or rationales are rejected both at ingestion and state validation. A source reference is provenance only: it cannot confirm a model suggestion or create authority.
 
+## Normal-task continuation capsule
+
+A `task-state` assertion may use predicate `task.continuation` and value schema
+`agentspine.task-continuation/v1`. Its task ID must equal the assertion subject.
+The bounded value records the current objective, `active`, `blocked`, `paused`,
+or `completed` state, the last verified step and measurement ID/digest, at most eight
+open questions, and one next step. Both the checkpoint and its last verified
+step carry stable session/message provenance. A completed checkpoint requires a
+passed last step, objective-measurement evidence, and no open questions or next step.
+
+`world_context` derives `knowledge.continuation` only from current, confirmed,
+conflict-free checkpoints. Repeated model suggestions remain assumptions and
+never appear as resumable work. Competing established checkpoints are withheld
+until an explicit supersession resolves them. A newer correction preserves all
+predecessors in opt-in history. The selected checkpoint survives process restart
+and enters `SessionStart`/`PostCompact` briefing without rereading a transcript.
+Terminal checkpoints remain visible separately so completed work is not started
+again. At most eight capsules are returned, and `continuationTaskId` narrows the
+view to one exact task.
+
+This capsule is a working-memory aid, not a job lease or permission. It cannot
+start a tool, authorize a file change, publish, delegate, or replace the existing
+coordination, goal-plan, timeline, host, and safety contracts.
+
 ## Privacy and authority
 
 Assertions use `private`, `shared`, or exact `group` privacy. A group read rejects private inclusion, sees only its exact group records plus shared records, and cannot observe another group's values. Project-scoped records are visible only in that exact project; unscoped records may follow the same installation across project turns when intentionally read from that root.

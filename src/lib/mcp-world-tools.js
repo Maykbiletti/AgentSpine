@@ -43,6 +43,7 @@ export const worldModelTools = [
         root: { type: "string" }, subjectId: nullableStableId,
         projectId: nullableStableId, groupId: nullableStableId,
         includePrivate: { type: "boolean" }, includeKnowledgeHistory: { type: "boolean" },
+        continuationTaskId: nullableStableId,
         maxItems: { type: "integer", minimum: 1, maximum: 500 },
         now: { type: "string", format: "date-time" }
       }

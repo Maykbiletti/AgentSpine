@@ -77,4 +77,38 @@ test("provider-neutral MCP records and reads provenance-bound world context", as
   });
   assert.equal(context.knowledge.current[0].status, "confirmed");
   assert.equal(context.authority, "context-only");
+
+  const continuation = {
+    schema: "agentspine.task-continuation/v1",
+    taskId: "task:synthetic-mcp",
+    status: "active",
+    objective: "Finish the synthetic MCP continuation.",
+    lastVerifiedStep: {
+      id: "step:mcp-baseline", summary: "Verified the MCP baseline.", result: "passed",
+      evidenceId: "measurement:mcp-baseline",
+      evidenceDigest: createHash("sha256").update("mcp-baseline").digest("hex"),
+      observedAt: "2026-09-04T08:30:00.000Z",
+      sessionRef: "session-ref:0123456789abcdef0123456789abcdef",
+      messageRef: "timeline-event:mcp-baseline"
+    },
+    openQuestions: [],
+    nextStep: { id: "step:mcp-contract", summary: "Run the MCP contract probe." }
+  };
+  const checkpoint = await call("record_world_assertion", {
+    root, id: "assertion:mcp-continuation", subjectId: continuation.taskId,
+    predicate: "task.continuation", value: continuation,
+    evidenceKind: "objective-measurement", evidenceId: "measurement:mcp-continuation",
+    evidenceDigest: createHash("sha256").update(JSON.stringify(continuation)).digest("hex"),
+    observedAt: "2026-09-04T09:10:00.000Z", privacy: "shared",
+    knowledgeKind: "task-state",
+    sessionRef: "session-ref:0123456789abcdef0123456789abcdef",
+    messageRef: "timeline-event:mcp-continuation"
+  });
+  assert.equal(checkpoint.isError, false);
+  const resumedResult = await call("world_context", {
+    root, continuationTaskId: continuation.taskId, now: "2026-09-04T10:00:00.000Z"
+  });
+  assert.equal(resumedResult.isError, false);
+  const resumed = JSON.parse(resumedResult.content[0].text);
+  assert.equal(resumed.knowledge.continuation.tasks[0].nextStep.id, "step:mcp-contract");
 });

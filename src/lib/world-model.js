@@ -208,13 +208,15 @@ function publicAssertion(assertion) {
 
 export async function worldContext({
   root = process.cwd(), subjectId = null, projectId = null, groupId = null,
-  includePrivate = false, includeKnowledgeHistory = false, maxItems = 100, now = new Date()
+  includePrivate = false, includeKnowledgeHistory = false, continuationTaskId = null,
+  maxItems = 100, now = new Date()
 } = {}) {
   if (groupId !== null && includePrivate) throw new Error("private world context cannot be assembled for a group audience");
   if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 500) throw new Error("maxItems must be between 1 and 500");
   subjectId = optionalStableId(subjectId, "subjectId");
   projectId = optionalStableId(projectId, "projectId");
   groupId = optionalStableId(groupId, "groupId");
+  continuationTaskId = optionalStableId(continuationTaskId, "continuationTaskId");
   const names = await stateNames(root);
   const model = await readModel(names);
   const { structuredKnowledgeView } = await import("./world-knowledge.js");
@@ -255,7 +257,7 @@ export async function worldContext({
   facts.sort(order); conflicts.sort(order); proposals.sort(order); stale.sort(order);
   const knowledge = structuredKnowledgeView({
     candidates, stale, active, supersededIds: superseded, conflictAssertions,
-    includeHistory: Boolean(includeKnowledgeHistory), maxItems
+    includeHistory: Boolean(includeKnowledgeHistory), continuationTaskId, maxItems
   });
   return {
     schema: "agentspine.world-context/v1", root: names.root, revision: model.revision,

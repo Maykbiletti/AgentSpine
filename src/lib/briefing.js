@@ -149,7 +149,8 @@ export async function sessionBriefing({
       : Promise.resolve({ items: [] }),
     loadPersonaRuntime(catalog.root, catalog),
     loadGatewayRuntime(catalog.root, catalog),
-    worldContext({ root: catalog.root, projectId, groupId, includePrivate, maxItems: 50, now }),
+    worldContext({ root: catalog.root, projectId, groupId, includePrivate,
+      continuationTaskId: currentTaskId, maxItems: 50, now }),
     tenantId ? projectPortfolioContext({ root: catalog.root, tenantId, groupId, markPresented: false, now })
       : Promise.resolve({ projects: [], observations: [], notice: null, rateLimited: false })
   ]);
@@ -209,6 +210,7 @@ export async function sessionBriefing({
       facts: [], conflicts: [], proposals: [], stale: [],
       ...(world.knowledge.current.length ? { knowledge: {
         schema: world.knowledge.schema, current: [], counts: world.knowledge.counts,
+        continuation: { ...world.knowledge.continuation, tasks: [], terminal: [] },
         omitted: { ...world.knowledge.omitted }, authority: "context-only"
       } } : {}),
       uncertainty: world.uncertainty,
@@ -229,12 +231,24 @@ export async function sessionBriefing({
   recalculateBudget(result);
   if (result.budget.usedBytes > limit) throw new Error(`maxBytes is too small for the briefing envelope; use at least ${MIN_BYTES}`);
 
+  const continuationIds = new Set();
+  for (const item of world.knowledge.continuation.tasks) {
+    if (tryAdd(result, result.world.knowledge.continuation.tasks, item)) continuationIds.add(item.assertionId);
+    else countOmitted(result, "world");
+  }
+  for (const item of world.knowledge.continuation.terminal) {
+    if (tryAdd(result, result.world.knowledge.continuation.terminal, item)) continuationIds.add(item.assertionId);
+    else countOmitted(result, "world");
+  }
   for (const section of ["facts", "conflicts", "proposals", "stale"]) {
-    for (const item of world[section]) {
+    const items = section === "facts"
+      ? world[section].filter((item) => !item.assertionIds?.some((id) => continuationIds.has(id)))
+      : world[section];
+    for (const item of items) {
       if (!tryAdd(result, result.world[section], item)) countOmitted(result, "world");
     }
   }
-  for (const item of world.knowledge.current) {
+  for (const item of world.knowledge.current.filter((entry) => !continuationIds.has(entry.id))) {
     if (!tryAdd(result, result.world.knowledge.current, item)) {
       result.world.knowledge.omitted.current += 1;
       countOmitted(result, "world");
@@ -242,7 +256,9 @@ export async function sessionBriefing({
   }
 
   const scopedTasks = tasks.items.filter((task) => taskMatchesScope(task, entityId));
-  if (currentTaskId && !scopedTasks.some((task) => task.id === currentTaskId)) {
+  const continuedTask = [...world.knowledge.continuation.tasks, ...world.knowledge.continuation.terminal]
+    .find((task) => task.taskId === currentTaskId) || null;
+  if (currentTaskId && !scopedTasks.some((task) => task.id === currentTaskId) && !continuedTask) {
     throw new Error(`current task is not visible in this briefing scope: ${currentTaskId}`);
   }
   const orderedTasks = [...scopedTasks].sort((left, right) => {
@@ -256,6 +272,10 @@ export async function sessionBriefing({
   const focusedTask = orderedTasks.find((task) => task.id === currentTaskId) || orderedTasks[0] || null;
   if (focusedTask && !trySet(result, result.voiceBrief, "currentTask", {
     id: focusedTask.id, title: focusedTask.title, status: focusedTask.status
+  })) countOmitted(result, "voice");
+  if (!focusedTask && continuedTask && !trySet(result, result.voiceBrief, "currentTask", {
+    id: continuedTask.taskId, title: continuedTask.objective, status: continuedTask.status,
+    nextStep: continuedTask.nextStep
   })) countOmitted(result, "voice");
   const focusedGoal = entityId ? gateway.policy.goals.find((goal) => goal.agentId === entityId && goal.status === "active"
     && (projectId === null || goal.projectId === projectId) && goal.groupId === groupId) : null;

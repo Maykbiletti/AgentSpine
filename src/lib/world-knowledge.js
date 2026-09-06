@@ -5,6 +5,11 @@ const KNOWLEDGE_KINDS = new Set([
 const SESSION_REF = /^session-ref:[a-f0-9]{32}$/;
 const MESSAGE_REF = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/;
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk[-_](?:proj[-_])?|gh[opusu]_)[A-Za-z0-9_-]{20,}\b|\b(?:xox[bapcrs]-|github_pat_|glpat-|npm_)[A-Za-z0-9_-]{12,}\b|\bAKIA[0-9A-Z]{16}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i;
+const TASK_CONTINUATION_SCHEMA = "agentspine.task-continuation/v1";
+const TASK_STATUSES = new Set(["active", "blocked", "paused", "completed"]);
+const STEP_RESULTS = new Set(["passed", "failed", "blocked"]);
+const STABLE_ID = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/;
+const DIGEST = /^[a-f0-9]{64}$/;
 
 function containsSecret(value) {
   const pending = [value];
@@ -26,6 +31,77 @@ function pairedSourceRefs(sessionRef, messageRef) {
   }
 }
 
+function exactKeys(value, expected, field) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).sort().join("\0") !== [...expected].sort().join("\0")) {
+    throw new Error(`${field} has an invalid structure`);
+  }
+}
+
+function boundedText(value, field, maximum) {
+  if (typeof value !== "string" || !value.trim() || value.length > maximum) {
+    throw new Error(`${field} must be a bounded non-empty string`);
+  }
+}
+
+function validateContinuation(input, value) {
+  if (value?.schema !== TASK_CONTINUATION_SCHEMA) return;
+  exactKeys(value, ["schema", "taskId", "status", "objective", "lastVerifiedStep", "openQuestions", "nextStep"], "task continuation");
+  if (input.knowledgeKind !== "task-state" || input.predicate !== "task.continuation"
+    || value.taskId !== input.subjectId || !STABLE_ID.test(value.taskId || "")) {
+    throw new Error("task continuation must be a task-state bound to its task subject and predicate");
+  }
+  if (input.sessionRef === undefined || input.messageRef === undefined) {
+    throw new Error("task continuation requires stable session and message source references");
+  }
+  if (!TASK_STATUSES.has(value.status)) throw new Error("task continuation status is invalid");
+  boundedText(value.objective, "task continuation objective", 500);
+  if (!Array.isArray(value.openQuestions) || value.openQuestions.length > 8) {
+    throw new Error("task continuation openQuestions must be a bounded array");
+  }
+  for (const question of value.openQuestions) {
+    exactKeys(question, ["id", "question"], "task continuation question");
+    if (!STABLE_ID.test(question.id || "")) throw new Error("task continuation question id is invalid");
+    boundedText(question.question, "task continuation question", 300);
+  }
+  if (new Set(value.openQuestions.map((item) => item.id)).size !== value.openQuestions.length) {
+    throw new Error("task continuation question ids must be unique");
+  }
+  if (value.nextStep !== null) {
+    exactKeys(value.nextStep, ["id", "summary"], "task continuation nextStep");
+    if (!STABLE_ID.test(value.nextStep.id || "")) throw new Error("task continuation next step id is invalid");
+    boundedText(value.nextStep.summary, "task continuation next step", 500);
+  }
+  if (value.lastVerifiedStep !== null) {
+    exactKeys(value.lastVerifiedStep,
+      ["id", "summary", "result", "evidenceId", "evidenceDigest", "observedAt", "sessionRef", "messageRef"],
+      "task continuation lastVerifiedStep");
+    if (!STABLE_ID.test(value.lastVerifiedStep.id || "") || !STEP_RESULTS.has(value.lastVerifiedStep.result)
+      || !STABLE_ID.test(value.lastVerifiedStep.evidenceId || "")
+      || !DIGEST.test(value.lastVerifiedStep.evidenceDigest || "")) {
+      throw new Error("task continuation verified step evidence is invalid");
+    }
+    boundedText(value.lastVerifiedStep.summary, "task continuation verified step", 500);
+    if (new Date(value.lastVerifiedStep.observedAt).toISOString() !== value.lastVerifiedStep.observedAt
+      || new Date(value.lastVerifiedStep.observedAt).getTime() > new Date(input.observedAt).getTime()) {
+      throw new Error("task continuation verified step timestamp is invalid");
+    }
+    pairedSourceRefs(value.lastVerifiedStep.sessionRef, value.lastVerifiedStep.messageRef);
+  }
+  if (value.status === "completed" && (value.nextStep !== null || value.openQuestions.length)) {
+    throw new Error("completed task continuation cannot retain a next step or open questions");
+  }
+  if (value.status === "completed" && value.lastVerifiedStep?.result !== "passed") {
+    throw new Error("completed task continuation requires a passed verified step");
+  }
+  if (value.status === "completed" && input.evidenceKind !== "objective-measurement") {
+    throw new Error("completed task continuation requires objective measurement evidence");
+  }
+  if (value.status !== "completed" && value.nextStep === null) {
+    throw new Error("resumable task continuation requires a next step");
+  }
+}
+
 export function normalizeKnowledgeFields(input, evidenceKind, value) {
   const kind = input.knowledgeKind ?? null;
   if (kind === null) {
@@ -38,6 +114,7 @@ export function normalizeKnowledgeFields(input, evidenceKind, value) {
   if (containsSecret(value) || containsSecret(input.reason || "")) {
     throw new Error("secret-shaped content cannot enter structured knowledge");
   }
+  validateContinuation(input, value);
   if (kind === "user-preference" && !["explicit-user-feedback", "model-suggestion"].includes(evidenceKind)) {
     throw new Error("user preferences require explicit feedback or remain a model suggestion");
   }
@@ -62,11 +139,40 @@ export function validKnowledgeFields(assertion) {
   if (kind === "decision" && !["explicit-user-feedback", "model-suggestion"].includes(assertion.evidenceKind)) return false;
   if (kind === "decision" && !assertion.reason) return false;
   try {
+    validateContinuation(assertion, assertion.value);
     pairedSourceRefs(assertion.sessionRef ?? null, assertion.messageRef ?? null);
     return true;
   } catch {
     return false;
   }
+}
+
+function continuationView(entries, taskId, maxItems) {
+  const eligible = entries.filter((item) => item.kind === "task-state" && item.status === "confirmed"
+    && item.predicate === "task.continuation" && item.value?.schema === TASK_CONTINUATION_SCHEMA
+    && (!taskId || item.subjectId === taskId));
+  const selected = new Map();
+  for (const item of eligible) {
+    if (!selected.has(item.subjectId)) selected.set(item.subjectId, item);
+  }
+  const capsules = [...selected.values()].map((item) => ({
+    schema: TASK_CONTINUATION_SCHEMA,
+    assertionId: item.id,
+    ...structuredClone(item.value),
+    source: structuredClone(item.source),
+    observedAt: item.observedAt,
+    scope: structuredClone(item.scope),
+    authority: "context-only"
+  }));
+  const limited = capsules.slice(0, Math.min(maxItems, 8));
+  return {
+    schema: "agentspine.task-continuation-context/v1",
+    tasks: limited.filter((item) => item.status !== "completed"),
+    terminal: limited.filter((item) => item.status === "completed"),
+    omitted: capsules.length - limited.length,
+    authority: "context-only",
+    note: "Continuation is descriptive context only and never grants permission, tools, delegation, or execution."
+  };
 }
 
 function publicEntry(assertion, status, statusReason) {
@@ -108,7 +214,7 @@ function statusFor(assertion, { staleIds, supersededIds, conflictIds }) {
 
 export function structuredKnowledgeView({
   candidates, stale, active, supersededIds, conflictAssertions,
-  includeHistory = false, maxItems = 100
+  includeHistory = false, continuationTaskId = null, maxItems = 100
 }) {
   const staleIds = new Set(stale.map((item) => item.id));
   const activeIds = new Set(active.map((item) => item.id));
@@ -126,6 +232,7 @@ export function structuredKnowledgeView({
     schema: "agentspine.structured-knowledge/v1",
     current: current.slice(0, maxItems),
     history: history.slice(0, maxItems),
+    continuation: continuationView(current, continuationTaskId, maxItems),
     counts,
     omitted: {
       current: Math.max(0, current.length - maxItems),
