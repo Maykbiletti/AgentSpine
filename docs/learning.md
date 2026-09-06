@@ -66,6 +66,8 @@ agentspine learn-context . --include-private --json
 
 Candidates never appear in learned context before acceptance. Native lifecycle hooks inject only accepted, exactly scoped learning inside the byte-budgeted session briefing. They never inject unreviewed candidates.
 
+Before each tool action, the lifecycle hook also rechecks the learning ledger and emits at most three currently valid outcome-gated behavior strategies whose stored task is exactly the authenticated current task. This action packet is bounded together with indexed source lessons, keeps the two origins separate, and records no new application or authority. Generic project advice, foreign task or tenant state, group conversations, and revoked or expired Canaries are excluded. If the learning ledger is unavailable, this advisory read degrades without blocking the tool; it never turns missing evidence into verified delivery or learning.
+
 ## Optional automatic promotion
 
 Automatic promotion is disabled by default. When deliberately enabled, it applies only to `project-fact` and `reference`, and only when both confidence and distinct-evidence thresholds pass.

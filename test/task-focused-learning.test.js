@@ -10,7 +10,7 @@ import { sessionBriefing } from "../src/lib/briefing.js";
 import { createTask } from "../src/lib/coordination.js";
 import {
   addLearningEvidence, configureLearning, evaluateLearning, learningContext, loadLearning,
-  proposeLearning, recordLearningMeasurement, recordLearningOutcome, reviewLearning
+  proposeLearning, recordLearningMeasurement, recordLearningOutcome, reviewLearning, rollbackLearning
 } from "../src/lib/learning.js";
 import { runHook } from "../src/hook.js";
 import { evidence, evaluation, fixture, hash, scopedTurn, upsertEntity } from "./learning-fixture.js";
@@ -192,5 +192,105 @@ test("task ranking never widens scope and keeps generic ordering unchanged", asy
     userId: scopedTurn.userId, tenantId: scopedTurn.tenantId, projectId: scopedTurn.projectId,
     currentTaskId: scopedTurn.taskId, includeSourceContent: false, maxBytes: 4096 });
   assert.equal(briefing.learning[0].id, LEARNING);
+  assert.deepEqual(await readFile(join(f.root, "AGENTS.md")), f.source);
+});
+
+for (const provider of ["claude", "codex", "king"]) test(`${provider} action hook recalls exact-task outcome learning before tool use`, async (t) => {
+  const f = await seed(t);
+  const keys = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "BLUN_HOME", "BLUN_PLUGIN_ROOT"];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+  if (provider === "claude") process.env.CLAUDE_CONFIG_DIR = f.state;
+  if (provider === "codex") process.env.CODEX_HOME = f.state;
+  if (provider === "king") {
+    process.env.BLUN_HOME = f.state;
+    process.env.BLUN_PLUGIN_ROOT = process.cwd();
+  }
+  t.after(() => { for (const [key, value] of Object.entries(previous)) {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  } });
+  const binding = {
+    ...(provider === "king" ? {} : { host: provider }),
+    cwd: f.root,
+    session_id: `session:action-learning-${provider}`,
+    entity_id: scopedTurn.personaId,
+    user_id: scopedTurn.userId,
+    tenant_id: scopedTurn.tenantId,
+    project_id: scopedTurn.projectId,
+    task_id: scopedTurn.taskId
+  };
+  const prompt = await runHook({ ...binding, hook_event_name: "UserPromptSubmit",
+    event_id: `turn:action-learning-${provider}`, prompt: "Continue the exact archive task." });
+  assert.equal(prompt.blocked, false, prompt.reason);
+  const compact = await runHook({ ...binding, hook_event_name: "PostCompact",
+    event_id: `compact:action-learning-${provider}` });
+  assert.equal(compact.blocked, false, compact.reason);
+  const started = performance.now();
+  const action = await runHook({ ...binding, hook_event_name: "PreToolUse",
+    tool_use_id: `tool:action-learning-${provider}`, tool_name: "Read",
+    tool_input: { path: "artifacts/result.txt" } });
+  assert.equal(action.blocked, false, action.reason);
+  assert.equal(action.lessonRecall.schema, "agentspine.action-lesson-recall/v2");
+  assert.equal(action.lessonRecall.learning.length, 1);
+  assert.equal(action.lessonRecall.learning[0].id, LEARNING);
+  assert.equal(action.lessonRecall.learning[0].relevance.match, "exact-task");
+  assert.ok(Buffer.byteLength(JSON.stringify(action.lessonRecall)) <= 8192);
+  // The deterministic worker consumes only the action-time context.
+  if (hasStrategy(action.lessonRecall.learning)) {
+    await writeFile(join(f.root, "artifacts/archive.bak"), "original archive");
+  }
+  const stop = await runHook({ ...binding, hook_event_name: "Stop" });
+  assert.equal(stop.blocked, false, stop.reason);
+  const state = (await loadLearning(f.root)).learning;
+  const application = state.applications.find((item) =>
+    item.initialAdmission?.evaluatorId === ARTIFACT_EVALUATOR);
+  const delivery = state.deliveries.find((item) => item.applicationId === application.id);
+  const after = await measureLearningArtifacts({ root: f.root, spec: f.spec,
+    id: `measurement:action-after-${provider}`, learningId: LEARNING, evaluationId: EVALUATION,
+    scope: scopedTurn, phase: "after", evaluatorId: ARTIFACT_EVALUATOR,
+    runId: f.contract.initialTrials.after.find((item) => item.evaluatorId === ARTIFACT_EVALUATOR).runId,
+    confirmLocalMeasurement: true });
+  await recordLearningOutcome({ root: f.root, id: `outcome:action-after-${provider}`,
+    learningId: LEARNING, evaluationId: EVALUATION, measurementReceiptId: after.receipt.id,
+    applicationId: application.id, deliveryId: delivery.id });
+  assert.equal(f.before.receipt.metric.value, 2 / 3);
+  assert.equal(after.receipt.metric.value, 1);
+  assert.deepEqual(await readFile(join(f.root, "AGENTS.md")), f.source);
+  t.diagnostic(JSON.stringify({ provider, before: 2 / 3, after: 1,
+    actionContextBytes: Buffer.byteLength(JSON.stringify(action.lessonRecall)),
+    elapsedMs: performance.now() - started, tokens: "not-measured" }));
+});
+
+test("action-time learning degrades safely and never crosses task, tenant or group scope", async (t) => {
+  const f = await seed(t);
+  process.env.CODEX_HOME = f.state;
+  const binding = { host: "codex", cwd: f.root, session_id: "session:action-boundaries",
+    entity_id: scopedTurn.personaId, user_id: scopedTurn.userId,
+    tenant_id: scopedTurn.tenantId, project_id: scopedTurn.projectId,
+    task_id: scopedTurn.taskId, hook_event_name: "PreToolUse", tool_name: "Read",
+    tool_input: { path: "artifacts/result.txt" } };
+  const concurrent = await Promise.all(Array.from({ length: 4 }, (_, index) => runHook({
+    ...binding, tool_use_id: `tool:action-race-${index}`
+  })));
+  assert.ok(concurrent.every((item) => !item.blocked && item.lessonRecall.learning[0]?.id === LEARNING));
+  for (const [field, value] of [["tenant_id", "tenant:foreign"], ["task_id", "task:foreign"]]) {
+    const result = await runHook({ ...binding, [field]: value, tool_use_id: `tool:foreign-${field}` });
+    assert.deepEqual(result.lessonRecall.learning, []);
+  }
+  const group = await runHook({ ...binding, group_id: "group:foreign",
+    tool_use_id: "tool:group-suppressed" });
+  assert.equal(group.lessonRecall.status, "group-suppressed");
+  assert.deepEqual(group.lessonRecall.learning, []);
+  await rollbackLearning({ root: f.root, id: LEARNING, reason: "Synthetic revocation before action." });
+  const revoked = await runHook({ ...binding, tool_use_id: "tool:revoked-learning" });
+  assert.deepEqual(revoked.lessonRecall.learning, []);
+  const { learningPath } = await loadLearning(f.root);
+  const stateBytes = await readFile(learningPath);
+  await writeFile(learningPath, "{synthetic-corrupt-state");
+  const degraded = await runHook({ ...binding, tool_use_id: "tool:degraded-learning" });
+  assert.equal(degraded.blocked, false);
+  assert.equal(degraded.lessonRecall.status, "degraded");
+  assert.equal(degraded.lessonRecall.learningDiagnostics.status, "degraded");
+  await writeFile(learningPath, stateBytes);
   assert.deepEqual(await readFile(join(f.root, "AGENTS.md")), f.source);
 });

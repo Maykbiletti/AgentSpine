@@ -6,6 +6,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Added action-time recall for currently valid, outcome-gated behavior learning whose stored task scope exactly matches the authenticated runtime task. Claude, Codex and King-compatible lifecycle hooks receive the bounded context before tool use without creating permissions or a second application receipt.
 - Added a local, command-free artifact evaluator that derives pass rates and blocking defects from at most sixteen precommitted file checks and submits actual observations to the existing learning-measurement contract. It is one evaluator principal, not a source of independent aliases, authorization, completion or automatic promotion.
 - Added a disabled-by-default cross-provider objective-evidence handoff across separately enrolled Claude, Codex and King sources. It requires a protected local host capability plus an explicit prior-provider search, ranks the bounded index first, opens at most one immutable snapshot and returns provider/session/message provenance.
 - Added a native King agent-wire history adapter with an explicit protected source/protocol mapping, provider-separated lifecycle binding, bounded objective `tool.result` extraction, and stable session/message references. It never scans `BLUN_HOME`, reuses Codex rollout parsing, or changes King permissions.
@@ -20,6 +21,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Security
 
+- Action-time learning excludes generic, foreign-task, foreign-tenant, group, stale, revoked and rolled-back candidates. Learning-state failures degrade this advisory recall without blocking normal host work, while existing source lessons remain separately bounded and user-owned source bytes stay unchanged.
 - Cross-provider recall requires exact private entity, user, tenant, project, task and compatible-goal continuity. The current provider keeps its own transport binding while the selected source is revalidated with its original signed provider enrollment and profile root; missing opt-in, foreign/group scope, expiry, mutation and replay return no content or authority.
 - Task recall opens no source, grants no authority, excludes unsafe state, and returns at most six entries.
 - Task continuation is context-only and derived only from current, confirmed, conflict-free, exactly scoped checkpoints. Proposed, stale, conflicting, foreign and malformed checkpoints are never resumable; completed checkpoints require a passed verified step and no remaining work.
@@ -45,6 +47,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Evidence limits
 
+- The pre-adjustment dry run exceeded the prior ceiling by 616 packed bytes and 1,492 unpacked bytes. The finite ceilings grow by 2 KiB packed and 3 KiB unpacked; file-count, required-file and forbidden-source gates are unchanged.
 - MemPalace `v3.9.0` commit `d9f05907` (MIT) and Claude-Mem commit `3939fbb2` (Apache-2.0), inspected 2026-09-06, informed only the separate-adapter and progressive-retrieval architecture. No external code or script was copied or executed. Repository tests do not establish an Otto or Fredrik live handoff.
 - The finite release ceiling grows by 4 KiB packed and 8 KiB unpacked for the provider-handoff implementation, provenance fields and contract; file-count and forbidden-source gates are unchanged.
 - The King repository adapter is pinned to public BLUN Code `1.0.109` commit `fbb97459` and vendored King SDK `0.12.1` format evidence. Fredrik's actual source/protocol mapping, installed format, live A/B recall, and host block enforcement remain unverified; no live configuration was changed.

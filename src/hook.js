@@ -220,7 +220,7 @@ async function runHookCore(input, payload, options) {
     }
     premortem = { ...premortem, writeIntent: premortemIntent.status,
       writeDigest: premortemIntent.writeDigest || null };
-    try { lessonRecall = actionLessonRecall({ catalog, event, input, scope }); }
+    try { lessonRecall = await actionLessonRecall({ catalog, event, input, scope }); }
     catch (error) { lessonRecall = { status: "degraded", items: [], reason: error.message, authority: "context-only" }; }
   }
   if (["PostToolUse", "Stop", "SubagentStop"].includes(event)) {
@@ -380,7 +380,7 @@ async function runHookCore(input, payload, options) {
         prompt: event === "UserPromptSubmit" ? promptFromInput(input) : null
       });
       if (event === "PostCompact") {
-        try { lessonRecall = actionLessonRecall({ catalog, event, input, scope }); }
+        try { lessonRecall = await actionLessonRecall({ catalog, event, input, scope }); }
         catch (error) { lessonRecall = { status: "degraded", items: [], reason: error.message, authority: "context-only" }; }
       }
       let context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, resolvedSources.diagnostics, preflight, lessonRecall);

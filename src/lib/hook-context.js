@@ -214,7 +214,8 @@ export function renderContext(event, catalog, briefing, signal = null, attention
     sourceResolution: sourceDiagnostics,
     lessonRecall: lessonRecall?.status === "recalled" ? {
       status: "recalled", schema: lessonRecall.schema, receiptDigest: lessonRecall.receiptDigest,
-      items: lessonRecall.items, omitted: lessonRecall.omitted,
+      items: lessonRecall.items, learning: lessonRecall.learning || [],
+      learningDiagnostics: lessonRecall.learningDiagnostics || null, omitted: lessonRecall.omitted,
       instruction: lessonRecall.instruction, authority: "context-only"
     } : lessonRecall?.status === "group-suppressed" ? {
       status: "group-suppressed", items: [], authority: "context-only"

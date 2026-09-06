@@ -130,7 +130,9 @@ export function lifecycleOutput(event, artifactGuard, premortem, deliveryVerific
   if (lessonRecall?.status === "recalled") {
     messages.push(JSON.stringify({
       schema: lessonRecall.schema, receiptDigest: lessonRecall.receiptDigest,
-      instruction: lessonRecall.instruction, items: lessonRecall.items, omitted: lessonRecall.omitted,
+      instruction: lessonRecall.instruction, items: lessonRecall.items,
+      learning: lessonRecall.learning || [], learningDiagnostics: lessonRecall.learningDiagnostics || null,
+      omitted: lessonRecall.omitted,
       authority: "context-only"
     }));
   }
