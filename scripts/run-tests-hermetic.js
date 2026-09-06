@@ -58,7 +58,11 @@ async function runMode(mode) {
   // Installation copies complete bundles, while the MCP process tests check real
   // 2-second startup deadlines. Keep those healthy-baseline probes off the shared
   // I/O pool. Both profiles still run them once, with unchanged assertions and limits.
-  const isolatedNames = new Set(["package.test.js", "mcp.test.js"]);
+  const isolatedNames = new Set([
+    "package.test.js",
+    "mcp.test.js",
+    "session-timeline-invocation.test.js"
+  ]);
   const isolated = indexed.filter(item => isolatedNames.has(item.file));
   const queue = indexed.filter(item => !isolatedNames.has(item.file));
   for (const item of isolated) results.push(await runOne(item.file, mode, item.index));
