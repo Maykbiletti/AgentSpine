@@ -9,7 +9,11 @@ import { configuredTestTimeout, runBoundedProcess } from "./hermetic-process.js"
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const base = await mkdtemp(join(tmpdir(), "agentspine-hermetic-tests-"));
 const testFiles = (await readdir(join(root, "test"))).filter((name) => name.endsWith(".test.js")).sort();
-const concurrency = Math.max(1, Math.min(4, cpus().length));
+// Windows process creation and antivirus-backed temporary I/O contend sharply
+// when several hermetic files each spawn MCP children. Preserve the real child
+// deadlines by reducing runner load there, rather than relaxing any deadline.
+const concurrencyCeiling = process.platform === "win32" ? 2 : 4;
+const concurrency = Math.max(1, Math.min(concurrencyCeiling, cpus().length));
 const testTimeoutMs = configuredTestTimeout();
 const slowTestTimeouts = new Map([
   ["indexed-memory.test.js", 300_000]
