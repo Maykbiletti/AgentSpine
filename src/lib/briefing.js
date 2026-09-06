@@ -211,6 +211,7 @@ export async function sessionBriefing({
       ...(world.knowledge.current.length ? { knowledge: {
         schema: world.knowledge.schema, current: [], counts: world.knowledge.counts,
         continuation: { ...world.knowledge.continuation, tasks: [], terminal: [] },
+        taskContext: { ...world.knowledge.taskContext, items: [] },
         omitted: { ...world.knowledge.omitted }, authority: "context-only"
       } } : {}),
       uncertainty: world.uncertainty,
@@ -240,15 +241,23 @@ export async function sessionBriefing({
     if (tryAdd(result, result.world.knowledge.continuation.terminal, item)) continuationIds.add(item.assertionId);
     else countOmitted(result, "world");
   }
+  const contextualIds = new Set(continuationIds);
+  for (const item of world.knowledge.taskContext.items) {
+    if (tryAdd(result, result.world.knowledge.taskContext.items, item)) contextualIds.add(item.id);
+    else {
+      result.world.knowledge.taskContext.omitted += 1;
+      countOmitted(result, "world");
+    }
+  }
   for (const section of ["facts", "conflicts", "proposals", "stale"]) {
     const items = section === "facts"
-      ? world[section].filter((item) => !item.assertionIds?.some((id) => continuationIds.has(id)))
+      ? world[section].filter((item) => !item.assertionIds?.some((id) => contextualIds.has(id)))
       : world[section];
     for (const item of items) {
       if (!tryAdd(result, result.world[section], item)) countOmitted(result, "world");
     }
   }
-  for (const item of world.knowledge.current.filter((entry) => !continuationIds.has(entry.id))) {
+  for (const item of world.knowledge.current.filter((entry) => !contextualIds.has(entry.id))) {
     if (!tryAdd(result, result.world.knowledge.current, item)) {
       result.world.knowledge.omitted.current += 1;
       countOmitted(result, "world");

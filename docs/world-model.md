@@ -66,6 +66,15 @@ This capsule is a working-memory aid, not a job lease or permission. It cannot
 start a tool, authorize a file change, publish, delegate, or replace the existing
 coordination, goal-plan, timeline, host, and safety contracts.
 
+## Task-relevant knowledge
+
+When `continuationTaskId` selects one current resumable capsule, `world_context`
+derives `knowledge.taskContext` from the loaded structured index. A deterministic
+query over its objective, questions, and next step selects at most six confirmed
+facts, preferences, decisions, or error lessons and keeps their source references.
+Uncertain, stale, superseded, private, foreign, and terminal state is excluded.
+No transcript or source is opened, and the view grants no authority.
+
 ## Privacy and authority
 
 Assertions use `private`, `shared`, or exact `group` privacy. A group read rejects private inclusion, sees only its exact group records plus shared records, and cannot observe another group's values. Project-scoped records are visible only in that exact project; unscoped records may follow the same installation across project turns when intentionally read from that root.

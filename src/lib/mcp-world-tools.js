@@ -36,7 +36,7 @@ export const worldModelTools = [
   },
   {
     name: "world_context",
-    description: "Read durable world context with strict privacy and group filtering. Conflicting or expired assertions are withheld from facts and surfaced as uncertainty; model suggestions remain separate context-only proposals.",
+    description: "Read privacy-filtered world context. Conflicts, expiry, and suggestions remain separate; continuationTaskId adds bounded, sourced task-relevant knowledge.",
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {

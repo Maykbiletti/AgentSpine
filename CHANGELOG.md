@@ -6,6 +6,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Added bounded, sourced structured recall for one exact continued task.
 - Added restart- and compaction-safe normal-task continuation capsules to structured knowledge. A bounded confirmed checkpoint carries the current objective, last verified step with source reference, open questions and next step; terminal checkpoints prevent completed work from being resumed.
 - Added an evidence-derived structured knowledge view over the durable world model. Facts, user preferences, decisions with rationale, task state, and error lessons retain source/time/scope plus optional stable session/message references across restart; explicit corrections preserve superseded history while briefing carries only bounded current entries.
 - Added same-task prior-session evidence recall to the existing timeline search tool. Restart and compaction hooks expose only a small sidecar availability hint; an explicit `includePriorSessions` query ranks the signed index first, then verifies at most one matching immutable source and returns bounded redacted evidence with stable session and message references.
@@ -14,6 +15,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Security
 
+- Task recall opens no source, grants no authority, excludes unsafe state, and returns at most six entries.
 - Task continuation is context-only and derived only from current, confirmed, conflict-free, exactly scoped checkpoints. Proposed, stale, conflicting, foreign and malformed checkpoints are never resumable; completed checkpoints require a passed verified step and no remaining work.
 - Structured knowledge remains context-only: repeated model suggestions stay assumptions, unresolved conflicting values cannot enter facts, foreign project/group/private records remain excluded, and secret-shaped values or rationales fail both ingestion and persisted-state validation.
 - Prior-session recall requires the current private host enrollment and exact host, entity, user, tenant, project, task and compatible goal binding. Current-session, foreign-task, foreign-project and group sources are excluded; changed prior snapshots, replayed invocations and tampered sidecars return no history.
@@ -21,6 +23,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Tests
 
+- A CSS-archive Before/After restores its sourced backup lesson after restart and `PostCompact`; boundary tests remain green.
 - Synthetic Before/After probes show that a legacy task-state cannot reconstruct work, while the structured checkpoint restores exactly one sourced next step after a separate-process restart and `PostCompact`. Correction, completion, MCP, scope, conflict, proposal, tamper, bounds and source-byte tests prevent false continuation.
 - Synthetic restart, correction, contradiction, repetition, MCP, briefing-budget, group/project/privacy, tamper and byte-preservation probes show that the new view reduces reconstruction ambiguity without promoting guesses or rereading historical state into every briefing.
 - A multi-megabyte synthetic prior session with 2,500 unrelated memory links and four old failure lessons proves the Before/After boundary: current-session search finds nothing after restart, while the explicit prior-session query returns only the `12:40` Suite 0 result and its source references. Lifecycle latency, compaction, replay, foreign task/group scope, changed-source rejection and byte preservation are covered.

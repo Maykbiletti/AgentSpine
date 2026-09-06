@@ -105,10 +105,25 @@ test("provider-neutral MCP records and reads provenance-bound world context", as
     messageRef: "timeline-event:mcp-continuation"
   });
   assert.equal(checkpoint.isError, false);
+  const lesson = { failure: "The synthetic MCP contract probe failed.",
+    safeStrategy: "Retry the bounded MCP continuation contract." };
+  const learned = await call("record_world_assertion", {
+    root, id: "assertion:mcp-lesson", subjectId: "project:synthetic",
+    predicate: "lesson.mcp-contract", value: lesson,
+    evidenceKind: "objective-measurement", evidenceId: "measurement:mcp-lesson",
+    evidenceDigest: createHash("sha256").update(JSON.stringify(lesson)).digest("hex"),
+    observedAt: "2026-09-04T09:05:00.000Z", privacy: "shared",
+    knowledgeKind: "error-lesson",
+    sessionRef: "session-ref:0123456789abcdef0123456789abcdef",
+    messageRef: "timeline-event:mcp-lesson"
+  });
+  assert.equal(learned.isError, false);
   const resumedResult = await call("world_context", {
     root, continuationTaskId: continuation.taskId, now: "2026-09-04T10:00:00.000Z"
   });
   assert.equal(resumedResult.isError, false);
   const resumed = JSON.parse(resumedResult.content[0].text);
   assert.equal(resumed.knowledge.continuation.tasks[0].nextStep.id, "step:mcp-contract");
+  assert.equal(resumed.knowledge.taskContext.items[0].id, "assertion:mcp-lesson");
+  assert.equal(resumed.knowledge.taskContext.items[0].source.messageRef, "timeline-event:mcp-lesson");
 });

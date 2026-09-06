@@ -1,3 +1,5 @@
+import { taskKnowledgeContext } from "./task-knowledge-context.js";
+
 const KNOWLEDGE_KINDS = new Set([
   "fact", "user-preference", "decision", "task-state", "error-lesson"
 ]);
@@ -228,11 +230,15 @@ export function structuredKnowledgeView({
   const history = includeHistory ? historical : [];
   const counts = Object.fromEntries(["confirmed", "assumption", "superseded", "contradictory"]
     .map((status) => [status, entries.filter((item) => item.status === status).length]));
+  const continuation = continuationView(current, continuationTaskId, maxItems);
   return {
     schema: "agentspine.structured-knowledge/v1",
     current: current.slice(0, maxItems),
     history: history.slice(0, maxItems),
-    continuation: continuationView(current, continuationTaskId, maxItems),
+    continuation,
+    taskContext: taskKnowledgeContext(current, {
+      taskId: continuationTaskId, continuation, maxItems
+    }),
     counts,
     omitted: {
       current: Math.max(0, current.length - maxItems),
