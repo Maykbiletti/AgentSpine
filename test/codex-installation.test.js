@@ -50,6 +50,17 @@ async function launchResult(launcher, cwd, env = {}) {
         reject(error);
       }
     });
+    child.stdin.on("error", (error) => {
+      // A fail-closed launcher may emit its response and exit before this tiny
+      // synthetic request has fully drained on macOS. The close handler still
+      // rejects when no response arrived, so only that expected pipe close is safe.
+      if (error.code === "EPIPE") return;
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
