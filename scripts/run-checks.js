@@ -7,9 +7,12 @@ import { githubErrorCommand } from "./github-actions.js";
 const CHECKS = [
   { title: "Syntax check", script: "lint" },
   { title: "Line budget", script: "line-budget" },
-  { title: "Hermetic test suite", script: "test" },
   { title: "Host manifest check", script: "host:check" },
+  // Exercise the copied-bundle hook deadlines before the hermetic suite creates
+  // hundreds of short-lived Windows processes. The deadlines and assertions stay
+  // unchanged; this removes residual runner load from the installed-host probe.
   { title: "Installed bundle check", script: "host:install-check" },
+  { title: "Hermetic test suite", script: "test" },
   { title: "Runtime smoke test", script: "smoke" },
   { title: "Self audit", script: "audit:self" }
 ];
