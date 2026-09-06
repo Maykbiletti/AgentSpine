@@ -50,6 +50,8 @@ Usage:
   agentspine learn-trial-failure-revoke <trial-failure-id> --reason-code clock-invalid|host-invalid|receipt-invalid|scope-invalid|duplicate|other --reason text --confirm-local-trial-failure-revocation
   agentspine learn-revalidation-start <learning-id> --confirm-local-validation
   agentspine learn-revalidate <learning-id> --measurements id,id --applications id,id --deliveries id,id --confirm-local-validation
+  agentspine learn-artifact-plan --checks JSON [--json]
+  agentspine learn-artifact-measure <id> --root path --checks JSON --learning id --evaluation id --phase before|after --evaluator id --run id --persona id --user id --tenant id --project id [--task id] [--group id] --confirm-local-measurement [--json]
   agentspine learn-measurement <id> --learning id --evaluation id --phase before|after --metric name --direction higher|lower --value 0..1 --measurement objective|user-feedback|model-suggestion --evaluator id --run id --source-digest sha256 --dataset-digest sha256 --case-count n --confirm-local-measurement
   agentspine learn-measurement-revoke <measurement-id> --reason-code source-invalid|evaluator-invalid|protocol-invalid|duplicate|other --reason text --confirm-local-measurement-revocation
   agentspine learn-application-revoke <application-id> --reason-code preflight-invalid|scope-invalid|projection-invalid|duplicate|other --reason text --confirm-local-application-revocation

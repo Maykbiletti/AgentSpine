@@ -20,6 +20,7 @@
     "bin",
     "docs/acceptance.md",
     "docs/assignment-continuation.md",
+    "docs/artifact-evaluation.md",
     "docs/host-integration.md",
     "docs/preflight-recall.md",
     "docs/preservation-contract.md",

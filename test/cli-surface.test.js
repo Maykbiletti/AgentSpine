@@ -16,7 +16,7 @@ attention-event-delete attention-events attention-purge attention-resolve attent
 briefing channel-bind channel-events channel-policy channel-revoke context continuity-config
 continuity-purge continuity-status delegation-check delegation-grant delegation-policy delegation-revoke
 doctor entity execution-grant execution-policy execution-revoke gateway-control gateway-status goal-assign
-goal-clarify job-cancel job-delete job-register jobs learn-application-revoke learn-config learn-context
+goal-clarify job-cancel job-delete job-register jobs learn-application-revoke learn-artifact-plan learn-artifact-measure learn-config learn-context
 learn-delete learn-delivery-purge learn-delivery-revoke learn-evaluate learn-evaluation
 learn-evaluation-revoke learn-evaluator-register learn-evaluator-revoke learn-evidence
 learn-evidence-revoke learn-evidence-source-attestation-revoke learn-measurement

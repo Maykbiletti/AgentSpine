@@ -6,6 +6,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Added a local, command-free artifact evaluator that derives pass rates and blocking defects from at most sixteen precommitted file checks and submits actual observations to the existing learning-measurement contract. It is one evaluator principal, not a source of independent aliases, authorization, completion or automatic promotion.
 - Added a disabled-by-default cross-provider objective-evidence handoff across separately enrolled Claude, Codex and King sources. It requires a protected local host capability plus an explicit prior-provider search, ranks the bounded index first, opens at most one immutable snapshot and returns provider/session/message provenance.
 - Added a native King agent-wire history adapter with an explicit protected source/protocol mapping, provider-separated lifecycle binding, bounded objective `tool.result` extraction, and stable session/message references. It never scans `BLUN_HOME`, reuses Codex rollout parsing, or changes King permissions.
 - Added an explicitly enrolled native Codex rollout adapter for bounded same-task historical tool-result recall, with project/session header verification, native message references, unchanged source bytes and independent provider contracts. Live-host acceptance remains open.

@@ -1,7 +1,10 @@
 import { addLearningEvidence, beginLearningRevalidation, configureLearning, deleteLearning, evaluateLearning, learningContext, learningOutcomeStatus, loadLearning, proposeLearning, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningMeasurement, recordLearningOutcome, registerLearningEvaluation, registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, reviewLearning, revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningEvidence, revokeLearningMeasurement, revokeLearningOutcome, revokeLearningTrialFailure, revokeLearningValidation, revokeLearningEvidenceSourceAttestation, rollbackLearning } from "./lib/learning.js";
 import { booleanFlag, evaluatorRootsFlag, hasLearningScope, learningScope, output } from "./cli-common.js";
+import { artifactEvaluationPlan, measureLearningArtifacts } from "./lib/learning-artifact-evaluator.js";
 
 export const learningCommands = new Set([
+  "learn-artifact-plan",
+  "learn-artifact-measure",
   "learn-propose",
   "learn-evidence",
   "learn-evidence-revoke",
@@ -32,6 +35,18 @@ export const learningCommands = new Set([
 ]);
 
 export async function runLearningCommand({ command, flags, positional, json }) {
+  if (command === "learn-artifact-plan" || command === "learn-artifact-measure") {
+    const text = flags.checks;
+    if (typeof text !== "string" || Buffer.byteLength(text) > 16384) {
+      throw new Error("--checks must contain a bounded artifact-checks JSON specification");
+    }
+    const spec = JSON.parse(text);
+    if (command === "learn-artifact-plan") return output(artifactEvaluationPlan(spec), json);
+    return output(await measureLearningArtifacts({ root: flags.root || process.cwd(), spec,
+      id: positional[0], learningId: flags.learning, evaluationId: flags.evaluation,
+      phase: flags.phase, scope: learningScope(flags), evaluatorId: flags.evaluator, runId: flags.run,
+      confirmLocalMeasurement: booleanFlag(flags["confirm-local-measurement"]) }), json);
+  }
   if (command === "learn-propose") {
     return output(await proposeLearning({
       root: flags.root || process.cwd(), id: positional[0], kind: flags.kind,
