@@ -51,11 +51,12 @@ async function runOne(file, mode, index) {
 async function runMode(mode) {
   const indexed = testFiles.map((file, index) => ({ file, index }));
   const results = [];
-  // Installation copies complete bundles and checks real 2-second source / 5-second
-  // child-hook deadlines. Keep that healthy-baseline probe off the shared I/O pool.
-  // Both profiles still run it once, with identical assertions and time limits.
-  const isolated = indexed.filter(item => item.file === "package.test.js");
-  const queue = indexed.filter(item => item.file !== "package.test.js");
+  // Installation copies complete bundles, while the MCP process tests check real
+  // 2-second startup deadlines. Keep those healthy-baseline probes off the shared
+  // I/O pool. Both profiles still run them once, with unchanged assertions and limits.
+  const isolatedNames = new Set(["package.test.js", "mcp.test.js"]);
+  const isolated = indexed.filter(item => isolatedNames.has(item.file));
+  const queue = indexed.filter(item => !isolatedNames.has(item.file));
   for (const item of isolated) results.push(await runOne(item.file, mode, item.index));
   async function worker() { while (queue.length) { const item = queue.shift(); results.push(await runOne(item.file, mode, item.index)); } }
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
