@@ -207,8 +207,10 @@ export async function sessionBriefing({
     world: {
       schema: world.schema,
       facts: [], conflicts: [], proposals: [], stale: [],
-      knowledge: { schema: world.knowledge.schema, current: [], counts: world.knowledge.counts,
-        omitted: { ...world.knowledge.omitted }, authority: "context-only" },
+      ...(world.knowledge.current.length ? { knowledge: {
+        schema: world.knowledge.schema, current: [], counts: world.knowledge.counts,
+        omitted: { ...world.knowledge.omitted }, authority: "context-only"
+      } } : {}),
       uncertainty: world.uncertainty,
       authority: "context-only"
     },
