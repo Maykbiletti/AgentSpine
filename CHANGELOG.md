@@ -6,6 +6,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Added an explicit group-response contract to the gateway worker: silent completion creates no outbox or delivery claim, and scoped exact-content contribution deduplication survives restart. Direct answers and legacy host replies remain compatible; live King addressing and adoption are not implied.
 - Added action-time recall for currently valid, outcome-gated behavior learning whose stored task scope exactly matches the authenticated runtime task. Claude, Codex and King-compatible lifecycle hooks receive the bounded context before tool use without creating permissions or a second application receipt.
 - Added a local, command-free artifact evaluator that derives pass rates and blocking defects from at most sixteen precommitted file checks and submits actual observations to the existing learning-measurement contract. It is one evaluator principal, not a source of independent aliases, authorization, completion or automatic promotion.
 - Added a disabled-by-default cross-provider objective-evidence handoff across separately enrolled Claude, Codex and King sources. It requires a protected local host capability plus an explicit prior-provider search, ranks the bounded index first, opens at most one immutable snapshot and returns provider/session/message provenance.

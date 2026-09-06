@@ -9,6 +9,7 @@ import {
 } from "./lib/gateway-runtime.js";
 import { createTelegramAdapter } from "./lib/telegram-adapter.js";
 import { acknowledgeChannelDelivery, loadChannelRuntime } from "./lib/channel-runtime.js";
+import { groupResponseContract, settleSuppressedGroupEvents } from "./lib/gateway-group-response.js";
 import { loadPersonaRuntime, syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
 import { selfHelpPolicyForWorkItem } from "./lib/knowledge-evidence.js";
 import { isMainModule } from "./lib/runtime.js";
@@ -107,6 +108,7 @@ async function hostWorkItem(root, item) {
     goalStep: goalStep ? { ...structuredClone(goalStep),
       ...(executionAttempt === null ? {} : { executionAttempt }) } : null,
     selfHelpPolicy: goalStep ? selfHelpPolicyForWorkItem(goalStep) : null,
+    groupResponseContract: groupResponseContract(event),
     hostEnvironment: {
       AGENTSPINE_GATEWAY_CONTEXT: "agentspine.gateway-start/v1",
       AGENTSPINE_ENTITY_ID: item.agentId,
@@ -140,6 +142,7 @@ export async function runWorkerTick({ root = process.cwd(), workerId = "gateway-
   await syncPersonaRosterFromEnvironment({ root, env, now });
   const initial = await loadGatewayRuntime(root);
   if (!initial.policy.enabled || initial.policy.killSwitch) return { status: "stopped", processed: false };
+  await settleSuppressedGroupEvents({ root, now });
   if (typeof deliveryAdapter.poll === "function") {
     try { await deliveryAdapter.poll(); }
     catch (error) {
@@ -175,6 +178,11 @@ export async function runWorkerTick({ root = process.cwd(), workerId = "gateway-
   }
   const completed = await completeGatewayRun({ root, queueId: claim.item.queueId, workerId,
     claimedAt: claim.item.lease.claimedAt, attempt: claim.item.attempts, result, now });
+  if (completed.communication?.suppressed) {
+    await settleSuppressedGroupEvents({ root, now });
+    return { status: "silent", processed: true, queueId: completed.item.queueId,
+      communication: completed.communication, deliveryConfirmed: false, completionVerified: false };
+  }
   if (!completed.outbox) return {
     status: completed.clarification ? "needs-clarification"
       : completed.exploration ? "exploring" : completed.selfHelp ? "self-help-resolved"

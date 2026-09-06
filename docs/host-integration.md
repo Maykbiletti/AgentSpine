@@ -177,3 +177,65 @@ The package also registers exactly one `agentspine-worker` entrypoint. It is sep
 The host runner is responsible for starting the selected host with the supplied scope and `agent_spine_channel_event` fields. Codex skips an untrusted hook definition until the user accepts its current hash in the startup warning or `/hooks`; the worker cannot bypass or manufacture that trust. Setup and the stdin/stdout contract are documented in [durable gateway worker](gateway-runtime.md).
 
 The visible acceptance runner invokes the same production lifecycle adapter with new synthetic people, separated groups, Swedish and Spanish prompts, restarts, compaction, correction, rollback, purge, current-rights checks, and durable checkpoints. It prints one reproducible receipt per gate and proves `mcpCalls: 0`. See [visible cross-host acceptance](acceptance.md).
+# Group participation in the gateway worker
+
+Group channel work now includes `groupResponseContract` in the existing
+`agentspine.run-request/v1` work item. It is internal context, not text to forward
+to the conversation. Without a direct request, choose silence unless there is a
+relevant idea, concrete error or useful improvement. Never send an empty-status
+announcement or echo another bot's status. Preserve the user's language and
+identity. A suggestion is not an objectively verified fact.
+
+The host can return one of these result shapes:
+
+```json
+{"groupResponse":{"schema":"agentspine.group-response/v1","kind":"silence"}}
+```
+
+```json
+{"text":"Die vorhandene Datei könnte überschrieben werden.","groupResponse":{"schema":"agentspine.group-response/v1","kind":"error","subjectId":"finding:destination-collision"}}
+```
+
+`answer` requires text and no `subjectId`; it answers a direct request and is not
+contribution-deduplicated. `idea`, `error` and `improvement` require text and a stable
+`subjectId`. `silence` must not include text, including a visible skip marker.
+Unknown versions and fields are rejected without rewriting the original event.
+All existing identity, exact reply capability, privacy and output safety checks
+remain in force. This contract grants no sending or other action rights.
+
+Silent completion and duplicate contributions consume the exact gateway lease
+without preparing an outbox. `deliveryConfirmed` and `completionVerified` remain
+false. The existing gateway receipt log records the disposition, not an outcome
+or learning acceptance. The worker settles the original channel event locally
+using its existing claim/completion API, never a fabricated delivery receipt.
+After a crash it recovers this acknowledgement before invoking another host;
+an acknowledgement already claimed by another worker waits for that lease.
+
+Contribution deduplication hashes the normalized output text and stable subject
+with the original provider, tenant, account, binding, agent, project, group, chat,
+thread and session. It ignores the incoming event ID. It reserves the contribution
+when the outbox is prepared, so an uncertain delivery does not provoke a second
+send under another event. Existing outbox recovery handles retries. Changed text
+can produce a new contribution. This is **exact-content**, not semantic,
+deduplication; paraphrases and model-chosen new subject IDs are not proven equal.
+
+Compatibility and limits: legacy host results containing only `text` keep their
+existing behavior. The ingress v1 record does not authenticate whether a message
+directly addresses the bot (`directAddressVerified: false`). The host must make
+that distinction and adopt this explicit response contract. Installing AgentSpine
+alone therefore does not prove that live Kings stop sending empty-status messages.
+No blanket text filter suppresses normal user answers. Private channels cannot
+use the group-silence contract. No Telegram configuration or live process changes
+are part of this implementation.
+
+Synthetic acceptance is in `test/gateway-group-response.test.js`: five quiet
+events produce zero sends and zero outbox entries; repeated worker ticks do not
+invoke the host again; a new contribution sends once, its exact duplicate sends
+zero times, changed content sends once, and two direct questions receive two
+answers. Budgets are 1024 bytes for this host contract and 10 seconds for the
+five-event task; the fresh-process recovery deadline is 5 seconds. Tests measure
+wall time and actual context bytes, not estimated tokens or model intelligence.
+They also cover exact leases, race, crash, restart, future versions, revocation,
+source mutation, secret-shaped text and immutable source Markdown. No real model
+or Telegram call is made. Real-model relevance, real unnecessary questions and
+token consumption remain unverified.

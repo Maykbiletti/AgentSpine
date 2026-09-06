@@ -53,8 +53,8 @@ test("release check validates every host version and the exact safe package boun
   assert.equal(result.package.filename, "agent-spine-0.73.0.tgz");
   assert.match(result.package.integrity, /^sha512-/);
   assert.equal(result.package.files > 40, true);
-  assert.equal(result.package.packedSize > 0 && result.package.packedSize <= 527 * 1024, true);
-  assert.equal(result.package.unpackedSize > 0 && result.package.unpackedSize <= 2363 * 1024, true);
+  assert.equal(result.package.packedSize > 0 && result.package.packedSize <= 531 * 1024, true);
+  assert.equal(result.package.unpackedSize > 0 && result.package.unpackedSize <= 2377 * 1024, true);
   assert.equal(sha(await readFile(join(root, "AGENTS.md"))), before);
 });
 

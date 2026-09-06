@@ -1,4 +1,5 @@
 import { loadChannelPolicy, loadChannelRuntime } from "./channel-runtime.js";
+import { reviewGroupResponse } from "./gateway-group-response.js";
 import {
   assertGatewayCompletionMode, exactGatewayLeaseGeneration, failGatewayLane,
   markHostStarted, newGatewayLease, normalizeGatewayExecutionMode,
@@ -156,26 +157,35 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
       executionReview = { passed: false, outcome: null, reason: "Execution outcome history is full." };
     }
     const text = result?.text ? safeText(result.text, "result.text", 16000) : null;
+    if (result?.groupResponse !== undefined && !item.channelEventId) {
+      throw new Error("group response requires channel work");
+    }
+    let communication = null;
     let clarification = null; let exploration = null; let selfHelp = null; let selfHelpRequired = null;
     preserve(runtime, "queue", item, "run-completed", current);
     if (item.channelEventId) {
-      if (!text) throw new Error("a channel obligation requires a non-empty response");
-      const voice = evaluateVoiceOutput(text);
-      if (!voice.ok) throw new Error("channel response contains a prohibited attachment or consciousness claim");
       const event = channelRuntime.runtime.events.find((entry) => entry.eventId === item.channelEventId);
       if (!event) throw new Error("channel event disappeared before delivery preparation");
       const binding = exactReplyBinding(channelPolicy.policy, event);
-      const idempotencyKey = "delivery:" + sha256([event.eventId, binding.id, event.chatId, event.threadId || "", event.replyTo || ""].join("\0")).slice(0, 32);
-      let outbox = runtime.outbox.find((entry) => entry.idempotencyKey === idempotencyKey);
-      if (!outbox) {
-        outbox = { outboxId: "gateway-outbox:" + sha256(idempotencyKey).slice(0, 32), queueId: item.queueId,
-          idempotencyKey, bindingId: binding.id, eventId: event.eventId, provider: event.provider, tenantId: event.tenantId,
-          accountId: event.accountId, chatId: event.chatId, threadId: event.threadId, replyTo: event.replyTo,
-          text, status: "prepared", attempts: 0, nextAttemptAt: current, createdAt: current, updatedAt: current,
-          deliveredAt: null, adapterReceipt: null, lastError: null, authority: "delivery-state-only" };
-        runtime.outbox.push(outbox);
+      communication = reviewGroupResponse({ result, text, event, item, runtime, current });
+      if (communication?.suppressed) {
+        item.status = "completed"; item.completedAt = current;
+      } else {
+        if (!text) throw new Error("a channel obligation requires a non-empty response");
+        const voice = evaluateVoiceOutput(text);
+        if (!voice.ok) throw new Error("channel response contains a prohibited attachment or consciousness claim");
+        const idempotencyKey = "delivery:" + sha256([event.eventId, binding.id, event.chatId, event.threadId || "", event.replyTo || ""].join("\0")).slice(0, 32);
+        let outbox = runtime.outbox.find((entry) => entry.idempotencyKey === idempotencyKey);
+        if (!outbox) {
+          outbox = { outboxId: "gateway-outbox:" + sha256(idempotencyKey).slice(0, 32), queueId: item.queueId,
+            idempotencyKey, bindingId: binding.id, eventId: event.eventId, provider: event.provider, tenantId: event.tenantId,
+            accountId: event.accountId, chatId: event.chatId, threadId: event.threadId, replyTo: event.replyTo,
+            text, status: "prepared", attempts: 0, nextAttemptAt: current, createdAt: current, updatedAt: current,
+            deliveredAt: null, adapterReceipt: null, lastError: null, authority: "delivery-state-only" };
+          runtime.outbox.push(outbox);
+        }
+        item.status = "awaiting-delivery";
       }
-      item.status = "awaiting-delivery";
     } else {
       item.status = result?.blocked || knowledgeGapRequest || premortemReview?.blocked || (executionReview && !executionReview.passed)
         ? "blocked" : "completed"; item.completedAt = current;
@@ -270,7 +280,7 @@ export async function completeGatewayRun({ root = process.cwd(), queueId, worker
     appendReceipt(runtime, "run-terminal", item.queueId, current, { status: item.status, goalStepId: item.goalStepId || null }); runtime.revision += 1;
     await writeGatewayStatePair(policy, runtime);
     return { item, outbox: runtime.outbox.find((entry) => entry.queueId === item.queueId) || null,
-      clarification, exploration, selfHelp, selfHelpRequired, executionReview, premortemReview };
+      clarification, exploration, selfHelp, selfHelpRequired, executionReview, premortemReview, communication };
   });
 }
 
@@ -297,4 +307,3 @@ export async function failGatewayRun({ root = process.cwd(), queueId, workerId, 
     return { item, receipt: failure.receipt, policyEnabled: policy.enabled && !policy.killSwitch };
   });
 }
-
