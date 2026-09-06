@@ -41,12 +41,14 @@ The packet contains:
 - a voice brief containing only visible persona descriptors, allowed voice fields, accepted preferences, corrections, no-gos, the current task, and active promise or blocker signals;
 - accepted local learning relevant to the exact persona, user, tenant, project, group, and task scope; outcome-gated behavior is included only while its canary is active and unexpired or after measured validation;
 - locally reviewed shared memory, deduplicated against equivalent local learning;
-- provenance-bound world facts, with contradictory, expired, and model-proposed assertions kept in separate uncertainty collections;
+- provenance-bound world facts and a bounded current typed view of facts, user preferences, decisions, task state, and error lessons, with contradictory, expired, superseded, and model-proposed assertions kept separate;
 - due attention suggestions only when focus mode is explicitly disabled.
 
 Candidates, rejected or superseded learning, pending shared imports, delegation grants, assignment proof, credentials, adapter configuration, signer material, and private keys are never included. World-model authority predicates are rejected at ingestion, model suggestions never enter `facts`, and an unresolved contradiction removes that predicate from established briefing context.
 
 Historical session timelines are never included in a briefing, prompt, source catalog, or `MEMORY.md`. After restart or compaction, a locally enrolled private session may report only freshness, its continuation capsule, and a small structured count/reference hint for already indexed prior sessions in the exact same task scope. An agent that needs a measured historic result must make a separate exact-time or two-term `session_timeline_search`, explicitly selecting prior sessions when relevant; see [bounded session timeline](session-timeline.md).
+
+Structured world knowledge follows the same bounded rule: briefing includes only current visible entries and status counts. Superseded correction history is available only through an explicit `world_context` request with `includeKnowledgeHistory`; each entry retains its evidence digest and optional stable session/message reference. Repetition never upgrades a model suggestion to confirmed knowledge.
 
 The voice brief does not claim that the agent has feelings or consciousness. It asks the host to lead with the useful outcome, avoid re-asking known facts, apply the current persona naturally, and acknowledge a relevant correction, blocker, frustration, uncertainty, or success briefly before acting. Its profile keys are limited to warmth, directness, humor, length, rhythm, and formality; arbitrary entity attributes cannot become behavioral instructions.
 

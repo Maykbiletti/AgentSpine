@@ -207,6 +207,8 @@ export async function sessionBriefing({
     world: {
       schema: world.schema,
       facts: [], conflicts: [], proposals: [], stale: [],
+      knowledge: { schema: world.knowledge.schema, current: [], counts: world.knowledge.counts,
+        omitted: { ...world.knowledge.omitted }, authority: "context-only" },
       uncertainty: world.uncertainty,
       authority: "context-only"
     },
@@ -228,6 +230,12 @@ export async function sessionBriefing({
   for (const section of ["facts", "conflicts", "proposals", "stale"]) {
     for (const item of world[section]) {
       if (!tryAdd(result, result.world[section], item)) countOmitted(result, "world");
+    }
+  }
+  for (const item of world.knowledge.current) {
+    if (!tryAdd(result, result.world.knowledge.current, item)) {
+      result.world.knowledge.omitted.current += 1;
+      countOmitted(result, "world");
     }
   }
 

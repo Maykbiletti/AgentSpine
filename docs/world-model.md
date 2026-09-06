@@ -27,6 +27,21 @@ A conflict removes that subject/predicate from `facts` and sets `uncertainty.req
 
 Session briefing reads this same model. It can expose conflicts, proposals, and stale items as uncertainty, but only the `facts` collection is established world context.
 
+## Structured knowledge and correction history
+
+An assertion may opt into one of five explicit knowledge kinds: `fact`, `user-preference`, `decision`, `task-state`, or `error-lesson`. This is a typed view over the same immutable evidence record, not a second memory store. Each typed item retains its evidence source and digest, observation and recording times, exact project/group/privacy scope, and optional stable session/message references. Decisions additionally require a bounded rationale.
+
+`world_context` derives one of four evidence-based statuses:
+
+- `confirmed` for current objective measurements or explicit user feedback;
+- `assumption` for model suggestions, including repeated matching suggestions;
+- `contradictory` for unresolved established values that disagree;
+- `superseded` for explicitly replaced or expired entries.
+
+Contradictory entries never enter `facts`. A newer explicit correction names every replaced assertion in `supersedes`; the current view then contains the correction while `includeKnowledgeHistory: true` exposes the traceable predecessors. Legacy assertions remain readable but are never retroactively assigned a knowledge kind.
+
+The session briefing carries only the bounded current structured view. Detailed correction history remains opt-in through `world_context`, preventing restarts from loading an ever-growing record. Secret-shaped structured values or rationales are rejected both at ingestion and state validation. A source reference is provenance only: it cannot confirm a model suggestion or create authority.
+
 ## Privacy and authority
 
 Assertions use `private`, `shared`, or exact `group` privacy. A group read rejects private inclusion, sees only its exact group records plus shared records, and cannot observe another group's values. Project-scoped records are visible only in that exact project; unscoped records may follow the same installation across project turns when intentionally read from that root.

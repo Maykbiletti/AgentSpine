@@ -56,7 +56,10 @@ test("provider-neutral MCP records and reads provenance-bound world context", as
     root, id: "assertion:mcp", subjectId: "project:synthetic", predicate: "suite.outcome", value,
     evidenceKind: "objective-measurement", evidenceId: "measurement:mcp",
     evidenceDigest: createHash("sha256").update(JSON.stringify(value)).digest("hex"),
-    observedAt: "2026-09-04T09:00:00.000Z", privacy: "shared"
+    observedAt: "2026-09-04T09:00:00.000Z", privacy: "shared",
+    knowledgeKind: "task-state",
+    sessionRef: "session-ref:0123456789abcdef0123456789abcdef",
+    messageRef: "timeline-event:mcp"
   });
   assert.equal(written.isError, false);
   const contextResult = await call("world_context", {
@@ -65,5 +68,13 @@ test("provider-neutral MCP records and reads provenance-bound world context", as
   assert.equal(contextResult.isError, false);
   const context = JSON.parse(contextResult.content[0].text);
   assert.deepEqual(context.facts[0].value, { failures: 0, suite: 0 });
+  assert.deepEqual(context.knowledge.current[0].source, {
+    kind: "objective-measurement",
+    id: "measurement:mcp",
+    digest: createHash("sha256").update(JSON.stringify(value)).digest("hex"),
+    sessionRef: "session-ref:0123456789abcdef0123456789abcdef",
+    messageRef: "timeline-event:mcp"
+  });
+  assert.equal(context.knowledge.current[0].status, "confirmed");
   assert.equal(context.authority, "context-only");
 });

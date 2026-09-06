@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { replaceFileWithRetry } from "./filesystem-retry.js";
 import { withOwnedFileLock } from "./owned-file-lock.js";
 import { canonicalPath, projectStateDir } from "./paths.js";
+import {
+  normalizeKnowledgeFields, structuredKnowledgeView, validKnowledgeFields
+} from "./world-knowledge.js";
 
 const SCHEMA = "agentspine.world-model/v1";
 const ASSERTION_SCHEMA = "agentspine.world-assertion/v1";
@@ -74,6 +77,7 @@ function validateStoredAssertion(assertion) {
     || (assertion.projectId && !STABLE_ID.test(assertion.projectId))
     || !STABLE_ID.test(assertion.evidenceId || "") || !Array.isArray(assertion.supersedes)
     || assertion.supersedes.some((item) => !STABLE_ID.test(item))) return false;
+  if (!validKnowledgeFields(assertion)) return false;
   try {
     if (exactTime(assertion.observedAt, "observedAt") !== assertion.observedAt) return false;
     if (assertion.expiresAt) exactTime(assertion.expiresAt, "expiresAt");
@@ -147,6 +151,7 @@ function assertionInput(input, now) {
   const value = canonicalValue(input.value);
   if (Buffer.byteLength(JSON.stringify(value)) > MAX_VALUE_BYTES) throw new Error("value exceeds 8 KiB");
   const supersedes = [...new Set((input.supersedes || []).map((item) => stableId(item, "supersedes")))].sort();
+  const knowledge = normalizeKnowledgeFields(input, input.evidenceKind, value);
   return {
     schema: ASSERTION_SCHEMA, id, subjectId, predicate: input.predicate, value,
     valueDigest: sha256(JSON.stringify(value)), evidenceKind: input.evidenceKind,
@@ -154,7 +159,8 @@ function assertionInput(input, now) {
     projectId: optionalStableId(input.projectId, "projectId"), groupId, privacy,
     supersedes, reason: typeof input.reason === "string" ? input.reason.trim().slice(0, 500) : "",
     status: input.evidenceKind === "model-suggestion" ? "proposed" : "established",
-    recordedAt: new Date(now).toISOString(), authority: "context-only"
+    recordedAt: new Date(now).toISOString(), authority: "context-only",
+    ...(knowledge.knowledgeKind ? knowledge : {})
   };
 }
 
@@ -203,7 +209,7 @@ function publicAssertion(assertion) {
 
 export async function worldContext({
   root = process.cwd(), subjectId = null, projectId = null, groupId = null,
-  includePrivate = false, maxItems = 100, now = new Date()
+  includePrivate = false, includeKnowledgeHistory = false, maxItems = 100, now = new Date()
 } = {}) {
   if (groupId !== null && includePrivate) throw new Error("private world context cannot be assembled for a group audience");
   if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 500) throw new Error("maxItems must be between 1 and 500");
@@ -230,9 +236,11 @@ export async function worldContext({
   }
   const facts = [];
   const conflicts = [];
+  const conflictAssertions = [];
   for (const assertions of buckets.values()) {
     const values = new Set(assertions.map((item) => item.valueDigest));
     if (values.size > 1) {
+      conflictAssertions.push(assertions);
       conflicts.push({ subjectId: assertions[0].subjectId, predicate: assertions[0].predicate,
         assertions: assertions.map(publicAssertion), authority: "context-only" });
       continue;
@@ -245,10 +253,15 @@ export async function worldContext({
   }
   const order = (left, right) => left.subjectId.localeCompare(right.subjectId) || left.predicate.localeCompare(right.predicate);
   facts.sort(order); conflicts.sort(order); proposals.sort(order); stale.sort(order);
+  const knowledge = structuredKnowledgeView({
+    candidates, stale, active, supersededIds: superseded, conflictAssertions,
+    includeHistory: Boolean(includeKnowledgeHistory), maxItems
+  });
   return {
     schema: "agentspine.world-context/v1", root: names.root, revision: model.revision,
     facts: facts.slice(0, maxItems), conflicts: conflicts.slice(0, maxItems),
     proposals: proposals.slice(0, maxItems).map(publicAssertion), stale: stale.slice(0, maxItems).map(publicAssertion),
+    knowledge,
     omitted: { facts: Math.max(0, facts.length - maxItems), conflicts: Math.max(0, conflicts.length - maxItems),
       proposals: Math.max(0, proposals.length - maxItems), stale: Math.max(0, stale.length - maxItems) },
     uncertainty: { requiresResolution: conflicts.length > 0, conflicts: conflicts.length,

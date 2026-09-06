@@ -8,7 +8,7 @@ const nullableStableId = { anyOf: [stableId, { type: "null" }] };
 export const worldModelTools = [
   {
     name: "record_world_assertion",
-    description: "Persist one provenance-bound world, user, relationship, or team assertion outside source files. Measurements and explicit user feedback become context-only facts; model output remains a proposal. Authority predicates are rejected.",
+    description: "Persist one provenance-bound world, user, relationship, or team assertion outside source files. Optional typed knowledge distinguishes facts, user preferences, decisions, task state, and error lessons. Measurements and explicit user feedback become context-only facts; model output remains a proposal. Authority predicates and secret-shaped structured knowledge are rejected.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: ["id", "subjectId", "predicate", "value", "evidenceKind", "evidenceId", "evidenceDigest", "observedAt"],
@@ -19,6 +19,12 @@ export const worldModelTools = [
         evidenceKind: { type: "string", enum: ["objective-measurement", "explicit-user-feedback", "model-suggestion"] },
         evidenceId: stableId,
         evidenceDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        knowledgeKind: {
+          type: "string",
+          enum: ["fact", "user-preference", "decision", "task-state", "error-lesson"]
+        },
+        sessionRef: { type: "string", pattern: "^session-ref:[a-f0-9]{32}$" },
+        messageRef: stableId,
         observedAt: { type: "string", format: "date-time" },
         expiresAt: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
         projectId: nullableStableId, groupId: nullableStableId,
@@ -36,7 +42,8 @@ export const worldModelTools = [
       properties: {
         root: { type: "string" }, subjectId: nullableStableId,
         projectId: nullableStableId, groupId: nullableStableId,
-        includePrivate: { type: "boolean" }, maxItems: { type: "integer", minimum: 1, maximum: 500 },
+        includePrivate: { type: "boolean" }, includeKnowledgeHistory: { type: "boolean" },
+        maxItems: { type: "integer", minimum: 1, maximum: 500 },
         now: { type: "string", format: "date-time" }
       }
     }
