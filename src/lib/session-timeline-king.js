@@ -77,3 +77,17 @@ export function kingTimelineToolResult(line) {
   if (!at || !Number.isFinite(at.getTime())) return null;
   return { role: "tool", content: output, nativeMessageId: event.toolCallId, at: at.toISOString() };
 }
+
+export function kingTimelineUserMessage(line) {
+  if (!RECORDS.has(line?.type) || line.schema_version !== undefined) {
+    throw new Error("king-history-format-mismatch");
+  }
+  if (line.type !== "context.append_message" || line.message?.role !== "user") return null;
+  const content = textOutput(line.message.content);
+  const nativeMessageId = line.message.id === undefined ? undefined
+    : ID.test(line.message.id) ? line.message.id : null;
+  const at = Number.isSafeInteger(line.time) && line.time > 0 ? new Date(line.time) : null;
+  if (content === null || nativeMessageId === null || !at || !Number.isFinite(at.getTime())) return null;
+  return { role: "user", content, at: at.toISOString(),
+    ...(nativeMessageId ? { nativeMessageId } : {}) };
+}

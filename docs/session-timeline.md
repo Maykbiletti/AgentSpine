@@ -142,13 +142,27 @@ Only the allowlisted outcome, count, test label, source provider and source
 digest enter the existing world model as private `task-state` knowledge. The
 ordinary search response still omits the raw-line digest.
 
-Capture does not turn an archived user or assistant message into a fact and
-does not infer a correction or next step. Conflicting measured results remain
-visible as uncertainty until separately resolved. Duplicate capture is
-idempotent across restart; a foreign thread, group, changed source, direct MCP
-call or mismatched event writes nothing. Captured context remains descriptive:
-it does not prove current completion, delivery, better model performance or
-permission to act.
+A second event type is deliberately narrower than chat inference. Claude,
+Codex and King adapters admit only a native `user` message whose entire text
+starts exactly with `Correction: next step:` or
+`Korrektur: nächster Schritt:`. Capture may copy its bounded remainder into an
+existing, nonterminal, conflict-free continuation in the same authenticated
+portal/thread. It preserves every other continuation field and explicitly
+supersedes the previous assertion. An older correction cannot replace a newer
+checkpoint, and an active-set compare-and-swap prevents concurrent different
+corrections from forking it. Assistant text, ordinary user chat, multiline
+content, secret-shaped text and instruction overrides do not become events.
+The sidecar stores no correction text or content-derived search term; it keeps
+only the generic event class, timestamp, offset and digests. The bounded text
+is returned only after an exact-time or generic correction search reopens and
+byte-verifies the enrolled source.
+
+Capture does not turn other archived user or assistant messages into facts.
+Conflicting measured results and continuations remain visible as uncertainty
+until separately resolved. Duplicate capture is idempotent across restart; a
+foreign thread, group, changed source, direct MCP call or mismatched event
+writes nothing. Captured context remains descriptive: it does not prove current
+completion, delivery, better model performance or permission to act.
 
 ## Memory-palace structure
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { searchSessionTimeline } from "./session-timeline.js";
-import { recordWorldAssertion } from "./world-model.js";
+import { recordWorldAssertion, worldContext } from "./world-model.js";
 
 const AUTHORITY = "context-only";
 const EVENT_ID = /^timeline-event:[a-f0-9]{32}$/;
@@ -28,14 +28,19 @@ function validCount(value) {
 }
 
 function validEvent(event, result, scope) {
-  if (!event || !EVENT_ID.test(event.id || "") || event.kind !== "objective-result"
-    || !OUTCOMES.has(event.outcome) || !validCount(event.count)
+  if (!event || !EVENT_ID.test(event.id || "")
     || !DIGEST.test(event.sourceDigest || "") || !DIGEST.test(event.messageDigest || "")
     || event.sourceDigest !== result.sourceDigest || !PROVIDERS.has(event.sourceProvider)
     || typeof event.sessionRef !== "string" || typeof event.messageRef !== "string"
     || event.messageRef !== event.id || event.authority !== AUTHORITY
     || !Number.isFinite(new Date(event.at).getTime())) return false;
-  return (event.portalRef ?? null) === (scope.portalRef ?? null)
+  const fields = event.kind === "objective-result"
+    ? OUTCOMES.has(event.outcome) && validCount(event.count)
+    : event.kind === "explicit-next-step-correction"
+      && typeof event.nextStepSummary === "string" && Boolean(event.nextStepSummary.trim())
+      && event.nextStepSummary.length <= 500 && event.outcome === undefined
+      && event.count === undefined && event.testLabel === undefined;
+  return fields && (event.portalRef ?? null) === (scope.portalRef ?? null)
     && (event.threadRef ?? null) === (scope.threadRef ?? null)
     && (result.portalRef ?? null) === (scope.portalRef ?? null)
     && (result.threadRef ?? null) === (scope.threadRef ?? null);
@@ -70,10 +75,87 @@ function assertionFromEvent({ event, scope, root, now }) {
   };
 }
 
+function correctionAssertion({ event, scope, root, now, current }) {
+  const material = canonical({ taskId: scope.currentTaskId, projectId: scope.projectId,
+    portalRef: scope.portalRef, threadRef: scope.threadRef, eventId: event.id,
+    sourceDigest: event.sourceDigest, messageDigest: event.messageDigest });
+  const value = structuredClone(current.value);
+  value.nextStep = {
+    id: `step:user-correction-${digest(`${event.id}\0${event.nextStepSummary}`).slice(0, 24)}`,
+    summary: event.nextStepSummary
+  };
+  return {
+    root, id: `assertion:timeline-correction-${digest(material).slice(0, 32)}`,
+    subjectId: scope.currentTaskId, predicate: "task.continuation", value,
+    evidenceKind: "explicit-user-feedback", evidenceId: event.id,
+    evidenceDigest: event.messageDigest, observedAt: new Date(event.at).toISOString(),
+    projectId: scope.projectId, groupId: null, privacy: "private", knowledgeKind: "task-state",
+    sessionRef: event.sessionRef, messageRef: event.messageRef,
+    supersedes: current.supersedes, requireActiveSupersedes: true,
+    reason: "The enrolled user message explicitly corrected only the current task continuation next step.",
+    portalRef: scope.portalRef, threadRef: scope.threadRef, now
+  };
+}
+
 function unavailable(reason, timeline = null) {
   return { schema: "agentspine.timeline-world-capture/v1", status: "unavailable", reason,
     timeline, captured: null, authority: AUTHORITY,
     instruction: "Continue normally without claiming that historical evidence entered structured knowledge." };
+}
+
+
+function timelineSource(timeline, event) {
+  return { schema: timeline.schema, sourceDigest: timeline.sourceDigest,
+    sourceProvider: timeline.sourceProvider, sessionRef: event.sessionRef, messageRef: event.messageRef,
+    portalRef: event.portalRef ?? null, threadRef: event.threadRef ?? null };
+}
+
+function publicCaptured(assertion) {
+  const source = assertion.source || {
+    kind: assertion.evidenceKind, id: assertion.evidenceId, digest: assertion.evidenceDigest,
+    sessionRef: assertion.sessionRef, messageRef: assertion.messageRef
+  };
+  const scope = assertion.scope || { projectId: assertion.projectId,
+    portalRef: assertion.portalRef ?? null, threadRef: assertion.threadRef ?? null };
+  return {
+    assertionId: assertion.assertionId || assertion.id, subjectId: assertion.subjectId,
+    predicate: assertion.predicate, value: structuredClone(assertion.value), source: structuredClone(source),
+    observedAt: assertion.observedAt, scope: structuredClone(scope), status: "confirmed", authority: AUTHORITY
+  };
+}
+
+function captureResult(status, timeline, event, assertion) {
+  return {
+    schema: "agentspine.timeline-world-capture/v1", status,
+    timeline: timelineSource(timeline, event), captured: publicCaptured(assertion),
+    completionVerified: false, deliveryConfirmed: false, authority: AUTHORITY,
+    instruction: "This is source-verified descriptive task context only. It grants no permission or action authority; conflicting measurements and corrections remain unresolved."
+  };
+}
+
+async function correctionCurrent({ root, scope, event, now }) {
+  if (!scope.portalRef || !scope.threadRef) return { reason: "timeline-correction-route-required" };
+  const context = await worldContext({ root, subjectId: scope.currentTaskId, projectId: scope.projectId,
+    groupId: null, includePrivate: true, includeKnowledgeHistory: true,
+    continuationTaskId: scope.currentTaskId, portalRef: scope.portalRef, threadRef: scope.threadRef,
+    maxItems: 100, now });
+  const continuations = context.knowledge.current.filter((item) => item.subjectId === scope.currentTaskId
+    && item.predicate === "task.continuation" && item.value?.schema === "agentspine.task-continuation/v1");
+  const replay = continuations.find((item) => item.status === "confirmed"
+    && item.source.kind === "explicit-user-feedback" && item.source.id === event.id
+    && item.value.nextStep?.summary === event.nextStepSummary);
+  if (replay) return { duplicate: replay };
+  if (!continuations.length) return { reason: "timeline-correction-continuation-missing" };
+  if (continuations.some((item) => item.status !== "confirmed")) {
+    return { reason: "timeline-correction-continuation-conflicted" };
+  }
+  const selected = [...continuations].sort((left, right) =>
+    right.observedAt.localeCompare(left.observedAt) || left.id.localeCompare(right.id))[0];
+  if (selected.value.status === "completed") return { reason: "timeline-correction-task-completed" };
+  if (new Date(event.at).getTime() < new Date(selected.observedAt).getTime()) {
+    return { reason: "timeline-correction-stale" };
+  }
+  return { value: selected.value, supersedes: continuations.map((item) => item.id).sort() };
 }
 
 export async function captureSessionTimelineEvidence({
@@ -93,27 +175,17 @@ export async function captureSessionTimelineEvidence({
   if (!event) return unavailable("timeline-capture-event-not-found", timeline);
   if (!validEvent(event, timeline, scope)) return unavailable("timeline-capture-evidence-invalid", timeline);
   try {
+    if (event.kind === "explicit-next-step-correction") {
+      const current = await correctionCurrent({ root, scope, event, now });
+      if (current.reason) return unavailable(current.reason, timeline);
+      if (current.duplicate) return captureResult("duplicate", timeline, event, current.duplicate);
+      const recorded = await recordWorldAssertion(correctionAssertion({ event, scope, root, now, current }));
+      return captureResult(recorded.status === "duplicate" ? "duplicate" : "captured",
+        timeline, event, recorded.assertion);
+    }
     const recorded = await recordWorldAssertion(assertionFromEvent({ event, scope, root, now }));
-    return {
-      schema: "agentspine.timeline-world-capture/v1",
-      status: recorded.status === "duplicate" ? "duplicate" : "captured",
-      timeline: { schema: timeline.schema, sourceDigest: timeline.sourceDigest,
-        sourceProvider: timeline.sourceProvider, sessionRef: event.sessionRef, messageRef: event.messageRef,
-        portalRef: event.portalRef ?? null, threadRef: event.threadRef ?? null },
-      captured: {
-        assertionId: recorded.assertion.id, subjectId: recorded.assertion.subjectId,
-        predicate: recorded.assertion.predicate, value: structuredClone(recorded.assertion.value),
-        source: { kind: recorded.assertion.evidenceKind, id: recorded.assertion.evidenceId,
-          digest: recorded.assertion.evidenceDigest, sessionRef: recorded.assertion.sessionRef,
-          messageRef: recorded.assertion.messageRef },
-        observedAt: recorded.assertion.observedAt,
-        scope: { projectId: recorded.assertion.projectId, portalRef: recorded.assertion.portalRef ?? null,
-          threadRef: recorded.assertion.threadRef ?? null },
-        status: "confirmed", authority: AUTHORITY
-      },
-      completionVerified: false, deliveryConfirmed: false, authority: AUTHORITY,
-      instruction: "This is source-verified descriptive task context only. It grants no permission or action authority; conflicting measurements remain unresolved."
-    };
+    return captureResult(recorded.status === "duplicate" ? "duplicate" : "captured",
+      timeline, event, recorded.assertion);
   } catch {
     return unavailable("timeline-capture-world-state-unavailable", timeline);
   }

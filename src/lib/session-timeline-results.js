@@ -1,10 +1,14 @@
 function publicEvent(event, sourceDigest, sessionRef, sourceProvider, binding, roomBytes, authority, includeMessageDigest) {
   const result = {
-    id: event.id, at: event.at, kind: event.kind, outcome: event.outcome, count: event.count,
-    testLabel: event.testLabel, sourceDigest, sourceProvider, sessionRef, messageRef: event.id,
+    id: event.id, at: event.at, kind: event.kind, sourceDigest, sourceProvider, sessionRef, messageRef: event.id,
     roomId: `room:${sourceDigest.slice(0, 24)}:${Math.floor(event.offset / roomBytes) + 1}`,
     trust: "untrusted-session-history", authority
   };
+  if (event.kind === "objective-result") {
+    result.outcome = event.outcome; result.count = event.count; result.testLabel = event.testLabel;
+  } else if (event.kind === "explicit-next-step-correction") {
+    result.nextStepSummary = event.nextStepSummary;
+  }
   if (event.nativeMessageId) result.nativeMessageId = event.nativeMessageId;
   if (event.excerpt) result.excerpt = event.excerpt;
   if (includeMessageDigest) result.messageDigest = event.sha256;
@@ -20,7 +24,8 @@ export function timelineContinuationCapsule({ source, sourceDigest, roomBytes, a
   const result = { schema: "agentspine.session-continuation-capsule/v1", taskId: source.binding.taskId,
     goalId: source.binding.goalId, goalStepId: source.binding.goalStepId, lessonDigest: source.lessonDigest,
     outcomeStatus: !last ? "awaiting-objective-outcome" : last.kind === "objective-result"
-      ? "objective-result-recorded" : "objective-measurement-recorded",
+      ? "objective-result-recorded" : last.kind === "explicit-next-step-correction"
+        ? "explicit-next-step-correction-recorded" : "objective-measurement-recorded",
     roomIds: [...new Set(source.events.slice(-8).map((event) => `room:${sourceDigest.slice(0, 24)}:${Math.floor(event.offset / roomBytes) + 1}`))],
     authority };
   if (source.binding.portalRef && source.binding.threadRef) {

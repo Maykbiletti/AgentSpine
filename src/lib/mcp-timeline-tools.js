@@ -153,7 +153,7 @@ export const sessionTimelineTools = [
   },
   {
     name: "session_timeline_search",
-    description: "Search the current or a same-task prior explicitly enrolled immutable Claude, Codex or King source for redacted objective evidence by exact UTC time or at least two concrete terms. Cross-provider recall additionally needs a local host capability and explicit selection; one indexed source is opened and no authority is granted.",
+    description: "Search the current or a same-task prior explicitly enrolled immutable Claude, Codex or King source for redacted objective evidence or a strict user-correction marker by exact UTC time or at least two concrete terms. Cross-provider recall additionally needs a local host capability and explicit selection; one indexed source is opened and no authority is granted.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: [],
@@ -168,7 +168,7 @@ export const sessionTimelineTools = [
   },
   {
     name: "session_timeline_capture",
-    description: "Reopen one exact bound timeline result and record only its mechanically derived objective fields as private context-only task knowledge. Source, message digest, time, task, portal and thread are host-bound; caller interpretations never become facts.",
+    description: "Reopen one exact bound timeline event and record only mechanically derived objective fields, or apply an explicitly prefixed user correction to an existing same-thread next step. Source, role, message digest, time, task, portal and thread are host-bound; caller interpretations never become facts.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: ["eventId"],

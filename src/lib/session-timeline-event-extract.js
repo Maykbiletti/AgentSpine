@@ -1,5 +1,5 @@
-import { codexTimelineToolResult } from "./session-timeline-codex.js";
-import { kingTimelineToolResult } from "./session-timeline-king.js";
+import { codexTimelineToolResult, codexTimelineUserMessage } from "./session-timeline-codex.js";
+import { kingTimelineToolResult, kingTimelineUserMessage } from "./session-timeline-king.js";
 import { createHash } from "node:crypto";
 import { timelineTerms } from "./session-timeline-query.js";
 
@@ -19,6 +19,7 @@ const OUTCOME_PATTERNS = [
   ["error", /\b(?:error|fehler)\b/gi],
   ["skipped", /\b(?:skipped|übersprungen)\b/gi]
 ];
+const NEXT_STEP_CORRECTION_RE = /^(?:Correction:\s*next step:|Korrektur:\s*nächster Schritt:)\s*(.+)$/iu;
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 
@@ -125,6 +126,26 @@ function candidateFromToolResult(value) {
   return { kind: "objective-result", outcome, count, testLabel, terms: structuredTerms({ outcome, count, testLabel }) };
 }
 
+function candidateFromUserMessage(value) {
+  if (value?.role !== "user" || typeof value.content !== "string" || /[\r\n]/u.test(value.content)) return null;
+  const match = value.content.trim().match(NEXT_STEP_CORRECTION_RE);
+  if (!match) return null;
+  const nextStepSummary = match[1].trim().replace(/\s+/gu, " ");
+  if (!nextStepSummary || nextStepSummary.length > 500 || unsafeText(nextStepSummary)) return null;
+  return { kind: "explicit-next-step-correction", nextStepSummary,
+    terms: timelineTerms("correction Korrektur next step nächster Schritt") };
+}
+
+function claudeTimelineUserMessage(parsed) {
+  const message = parsed?.message;
+  if (!message || message.role !== "user") return null;
+  if (typeof message.content === "string") return { role: "user", content: message.content };
+  if (!Array.isArray(message.content) || message.content.length > 12
+    || message.content.some((part) => !part || !["text", "input_text"].includes(part.type)
+      || typeof part.text !== "string")) return null;
+  return { role: "user", content: message.content.map((part) => part.text).join("\n") };
+}
+
 function timelineEventFromLine(line, offset, authority, includeExcerpt, host) {
   const source = Buffer.from(line);
   if (source.byteLength > MAX_LINE_BYTES) return null;
@@ -135,16 +156,20 @@ function timelineEventFromLine(line, offset, authority, includeExcerpt, host) {
   }
   const tool = host === "codex" ? codexTimelineToolResult(parsed)
     : host === "king" ? kingTimelineToolResult(parsed) : null;
-  const at = tool?.at || extractTimelineTimestamp(parsed);
+  const user = host === "codex" ? codexTimelineUserMessage(parsed)
+    : host === "king" ? kingTimelineUserMessage(parsed) : claudeTimelineUserMessage(parsed);
+  const at = tool?.at || user?.at || extractTimelineTimestamp(parsed);
   if (!at || unsafeObject(parsed)) return null;
-  const candidate = ["codex", "king"].includes(host) ? candidateFromToolResult(tool)
-    : candidateFromToolResult(parsed) || candidateFromToolResult(parsed.message);
+  const candidate = ["codex", "king"].includes(host)
+    ? candidateFromToolResult(tool) || candidateFromUserMessage(user)
+    : candidateFromToolResult(parsed) || candidateFromToolResult(parsed.message) || candidateFromUserMessage(user);
   if (!candidate) return null;
   const stable = JSON.stringify({ at, ...candidate });
   const event = { id: `timeline-event:${digest(`${offset}\0${stable}`).slice(0, 32)}`, at, offset, bytes: source.byteLength,
     sha256: digest(source), ...candidate, authority };
-  if (tool) event.nativeMessageId = tool.nativeMessageId;
-  if (includeExcerpt) event.excerpt = objectiveExcerpt(objectiveText(tool || parsed));
+  const nativeMessageId = tool?.nativeMessageId || user?.nativeMessageId;
+  if (nativeMessageId) event.nativeMessageId = nativeMessageId;
+  if (includeExcerpt && candidate.kind === "objective-result") event.excerpt = objectiveExcerpt(objectiveText(tool || parsed));
   return event;
 }
 

@@ -40,7 +40,7 @@ const MAX_INDEX_BYTES = 16 * 1024 * 1024;
 const ROOM_BYTES = 1024 * 1024;
 const EVENT_OUTCOMES = new Set(["pass", "fail", "blocked", "timeout", "error", "skipped"]);
 const EVENT_LABEL_RE = /^(?:suite-(?:0|[1-9]\d{0,3})|acceptance|audit|npm-check|ci|test)$/;
-const EVENT_KEYS = new Set(["nativeMessageId", "id", "at", "offset", "bytes", "sha256", "kind", "outcome", "count", "testLabel", "terms", "authority"]);
+const EVENT_KEYS = new Set(["nativeMessageId", "id", "at", "offset", "bytes", "sha256", "kind", "outcome", "count", "testLabel", "nextStepSummary", "terms", "authority"]);
 const MUTATION_TAILS = new Map();
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
@@ -59,15 +59,23 @@ function validCount(item) {
     && item.total > 0 && item.value <= item.total);
 }
 function validEvent(item) {
-  return item && typeof item === "object" && hasOnlyKeys(item, EVENT_KEYS)
+  const common = item && typeof item === "object" && hasOnlyKeys(item, EVENT_KEYS)
     && typeof item.id === "string" && TIMELINE_ID_RE.test(item.id) && date(item.at)
     && Number.isSafeInteger(item.offset) && item.offset >= 0 && Number.isSafeInteger(item.bytes) && item.bytes > 0
-    && /^[a-f0-9]{64}$/.test(item.sha256 || "") && item.kind === "objective-result"
-    && EVENT_OUTCOMES.has(item.outcome) && validCount(item.count)
-    && (item.testLabel === null || typeof item.testLabel === "string" && EVENT_LABEL_RE.test(item.testLabel))
+    && /^[a-f0-9]{64}$/.test(item.sha256 || "")
     && Array.isArray(item.terms) && item.terms.length <= 24 && item.terms.every((term) => /^[\p{L}\p{N}]{3,}$/u.test(term))
     && (item.nativeMessageId === undefined || typeof item.nativeMessageId === "string" && TIMELINE_ID_RE.test(item.nativeMessageId))
     && item.authority === AUTHORITY;
+  if (!common) return false;
+  if (item.kind === "objective-result") {
+    return EVENT_OUTCOMES.has(item.outcome) && validCount(item.count)
+      && (item.testLabel === null || typeof item.testLabel === "string" && EVENT_LABEL_RE.test(item.testLabel))
+      && item.nextStepSummary === undefined;
+  }
+  return item.kind === "explicit-next-step-correction" && item.outcome === undefined
+    && item.count === undefined && item.testLabel === undefined
+    && (item.nextStepSummary === undefined || typeof item.nextStepSummary === "string"
+      && Boolean(item.nextStepSummary.trim()) && item.nextStepSummary.length <= 500);
 }
 function validSource(item) {
   return item && validTimelineBinding(item.binding) && typeof item.path === "string" && isAbsolute(item.path)
@@ -258,7 +266,10 @@ function parsedEvents(buffer, start, dropFirst = false, host = "claude") {
     const line = buffer.subarray(index, end);
     if (!(dropFirst && index === 0) && line.byteLength) {
       const event = eventFromTimelineLine(line.toString("utf8"), start + index, AUTHORITY, host);
-      if (event) result.push(event);
+      if (event) {
+        if (event.kind === "explicit-next-step-correction") delete event.nextStepSummary;
+        result.push(event);
+      }
     }
     index = end;
   }

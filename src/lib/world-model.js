@@ -201,6 +201,20 @@ export async function recordWorldAssertion(input = {}) {
       if (assertionDigest(existing) !== assertionDigest(candidate)) throw new Error(`world assertion id is already used: ${candidate.id}`);
       return { status: "duplicate", assertion: structuredClone(existing), revision: model.revision, authority: "context-only" };
     }
+    if (input.requireActiveSupersedes === true) {
+      if (!candidate.supersedes.length) throw new Error("active supersession requires at least one assertion");
+      const cutoff = new Date(now).getTime();
+      const live = model.assertions.filter((item) => item.status === "established"
+        && item.subjectId === candidate.subjectId && item.predicate === candidate.predicate
+        && item.projectId === candidate.projectId && item.groupId === candidate.groupId
+        && item.privacy === candidate.privacy && sameRoute(item, candidate)
+        && (!item.expiresAt || new Date(item.expiresAt).getTime() > cutoff));
+      const replaced = new Set(live.flatMap((item) => item.supersedes));
+      const activeIds = live.filter((item) => !replaced.has(item.id)).map((item) => item.id).sort();
+      if (activeIds.join("\0") !== candidate.supersedes.join("\0")) {
+        throw new Error("active supersession compare-and-swap failed");
+      }
+    }
     for (const id of candidate.supersedes) {
       const previous = model.assertions.find((item) => item.id === id);
       if (!previous) throw new Error(`superseded assertion does not exist: ${id}`);

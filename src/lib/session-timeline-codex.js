@@ -56,3 +56,18 @@ export function codexTimelineToolResult(line) {
   }
   return typeof output === "string" ? { role: "tool", content: output, nativeMessageId: item.call_id } : null;
 }
+
+export function codexTimelineUserMessage(line) {
+  if (!RECORDS.has(line?.type) || line.schema_version !== undefined) {
+    throw new Error("codex-history-format-mismatch");
+  }
+  if (line.type !== "response_item") return null;
+  const item = line.payload;
+  if (!item || item.type !== "message" || item.role !== "user" || !Array.isArray(item.content)
+    || item.content.length > 12 || item.content.some((part) => part?.type !== "input_text"
+      || typeof part.text !== "string")) return null;
+  const nativeMessageId = item.id === undefined ? undefined : ID.test(item.id) ? item.id : null;
+  if (nativeMessageId === null) return null;
+  return { role: "user", content: item.content.map((part) => part.text).join("\n"),
+    ...(nativeMessageId ? { nativeMessageId } : {}) };
+}
