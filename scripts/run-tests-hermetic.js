@@ -55,9 +55,9 @@ async function runOne(file, mode, index) {
 async function runMode(mode) {
   const indexed = testFiles.map((file, index) => ({ file, index }));
   const results = [];
-  // Installation copies complete bundles, while the MCP process tests check real
-  // 2-second startup deadlines and host-origin enrollment attests a live source plus
-  // signed state. Keep those healthy-baseline probes off the shared Windows I/O pool.
+  // Installation copies complete bundles, while the MCP and route-lifecycle tests
+  // start real children with fixed deadlines and host-origin enrollment attests a
+  // live source plus signed state. Keep those probes off the shared Windows I/O pool.
   // Both profiles still run them once, with unchanged assertions and limits.
   const isolatedNames = new Set([
     "assignment-continuation-boundaries.test.js",
@@ -72,6 +72,7 @@ async function runMode(mode) {
     "mcp-bounded-preflight.test.js",
     "mcp-bounded-recovery.test.js",
     "package.test.js",
+    "portal-thread-continuity.test.js",
     "mcp.test.js",
     "session-timeline-host-origin.test.js",
     "session-timeline-invocation.test.js"
