@@ -1,7 +1,82 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PREMORTEM_REQUIREMENT_TEXT, premortemRequirementText } from "../src/lib/delivery-premortem.js";
-import { blockedHookOutput, blunRuntimeMessage, lifecycleOutput } from "../src/lib/hook-output.js";
+import {
+  blockedHookOutput, blunRuntimeMessage, hookOutput, lifecycleOutput, preAnswerRecallCapsule
+} from "../src/lib/hook-output.js";
+
+function recallContext(groupId = null) {
+  return {
+    event: "UserPromptSubmit", loaded: true, indexedSources: 7,
+    sourceResolution: { status: "loaded" },
+    briefing: {
+      focus: { currentTaskId: "task:synthetic" }, scope: { groupId },
+      preAnswerRecall: {
+        schema: "agentspine.pre-answer-recall/v1", order: "review-before-claims-and-actions",
+        authority: "context-only",
+        task: {
+          taskId: "task:synthetic", status: "active", objective: "Prepare result.txt",
+          lastVerifiedStep: { summary: "Created result.txt", result: "passed",
+            evidenceDigest: "a".repeat(64), observedAt: "2026-09-07T01:00:00.000Z" },
+          nextStep: { summary: "Migrate result.txt" }, observedAt: "2026-09-07T01:00:00.000Z"
+        },
+        feedback: { text: "Nein, erst die Prüfsumme prüfen", interpretationStatus: "unresolved",
+          sourceProvider: "claude", sourceDigest: "b".repeat(64), sessionRef: "session-ref:old",
+          messageRef: "message:correction", observedAt: "2026-09-07T02:00:00.000Z" }
+      },
+      world: { knowledge: {
+        continuation: { tasks: [{
+          assertionId: "assertion:task", taskId: "task:synthetic", status: "active",
+          objective: "Prepare result.txt",
+          lastVerifiedStep: { summary: "Created result.txt", result: "passed",
+            evidenceDigest: "a".repeat(64), observedAt: "2026-09-07T01:00:00.000Z" },
+          nextStep: { summary: "Migrate result.txt" }, observedAt: "2026-09-07T01:00:00.000Z"
+        }], terminal: [] },
+        taskContext: { items: [{
+          value: { targetAssertionId: "assertion:task", sourceText: "Nein, erst die Prüfsumme prüfen",
+            interpretationStatus: "unresolved", sourceProvider: "claude", sourceDigest: "b".repeat(64) },
+          source: { kind: "uninterpreted-user-message", sessionRef: "session-ref:old",
+            messageRef: "message:correction" }, observedAt: "2026-09-07T02:00:00.000Z"
+        }] }
+      } }
+    },
+    preflight: { briefing: {
+      mustRemember: [{ id: "remember:access-check", claim: "Check configured access before claiming it is unavailable.",
+        checksum: "c".repeat(64) }], retrieval: []
+    } }
+  };
+}
+
+test("pre-answer recall is carried by every host output before claims", () => {
+  const context = JSON.stringify(recallContext());
+  for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" },
+    { PLUGIN_ROOT: "/synthetic/codex" }]) {
+    const output = hookOutput("UserPromptSubmit", context, env);
+    assert.match(output.hookSpecificOutput.additionalContext, /result\.txt/);
+    assert.match(output.hookSpecificOutput.additionalContext, /Nein, erst die Prüfsumme prüfen/);
+    assert.match(output.hookSpecificOutput.additionalContext, /Check configured access/);
+  }
+  const blun = hookOutput("UserPromptSubmit", context, { BLUN_PLUGIN_ROOT: "/synthetic/blun" });
+  assert.equal(Buffer.byteLength(blun.hookSpecificOutput.message) <= 1200, true);
+  assert.match(blun.hookSpecificOutput.message, /review-before-claims-and-actions/);
+  assert.match(blun.hookSpecificOutput.message, /result\.txt/);
+  assert.match(blun.hookSpecificOutput.message, /Nein, erst die Prüfsumme prüfen/);
+  assert.match(blun.hookSpecificOutput.message, /Check configured access/);
+  assert.doesNotMatch(blun.hookSpecificOutput.message, /only on demand/);
+});
+
+test("bounded recall preserves uncertainty and suppresses private group projection", () => {
+  const capsule = preAnswerRecallCapsule(recallContext());
+  assert.equal(capsule.feedback.interpretationStatus, "unresolved");
+  assert.equal(capsule.feedback.sourceDigest, "b".repeat(64));
+  assert.equal(capsule.feedback.sessionRef, "session-ref:old");
+  assert.equal(capsule.feedback.messageRef, "message:correction");
+  assert.equal(capsule.task.lastVerifiedStep.result, "passed");
+  assert.equal(capsule.authority, "context-only");
+  assert.equal(preAnswerRecallCapsule(recallContext("group:foreign")), null);
+  assert.doesNotMatch(blunRuntimeMessage(JSON.stringify(recallContext("group:foreign"))),
+    /result\.txt|Prüfsumme|configured access/);
+});
 
 test("long-path BLUN messages retain mandatory premortem text and bound optional detail", () => {
   const root = `/tmp/${"deep-profile/".repeat(80)}project`;

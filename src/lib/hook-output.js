@@ -1,6 +1,43 @@
 const BLUN_MESSAGE_MAX_BYTES = 1200;
 const BLUN_BOUND_MARKER = "\n[optional runtime detail omitted: 1200-byte bound]";
 
+function byteSize(value) {
+  return Buffer.byteLength(JSON.stringify(value));
+}
+
+function addRecallField(packet, key, value, omitted) {
+  if (value === undefined || value === null) return;
+  packet[key] = value;
+  if (byteSize(packet) <= 1020) return;
+  delete packet[key];
+  omitted.push(key);
+}
+
+export function preAnswerRecallCapsule(detailed) {
+  if (detailed?.event !== "UserPromptSubmit" || !detailed.loaded) return null;
+  const briefing = detailed.briefing;
+  const preflight = detailed.preflight?.briefing;
+  if (!briefing || !preflight) return null;
+  if (briefing.scope?.groupId !== null && briefing.scope?.groupId !== undefined) return null;
+  const omitted = [];
+  const packet = briefing.preAnswerRecall ? { ...briefing.preAnswerRecall } : {
+    schema: "agentspine.pre-answer-recall/v1",
+    order: "review-before-claims-and-actions",
+    authority: "context-only"
+  };
+  const mustRemember = (preflight.mustRemember || []).map((item) => ({
+    id: item.id, claim: item.claim, checksum: item.checksum
+  }));
+  if (mustRemember.length) addRecallField(packet, "mustRemember", mustRemember, omitted);
+  const retrieval = (preflight.retrieval || []).flatMap((provider) =>
+    (provider.items || []).map((item) => ({ providerId: provider.providerId,
+      id: item.id, revision: item.revision, claim: item.claim, source: item.source,
+      validity: item.validity, confidence: item.confidence }))).slice(0, 3);
+  if (retrieval.length) addRecallField(packet, "retrieval", retrieval, omitted);
+  if (omitted.length && byteSize({ ...packet, omitted }) <= 1020) packet.omitted = omitted;
+  return Object.keys(packet).length > 3 ? packet : null;
+}
+
 function compactPremortemRegistration(premortem, includeRoot = true) {
   const root = premortem?.registration?.root;
   const requirementId = premortem?.requirementId || premortem?.registration?.requirementId;
@@ -37,6 +74,8 @@ export function blunRuntimeContext(context) {
       : detailed.instruction,
     authority: "context-only"
   };
+  const recall = preAnswerRecallCapsule(detailed);
+  if (recall) runtime.preAnswerRecall = recall;
   if (detailed.signal && (detailed.signal.captured || detailed.signal.accepted || detailed.signal.reason)) {
     runtime.signal = detailed.signal;
   }
@@ -56,7 +95,9 @@ export function blunRuntimeMessage(context) {
   const runtime = JSON.parse(blunRuntimeContext(context));
   const warning = runtime.sourceResolution?.incomplete ? ` Warning: ${runtime.sourceResolution.warning}` : "";
   const base = runtime.loaded
-    ? `AgentSpine ready: ${runtime.indexedSources} sources indexed. Load detailed continuity only on demand through session_briefing.${warning}`
+    ? runtime.preAnswerRecall
+      ? `AgentSpine ready: ${runtime.indexedSources} sources indexed.${warning}`
+      : `AgentSpine ready: ${runtime.indexedSources} sources indexed. Load detailed continuity only on demand through session_briefing.${warning}`
     : `AgentSpine unavailable${runtime.sourceResolution?.reason ? `: ${runtime.sourceResolution.reason}` : ""}. ${runtime.instruction}`;
   const active = {};
   if (runtime.signal && (runtime.signal.captured || runtime.signal.accepted
@@ -72,16 +113,24 @@ export function blunRuntimeMessage(context) {
   const details = Object.keys(active).length === 0
     ? ""
     : `\nActive AgentSpine runtime data: ${JSON.stringify(active)}`;
+  const recall = runtime.preAnswerRecall
+    ? `\nRecall before claims/actions: ${JSON.stringify(runtime.preAnswerRecall)}`
+    : "";
   const root = runtime.premortem?.registration?.root;
   const instruction = typeof root === "string"
     ? runtime.premortem?.instruction?.replace("registration.root", () => `root ${JSON.stringify(root)}`)
     : runtime.premortem?.instruction;
   const premortem = instruction ? `\n${instruction}` : "";
-  const message = `${base}${details}${premortem}`;
+  const message = `${base}${recall}${details}${premortem}`;
   if (Buffer.byteLength(message) <= BLUN_MESSAGE_MAX_BYTES) return message;
-  const compact = `${base}${BLUN_BOUND_MARKER}\n${compactPremortemRegistration(runtime.premortem)}`;
+  const compact = `${base}${recall}${BLUN_BOUND_MARKER}\n${compactPremortemRegistration(runtime.premortem)}`;
   if (Buffer.byteLength(compact) <= BLUN_MESSAGE_MAX_BYTES) return compact;
-  return `${base}${BLUN_BOUND_MARKER}\n${compactPremortemRegistration(runtime.premortem, false)}`;
+  if (!runtime.preAnswerRecall) {
+    return `${base}${BLUN_BOUND_MARKER}\n${compactPremortemRegistration(runtime.premortem, false)}`;
+  }
+  const recallOnly = `${base}${recall}${BLUN_BOUND_MARKER}`;
+  if (Buffer.byteLength(recallOnly) <= BLUN_MESSAGE_MAX_BYTES) return recallOnly;
+  return `${base}\nRecall unavailable.`;
 }
 
 export function hookOutput(event, context, env = process.env) {

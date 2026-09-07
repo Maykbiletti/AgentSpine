@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fixture, processCall } from "./mcp-bounded-fixture.js";
 import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
 import { runHook } from "../src/hook.js";
+import { hookOutput } from "../src/lib/hook-output.js";
 import { channelTimelineContinuity } from "../src/lib/channel-continuity.js";
 import { recordWorldAssertion } from "../src/lib/world-model.js";
 import { sessionTimelineStatePaths } from "../src/lib/session-timeline-auth.js";
@@ -198,6 +199,23 @@ test("new session receives exact task, existing result file and source-verified 
   assert.ok(Buffer.byteLength(contextText) <= 16_384, "fixed synthetic lifecycle context budget");
   assert.match(contextText, /Nein, erst die Prüfsumme prüfen/);
   assert.match(contextText, /result.txt/);
+  const prompted = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude", cwd: item.root,
+    session_id: "session:new", event_id: "turn:new:recall", prompt: "Continue the existing task",
+    entity_id: SCOPE.entityId, user_id: SCOPE.userId, tenant_id: SCOPE.tenantId,
+    project_id: PROJECT, task_id: TASK, goal_id: SCOPE.goalId,
+    goal_step_id: SCOPE.goalStepId, group_id: null });
+  assert.equal(prompted.blocked, false, prompted.reason);
+  for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" }, { PLUGIN_ROOT: "/synthetic/codex" }]) {
+    const output = hookOutput("UserPromptSubmit", prompted.context, env);
+    assert.match(output.hookSpecificOutput.additionalContext, /result.txt/);
+    assert.match(output.hookSpecificOutput.additionalContext, /Nein, erst die Prüfsumme prüfen/);
+  }
+  const kingOutput = hookOutput("UserPromptSubmit", prompted.context,
+    { BLUN_PLUGIN_ROOT: "/synthetic/blun" });
+  assert.equal(Buffer.byteLength(kingOutput.hookSpecificOutput.message) <= 1200, true);
+  assert.match(kingOutput.hookSpecificOutput.message, /result.txt/);
+  assert.match(kingOutput.hookSpecificOutput.message, /Nein, erst die Prüfsumme prüfen/);
+  assert.match(kingOutput.hookSpecificOutput.message, /review-before-claims-and-actions/);
   gateway(route("thread:foreign"));
   assert.equal((await freshWorld(item)).knowledge.taskContext.items.length, 0);
   gateway(binding);
@@ -213,7 +231,8 @@ test("new session receives exact task, existing result file and source-verified 
   // Mutation above belongs only to the synthetic tamper probe. All real fixture user sources and artifact stay exact.
   assert.deepEqual(await readFile(artifact), artifactBytes);
   await item.preserve();
-  t.diagnostic(JSON.stringify({ contextBytes: Buffer.byteLength(contextText), elapsedMs: performance.now() - started,
+  t.diagnostic(JSON.stringify({ contextBytes: Buffer.byteLength(contextText),
+    preAnswerBytes: Buffer.byteLength(kingOutput.hookSpecificOutput.message), elapsedMs: performance.now() - started,
     preservedFeedbackCandidates: "0 -> 1", falseAutomaticApplications: 0, realModelRuns: 0,
     semanticAssignment: "unverified", necessaryQuestions: "unverified", unnecessaryQuestions: "unverified",
     repeatedJobs: "unverified", newSessionUserAcceptance: "not-passed" }));

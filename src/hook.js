@@ -376,8 +376,8 @@ async function runHookCore(input, payload, options) {
         focusActive: true, includeSourceContent: event === "UserPromptSubmit" ? false : !scope.groupId,
         maxBytes: event === "UserPromptSubmit" ? 4096 : scope.config.maxBriefingBytes,
         now: input.timestamp || new Date(),
-        catalog, userStateRoot: resolvedSources.userStateRoot, sourceDiagnostics: resolvedSources.diagnostics,
-        prompt: event === "UserPromptSubmit" ? promptFromInput(input) : null
+        catalog, userStateRoot: resolvedSources.userStateRoot, sourceDiagnostics: event === "UserPromptSubmit" ? null : resolvedSources.diagnostics,
+        prompt: event === "UserPromptSubmit" ? promptFromInput(input) : null, preAnswer: event === "UserPromptSubmit"
       });
       if (event === "PostCompact") {
         try { lessonRecall = await actionLessonRecall({ catalog, event, input, scope }); }

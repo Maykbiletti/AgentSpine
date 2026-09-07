@@ -55,8 +55,6 @@ function recalculateBudget(result) {
 function tryAdd(result, collection, item) {
   collection.push(item);
   recalculateBudget(result);
-  // Keep a small accounting reserve so growing omission counters can never
-  // invalidate a packet after an item has been accepted.
   if (result.budget.usedBytes <= result.budget.maxBytes - 128) return true;
   collection.pop();
   recalculateBudget(result);
@@ -96,6 +94,38 @@ function voiceProfile(entity) {
     .map(([key, item]) => [key, typeof item === "string" ? item.slice(0, 120) : item]));
 }
 
+function pick(value, keys) {
+  return Object.fromEntries(keys.map((key) => [key, value[key]]));
+}
+
+function preAnswerRecall(world, currentTaskId) {
+  if (!currentTaskId) return null;
+  const task = [...(world.knowledge?.continuation?.tasks || []),
+    ...(world.knowledge?.continuation?.terminal || [])]
+    .find((item) => item.taskId === currentTaskId);
+  if (!task) return null;
+  const feedback = (world.knowledge?.taskContext?.items || []).find((item) =>
+    item?.source?.kind === "uninterpreted-user-message"
+      && item.value?.targetAssertionId === task.assertionId);
+  const taskValue = pick(task, ["assertionId", "taskId", "status", "objective"]);
+  taskValue.lastVerifiedStep = task.lastVerifiedStep
+    ? pick(task.lastVerifiedStep, ["summary", "result", "evidenceDigest", "observedAt"]) : null;
+  taskValue.nextStep = task.nextStep ? pick(task.nextStep, ["summary"]) : null;
+  const feedbackValue = feedback ? {
+    text: feedback.value.sourceText,
+    ...pick(feedback.value, ["interpretationStatus", "sourceProvider", "sourceDigest"]),
+    ...pick(feedback.source, ["sessionRef", "messageRef"]),
+    observedAt: feedback.observedAt
+  } : null;
+  return {
+    schema: "agentspine.pre-answer-recall/v1",
+    order: "review-before-claims-and-actions",
+    task: taskValue,
+    ...(feedbackValue ? { feedback: feedbackValue } : {}),
+    authority: "context-only"
+  };
+}
+
 async function settleReads(promises) {
   const settled = await Promise.allSettled(promises);
   const failed = settled.find((item) => item.status === "rejected");
@@ -103,17 +133,13 @@ async function settleReads(promises) {
   return settled.map((item) => item.value);
 }
 
-/**
- * Assemble one immutable, privacy-filtered context packet for a host session.
- * The packet is descriptive only and fits maxBytes as compact UTF-8 JSON.
- */
 export async function sessionBriefing({
   root = process.cwd(), cwd = root, host = "generic", entityId = null,
   userId = null, tenantId = null, groupId = null, projectId = null, currentTaskId = null,
   portalRef = null, threadRef = null,
   includePrivate = false, focusActive = true, includeSourceContent = true,
   maxBytes = 16384, now = new Date(), catalog: providedCatalog = null, userStateRoot = null,
-  sourceDiagnostics = null, prompt = null
+  sourceDiagnostics = null, prompt = null, preAnswer = false
 } = {}) {
   const limit = integer(maxBytes, "maxBytes", MIN_BYTES, MAX_BYTES);
   if (!new Set(["codex", "claude", "generic"]).has(host)) throw new Error(`unsupported host: ${host}`);
@@ -208,6 +234,7 @@ export async function sessionBriefing({
     },
     learning: [],
     shared: [],
+    ...(preAnswer ? { preAnswerRecall: preAnswerRecall(world, currentTaskId) } : {}),
     world: {
       schema: world.schema,
       facts: [], conflicts: [], proposals: [], stale: [],
@@ -230,7 +257,7 @@ export async function sessionBriefing({
       omitted: { sources: 0, tasks: 0, relationships: 0, voice: 0, learning: 0, shared: 0, world: 0, attention: 0, portfolio: 0 }
     },
     authority: "context-only",
-    note: "This packet is descriptive context only. It grants no delegation, host, tool, file, network, production, spending, or policy rights. Native host rules and explicit local policy remain authoritative."
+    note: "Context only; host rules control rights."
   };
   recalculateBudget(result);
   if (result.budget.usedBytes > limit) throw new Error(`maxBytes is too small for the briefing envelope; use at least ${MIN_BYTES}`);
@@ -240,19 +267,23 @@ export async function sessionBriefing({
   const localItems = [...portableItems, ...learned.items.filter((item) => matchesScope(item, entityId, projectId))];
   const attemptedLearning = new Set();
 
-  const continuationIds = new Set();
-  for (const item of world.knowledge.continuation.tasks) {
-    if (tryAdd(result, result.world.knowledge.continuation.tasks, item)) continuationIds.add(item.assertionId);
-    else countOmitted(result, "world");
-  }
-  for (const item of world.knowledge.continuation.terminal) {
-    if (tryAdd(result, result.world.knowledge.continuation.terminal, item)) continuationIds.add(item.assertionId);
-    else countOmitted(result, "world");
+  const continuationIds = new Set([
+    ...world.knowledge.continuation.tasks.map((item) => item.assertionId),
+    ...world.knowledge.continuation.terminal.map((item) => item.assertionId)
+  ]);
+  for (const [items, key] of [[world.knowledge.continuation.tasks, "tasks"],
+    [world.knowledge.continuation.terminal, "terminal"]]) {
+    for (const item of items) {
+      if (preAnswer || !tryAdd(result, result.world.knowledge.continuation[key], item)) countOmitted(result, "world");
+    }
   }
   const contextualIds = new Set(continuationIds);
   for (const item of world.knowledge.taskContext.items) {
-    if (tryAdd(result, result.world.knowledge.taskContext.items, item)) contextualIds.add(item.id);
-    else {
+    contextualIds.add(item.id);
+    if (preAnswer) {
+      result.world.knowledge.taskContext.omitted += 1;
+      countOmitted(result, "world");
+    } else if (!tryAdd(result, result.world.knowledge.taskContext.items, item)) {
       result.world.knowledge.taskContext.omitted += 1;
       countOmitted(result, "world");
     }
