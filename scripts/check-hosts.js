@@ -5,8 +5,8 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { installedHostEnvironment } from "./check-install-hook.js";
 
-const TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search))$";
-const BLUN_TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|exec_command|mcp__agent-spine__session_timeline_(?:index|search))$";
+const TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search|capture))$";
+const BLUN_TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|exec_command|mcp__agent-spine__session_timeline_(?:index|search|capture))$";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -168,7 +168,7 @@ export async function checkHosts(root = process.cwd()) {
     required: [...commonEvents, "InstructionsLoaded"], commandRoot: "CLAUDE_PLUGIN_ROOT"
   });
   const codexHookInventory = validateHooks(root, codexHooks, { required: commonEvents, commandRoot: "PLUGIN_ROOT",
-    matcher: "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__(?:plugin_agent-spine_agent-spine|agent-spine)__session_timeline_(?:index|search))$" });
+    matcher: "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__(?:plugin_agent-spine_agent-spine|agent-spine)__session_timeline_(?:index|search|capture))$" });
   const blunHookInventory = validateBlunHooks(root, blunManifest.hooks);
   const registrations = await Promise.all([
     initializeServer({ label: "blun", root, variable: "BLUN_PLUGIN_ROOT", server: blunManifest.mcpServers["agent-spine"], version: pkg.version }),

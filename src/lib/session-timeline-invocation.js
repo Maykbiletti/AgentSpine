@@ -132,7 +132,7 @@ async function saveState(state, path, headPath, root, assertOwned, assertStable)
 }
 
 function requestDigest({ root, tool, binding, sourceDigest, request }) {
-  if (!/^(index|search)$/.test(tool || "") || !/^[a-f0-9]{64}$/.test(sourceDigest || "")
+  if (!/^(index|search|capture)$/.test(tool || "") || !/^[a-f0-9]{64}$/.test(sourceDigest || "")
     || !binding || !request) {
     throw new Error("session timeline invocation binding is invalid");
   }

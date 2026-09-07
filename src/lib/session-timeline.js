@@ -351,7 +351,7 @@ export async function authorizeSessionTimelineInvocation({
   environment = process.env
 }) {
   const scoped = sessionTimelineBinding({ host, sessionId, scope });
-  if (!hasExactPrivateTimelineScope(scope) || !completeTimelineBinding(scoped) || !/^(index|search)$/.test(tool || "")) return null;
+  if (!hasExactPrivateTimelineScope(scope) || !completeTimelineBinding(scoped) || !/^(index|search|capture)$/.test(tool || "")) return null;
   if (!hasVerifiedTimelinePrivateScope(scope)) return null;
   try {
     await ensureSessionTimelineTrust();
@@ -362,7 +362,7 @@ export async function authorizeSessionTimelineInvocation({
       || !await confirmedSourceEnrollment({ root, scoped, source: currentSource, hostHome })) return null;
     const includePriorProviders = request?.includePriorProviders === true;
     if (includePriorProviders && (request?.includePriorSessions !== true || !crossProviderTimelineEnabled(environment))) return null;
-    const query = tool === "search" ? timelineQuery({ at: request?.at, query: request?.query }) : null;
+    const query = tool !== "index" ? timelineQuery({ at: request?.at, query: request?.query }) : null;
     const source = request?.includePriorSessions === true
       ? selectPriorTimelineSource(state, scoped, { ...query, windowMs: request.windowSeconds * 1000,
         includePriorProviders }) : currentSource;
@@ -378,17 +378,17 @@ export async function authorizeSessionTimelineInvocation({
   } catch { return null; }
 }
 
-function searchResult(source, target, wanted, mode, events, extra = {}) {
+function searchResult(source, target, wanted, mode, events, extra = {}, includeMessageDigest = false) {
   const index = sourceMetadata(source);
   return timelineSearchResult({ sourceDigest: index.sourceDigest, sessionRef: timelineSessionReference(source.binding),
     sourceProvider: source.binding.host, binding: source.binding, target, wanted, mode, events, index,
-    roomBytes: ROOM_BYTES, authority: AUTHORITY, extra });
+    roomBytes: ROOM_BYTES, authority: AUTHORITY, extra, includeMessageDigest });
 }
 
 export async function searchSessionTimeline({
   root, host, sessionId, scope, at, query, windowSeconds = undefined,
   includePriorSessions = false, includePriorProviders = false, environment = process.env,
-  invocationRequest = null, transportDigest = null, enrollmentDigest = null, hostHome = null
+  invocationRequest = null, invocationTool = "search", transportDigest = null, enrollmentDigest = null, hostHome = null
 }) {
   const scoped = sessionTimelineBinding({ host, sessionId, scope });
   if (!hasExactPrivateTimelineScope(scope) || !hasVerifiedTimelinePrivateScope(scope) || !completeTimelineBinding(scoped)) {
@@ -427,8 +427,9 @@ export async function searchSessionTimeline({
     return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY };
   }
   const sourceDigest = sourceMetadata(source).sourceDigest;
-  if (!invocationRequest || !await timelineTransportEnrollmentMatches({ root, binding: scoped, enrollmentDigest, transportDigest, hostHome })
-    || !await consumeSessionTimelineInvocation({ root, tool: "search", binding: scoped, sourceDigest,
+  if (!/^(search|capture)$/.test(invocationTool) || !invocationRequest
+    || !await timelineTransportEnrollmentMatches({ root, binding: scoped, enrollmentDigest, transportDigest, hostHome })
+    || !await consumeSessionTimelineInvocation({ root, tool: invocationTool, binding: scoped, sourceDigest,
       request: invocationRequest, transportDigest })) {
     return { blocked: true, reason: "session timeline invocation is unavailable", authority: AUTHORITY };
   }
@@ -436,7 +437,7 @@ export async function searchSessionTimeline({
     .filter((event) => matchesTimelineEvent(event, wanted, target, boundedWindowSeconds * 1000)), wanted, target).slice(0, 8);
   if (includePriorSessions && !indexed.length) {
     return searchResult(source, target, wanted, "prior-index", [], { priorSession: true,
-      priorProvider: source.binding.host !== scoped.host });
+      priorProvider: source.binding.host !== scoped.host }, invocationTool === "capture");
   }
   const opened = await validatedHandle(source, sourceHome);
   if (opened.status !== "open") return { blocked: true, reason: opened.reason, authority: AUTHORITY };
@@ -451,9 +452,10 @@ export async function searchSessionTimeline({
     if (verified.length) {
       if (!await unchangedHandle(opened.handle, source, sourceHome)) return { blocked: true, reason: "transcript-changed", authority: AUTHORITY };
       return searchResult(source, target, wanted, includePriorSessions ? "prior-verified-index" : "verified-index", verified,
-        includePriorSessions ? { priorSession: true, priorProvider: source.binding.host !== scoped.host } : {});
+        includePriorSessions ? { priorSession: true, priorProvider: source.binding.host !== scoped.host } : {},
+        invocationTool === "capture");
     }
-    if (!target) return searchResult(source, target, wanted, "verified-index", []);
+    if (!target) return searchResult(source, target, wanted, "verified-index", [], {}, invocationTool === "capture");
     const sought = await seekTimelineEvidence({ handle: opened.handle, size: opened.size, target, wanted,
       windowMs: boundedWindowSeconds * 1000, readRange,
       eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY, source.binding.host),
@@ -461,9 +463,12 @@ export async function searchSessionTimeline({
       matches: matchesTimelineEvent, rank: rankTimelineEvents });
     if (sought.status === "searched") {
       if (!await unchangedHandle(opened.handle, source, sourceHome)) return { blocked: true, reason: "transcript-changed", authority: AUTHORITY };
-      return searchResult(source, target, wanted, "timestamp-seek", sought.events, { budgetExhausted: sought.budgetExhausted });
+      return searchResult(source, target, wanted, "timestamp-seek", sought.events,
+        { budgetExhausted: sought.budgetExhausted }, invocationTool === "capture");
     }
-    if (sought.status === "out-of-range") return searchResult(source, target, wanted, "timestamp-seek", []);
+    if (sought.status === "out-of-range") {
+      return searchResult(source, target, wanted, "timestamp-seek", [], {}, invocationTool === "capture");
+    }
     return { blocked: true, reason: sought.reason, authority: AUTHORITY };
   } finally { await opened.handle.close(); }
 }

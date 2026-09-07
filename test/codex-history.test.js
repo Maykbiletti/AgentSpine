@@ -98,6 +98,11 @@ test("Codex session B finds only A's registered tool evidence after a native hoo
   assert.ok(found.events[0].sessionRef);
   assert.ok(found.events[0].messageRef);
   assert.match(found.sourceDigest, /^[a-f0-9]{64}$/);
+  const captured = await lookup(f, "session:codex-b", "capture",
+    { query: "Suite result", at: AT, includePriorSessions: true, eventId: found.events[0].id });
+  assert.equal(captured.status, "captured");
+  assert.equal(captured.captured.value.sourceProvider, "codex");
+  assert.equal(captured.captured.source.id, found.events[0].id);
   assert.deepEqual(await readFile(a.path), a.bytes);
   assert.deepEqual(await readFile(b.path), b.bytes);
   await f.preserve();

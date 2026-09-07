@@ -109,6 +109,12 @@ test("King session B recalls only A's objective wire result after restart and co
   assert.match(found.events[0].excerpt, /FAIL 0\/15/);
   assert.ok(found.events[0].sessionRef);
   assert.ok(found.events[0].messageRef);
+  const captured = await lookup(f, "session_king-b", "capture",
+    { query: "Suite result", at: new Date(AT_MS).toISOString(), includePriorSessions: true,
+      eventId: found.events[0].id });
+  assert.equal(captured.status, "captured");
+  assert.equal(captured.captured.value.sourceProvider, "king");
+  assert.equal(captured.captured.source.id, found.events[0].id);
   assert.deepEqual(await readFile(a.path), a.bytes);
   assert.deepEqual(await readFile(b.path), b.bytes);
   await f.preserve();

@@ -28,12 +28,13 @@ test("package and host manifests keep one release version", async () => {
   assert.match(hooks.hooks.PreToolUse[0].matcher, /PowerShell/);
   assert.match(codexHooks.hooks.PreToolUse[0].matcher, /PowerShell/);
   assert.match(blun.hooks.find(({ event }) => event === "PreToolUse").matcher, /PowerShell/);
-  assert.match(hooks.hooks.PreToolUse[0].matcher, /session_timeline_\(\?:index\|search\)/);
-  assert.match(codexHooks.hooks.PreToolUse[0].matcher, /session_timeline_\(\?:index\|search\)/);
-  assert.match(blun.hooks.find(({ event }) => event === "PreToolUse").matcher, /session_timeline_\(\?:index\|search\)/);
+  assert.match(hooks.hooks.PreToolUse[0].matcher, /session_timeline_\(\?:index\|search\|capture\)/);
+  assert.match(codexHooks.hooks.PreToolUse[0].matcher, /session_timeline_\(\?:index\|search\|capture\)/);
+  assert.match(blun.hooks.find(({ event }) => event === "PreToolUse").matcher, /session_timeline_\(\?:index\|search\|capture\)/);
   const blunPreTool = new RegExp(blun.hooks.find(({ event }) => event === "PreToolUse").matcher);
   assert.equal(blunPreTool.test("mcp__agent-spine__session_timeline_index"), true);
   assert.equal(blunPreTool.test("mcp__agent-spine__session_timeline_search"), true);
+  assert.equal(blunPreTool.test("mcp__agent-spine__session_timeline_capture"), true);
   assert.equal(blunPreTool.test("mcp__plugin_agent-spine_agent-spine__session_timeline_search"), false);
   assert.equal(blunPreTool.test("mcp__foreign__session_timeline_search"), false);
   assert.equal(Object.hasOwn(codexHooks.hooks, "InstructionsLoaded"), false);

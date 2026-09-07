@@ -25,6 +25,7 @@ import {
 import { sharedContext } from "./sharing.js";
 import { recordWorldAssertion, worldContext } from "./world-model.js";
 import { indexSessionTimeline, searchSessionTimeline } from "./session-timeline.js";
+import { captureSessionTimelineEvidence } from "./timeline-world-capture.js";
 import { gatewayEnvironmentContext } from "./hook-context.js";
 import {
   timelineInvocationInput, timelineInvocationRequest
@@ -248,6 +249,24 @@ async function callTool(name, args = {}, environment = process.env) {
       at: args.at, query: args.query, windowSeconds: args.windowSeconds, includePriorSessions: args.includePriorSessions,
       includePriorProviders: args.includePriorProviders, environment,
       enrollmentDigest: input.request.enrollmentDigest,
+      hostHome: timelineHostHome(timeline.host, environment), transportDigest: timeline.transportDigest,
+      invocationRequest }));
+  }
+  if (name === "session_timeline_capture") {
+    const input = timelineInvocationInput(args);
+    if (runtimeTimelineGroup(environment, input)) return textResult(unavailableTimelineInvocation("timeline-group-suppressed"));
+    if (!input.valid) return textResult(unavailableTimelineInvocation(input.reason || "timeline-scope-invalid"));
+    const timeline = timelineTransport(input, root, environment);
+    if (!runtimeGatewayMatchesTimeline(environment, timeline.scope, timeline.host)) {
+      return textResult(unavailableTimelineInvocation("timeline-gateway-binding-mismatch"));
+    }
+    const invocationRequest = timelineInvocationRequest("capture", args, root);
+    if (!invocationRequest) return textResult(unavailableTimelineInvocation("timeline-invocation-unavailable"));
+    return textResult(await captureSessionTimelineEvidence({ root, host: timeline.host,
+      sessionId: input.request.sessionId, scope: timeline.scope, eventId: args.eventId,
+      at: args.at, query: args.query, windowSeconds: args.windowSeconds,
+      includePriorSessions: args.includePriorSessions, includePriorProviders: args.includePriorProviders,
+      environment, enrollmentDigest: input.request.enrollmentDigest,
       hostHome: timelineHostHome(timeline.host, environment), transportDigest: timeline.transportDigest,
       invocationRequest }));
   }

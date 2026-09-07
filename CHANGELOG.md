@@ -6,6 +6,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Added an explicit timeline-to-world capture path. One exact objective event from a bound search is reopened, byte-verified and recorded in the existing world model with host-derived task, portal/thread, source, message and time provenance; archived chat and caller interpretations are never promoted to facts.
 - Extended the authenticated opaque portal/thread binding from session-timeline recall through the existing structured knowledge and task-continuation path. The exact current thread now receives its confirmed correction, last verified step, and next step across restart and compaction; deliberately portable project knowledge remains portable.
 - Added an authenticated, opaque portal/thread continuity binding to the existing session-timeline lifecycle. Prior-session hints and evidence searches now stay inside the exact channel route that created the enrollment; unbound historical records remain valid but cannot enter a route-bound search.
 - Added an explicit group-response contract to the gateway worker: silent completion creates no outbox or delivery claim, and scoped exact-content contribution deduplication survives restart. Direct answers and legacy host replies remain compatible; live King addressing and adoption are not implied.
@@ -24,6 +25,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Security
 
+- Timeline capture has its own one-use `PreToolUse` invocation and derives the assertion ID, subject, predicate, evidence class, evidence digest, source references and private route scope internally. Direct MCP, replay, foreign/group scope, wrong event IDs, changed sources and caller-supplied provenance write nothing; contradictory measurements remain uncertainty instead of becoming a selected fact.
 - Task-subject knowledge written or read through a portal-bound MCP process takes project, group, task, portal, and thread from authenticated gateway context. Tool-supplied route claims, partial pairs, foreign task reads, and cross-thread supersession fail closed; unbound readers cannot see route-bound task knowledge.
 - Portal and thread references are derived inside the gateway from the authenticated provider, tenant, account, binding, chat, thread, session, agent and project route. Raw route IDs are not stored in timeline state; model-supplied route claims, partial bindings and foreign threads return no recall and create no authority.
 - Action-time learning excludes generic, foreign-task, foreign-tenant, group, stale, revoked and rolled-back candidates. Learning-state failures degrade this advisory recall without blocking normal host work, while existing source lessons remain separately bounded and user-owned source bytes stay unchanged.
@@ -36,6 +38,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Tests
 
+- A multi-session Claude Before/After starts with zero structured entries despite a verified historical `FAIL 0/15`, then records exactly one source-derived entry visible after an MCP restart only in the same BLUN thread. Concurrent capture, duplicate restart, conflict preservation, direct calls, wrong events, source mutation, group/route isolation and source bytes are covered; native Codex and King histories exercise the same capture tool without implying live-host or model performance.
 - A two-thread continuation comparison holds user, tenant, project, and task constant: the prior unbound view yields zero resumable checkpoints because the states conflict, while the authenticated view yields exactly one current correction and next step. MCP write/read, `SessionStart`, `PostCompact`, a fresh process, terminal foreign work, portable project learning, race, tamper, service failure, source bytes, and the 9,500-byte hook budget are covered; model/token improvement is not claimed.
 - Product and documentation growth before this release-evidence line measured 1,953 packed and 6,913 unpacked bytes. The finite ceilings move by 2 KiB packed and 7 KiB unpacked; file-count, required-file, forbidden-source and safety checks are unchanged.
 - A three-session portal comparison fixes the task, user, tenant and project while varying only the thread: the legacy binding admits two prior candidates, whereas the authenticated route admits exactly one and retrieves its sourced FAIL 0/15. Restart, compaction, self-claims, partial routes, transcript bytes and route-boundary changes are covered; no model or token improvement is claimed.
@@ -57,6 +60,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Evidence limits
 
+- Product and documentation growth for timeline-to-world capture measured 2,901 packed and 13,132 unpacked bytes. The finite ceilings move by 4 KiB packed and 13 KiB unpacked; file-count, required-file, forbidden-source, timeout and safety checks are unchanged, and the new production module is now required in the package.
 - Product and documentation growth before this release-evidence note measured 2,070 packed and 8,682 unpacked bytes. The finite ceilings move by 3 KiB packed and 9 KiB unpacked; file-count, required-file, forbidden-source, timeout, and safety checks are unchanged.
 - The pre-adjustment dry run exceeded the prior ceiling by 616 packed bytes and 1,492 unpacked bytes. The finite ceilings grow by 2 KiB packed and 3 KiB unpacked; file-count, required-file and forbidden-source gates are unchanged.
 - MemPalace `v3.9.0` commit `d9f05907` (MIT) and Claude-Mem commit `3939fbb2` (Apache-2.0), inspected 2026-09-06, informed only the separate-adapter and progressive-retrieval architecture. No external code or script was copied or executed. Repository tests do not establish an Otto or Fredrik live handoff.

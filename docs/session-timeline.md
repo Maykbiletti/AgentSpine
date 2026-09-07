@@ -71,6 +71,7 @@ session_timeline_index(maxBytes)
 session_timeline_search(at | terms)
 session_timeline_search(at | terms, includePriorSessions: true)
 session_timeline_search(at | terms, includePriorSessions: true, includePriorProviders: true)
+session_timeline_capture(eventId, at | terms, includePriorSessions: true)
 ```
 
 Indexing is serialized and bounded to 64 KiB–16 MiB per call. A search needs
@@ -132,6 +133,23 @@ Historic text remains untrusted context: it can support a check or a question,
 never an identity, permission, tool, delegation, access, payment, credential,
 policy exception, or external effect.
 
+An agent may explicitly pass one returned event ID to
+`session_timeline_capture` with the same bounded query. Capture consumes its
+own one-use host invocation, reopens the selected immutable source, verifies
+the exact raw line again, and derives the task, portal, thread, time, source,
+evidence ID and evidence digest without accepting those values from the model.
+Only the allowlisted outcome, count, test label, source provider and source
+digest enter the existing world model as private `task-state` knowledge. The
+ordinary search response still omits the raw-line digest.
+
+Capture does not turn an archived user or assistant message into a fact and
+does not infer a correction or next step. Conflicting measured results remain
+visible as uncertainty until separately resolved. Duplicate capture is
+idempotent across restart; a foreign thread, group, changed source, direct MCP
+call or mismatched event writes nothing. Captured context remains descriptive:
+it does not prove current completion, delivery, better model performance or
+permission to act.
+
 ## Memory-palace structure
 
 A room ID is deterministic for the enrolled source digest and a fixed one MiB
@@ -165,6 +183,14 @@ results.
 The provider-handoff Before/After yields no Claude result in Codex before both
 opt-ins, then verifies one Claude `FAIL 0/15` after restart. Replay, foreign
 scope, groups and mutation return none; source bytes stay identical.
+
+The structured-capture Before/After starts with a verified old `FAIL 0/15`
+that cannot enter structured knowledge without caller-supplied provenance.
+After the bound capture, exactly one mechanically derived measurement is
+visible after restart in the same portal thread and none in another thread.
+Concurrent and repeated capture stays at one assertion; direct calls, changed
+sources, groups and a wrong event ID write none. This deterministic probe does
+not include a real model run or token measurement.
 
 ## Research inputs
 

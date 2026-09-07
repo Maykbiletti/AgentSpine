@@ -121,10 +121,12 @@ async function matchesRoot(value, root) {
 function requestInput(tool, args) {
   if (tool === "index") return args.maxBytes === undefined ? {} : { maxBytes: args.maxBytes };
   if (args.at === undefined && args.query === undefined) return null;
+  if (tool === "capture" && !/^timeline-event:[a-f0-9]{32}$/.test(args.eventId || "")) return null;
   if (args.includePriorSessions !== undefined && typeof args.includePriorSessions !== "boolean") return null;
   if (args.includePriorProviders !== undefined && typeof args.includePriorProviders !== "boolean") return null;
   if (args.includePriorProviders === true && args.includePriorSessions !== true) return null;
-  return { ...(args.at === undefined ? {} : { at: args.at }), ...(args.query === undefined ? {} : { query: args.query }),
+  return { ...(tool === "capture" ? { eventId: args.eventId } : {}),
+    ...(args.at === undefined ? {} : { at: args.at }), ...(args.query === undefined ? {} : { query: args.query }),
     ...(args.windowSeconds === undefined ? {} : { windowSeconds: args.windowSeconds }),
     ...(args.includePriorSessions === undefined ? {} : { includePriorSessions: args.includePriorSessions }),
     ...(args.includePriorProviders === undefined ? {} : { includePriorProviders: args.includePriorProviders }) };

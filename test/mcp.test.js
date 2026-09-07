@@ -64,6 +64,7 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   assert.deepEqual(names, [
     "scan", "resolve_context", "session_briefing", "delivery_knowledge_query",
     "record_world_assertion", "world_context", "session_timeline_index", "session_timeline_search",
+    "session_timeline_capture",
     "project_portfolio", "record_project_observation", "evaluate_autonomy_action", "read_document", "verify",
     "link_documents", "annotate_document", "upsert_entity",
     "link_entities", "relationship_context", "upsert_attention",
@@ -77,9 +78,9 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   ]);
   const timelineIndex = messages[1].result.tools.find((tool) => tool.name === "session_timeline_index");
   const timelineSearch = messages[1].result.tools.find((tool) => tool.name === "session_timeline_search");
-  for (const tool of [timelineIndex, timelineSearch]) {
+  const timelineCapture = messages[1].result.tools.find((tool) => tool.name === "session_timeline_capture");
+  for (const tool of [timelineIndex, timelineSearch, timelineCapture]) {
     assert.equal(tool.inputSchema.additionalProperties, false);
-    assert.deepEqual(tool.inputSchema.required, []);
     assert.equal("accessProof" in tool.inputSchema.properties, false);
     assert.equal("invocationPermit" in tool.inputSchema.properties, false);
     assert.equal("transportDigest" in tool.inputSchema.properties, false);
@@ -87,7 +88,11 @@ test("MCP server initializes and lists its read and graph tools", async () => {
     assert.equal(tool.inputSchema.properties.enrollmentDigest.pattern, "^[a-f0-9]{64}$");
   }
   assert.equal(timelineIndex.inputSchema.properties.maxBytes.maximum, 16777216);
+  assert.deepEqual(timelineIndex.inputSchema.required, []);
+  assert.deepEqual(timelineSearch.inputSchema.required, []);
   assert.equal(timelineSearch.inputSchema.anyOf.length, 2);
+  assert.deepEqual(timelineCapture.inputSchema.required, ["eventId"]);
+  assert.equal(timelineCapture.inputSchema.properties.eventId.pattern, "^timeline-event:[a-f0-9]{32}$");
   const premortem = messages[1].result.tools.find(tool => tool.name === "record_delivery_premortem");
   assert.deepEqual(premortem.inputSchema.required, ["root", "requirementId", "items"]);
   assert.equal(premortem.inputSchema.properties.root.type, "string");

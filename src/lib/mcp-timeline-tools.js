@@ -110,6 +110,7 @@ export function timelineToolKind(name) {
   const qualified = String(name || "");
   if (TIMELINE_TOOL_PREFIXES.some((prefix) => qualified === `${prefix}session_timeline_index`)) return "index";
   if (TIMELINE_TOOL_PREFIXES.some((prefix) => qualified === `${prefix}session_timeline_search`)) return "search";
+  if (TIMELINE_TOOL_PREFIXES.some((prefix) => qualified === `${prefix}session_timeline_capture`)) return "capture";
   return null;
 }
 
@@ -123,7 +124,8 @@ export function timelineInvocationRequest(tool, args, root) {
     portalRef: scope.portalRef, threadRef: scope.threadRef,
     enrollmentDigest: input.request.enrollmentDigest };
   if (tool === "index") return { ...request, maxBytes: args.maxBytes ?? 4 * 1024 * 1024 };
-  return { ...request, at: args.at ?? null, query: args.query ?? null,
+  return { ...request, ...(tool === "capture" ? { eventId: args.eventId ?? null } : {}),
+    at: args.at ?? null, query: args.query ?? null,
     windowSeconds: args.windowSeconds === undefined ? 0 : args.windowSeconds,
     includePriorSessions: args.includePriorSessions === true,
     includePriorProviders: args.includePriorProviders === true };
@@ -159,6 +161,22 @@ export const sessionTimelineTools = [
       properties: { root: { type: "string", minLength: 1 }, sessionId: stableId, ...scopeProperties,
         enrollmentDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
         timelineVisibility: { const: "private-verified" }, groupId: { anyOf: [stableId, { type: "null" }] },
+        at: { type: "string", format: "date-time" }, query: { type: "string", minLength: 3, maxLength: 512 },
+        windowSeconds: { type: "integer", minimum: 0, maximum: 900 },
+        includePriorSessions: { type: "boolean" }, includePriorProviders: { type: "boolean" } }
+    }
+  },
+  {
+    name: "session_timeline_capture",
+    description: "Reopen one exact bound timeline result and record only its mechanically derived objective fields as private context-only task knowledge. Source, message digest, time, task, portal and thread are host-bound; caller interpretations never become facts.",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      required: ["eventId"],
+      anyOf: [{ required: ["at"] }, { required: ["query"] }],
+      properties: { root: { type: "string", minLength: 1 }, sessionId: stableId, ...scopeProperties,
+        enrollmentDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        timelineVisibility: { const: "private-verified" }, groupId: { anyOf: [stableId, { type: "null" }] },
+        eventId: { type: "string", pattern: "^timeline-event:[a-f0-9]{32}$" },
         at: { type: "string", format: "date-time" }, query: { type: "string", minLength: 3, maxLength: 512 },
         windowSeconds: { type: "integer", minimum: 0, maximum: 900 },
         includePriorSessions: { type: "boolean" }, includePriorProviders: { type: "boolean" } }
