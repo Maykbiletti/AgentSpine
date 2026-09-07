@@ -371,7 +371,7 @@ async function runHookCore(input, payload, options) {
       }
       const briefing = await sessionBriefing({
         root, cwd, host: scope.host, entityId: scope.entityId, groupId: scope.groupId,
-        userId: scope.userId, tenantId: scope.tenantId, projectId: scope.projectId, currentTaskId: scope.currentTaskId,
+        userId: scope.userId, tenantId: scope.tenantId, projectId: scope.projectId, currentTaskId: scope.currentTaskId, portalRef: scope.portalRef, threadRef: scope.threadRef,
         includePrivate: Boolean(scope.entityId && !scope.groupId),
         focusActive: true, includeSourceContent: event === "UserPromptSubmit" ? false : !scope.groupId,
         maxBytes: event === "UserPromptSubmit" ? 4096 : scope.config.maxBriefingBytes,

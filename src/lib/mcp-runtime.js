@@ -48,6 +48,66 @@ function timelineTransport(input, root, environment) {
 
 function absent(value) { return value === undefined || value === null || value === ""; }
 
+function gatewayWorldRoute(environment) {
+  const gateway = gatewayEnvironmentContext(environment);
+  return gateway?.portalRef && gateway?.threadRef ? gateway : null;
+}
+
+function exactGatewayValue(args, key, value) {
+  if (!absent(args[key]) && args[key] !== value) {
+    throw new Error(`${key} does not match the authenticated gateway binding`);
+  }
+  return value ?? null;
+}
+
+function boundGatewayBriefing(args, gateway) {
+  if (!gateway) return args;
+  const result = { ...args, portalRef: gateway.portalRef, threadRef: gateway.threadRef };
+  for (const [key, gatewayKey] of [["host", "host"], ["entityId", "entityId"],
+    ["projectId", "projectId"], ["groupId", "groupId"], ["currentTaskId", "taskId"]]) {
+    result[key] = exactGatewayValue(args, key, gateway[gatewayKey]);
+  }
+  if (result.groupId && result.includePrivate) {
+    throw new Error("private briefing context cannot be requested from an authenticated group route");
+  }
+  return result;
+}
+
+function boundWorldWrite(args, environment) {
+  if (Object.hasOwn(args, "portalRef") || Object.hasOwn(args, "threadRef")) {
+    throw new Error("portal and thread references are supplied only by the authenticated gateway");
+  }
+  const gateway = gatewayWorldRoute(environment);
+  if (!gateway || !args.knowledgeKind || args.subjectId !== gateway.taskId) return args;
+  const projectId = exactGatewayValue(args, "projectId", gateway.projectId);
+  const groupId = exactGatewayValue(args, "groupId", gateway.groupId);
+  if (groupId && args.privacy !== "group") {
+    throw new Error("task knowledge from an authenticated group route requires group privacy");
+  }
+  if (!groupId && args.privacy === "group") {
+    throw new Error("group task knowledge requires an authenticated group route");
+  }
+  return { ...args, projectId, groupId, portalRef: gateway.portalRef, threadRef: gateway.threadRef };
+}
+
+function boundWorldRead(args, environment) {
+  if (Object.hasOwn(args, "portalRef") || Object.hasOwn(args, "threadRef")) {
+    throw new Error("portal and thread references are supplied only by the authenticated gateway");
+  }
+  const gateway = gatewayWorldRoute(environment);
+  if (!gateway) return args;
+  if (args.continuationTaskId && gateway.taskId && args.continuationTaskId !== gateway.taskId) {
+    throw new Error("continuationTaskId does not match the authenticated gateway task");
+  }
+  const projectId = exactGatewayValue(args, "projectId", gateway.projectId);
+  const groupId = exactGatewayValue(args, "groupId", gateway.groupId);
+  if (groupId && args.includePrivate) {
+    throw new Error("private world context cannot be requested from an authenticated group route");
+  }
+  return { ...args, projectId, groupId, portalRef: gateway.portalRef, threadRef: gateway.threadRef,
+    continuationTaskId: args.continuationTaskId ?? gateway.taskId };
+}
+
 // The MCP process can outlive a host turn.  A group claim that appears after a
 // private permit was issued must therefore suppress consumption here as well
 // as in PreToolUse; tool arguments cannot clear an authenticated environment.
@@ -99,7 +159,8 @@ async function callTool(name, args = {}, environment = process.env) {
     }));
   }
   if (name === "session_briefing") {
-    const scoped = await boundBriefingArguments({ ...args, root });
+    const gateway = gatewayWorldRoute(environment);
+    const scoped = boundGatewayBriefing(await boundBriefingArguments({ ...args, root }), gateway);
     const sources = await resolveMcpSources({ ...scoped, required: Boolean(args.requirementId) });
     const briefing = await sessionBriefing({ ...scoped, host: sources.host,
       catalog: sources.catalog, userStateRoot: sources.userStateRoot, sourceDiagnostics: sources.diagnostics });
@@ -150,8 +211,12 @@ async function callTool(name, args = {}, environment = process.env) {
   if (name === "update_task") return textResult(await updateTask({ ...args, root }));
   if (name === "task_context") return textResult(await taskContext({ ...args, root }));
   if (name === "shared_context") return textResult(await sharedContext({ ...args, root }));
-  if (name === "record_world_assertion") return textResult(await recordWorldAssertion({ ...args, root }));
-  if (name === "world_context") return textResult(await worldContext({ ...args, root }));
+  if (name === "record_world_assertion") {
+    return textResult(await recordWorldAssertion({ ...boundWorldWrite(args, environment), root }));
+  }
+  if (name === "world_context") {
+    return textResult(await worldContext({ ...boundWorldRead(args, environment), root }));
+  }
   if (name === "project_portfolio") return textResult(await projectPortfolioContext({ ...args, root }));
   if (name === "record_project_observation") return textResult(await recordProjectObservation({ ...args, root }));
   if (name === "evaluate_autonomy_action") return textResult(await evaluateAutonomyAction({ ...args, root }));

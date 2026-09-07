@@ -200,7 +200,8 @@ function publicEntry(assertion, status, statusReason) {
     scope: {
       projectId: assertion.projectId,
       groupId: assertion.groupId,
-      privacy: assertion.privacy
+      privacy: assertion.privacy,
+      ...(assertion.portalRef ? { portalRef: assertion.portalRef, threadRef: assertion.threadRef } : {})
     },
     authority: "context-only"
   };

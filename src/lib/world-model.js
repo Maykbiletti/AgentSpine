@@ -16,6 +16,8 @@ const PRIVACY = new Set(["private", "shared", "group"]);
 const STABLE_ID = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/;
 const PREDICATE = /^[a-z][a-z0-9.-]{0,127}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
+const PORTAL_REF = /^portal-ref:[a-f0-9]{32}$/;
+const THREAD_REF = /^thread-ref:[a-f0-9]{32}$/;
 const FORBIDDEN = /(^|[-_.])(permissions?|rights?|authori[sz]ation|credentials?|secrets?|tokens?|api[-_]?keys?|delegation|tool[-_]?access|production[-_]?access|payments?|spending)([-_.]|$)/i;
 
 function sha256(value) {
@@ -59,6 +61,23 @@ function optionalStableId(value, field) {
   return value === null || value === undefined ? null : stableId(value, field);
 }
 
+function routeBinding(input) {
+  const portalRef = input.portalRef ?? null;
+  const threadRef = input.threadRef ?? null;
+  if (Boolean(portalRef) !== Boolean(threadRef)) {
+    throw new Error("portalRef and threadRef must be provided together");
+  }
+  if (portalRef !== null && (!PORTAL_REF.test(portalRef) || !THREAD_REF.test(threadRef))) {
+    throw new Error("portalRef and threadRef must be opaque gateway references");
+  }
+  return portalRef ? { portalRef, threadRef } : {};
+}
+
+function sameRoute(left, right) {
+  return (left.portalRef ?? null) === (right.portalRef ?? null)
+    && (left.threadRef ?? null) === (right.threadRef ?? null);
+}
+
 function emptyModel(root) {
   return { schema: SCHEMA, root, revision: 0, assertions: [], events: [], authority: "context-only" };
 }
@@ -72,6 +91,8 @@ function validateStoredAssertion(assertion, validKnowledgeFields) {
   if ((assertion.privacy === "group") !== Boolean(assertion.groupId)
     || (assertion.groupId && !STABLE_ID.test(assertion.groupId))
     || (assertion.projectId && !STABLE_ID.test(assertion.projectId))
+    || Boolean(assertion.portalRef) !== Boolean(assertion.threadRef)
+    || (assertion.portalRef && (!PORTAL_REF.test(assertion.portalRef) || !THREAD_REF.test(assertion.threadRef)))
     || !STABLE_ID.test(assertion.evidenceId || "") || !Array.isArray(assertion.supersedes)
     || assertion.supersedes.some((item) => !STABLE_ID.test(item))) return false;
   if (!validKnowledgeFields(assertion)) return false;
@@ -158,6 +179,7 @@ function assertionInput(input, now, normalizeKnowledgeFields) {
     supersedes, reason: typeof input.reason === "string" ? input.reason.trim().slice(0, 500) : "",
     status: input.evidenceKind === "model-suggestion" ? "proposed" : "established",
     recordedAt: new Date(now).toISOString(), authority: "context-only",
+    ...routeBinding(input),
     ...(knowledge.knowledgeKind ? knowledge : {})
   };
 }
@@ -185,6 +207,9 @@ export async function recordWorldAssertion(input = {}) {
       if (previous.subjectId !== candidate.subjectId || previous.predicate !== candidate.predicate) {
         throw new Error("supersession must keep the same subject and predicate");
       }
+      if (!sameRoute(previous, candidate)) {
+        throw new Error("supersession must keep the same portal and thread scope");
+      }
       if (candidate.status !== "established") throw new Error("model suggestions cannot supersede established context");
     }
     model.revision += 1;
@@ -196,10 +221,18 @@ export async function recordWorldAssertion(input = {}) {
   });
 }
 
-function visible(assertion, { includePrivate, groupId, projectId }) {
+function visible(assertion, { includePrivate, groupId, projectId, portalRef, threadRef, continuationTaskId }) {
   if (assertion.privacy === "private" && (!includePrivate || groupId)) return false;
   if (assertion.privacy === "group" && assertion.groupId !== groupId) return false;
-  return assertion.projectId === null || assertion.projectId === projectId;
+  if (assertion.projectId !== null && assertion.projectId !== projectId) return false;
+  const currentRoute = Boolean(portalRef && threadRef);
+  const assertionRoute = Boolean(assertion.portalRef && assertion.threadRef);
+  if (assertionRoute) return currentRoute && sameRoute(assertion, { portalRef, threadRef });
+  // A portal-bound task must not silently inherit an older unbound checkpoint
+  // or task-local correction. General user/project knowledge remains portable.
+  if (currentRoute && continuationTaskId && assertion.knowledgeKind
+    && assertion.subjectId === continuationTaskId) return false;
+  return true;
 }
 
 function publicAssertion(assertion) {
@@ -209,7 +242,7 @@ function publicAssertion(assertion) {
 export async function worldContext({
   root = process.cwd(), subjectId = null, projectId = null, groupId = null,
   includePrivate = false, includeKnowledgeHistory = false, continuationTaskId = null,
-  maxItems = 100, now = new Date()
+  portalRef = null, threadRef = null, maxItems = 100, now = new Date()
 } = {}) {
   if (groupId !== null && includePrivate) throw new Error("private world context cannot be assembled for a group audience");
   if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 500) throw new Error("maxItems must be between 1 and 500");
@@ -217,12 +250,15 @@ export async function worldContext({
   projectId = optionalStableId(projectId, "projectId");
   groupId = optionalStableId(groupId, "groupId");
   continuationTaskId = optionalStableId(continuationTaskId, "continuationTaskId");
+  ({ portalRef = null, threadRef = null } = routeBinding({ portalRef, threadRef }));
   const names = await stateNames(root);
   const model = await readModel(names);
   const { structuredKnowledgeView } = await import("./world-knowledge.js");
   const cutoff = new Date(now).getTime();
   if (!Number.isFinite(cutoff)) throw new Error("now is invalid");
-  const candidates = model.assertions.filter((item) => visible(item, { includePrivate, groupId, projectId })
+  const candidates = model.assertions.filter((item) => visible(item, {
+    includePrivate, groupId, projectId, portalRef, threadRef, continuationTaskId
+  })
     && (!subjectId || item.subjectId === subjectId));
   const stale = candidates.filter((item) => item.expiresAt && new Date(item.expiresAt).getTime() <= cutoff);
   const current = candidates.filter((item) => !item.expiresAt || new Date(item.expiresAt).getTime() > cutoff);
@@ -251,7 +287,9 @@ export async function worldContext({
     facts.push({ subjectId: newest.subjectId, predicate: newest.predicate, value: structuredClone(newest.value),
       assertionIds: assertions.map((item) => item.id).sort(), evidenceKinds: [...new Set(assertions.map((item) => item.evidenceKind))].sort(),
       latestObservedAt: newest.observedAt, expiresAt: newest.expiresAt, privacy: newest.privacy,
-      groupId: newest.groupId, projectId: newest.projectId, authority: "context-only" });
+      groupId: newest.groupId, projectId: newest.projectId,
+      ...(newest.portalRef ? { portalRef: newest.portalRef, threadRef: newest.threadRef } : {}),
+      authority: "context-only" });
   }
   const order = (left, right) => left.subjectId.localeCompare(right.subjectId) || left.predicate.localeCompare(right.predicate);
   facts.sort(order); conflicts.sort(order); proposals.sort(order); stale.sort(order);
@@ -261,6 +299,8 @@ export async function worldContext({
   });
   return {
     schema: "agentspine.world-context/v1", root: names.root, revision: model.revision,
+    scope: { projectId, groupId, includePrivate,
+      ...(portalRef ? { portalRef, threadRef } : {}) },
     facts: facts.slice(0, maxItems), conflicts: conflicts.slice(0, maxItems),
     proposals: proposals.slice(0, maxItems).map(publicAssertion), stale: stale.slice(0, maxItems).map(publicAssertion),
     knowledge,

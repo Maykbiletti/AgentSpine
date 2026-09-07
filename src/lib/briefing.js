@@ -110,6 +110,7 @@ async function settleReads(promises) {
 export async function sessionBriefing({
   root = process.cwd(), cwd = root, host = "generic", entityId = null,
   userId = null, tenantId = null, groupId = null, projectId = null, currentTaskId = null,
+  portalRef = null, threadRef = null,
   includePrivate = false, focusActive = true, includeSourceContent = true,
   maxBytes = 16384, now = new Date(), catalog: providedCatalog = null, userStateRoot = null,
   sourceDiagnostics = null, prompt = null
@@ -150,7 +151,7 @@ export async function sessionBriefing({
       : Promise.resolve({ items: [] }),
     loadPersonaRuntime(catalog.root, catalog),
     loadGatewayRuntime(catalog.root, catalog),
-    worldContext({ root: catalog.root, projectId, groupId, includePrivate,
+    worldContext({ root: catalog.root, projectId, groupId, includePrivate, portalRef, threadRef,
       continuationTaskId: currentTaskId, maxItems: 50, now }),
     tenantId ? projectPortfolioContext({ root: catalog.root, tenantId, groupId, markPresented: false, now })
       : Promise.resolve({ projects: [], observations: [], notice: null, rateLimited: false })
@@ -170,7 +171,8 @@ export async function sessionBriefing({
     root: catalog.root,
     cwd: sources.cwd,
     host,
-    scope: { entityId, userId, tenantId, groupId, projectId, includePrivate },
+    scope: { entityId, userId, tenantId, groupId, projectId, includePrivate,
+      ...(portalRef && threadRef ? { portalRef, threadRef } : {}) },
     focus: { active: Boolean(focusActive), currentTaskId },
     sources: { documents: [], diagnostics: sourceDiagnostics },
     tasks: [],

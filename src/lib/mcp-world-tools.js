@@ -8,7 +8,7 @@ const nullableStableId = { anyOf: [stableId, { type: "null" }] };
 export const worldModelTools = [
   {
     name: "record_world_assertion",
-    description: "Persist one provenance-bound world, user, relationship, or team assertion outside source files. Optional typed knowledge distinguishes facts, user preferences, decisions, task state, and error lessons. Measurements and explicit user feedback become context-only facts; model output remains a proposal. Authority predicates and secret-shaped structured knowledge are rejected.",
+    description: "Persist one provenance-bound world, user, relationship, or team assertion outside source files. Optional typed knowledge distinguishes facts, user preferences, decisions, task state, and error lessons. In an authenticated portal task, task-subject knowledge is bound to the gateway's opaque portal/thread route; tool arguments cannot claim that route. Measurements and explicit user feedback become context-only facts; model output remains a proposal. Authority predicates and secret-shaped structured knowledge are rejected.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: ["id", "subjectId", "predicate", "value", "evidenceKind", "evidenceId", "evidenceDigest", "observedAt"],
@@ -36,7 +36,7 @@ export const worldModelTools = [
   },
   {
     name: "world_context",
-    description: "Read privacy-filtered world context. Conflicts, expiry, and suggestions remain separate; continuationTaskId adds bounded, sourced task-relevant knowledge.",
+    description: "Read privacy-filtered world context. Conflicts, expiry, and suggestions remain separate; continuationTaskId adds bounded, sourced task-relevant knowledge. An authenticated portal process automatically restricts task continuation to its opaque gateway route; route references are not accepted as tool input.",
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {

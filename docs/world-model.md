@@ -75,6 +75,31 @@ facts, preferences, decisions, or error lessons and keeps their source reference
 Uncertain, stale, superseded, private, foreign, and terminal state is excluded.
 No transcript or source is opened, and the view grants no authority.
 
+## Authenticated portal and thread continuity
+
+When the gateway starts a portal-bound task, it derives opaque `portalRef` and
+`threadRef` values from the complete authenticated route. The MCP runtime, not
+the model or tool arguments, attaches that pair to structured knowledge whose
+subject is the exact current task. `SessionStart`, `PostCompact`,
+`session_briefing`, and `world_context` then use the same pair. A continuation,
+decision, correction, or error lesson about that task is visible only on that
+route, even when another portal thread uses the same user, project, and task ID.
+
+An unbound reader cannot see route-bound task knowledge. Conversely, an
+authenticated portal task does not silently inherit older unbound task-local
+knowledge. Historical records remain byte-valid and stored, but need an
+explicitly reviewed migration rather than an inferred binding. Supersession
+must keep subject, predicate, portal, and thread identical, so a correction in
+one conversation cannot retire another conversation's state.
+
+This narrower rule does not trap intentionally portable memory. General user
+preferences and measured project-level lessons that are not assertions about
+the current task retain their existing project/group/privacy scope and may be
+reused across threads. Portal references are not MCP input fields, do not expose
+raw route identifiers, and grant no retrieval, sending, tool, or execution
+right. A host without the authenticated gateway pair gets no portal-bound task
+context.
+
 ## Privacy and authority
 
 Assertions use `private`, `shared`, or exact `group` privacy. A group read rejects private inclusion, sees only its exact group records plus shared records, and cannot observe another group's values. Project-scoped records are visible only in that exact project; unscoped records may follow the same installation across project turns when intentionally read from that root.

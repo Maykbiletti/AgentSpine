@@ -3,7 +3,7 @@ import { resolveHostSourceCatalog } from "./source-roots.js";
 import { inspectPremortemState } from "./delivery-premortem.js";
 
 const INTERNAL = new Set(["catalog", "userStateRoot", "sourceDiagnostics", "sourceRegistry",
-  "env", "input", "memoryHooks", "resolvedSources"]);
+  "env", "input", "memoryHooks", "resolvedSources", "portalRef", "threadRef"]);
 
 export function rejectInternalSourceArguments(args) {
   for (const key of INTERNAL) {

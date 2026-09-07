@@ -4,7 +4,7 @@ AgentSpine uses native plugin surfaces instead of asking users to paste a large 
 
 ## Provider contracts and evidence
 
-Provider names are not interchangeable. Shared retrieval, structured knowledge and task continuation remain context-only. Each adapter must separately establish native lifecycle events, instruction roots, transcript format/version, session/message identifiers and authenticated invocation binding. Unknown formats remain unavailable; adapters must not impersonate another host or infer access from remembered text.
+Provider names are not interchangeable. Shared retrieval, structured knowledge and task continuation remain context-only. Each adapter must separately establish native lifecycle events, instruction roots, transcript format/version, session/message identifiers and authenticated invocation binding. For portal tasks, the host must also carry the gateway-derived opaque portal/thread pair into the process; ordinary hook or MCP arguments cannot establish it. Unknown formats remain unavailable; adapters must not impersonate another host or infer access from remembered text.
 
 Portal continuity is an additional gateway-origin binding. A launcher receives
 `AGENTSPINE_PORTAL_REF` and `AGENTSPINE_THREAD_REF` only as a pair inside the
