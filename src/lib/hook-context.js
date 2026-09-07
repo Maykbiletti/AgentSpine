@@ -58,6 +58,9 @@ export function hostFromInput(input) {
 
 export function gatewayEnvironmentContext(env = process.env) {
   if (env.AGENTSPINE_GATEWAY_CONTEXT !== "agentspine.gateway-start/v1") return null;
+  const portalRef = boundedId(env.AGENTSPINE_PORTAL_REF, "AGENTSPINE_PORTAL_REF");
+  const threadRef = boundedId(env.AGENTSPINE_THREAD_REF, "AGENTSPINE_THREAD_REF");
+  if (Boolean(portalRef) !== Boolean(threadRef)) throw new Error("gateway portal and thread references must be paired");
   return {
     host: boundedId(env.AGENTSPINE_HOST, "AGENTSPINE_HOST"),
     entityId: boundedId(env.AGENTSPINE_ENTITY_ID, "AGENTSPINE_ENTITY_ID"),
@@ -71,7 +74,8 @@ export function gatewayEnvironmentContext(env = process.env) {
       "AGENTSPINE_PLAN_DEFINITIONS_DIGEST"),
     gatewayAttempt: positiveInteger(env.AGENTSPINE_GATEWAY_ATTEMPT, "AGENTSPINE_GATEWAY_ATTEMPT"),
     eventId: boundedId(env.AGENTSPINE_CHANNEL_EVENT_ID, "AGENTSPINE_CHANNEL_EVENT_ID"),
-    provider: boundedId(env.AGENTSPINE_CHANNEL_PROVIDER, "AGENTSPINE_CHANNEL_PROVIDER")
+    provider: boundedId(env.AGENTSPINE_CHANNEL_PROVIDER, "AGENTSPINE_CHANNEL_PROVIDER"),
+    portalRef, threadRef
   };
 }
 
@@ -116,6 +120,11 @@ export async function runtimeScope(input, root, userStateRoot = null, catalog) {
   const gateway = gatewayEnvironmentContext();
   const suppliedAttempt = positiveInteger(supplied.gateway_attempt ?? supplied.gatewayAttempt,
     "gatewayAttempt");
+  const suppliedPortalRef = supplied.portal_ref ?? supplied.portalRef;
+  const suppliedThreadRef = supplied.thread_ref ?? supplied.threadRef;
+  if (!gateway && [suppliedPortalRef, suppliedThreadRef].some((value) => value !== undefined && value !== null && value !== "")) {
+    throw new Error("portal timeline scope requires an authenticated gateway binding");
+  }
   return {
     entityId: boundedId(gatewayBound(gateway, "entityId",
       supplied.entity_id ?? supplied.entityId, "entityId")
@@ -139,6 +148,8 @@ export async function runtimeScope(input, root, userStateRoot = null, catalog) {
       supplied.plan_definitions_digest ?? supplied.planDefinitionsDigest,
       "planDefinitionsDigest"), "planDefinitionsDigest"),
     gatewayAttempt: gatewayBound(gateway, "gatewayAttempt", suppliedAttempt, "gatewayAttempt"),
+    portalRef: boundedId(gatewayBound(gateway, "portalRef", suppliedPortalRef, "portalRef"), "portalRef"),
+    threadRef: boundedId(gatewayBound(gateway, "threadRef", suppliedThreadRef, "threadRef"), "threadRef"),
     host: gateway
       ? gatewayBound(gateway, "host", input.host ?? input.provider, "host")
       : hostFromInput(input),
@@ -261,7 +272,8 @@ export function selfstarterInput(input) {
 
 function channelEventInput(input) {
   const gateway = gatewayEnvironmentContext();
-  const value = input.agent_spine_channel_event ?? (gateway?.eventId && gateway?.provider
+  const value = input.agent_spine_channel_event ?? (input.hook_event_name === "SessionStart"
+    && gateway?.eventId && gateway?.provider
     ? { event_id: gateway.eventId, provider: gateway.provider } : null);
   if (value === undefined || value === null) return null;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("agent_spine_channel_event must be one object");

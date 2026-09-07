@@ -381,7 +381,7 @@ export async function authorizeSessionTimelineInvocation({
 function searchResult(source, target, wanted, mode, events, extra = {}) {
   const index = sourceMetadata(source);
   return timelineSearchResult({ sourceDigest: index.sourceDigest, sessionRef: timelineSessionReference(source.binding),
-    sourceProvider: source.binding.host, target, wanted, mode, events, index,
+    sourceProvider: source.binding.host, binding: source.binding, target, wanted, mode, events, index,
     roomBytes: ROOM_BYTES, authority: AUTHORITY, extra });
 }
 

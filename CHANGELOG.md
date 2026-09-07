@@ -6,6 +6,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Added an authenticated, opaque portal/thread continuity binding to the existing session-timeline lifecycle. Prior-session hints and evidence searches now stay inside the exact channel route that created the enrollment; unbound historical records remain valid but cannot enter a route-bound search.
 - Added an explicit group-response contract to the gateway worker: silent completion creates no outbox or delivery claim, and scoped exact-content contribution deduplication survives restart. Direct answers and legacy host replies remain compatible; live King addressing and adoption are not implied.
 - Added action-time recall for currently valid, outcome-gated behavior learning whose stored task scope exactly matches the authenticated runtime task. Claude, Codex and King-compatible lifecycle hooks receive the bounded context before tool use without creating permissions or a second application receipt.
 - Added a local, command-free artifact evaluator that derives pass rates and blocking defects from at most sixteen precommitted file checks and submits actual observations to the existing learning-measurement contract. It is one evaluator principal, not a source of independent aliases, authorization, completion or automatic promotion.
@@ -22,6 +23,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Security
 
+- Portal and thread references are derived inside the gateway from the authenticated provider, tenant, account, binding, chat, thread, session, agent and project route. Raw route IDs are not stored in timeline state; model-supplied route claims, partial bindings and foreign threads return no recall and create no authority.
 - Action-time learning excludes generic, foreign-task, foreign-tenant, group, stale, revoked and rolled-back candidates. Learning-state failures degrade this advisory recall without blocking normal host work, while existing source lessons remain separately bounded and user-owned source bytes stay unchanged.
 - Cross-provider recall requires exact private entity, user, tenant, project, task and compatible-goal continuity. The current provider keeps its own transport binding while the selected source is revalidated with its original signed provider enrollment and profile root; missing opt-in, foreign/group scope, expiry, mutation and replay return no content or authority.
 - Task recall opens no source, grants no authority, excludes unsafe state, and returns at most six entries.
@@ -32,6 +34,8 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Tests
 
+- Product and documentation growth before this release-evidence line measured 1,953 packed and 6,913 unpacked bytes. The finite ceilings move by 2 KiB packed and 7 KiB unpacked; file-count, required-file, forbidden-source and safety checks are unchanged.
+- A three-session portal comparison fixes the task, user, tenant and project while varying only the thread: the legacy binding admits two prior candidates, whereas the authenticated route admits exactly one and retrieves its sourced FAIL 0/15. Restart, compaction, self-claims, partial routes, transcript bytes and route-boundary changes are covered; no model or token improvement is claimed.
 - A synthetic Claude-to-Codex Before/After proves that provider history is absent by default and exactly one measured `FAIL 0/15` becomes available after both opt-ins and restart/compaction. Provider provenance, source bytes, invocation replay, scope/group isolation and changed-source rejection are covered.
 - Synthetic King sessions A/B prove measured `FAIL 0/15` recall after restart and compaction while exact gateway binding, wrong protocol/path/scope/provider, replay/race, source mutation, unknown records, and source-byte preservation remain enforced.
 - A CSS-archive Before/After restores its sourced backup lesson after restart and `PostCompact`; boundary tests remain green.

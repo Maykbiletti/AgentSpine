@@ -44,6 +44,9 @@ test("group silence completes without text, outbox, delivery claim or repeated h
     calls += 1;
     assert.equal(item.groupResponseContract.defaultKind, "silence");
     assert.equal(item.groupResponseContract.directAddressVerified, false);
+    assert.match(item.hostEnvironment.AGENTSPINE_PORTAL_REF, /^portal-ref:[a-f0-9]{32}$/);
+    assert.match(item.hostEnvironment.AGENTSPINE_THREAD_REF, /^thread-ref:[a-f0-9]{32}$/);
+    assert.doesNotMatch(JSON.stringify(item.hostEnvironment), /-1001234567890/);
     contextBytes = Buffer.byteLength(JSON.stringify(item.groupResponseContract));
     return silence;
   };

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { matchesTimelineEvent, rankTimelineEvents } from "./session-timeline-query.js";
 
-const CONTINUITY_FIELDS = ["entityId", "userId", "tenantId", "projectId", "taskId"];
+const CONTINUITY_FIELDS = ["entityId", "userId", "tenantId", "projectId", "taskId", "portalRef", "threadRef"];
 const REFERENCE_FIELDS = ["host", ...CONTINUITY_FIELDS, "sessionId"];
 
 function digest(value) {
@@ -12,12 +12,13 @@ function sameContinuationScope(candidate, current, includePriorProviders) {
   return candidate.groupId === null && current.groupId === null
     && (candidate.host !== current.host || candidate.sessionId !== current.sessionId)
     && (includePriorProviders || candidate.host === current.host)
-    && CONTINUITY_FIELDS.every((field) => candidate[field] === current[field])
+    && CONTINUITY_FIELDS.every((field) => (candidate[field] ?? null) === (current[field] ?? null))
     && (!candidate.goalId || !current.goalId || candidate.goalId === current.goalId);
 }
 
 export function timelineSessionReference(binding) {
-  const material = REFERENCE_FIELDS
+  const fields = binding.portalRef || binding.threadRef ? [...REFERENCE_FIELDS, "portalRef", "threadRef"] : REFERENCE_FIELDS;
+  const material = fields
     .map((field) => `${field}:${binding[field] || ""}`).join("\0");
   return `session-ref:${digest(material).slice(0, 32)}`;
 }
@@ -48,6 +49,8 @@ export function priorTimelineHint(state, scoped, sourceDigest, { includePriorPro
       sessionRef: timelineSessionReference(latest.source.binding),
       messageRef: latest.event.id,
       sourceProvider: latest.source.binding.host,
+      ...(latest.source.binding.portalRef && latest.source.binding.threadRef
+        ? { portalRef: latest.source.binding.portalRef, threadRef: latest.source.binding.threadRef } : {}),
       sourceDigest: sourceDigest(latest.source),
       at: latest.event.at,
       outcome: latest.event.outcome,

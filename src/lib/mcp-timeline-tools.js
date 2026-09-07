@@ -27,6 +27,8 @@ const SCOPE_FIELDS = [
   ["currentTaskId", ["taskId", "task_id", "currentTaskId", "current_task_id"]],
   ["goalId", ["goalId", "goal_id"]],
   ["goalStepId", ["goalStepId", "goal_step_id"]],
+  ["portalRef", ["portalRef", "portal_ref"]],
+  ["threadRef", ["threadRef", "thread_ref"]],
   ["timelineVisibility", ["timelineVisibility", "timeline_visibility"]]
 ];
 
@@ -118,6 +120,7 @@ export function timelineInvocationRequest(tool, args, root) {
   const request = { root, tool, sessionId: input.request.sessionId, entityId: scope.entityId, userId: scope.userId,
     tenantId: scope.tenantId, projectId: scope.projectId, groupId: scope.groupId, taskId: scope.currentTaskId,
     goalId: scope.goalId, goalStepId: scope.goalStepId, timelineVisibility: scope.timelineVisibility,
+    portalRef: scope.portalRef, threadRef: scope.threadRef,
     enrollmentDigest: input.request.enrollmentDigest };
   if (tool === "index") return { ...request, maxBytes: args.maxBytes ?? 4 * 1024 * 1024 };
   return { ...request, at: args.at ?? null, query: args.query ?? null,
@@ -129,7 +132,8 @@ export function timelineInvocationRequest(tool, args, root) {
 const scopeProperties = {
   host: { enum: TIMELINE_HOSTS },
   entityId: stableId, userId: stableId, tenantId: stableId, projectId: stableId,
-  taskId: stableId, goalId: optionalId, goalStepId: optionalId
+  taskId: stableId, goalId: optionalId, goalStepId: optionalId,
+  portalRef: optionalId, threadRef: optionalId
 };
 
 export const sessionTimelineTools = [

@@ -58,7 +58,9 @@ test("worker tick reconciles, runs, delivers, and acknowledges one pending chann
       assert.deepEqual(item.channelStart.agent_spine_channel_event, {
         event_id: "telegram:update:1001", provider: "telegram"
       });
-      assert.deepEqual(item.hostEnvironment, {
+      const { AGENTSPINE_PORTAL_REF: portalRef, AGENTSPINE_THREAD_REF: threadRef,
+        ...legacyEnvironment } = item.hostEnvironment;
+      assert.deepEqual(legacyEnvironment, {
         AGENTSPINE_GATEWAY_CONTEXT: "agentspine.gateway-start/v1",
         AGENTSPINE_ENTITY_ID: agentId,
         AGENTSPINE_PROJECT_ID: "project:alpha",
@@ -69,6 +71,8 @@ test("worker tick reconciles, runs, delivers, and acknowledges one pending chann
         AGENTSPINE_CHANNEL_EVENT_ID: "telegram:update:1001",
         AGENTSPINE_CHANNEL_PROVIDER: "telegram"
       });
+      assert.match(portalRef, /^portal-ref:[a-f0-9]{32}$/);
+      assert.match(threadRef, /^thread-ref:[a-f0-9]{32}$/);
       assert.equal(item.channelStart.agent_spine_scope.entity_id, agentId);
       return { text: `Antwort für ${item.channelEventId}` };
     },
@@ -190,4 +194,3 @@ test("persona leave blocks an already prepared channel effect", async (t) => {
   assert.match(outcome.outbox.lastError, /active authenticated agent or bot/);
   assert.equal(sends, 0);
 });
-

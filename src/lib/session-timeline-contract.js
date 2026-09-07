@@ -7,7 +7,7 @@ export function safeTimelineId(value) {
 }
 
 export function sessionTimelineBinding({ host, sessionId, scope }) {
-  return {
+  const binding = {
     host: validTimelineHost(host) ? host : null,
     sessionId: safeTimelineId(sessionId),
     entityId: safeTimelineId(scope?.entityId),
@@ -19,6 +19,11 @@ export function sessionTimelineBinding({ host, sessionId, scope }) {
     goalId: safeTimelineId(scope?.goalId),
     goalStepId: safeTimelineId(scope?.goalStepId)
   };
+  if (scope?.portalRef || scope?.threadRef) {
+    binding.portalRef = safeTimelineId(scope?.portalRef);
+    binding.threadRef = safeTimelineId(scope?.threadRef);
+  }
+  return binding;
 }
 
 export function hasTimelineGroupScope(scope) {
@@ -31,12 +36,13 @@ export function hasVerifiedTimelinePrivateScope(scope) {
 
 export function completeTimelineBinding(value) {
   return validTimelineHost(value.host) && !value.groupId
+    && Boolean(value.portalRef) === Boolean(value.threadRef)
     && ["sessionId", "entityId", "userId", "tenantId", "projectId", "taskId"].every((key) => value[key]);
 }
 
 export function sameTimelineBinding(left, right) {
-  return ["host", "sessionId", "entityId", "userId", "tenantId", "projectId", "groupId", "taskId", "goalId", "goalStepId"]
-    .every((key) => left[key] === right[key]);
+  return ["host", "sessionId", "entityId", "userId", "tenantId", "projectId", "groupId", "taskId", "goalId", "goalStepId",
+    "portalRef", "threadRef"].every((key) => (left[key] ?? null) === (right[key] ?? null));
 }
 
 export function validTimelineBinding(value) {
@@ -44,5 +50,7 @@ export function validTimelineBinding(value) {
     && [value.sessionId, value.entityId, value.userId, value.tenantId, value.projectId, value.taskId]
       .every((item) => typeof item === "string" && TIMELINE_ID_RE.test(item))
     && [value.groupId, value.goalId, value.goalStepId]
-      .every((item) => item === null || (typeof item === "string" && TIMELINE_ID_RE.test(item)));
+      .every((item) => item === null || (typeof item === "string" && TIMELINE_ID_RE.test(item)))
+    && ((value.portalRef === undefined && value.threadRef === undefined)
+      || [value.portalRef, value.threadRef].every((item) => typeof item === "string" && TIMELINE_ID_RE.test(item)));
 }

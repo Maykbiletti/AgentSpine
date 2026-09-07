@@ -34,6 +34,8 @@ function gatewayMatchesEnrollment(gateway, binding) {
   ];
   return gateway.host === runtimeHostForTimeline(binding.host)
     && fields.slice(1).every(([gatewayField, bindingField]) => gateway[gatewayField] === binding[bindingField])
+    && (gateway.portalRef ?? null) === (binding.portalRef ?? null)
+    && (gateway.threadRef ?? null) === (binding.threadRef ?? null)
     && process.env.AGENTSPINE_USER_ID === binding.userId && process.env.AGENTSPINE_TENANT_ID === binding.tenantId;
 }
 
@@ -41,6 +43,7 @@ function bindingScope(binding, enrollment) {
   return { entityId: binding.entityId, userId: binding.userId, tenantId: binding.tenantId,
     projectId: binding.projectId, groupId: null, currentTaskId: binding.taskId,
     goalId: binding.goalId, goalStepId: binding.goalStepId,
+    portalRef: binding.portalRef ?? null, threadRef: binding.threadRef ?? null,
     timelineVisibility: enrollment.timelineVisibility };
 }
 
@@ -75,6 +78,8 @@ function matchesScopeBinding(args, binding) {
     && scopeClaimsMatch(args, ["taskId", "task_id", "currentTaskId", "current_task_id"], binding.taskId)
     && scopeClaimsMatch(args, ["goalId", "goal_id"], binding.goalId)
     && scopeClaimsMatch(args, ["goalStepId", "goal_step_id"], binding.goalStepId)
+    && scopeClaimsMatch(args, ["portalRef", "portal_ref"], binding.portalRef ?? null)
+    && scopeClaimsMatch(args, ["threadRef", "thread_ref"], binding.threadRef ?? null)
     && noScopeClaims(args, ["groupId", "group_id"]);
 }
 
@@ -92,7 +97,7 @@ function matchesHostBinding(input, binding) {
       "transportDigest", "transport_digest", "enrollmentDigest", "enrollment_digest"]);
 }
 
-function claimedScope(input) {
+function claimedScope(input, gateway) {
   const claim = (keys) => {
     const values = scopeValues(input, keys).filter((value) => !absent(value));
     return values.length && values.every((value) => value === values[0]) ? values[0] : null;
@@ -101,7 +106,8 @@ function claimedScope(input) {
     entityId: claim(["entityId", "entity_id"]), userId: claim(["userId", "user_id"]),
     tenantId: claim(["tenantId", "tenant_id"]), projectId: claim(["projectId", "project_id"]),
     groupId: claim(["groupId", "group_id"]), currentTaskId: claim(["taskId", "task_id", "currentTaskId", "current_task_id"]),
-    goalId: claim(["goalId", "goal_id"]), goalStepId: claim(["goalStepId", "goal_step_id"])
+    goalId: claim(["goalId", "goal_id"]), goalStepId: claim(["goalStepId", "goal_step_id"]),
+    portalRef: gateway?.portalRef ?? null, threadRef: gateway?.threadRef ?? null
   };
 }
 
@@ -160,7 +166,7 @@ export async function runTimelineToolGuard(input) {
     const hostSession = sessionId(input);
     const gateway = gatewayEnvironmentContext();
     if (rawGroupClaim(input, gateway)) return denied("AgentSpine session timeline is unavailable for group-scoped activity.");
-    const provisionalBinding = sessionTimelineBinding({ host, sessionId: hostSession, scope: claimedScope(input) });
+    const provisionalBinding = sessionTimelineBinding({ host, sessionId: hostSession, scope: claimedScope(input, gateway) });
     const transportDigest = timelineTransportDigest({ root, binding: provisionalBinding });
     if (!transportDigest) {
       return denied("AgentSpine session timeline requires a locally configured per-session transport capability.");
@@ -192,6 +198,7 @@ export async function runTimelineToolGuard(input) {
       entityId: enrollment.binding.entityId, userId: enrollment.binding.userId, tenantId: enrollment.binding.tenantId,
       projectId: enrollment.binding.projectId, taskId: enrollment.binding.taskId, groupId: null,
       goalId: enrollment.binding.goalId, goalStepId: enrollment.binding.goalStepId,
+      portalRef: enrollment.binding.portalRef ?? null, threadRef: enrollment.binding.threadRef ?? null,
       timelineVisibility: enrollment.timelineVisibility, enrollmentDigest: enrollment.enrollmentDigest };
     const request = timelineInvocationRequest(tool, updatedInput, root);
     const authorization = await authorizeSessionTimelineInvocation({

@@ -9,6 +9,7 @@ import {
 } from "./lib/gateway-runtime.js";
 import { createTelegramAdapter } from "./lib/telegram-adapter.js";
 import { acknowledgeChannelDelivery, loadChannelRuntime } from "./lib/channel-runtime.js";
+import { channelTimelineContinuity } from "./lib/channel-continuity.js";
 import { groupResponseContract, settleSuppressedGroupEvents } from "./lib/gateway-group-response.js";
 import { loadPersonaRuntime, syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
 import { selfHelpPolicyForWorkItem } from "./lib/knowledge-evidence.js";
@@ -102,6 +103,7 @@ async function hostWorkItem(root, item) {
   const event = item.channelEventId === null ? null
     : channel.runtime.events.find((entry) => entry.eventId === item.channelEventId) || null;
   if (item.channelEventId && !event) throw new Error("claimed channel work lost its exact event");
+  const continuity = channelTimelineContinuity(event);
   return {
     ...structuredClone(item), host: identity.host, profileId: identity.profileId, projectRoot: root,
     goal: goal ? structuredClone(goal) : null,
@@ -124,7 +126,9 @@ async function hostWorkItem(root, item) {
       } : {}),
       ...(event ? {
         AGENTSPINE_CHANNEL_EVENT_ID: event.eventId,
-        AGENTSPINE_CHANNEL_PROVIDER: event.provider
+        AGENTSPINE_CHANNEL_PROVIDER: event.provider,
+        AGENTSPINE_PORTAL_REF: continuity.portalRef,
+        AGENTSPINE_THREAD_REF: continuity.threadRef
       } : {})
     },
     channelStart: event ? {

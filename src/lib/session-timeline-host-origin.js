@@ -6,17 +6,22 @@ const verifiedOrigins = new WeakSet();
 const USER_PROMPT_SUBMIT = "UserPromptSubmit";
 
 function timelineBinding(input, scope) {
-  return {
+  const binding = {
     host: scope?.host, sessionId: input?.session_id ?? input?.sessionId,
     entityId: scope?.entityId, userId: scope?.userId, tenantId: scope?.tenantId,
     projectId: scope?.projectId, groupId: scope?.groupId,
     taskId: scope?.currentTaskId, goalId: scope?.goalId, goalStepId: scope?.goalStepId
   };
+  if (scope?.portalRef || scope?.threadRef) {
+    binding.portalRef = scope?.portalRef;
+    binding.threadRef = scope?.threadRef;
+  }
+  return binding;
 }
 
 function sameBinding(left, right) {
-  return ["host", "sessionId", "entityId", "userId", "tenantId", "projectId", "groupId", "taskId", "goalId", "goalStepId"]
-    .every((key) => left?.[key] === right?.[key]);
+  return ["host", "sessionId", "entityId", "userId", "tenantId", "projectId", "groupId", "taskId", "goalId", "goalStepId",
+    "portalRef", "threadRef"].every((key) => (left?.[key] ?? null) === (right?.[key] ?? null));
 }
 
 function sameInput(left, right) {

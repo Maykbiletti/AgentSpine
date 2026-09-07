@@ -15,6 +15,13 @@ verified host `projects` (Claude) or `sessions` (Codex and King) root to the exa
 project, task, and optional goal step. It is not exposed in hook context or to
 the model.
 
+When a session originates from the authenticated channel gateway, the same
+receipt also binds two opaque references: one portal and one conversation
+thread. The gateway derives them from the complete provider, tenant, account,
+binding, chat, thread, session-key, agent and project route. Raw route IDs
+never enter timeline state. A partial pair or a value supplied by prompt,
+model output or an ordinary hook argument is not a portal binding.
+
 The local owner may then activate that one snapshot explicitly:
 
 ```text
@@ -81,6 +88,15 @@ entity, user, tenant, project, task and compatible goal. It ranks their signed
 sidecar cards before opening a source, selects at most one prior immutable
 snapshot, and verifies only matching original lines. A missing match does not
 fall back to scanning old transcripts.
+
+For a portal-bound current session, the prior source must additionally carry
+the same opaque portal and thread references. A different BLUN conversation,
+chat, topic or channel registration is therefore ineligible even when user,
+project and task happen to match. Historical sources created before this
+binding remain byte-valid and available to unbound local sessions, but they
+are not silently promoted into a portal-bound search. Results repeat the
+opaque references alongside session/message provenance so the caller can
+explain which conversation supplied a memory without exposing raw route IDs.
 
 Provider handoff is an additional, disabled-by-default continuity mode. The
 local host must set `AGENTSPINE_TIMELINE_CROSS_PROVIDER=1`, and the one bounded

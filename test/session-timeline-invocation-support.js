@@ -13,7 +13,8 @@ function scopeFromBinding(binding, visibility) {
   return {
     entityId: binding.entityId, userId: binding.userId, tenantId: binding.tenantId,
     projectId: binding.projectId, groupId: null, currentTaskId: binding.taskId,
-    goalId: binding.goalId, goalStepId: binding.goalStepId, timelineVisibility: visibility
+    goalId: binding.goalId, goalStepId: binding.goalStepId, timelineVisibility: visibility,
+    portalRef: binding.portalRef ?? null, threadRef: binding.threadRef ?? null
   };
 }
 
@@ -22,6 +23,7 @@ function requestInput(root, binding, visibility, enrollmentDigest, fields) {
     root, sessionId: binding.sessionId, entityId: binding.entityId, userId: binding.userId,
     tenantId: binding.tenantId, projectId: binding.projectId, taskId: binding.taskId,
     groupId: null, goalId: binding.goalId, goalStepId: binding.goalStepId,
+    portalRef: binding.portalRef ?? null, threadRef: binding.threadRef ?? null,
     timelineVisibility: visibility, enrollmentDigest, ...fields
   };
 }
