@@ -75,7 +75,8 @@ async function runMode(mode) {
     "portal-thread-continuity.test.js",
     "mcp.test.js",
     "session-timeline-host-origin.test.js",
-    "session-timeline-invocation.test.js"
+    "session-timeline-invocation.test.js",
+    "timeline-natural-feedback.test.js"
   ]);
   const isolated = indexed.filter(item => isolatedNames.has(item.file));
   const queue = indexed.filter(item => !isolatedNames.has(item.file));

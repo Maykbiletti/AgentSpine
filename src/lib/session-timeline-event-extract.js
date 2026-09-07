@@ -129,7 +129,11 @@ function candidateFromToolResult(value) {
 function candidateFromUserMessage(value) {
   if (value?.role !== "user" || typeof value.content !== "string" || /[\r\n]/u.test(value.content)) return null;
   const match = value.content.trim().match(NEXT_STEP_CORRECTION_RE);
-  if (!match) return null;
+  if (!match) {
+    if (!value.content.trim() || Buffer.byteLength(value.content) > 2048 || unsafeText(value.content)) return null;
+    return { kind: "user-message-candidate", sourceText: value.content,
+      terms: ["user", "message"] };
+  }
   const nextStepSummary = match[1].trim().replace(/\s+/gu, " ");
   if (!nextStepSummary || nextStepSummary.length > 500 || unsafeText(nextStepSummary)) return null;
   return { kind: "explicit-next-step-correction", nextStepSummary,

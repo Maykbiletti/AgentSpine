@@ -1,3 +1,5 @@
+import { relevantUserFeedback } from "./timeline-user-feedback.js";
+
 const MAX_ITEMS = 6;
 const STOP_WORDS = new Set([
   "and", "are", "das", "der", "die", "eine", "einer", "for", "from", "für", "ist",
@@ -39,7 +41,7 @@ function empty(taskId, status) {
 
 export function taskKnowledgeContext(entries, { taskId = null, continuation, maxItems = MAX_ITEMS } = {}) {
   if (!taskId) return empty(null, "not-requested");
-  const task = continuation.tasks.find((item) => item.taskId === taskId);
+  const task = [...continuation.tasks, ...continuation.terminal].find((item) => item.taskId === taskId);
   if (!task) {
     const terminal = continuation.terminal.some((item) => item.taskId === taskId);
     return empty(taskId, terminal ? "terminal" : "unavailable");
@@ -51,6 +53,11 @@ export function taskKnowledgeContext(entries, { taskId = null, continuation, max
   const seen = new Set();
   const ranked = [];
   for (const entry of entries) {
+    if (relevantUserFeedback(entry, task)) {
+      ranked.push({ entry, matchedTerms: [], score: 100_000 });
+      continue;
+    }
+    if (task.status === "completed") continue;
     if (entry.status !== "confirmed" || !(entry.kind in KIND_WEIGHT)) continue;
     const matchedTerms = terms(entryText(entry)).filter((item) => querySet.has(item));
     if (matchedTerms.length < minimumMatches) continue;
@@ -63,6 +70,7 @@ export function taskKnowledgeContext(entries, { taskId = null, continuation, max
   ranked.sort((left, right) => right.score - left.score
     || right.entry.observedAt.localeCompare(left.entry.observedAt)
     || left.entry.id.localeCompare(right.entry.id));
+  if (task.status === "completed" && !ranked.length) return empty(taskId, "terminal");
   const limit = Math.min(MAX_ITEMS, Math.max(1, maxItems));
   return {
     schema: "agentspine.task-knowledge-context/v1",

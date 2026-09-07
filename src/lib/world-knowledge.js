@@ -1,4 +1,5 @@
 import { taskKnowledgeContext } from "./task-knowledge-context.js";
+import { validateUserFeedback } from "./timeline-user-feedback.js";
 
 const KNOWLEDGE_KINDS = new Set([
   "fact", "user-preference", "decision", "task-state", "error-lesson"
@@ -105,6 +106,7 @@ function validateContinuation(input, value) {
 }
 
 export function normalizeKnowledgeFields(input, evidenceKind, value) {
+  validateUserFeedback(input, value);
   const kind = input.knowledgeKind ?? null;
   if (kind === null) {
     if (input.sessionRef !== undefined || input.messageRef !== undefined) {
@@ -133,6 +135,7 @@ export function normalizeKnowledgeFields(input, evidenceKind, value) {
 }
 
 export function validKnowledgeFields(assertion) {
+  try { validateUserFeedback(assertion, assertion.value); } catch { return false; }
   const kind = assertion.knowledgeKind ?? null;
   if (kind === null) return assertion.sessionRef === undefined && assertion.messageRef === undefined;
   if (!KNOWLEDGE_KINDS.has(kind)) return false;
@@ -210,7 +213,7 @@ function publicEntry(assertion, status, statusReason) {
 function statusFor(assertion, { staleIds, supersededIds, conflictIds }) {
   if (staleIds.has(assertion.id)) return ["superseded", "expired"];
   if (supersededIds.has(assertion.id)) return ["superseded", "replaced"];
-  if (assertion.status === "proposed") return ["assumption", "model-suggestion"];
+  if (assertion.status === "proposed") return ["assumption", assertion.evidenceKind];
   if (conflictIds.has(assertion.id)) return ["contradictory", "active-conflict"];
   return ["confirmed", "established-evidence"];
 }

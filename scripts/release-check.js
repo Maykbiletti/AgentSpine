@@ -5,10 +5,10 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-// Includes source-verified explicit next-step correction and its host contract.
-// Product/doc growth from the previous package: about 2.6 KiB packed / 11.6 KiB unpacked.
-const MAX_PACKED_BYTES = 540 * 1024;
-const MAX_UNPACKED_BYTES = 2417 * 1024;
+// Includes the bounded user-feedback candidate path; this is not semantic acceptance.
+// Measured code growth before documentation: 1874 packed / 7830 unpacked bytes.
+const MAX_PACKED_BYTES = 544 * 1024;
+const MAX_UNPACKED_BYTES = 2430 * 1024;
 const REQUIRED_PACKAGE_FILES = [
   "blun.plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".mcp.json",
   "CHANGELOG.md", "LICENSE", "README.md", "bin/agentspine.js", "bin/agentspine-mcp.js",
@@ -21,6 +21,7 @@ const REQUIRED_PACKAGE_FILES = [
   "src/index.js", "src/mcp.js", "src/lib/mcp-world-tools.js", "src/lib/world-model.js", "src/lib/session-timeline.js",
   "src/lib/session-timeline-auth.js", "src/lib/session-timeline-results.js", "src/lib/session-timeline-state.js", "src/lib/mcp-timeline-tools.js", "src/worker.js",
   "src/lib/timeline-world-capture.js",
+  "src/lib/timeline-user-feedback.js",
   "hooks/hooks.json", "hooks/codex.json", "hooks/version.json"
 ];
 const FORBIDDEN_PACKAGE_PATHS = [
@@ -76,8 +77,8 @@ function validatePackageReport(report, version) {
   assert(typeof item.filename === "string" && item.filename.endsWith(`-${version}.tgz`), "npm pack filename is not versioned correctly");
   assert(typeof item.integrity === "string" && item.integrity.startsWith("sha512-"), "npm pack did not report SHA-512 integrity");
   assert(Number.isInteger(item.entryCount) && item.entryCount > 0 && item.entryCount <= 500, "npm package file count is outside the release limit");
-  assert(Number.isInteger(item.size) && item.size > 0 && item.size <= MAX_PACKED_BYTES, "npm package exceeds the 540 KiB packed release limit");
-  assert(Number.isInteger(item.unpackedSize) && item.unpackedSize > 0 && item.unpackedSize <= MAX_UNPACKED_BYTES, "npm package exceeds the 2417 KiB unpacked release limit");
+  assert(Number.isInteger(item.size) && item.size > 0 && item.size <= MAX_PACKED_BYTES, "npm package exceeds the 544 KiB packed release limit");
+  assert(Number.isInteger(item.unpackedSize) && item.unpackedSize > 0 && item.unpackedSize <= MAX_UNPACKED_BYTES, "npm package exceeds the 2430 KiB unpacked release limit");
   const paths = (item.files || []).map((file) => file.path);
   assert(paths.length === new Set(paths).size, "npm package contains duplicate paths");
   for (const path of REQUIRED_PACKAGE_FILES) assert(paths.includes(path), `npm package is missing required file: ${path}`);

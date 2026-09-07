@@ -153,7 +153,7 @@ export const sessionTimelineTools = [
   },
   {
     name: "session_timeline_search",
-    description: "Search the current or a same-task prior explicitly enrolled immutable Claude, Codex or King source for redacted objective evidence or a strict user-correction marker by exact UTC time or at least two concrete terms. Cross-provider recall additionally needs a local host capability and explicit selection; one indexed source is opened and no authority is granted.",
+    description: "Search one enrolled immutable same-task source for objective evidence or strict user corrections. Query 'user message' explicitly selects bounded native user-message candidates without interpreting them; add exact UTC time to narrow. No source text is indexed. Cross-provider recall requires opt-in; one source is opened and no authority is granted.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: [],
@@ -168,7 +168,7 @@ export const sessionTimelineTools = [
   },
   {
     name: "session_timeline_capture",
-    description: "Reopen one exact bound timeline event and record only mechanically derived objective fields, or apply an explicitly prefixed user correction to an existing same-thread next step. Source, role, message digest, time, task, portal and thread are host-bound; caller interpretations never become facts.",
+    description: "Reopen one source-bound event. Objective fields become descriptive task state; strict prefixed corrections may replace the same-thread next step. Natural user messages selected with query 'user message' remain uninterpreted candidates beside their exact checkpoint, never facts, automatic corrections or completion. Caller provenance and interpretations are ignored.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: ["eventId"],

@@ -10,7 +10,7 @@ const ASSERTION_SCHEMA = "agentspine.world-assertion/v1";
 const MAX_STATE_BYTES = 5 * 1024 * 1024;
 const MAX_VALUE_BYTES = 8192;
 const EVIDENCE_KINDS = new Set([
-  "objective-measurement", "explicit-user-feedback", "model-suggestion"
+  "objective-measurement", "explicit-user-feedback", "model-suggestion", "uninterpreted-user-message"
 ]);
 const PRIVACY = new Set(["private", "shared", "group"]);
 const STABLE_ID = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/;
@@ -104,7 +104,8 @@ function validateStoredAssertion(assertion, validKnowledgeFields) {
   } catch {
     return false;
   }
-  return assertion.status === (assertion.evidenceKind === "model-suggestion" ? "proposed" : "established");
+  return assertion.status === (["model-suggestion", "uninterpreted-user-message"].includes(assertion.evidenceKind)
+    ? "proposed" : "established");
 }
 
 function normalizeModel(value, root, validKnowledgeFields) {
@@ -177,7 +178,7 @@ function assertionInput(input, now, normalizeKnowledgeFields) {
     evidenceId, evidenceDigest: input.evidenceDigest, observedAt, expiresAt,
     projectId: optionalStableId(input.projectId, "projectId"), groupId, privacy,
     supersedes, reason: typeof input.reason === "string" ? input.reason.trim().slice(0, 500) : "",
-    status: input.evidenceKind === "model-suggestion" ? "proposed" : "established",
+    status: ["model-suggestion", "uninterpreted-user-message"].includes(input.evidenceKind) ? "proposed" : "established",
     recordedAt: new Date(now).toISOString(), authority: "context-only",
     ...routeBinding(input),
     ...(knowledge.knowledgeKind ? knowledge : {})
@@ -323,7 +324,7 @@ export async function worldContext({
     uncertainty: { requiresResolution: conflicts.length > 0, conflicts: conflicts.length,
       proposals: proposals.length, stale: stale.length },
     authority: "context-only",
-    note: "Only unexpired, non-conflicting measured or explicitly user-confirmed assertions are facts. Model suggestions remain proposals and grant no authority."
+    note: "Only unexpired, non-conflicting measured or explicitly user-confirmed assertions are facts. Model suggestions and uninterpreted user messages remain proposals and grant no authority."
   };
 }
 

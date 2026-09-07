@@ -6,6 +6,43 @@ host-owned file in place: it never copies, archives, rewrites, places it in
 small, restart-safe index of redacted objective evidence, not a second
 transcript.
 
+## Development: natural user-message continuity (not semantic acceptance)
+
+For authenticated portal/thread sources, new bounded index ranges also retain
+up to 256 native user-message references. They never evict objective evidence
+or strict corrections, and the combined index keeps its existing 4096-event
+limit. No message text or content-derived search terms enter the index. Older
+index ranges are not silently rebuilt or migrated.
+
+The explicit tool query `user message` selects this lane; an exact UTC time can
+narrow it further. This query is an API selector, not a required user phrase
+or a natural-language classifier. Ordinary timestamp/objective searches retain
+their existing behavior. Single-line messages up to 2048 UTF-8 bytes pass the
+existing secret/instruction checks; no language or correction-keyword list
+determines their meaning.
+
+`session_timeline_capture` reopens the immutable original and verifies source,
+line, event, speaker role and exact private task/route binding. With a current,
+non-conflicting checkpoint, it records the exact quote as
+`uninterpreted-user-message` in the existing world model, never as a fact or
+an automatically applied correction. Its target checkpoint ID, provider,
+session/message references, digests and time remain attached. A newer checkpoint
+removes its task-context priority without deleting history. Same-event capture
+deduplicates after restart; concurrent captures cannot change the checkpoint.
+Unknown schemas remain invalid. There is no new storage system or authority.
+
+Fresh MCP processes and PostCompact can receive this candidate alongside the
+task and its last verified result-file reference. A quoted, hypothetical,
+negated, ambiguous or completion-related sentence remains **uninterpreted**.
+No clarification is emitted automatically and no completion claim is verified.
+
+The required product acceptance remains open: a genuinely new model session
+must recognize the job, name the existing result file and correctly incorporate
+a natural correction, asking only on genuine ambiguity. The deterministic
+source/index/MCP tests do not establish semantic assignment, question quality,
+avoided reexecution, token savings, or live King behavior. This is development
+infrastructure, not a completed natural-correction capability.
+
 ## Enrollment contract
 
 The Claude, Codex, and King adapters are deny-by-default. A regular `UserPromptSubmit` hook first

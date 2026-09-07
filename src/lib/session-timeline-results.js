@@ -8,6 +8,10 @@ function publicEvent(event, sourceDigest, sessionRef, sourceProvider, binding, r
     result.outcome = event.outcome; result.count = event.count; result.testLabel = event.testLabel;
   } else if (event.kind === "explicit-next-step-correction") {
     result.nextStepSummary = event.nextStepSummary;
+  } else if (event.kind === "user-message-candidate") {
+    result.sourceText = event.sourceText;
+    result.speakerRole = "user";
+    result.interpretationStatus = "unresolved";
   }
   if (event.nativeMessageId) result.nativeMessageId = event.nativeMessageId;
   if (event.excerpt) result.excerpt = event.excerpt;
@@ -20,7 +24,7 @@ function publicEvent(event, sourceDigest, sessionRef, sourceProvider, binding, r
 }
 
 export function timelineContinuationCapsule({ source, sourceDigest, roomBytes, authority }) {
-  const last = source.events.at(-1);
+  const last = source.events.filter((event) => event.kind !== "user-message-candidate").at(-1);
   const result = { schema: "agentspine.session-continuation-capsule/v1", taskId: source.binding.taskId,
     goalId: source.binding.goalId, goalStepId: source.binding.goalStepId, lessonDigest: source.lessonDigest,
     outcomeStatus: !last ? "awaiting-objective-outcome" : last.kind === "objective-result"

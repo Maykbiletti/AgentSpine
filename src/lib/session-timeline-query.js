@@ -33,6 +33,8 @@ export function timelineQuery({ at, query }) {
 }
 
 export function matchesTimelineEvent(event, wanted, target, windowMs) {
+  // Explicit query lane, not a language recognizer. Ordinary searches remain objective/strict-correction only.
+  if (event.kind === "user-message-candidate" && !(wanted.includes("user") && wanted.includes("message"))) return false;
   return (!target || Math.abs(new Date(event.at).getTime() - target.getTime()) <= windowMs)
     && (!wanted.length || wanted.filter((term) => event.terms.includes(term)).length >= 2);
 }

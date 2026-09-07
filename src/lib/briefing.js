@@ -264,7 +264,7 @@ export async function sessionBriefing({
   for (const section of ["facts", "conflicts", "proposals", "stale"]) {
     const items = section === "facts"
       ? world[section].filter((item) => !item.assertionIds?.some((id) => contextualIds.has(id)))
-      : world[section];
+      : world[section].filter((item) => !contextualIds.has(item.id));
     for (const item of items) {
       if (!tryAdd(result, result.world[section], item)) countOmitted(result, "world");
     }

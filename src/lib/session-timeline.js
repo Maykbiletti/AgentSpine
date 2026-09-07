@@ -67,6 +67,9 @@ function validEvent(item) {
     && (item.nativeMessageId === undefined || typeof item.nativeMessageId === "string" && TIMELINE_ID_RE.test(item.nativeMessageId))
     && item.authority === AUTHORITY;
   if (!common) return false;
+  if (item.kind === "user-message-candidate") return item.outcome === undefined
+    && item.count === undefined && item.testLabel === undefined && item.nextStepSummary === undefined
+    && item.terms.join(" ") === "user message";
   if (item.kind === "objective-result") {
     return EVENT_OUTCOMES.has(item.outcome) && validCount(item.count)
       && (item.testLabel === null || typeof item.testLabel === "string" && EVENT_LABEL_RE.test(item.testLabel))
@@ -232,7 +235,12 @@ export async function registerSessionTimelineSource() {
 function mergeEvents(existing, additions) {
   const byId = new Map(existing.map((item) => [item.id, item]));
   for (const item of additions) byId.set(item.id, item);
-  return [...byId.values()].sort((left, right) => left.at.localeCompare(right.at) || left.offset - right.offset).slice(-MAX_EVENTS);
+  const ordered = [...byId.values()].sort((left, right) => left.at.localeCompare(right.at) || left.offset - right.offset);
+  const evidence = ordered.filter((item) => item.kind !== "user-message-candidate").slice(-MAX_EVENTS);
+  const available = Math.min(256, MAX_EVENTS - evidence.length);
+  const feedback = ordered.filter((item) => item.kind === "user-message-candidate")
+    .slice(available ? -available : ordered.length);
+  return [...evidence, ...feedback].sort((left, right) => left.at.localeCompare(right.at) || left.offset - right.offset);
 }
 async function unchangedHandle(handle, source, hostHome = null) {
   try {
@@ -257,7 +265,7 @@ async function readRange(handle, offset, length) {
   const { bytesRead } = await handle.read(buffer, 0, length, offset);
   return buffer.subarray(0, bytesRead);
 }
-function parsedEvents(buffer, start, dropFirst = false, host = "claude") {
+function parsedEvents(buffer, start, dropFirst = false, host = "claude", includeUserMessages = false) {
   const result = [];
   let index = 0;
   while (index < buffer.byteLength) {
@@ -266,8 +274,9 @@ function parsedEvents(buffer, start, dropFirst = false, host = "claude") {
     const line = buffer.subarray(index, end);
     if (!(dropFirst && index === 0) && line.byteLength) {
       const event = eventFromTimelineLine(line.toString("utf8"), start + index, AUTHORITY, host);
-      if (event) {
+      if (event && (includeUserMessages || event.kind !== "user-message-candidate")) {
         if (event.kind === "explicit-next-step-correction") delete event.nextStepSummary;
+        delete event.sourceText;
         result.push(event);
       }
     }
@@ -289,7 +298,8 @@ async function indexRange(source, start, maximum, hostHome = null) {
     const before = start > 0 ? await readRange(opened.handle, start - 1, 1) : Buffer.alloc(0);
     if (!await unchangedHandle(opened.handle, source, hostHome)) return { status: "unavailable", reason: "transcript-changed" };
     return { status: "indexed", next: start + selected.byteLength,
-      events: parsedEvents(selected, start, start > 0 && before[0] !== 0x0a, source.binding.host), size: opened.size };
+      events: parsedEvents(selected, start, start > 0 && before[0] !== 0x0a, source.binding.host,
+        Boolean(source.binding.portalRef && source.binding.threadRef)), size: opened.size };
   } finally { await opened.handle.close(); }
 }
 

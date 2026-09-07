@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { searchSessionTimeline } from "./session-timeline.js";
 import { recordWorldAssertion, worldContext } from "./world-model.js";
+import { captureTimelineUserFeedback } from "./timeline-user-feedback.js";
 
 const AUTHORITY = "context-only";
 const EVENT_ID = /^timeline-event:[a-f0-9]{32}$/;
@@ -36,7 +37,11 @@ function validEvent(event, result, scope) {
     || !Number.isFinite(new Date(event.at).getTime())) return false;
   const fields = event.kind === "objective-result"
     ? OUTCOMES.has(event.outcome) && validCount(event.count)
-    : event.kind === "explicit-next-step-correction"
+    : event.kind === "user-message-candidate"
+      ? event.speakerRole === "user" && event.interpretationStatus === "unresolved"
+        && typeof event.sourceText === "string" && Boolean(event.sourceText.trim())
+        && Buffer.byteLength(event.sourceText) <= 2048 && !/[\r\n]/u.test(event.sourceText)
+      : event.kind === "explicit-next-step-correction"
       && typeof event.nextStepSummary === "string" && Boolean(event.nextStepSummary.trim())
       && event.nextStepSummary.length <= 500 && event.outcome === undefined
       && event.count === undefined && event.testLabel === undefined;
@@ -120,7 +125,8 @@ function publicCaptured(assertion) {
   return {
     assertionId: assertion.assertionId || assertion.id, subjectId: assertion.subjectId,
     predicate: assertion.predicate, value: structuredClone(assertion.value), source: structuredClone(source),
-    observedAt: assertion.observedAt, scope: structuredClone(scope), status: "confirmed", authority: AUTHORITY
+    observedAt: assertion.observedAt, scope: structuredClone(scope),
+    status: ["proposed", "assumption"].includes(assertion.status) ? "assumption" : "confirmed", authority: AUTHORITY
   };
 }
 
@@ -175,6 +181,13 @@ export async function captureSessionTimelineEvidence({
   if (!event) return unavailable("timeline-capture-event-not-found", timeline);
   if (!validEvent(event, timeline, scope)) return unavailable("timeline-capture-evidence-invalid", timeline);
   try {
+    if (event.kind === "user-message-candidate") {
+      const recorded = await captureTimelineUserFeedback({ root, scope, event, now });
+      if (recorded.reason) return unavailable(recorded.reason, timeline);
+      return { ...captureResult(recorded.status === "duplicate" ? "duplicate" : "captured",
+        timeline, event, recorded.assertion),
+      instruction: "Historical user speech, not a confirmed correction. Source verification proves provenance only. Interpret the quote with the current task; ask one targeted question only when its intended task or referent is genuinely ambiguous. Never treat quoted, hypothetical, negated or obsolete text as a current instruction, or a completion claim as an objective outcome." };
+    }
     if (event.kind === "explicit-next-step-correction") {
       const current = await correctionCurrent({ root, scope, event, now });
       if (current.reason) return unavailable(current.reason, timeline);
