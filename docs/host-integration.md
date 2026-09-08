@@ -167,53 +167,27 @@ The host runner is responsible for starting the selected host with the supplied 
 The visible acceptance runner invokes the same production lifecycle adapter with new synthetic people, separated groups, Swedish and Spanish prompts, restarts, compaction, correction, rollback, purge, current-rights checks, and durable checkpoints. It prints one reproducible receipt per gate and proves `mcpCalls: 0`. See [visible cross-host acceptance](acceptance.md).
 # Group participation in the gateway worker
 
-Group channel work now includes `groupResponseContract` in the existing
-`agentspine.run-request/v1` work item. It is internal context, not text to forward
-to the conversation. Without a direct request, choose silence unless there is a
-relevant idea, concrete error or useful improvement. Never send an empty-status
-announcement or echo another bot's status. Preserve the user's language and
-identity. A suggestion is not an objectively verified fact.
-
-The host can return one of these result shapes:
+`agentspine.run-request/v1` carries an internal `groupResponseContract`. Without
+a direct request, remain silent except for a relevant idea, concrete error, or
+useful improvement. Never emit status, echo bots, change identity/language, or
+present suggestions as measured facts. Silence is:
 
 ```json
 {"groupResponse":{"schema":"agentspine.group-response/v1","kind":"silence"}}
 ```
 
-```json
-{"text":"Die vorhandene Datei könnte überschrieben werden.","groupResponse":{"schema":"agentspine.group-response/v1","kind":"error","subjectId":"finding:destination-collision"}}
-```
+`answer` needs text and no subject; other contribution kinds need text plus a
+stable subject. `silence` forbids text/skip markers. Unknown shapes fail.
+Identity, capability, privacy, and output gates still apply; no rights arise.
 
-`answer` requires text and no `subjectId`; it answers a direct request and is not
-contribution-deduplicated. `idea`, `error` and `improvement` require text and a stable
-`subjectId`. `silence` must not include text, including a visible skip marker.
-Unknown versions and fields are rejected without rewriting the original event.
-All existing identity, exact reply capability, privacy and output safety checks
-remain in force. This contract grants no sending or other action rights.
+Silence/duplicates consume the lease without an outbox; delivery/completion stay
+false. Receipts record disposition and recover crashes. Deduplication binds
+normalized text/subject to the full route except event ID; outbox recovery
+handles uncertainty. It is not semantic.
 
-Silent completion and duplicate contributions consume the exact gateway lease
-without preparing an outbox. `deliveryConfirmed` and `completionVerified` remain
-false. The existing gateway receipt log records the disposition, not an outcome
-or learning acceptance. The worker settles the original channel event locally
-using its existing claim/completion API, never a fabricated delivery receipt.
-After a crash it recovers this acknowledgement before invoking another host;
-an acknowledgement already claimed by another worker waits for that lease.
-
-Contribution deduplication binds normalized text and subject to the complete
-origin route, excluding only the event ID. Reservation occurs before delivery;
-outbox recovery handles uncertainty. This is exact-content, not semantic,
-deduplication.
-
-Compatibility and limits: legacy host results containing only `text` keep their
-existing behavior. The ingress v1 record does not authenticate whether a message
-directly addresses the bot (`directAddressVerified: false`). The host must make
-that distinction and adopt this explicit response contract. Installing AgentSpine
-alone therefore does not prove that live Kings stop sending empty-status messages.
-No blanket text filter suppresses normal user answers. Private channels cannot
-use the group-silence contract. No Telegram configuration or live process changes
-are part of this implementation.
-
-Synthetic tests cover silence, direct answers, exact duplicate contributions,
-leases, crash/restart, future versions, revocation, mutation, secrets, immutable
-sources, byte budgets, and fixed deadlines. No model or Telegram call is made;
-real relevance, unnecessary questions, and token use remain unverified.
+Legacy text-only results remain compatible. Ingress cannot authenticate direct
+address (`directAddressVerified:false`), so the host must adopt and enforce this
+contract. Installation proves no live behavior. Group silence is not private;
+no broad filter/live change is included. Synthetic tests cover response kinds,
+replay, crash, mutation, source bytes, limits, and deadlines; model relevance,
+questions, tokens, and Telegram remain unverified.

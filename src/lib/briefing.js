@@ -98,6 +98,21 @@ function pick(value, keys) {
   return Object.fromEntries(keys.map((key) => [key, value[key]]));
 }
 
+function feedbackCandidates(values) {
+  if (values.length < 3) return values.map((item) =>
+    pick(item, ["id", "text", "provider", "digest", "session", "message", "at"]));
+  const shared = ["provider", "digest", "session"].filter((key) =>
+    values.every((item) => item[key] === values[0][key]));
+  const fields = ["id", "text", "message", "at",
+    ...["provider", "digest", "session"].filter((key) => !shared.includes(key))];
+  const expected = { id: "assertion:user-feedback-", message: "timeline-event:" };
+  const prefixes = fields.map((key) => expected[key] || (key === "at"
+    && values.every((item) => /^\d{4}-\d{2}-\d{2}T\d{2}:/.test(item[key]))
+    ? values[0][key].slice(0, 14) : ""));
+  return { fields, common: Object.fromEntries(shared.map((key) => [key, values[0][key]])), prefixes,
+    rows: values.map((item) => fields.map((key, index) => item[key].slice(prefixes[index].length))) };
+}
+
 function preAnswerRecall(world, currentTaskId) {
   if (!currentTaskId) return null;
   const task = [...(world.knowledge?.continuation?.tasks || []),
@@ -147,8 +162,7 @@ function preAnswerRecall(world, currentTaskId) {
     task: taskValue,
     ...(values.length === 1 ? { feedback: values[0], interpretationInput: {
       feedbackAssertionId: feedback[0].id, targetAssertionId: feedback[0].value.targetAssertionId } } : {}),
-    ...(values.length > 1 ? { feedbackCandidates: values.map((item) =>
-      pick(item, ["id", "text", "provider", "digest", "session", "message", "at"])),
+    ...(values.length > 1 ? { feedbackCandidates: feedbackCandidates(values),
       feedbackReview: { status: "multiple-unresolved", completionVerified: false,
         targetAssertionId: feedback[0].value.targetAssertionId,
         ...(() => {
@@ -231,6 +245,8 @@ export async function sessionBriefing({
   }
   const gatewayFindings = gatewayRuntimeFindings(gateway.policy, gateway.runtime);
   if (gatewayFindings.length) throw new Error(`gateway runtime failed closed: ${gatewayFindings.join(", ")}`);
+  const compactFeedbackRecall = !preAnswer && currentTaskId
+    && world.knowledge.taskContext.items.filter((item) => item.predicate === "task.user-feedback").length >= 3;
 
   const result = {
     schema: "agentspine.session-briefing/v1",
@@ -270,7 +286,8 @@ export async function sessionBriefing({
     },
     learning: [],
     shared: [],
-    ...(preAnswer ? { preAnswerRecall: preAnswerRecall(world, currentTaskId) } : {}),
+    ...(preAnswer || compactFeedbackRecall
+      ? { preAnswerRecall: preAnswerRecall(world, currentTaskId) } : {}),
     world: {
       schema: world.schema,
       facts: [], conflicts: [], proposals: [], stale: [],
@@ -317,7 +334,8 @@ export async function sessionBriefing({
       .includes(item.predicate)).map((item) => item.id)]);
   for (const item of world.knowledge.taskContext.items) {
     contextualIds.add(item.id);
-    if (preAnswer) {
+    if (preAnswer || (compactFeedbackRecall
+      && ["task.user-feedback", "task.user-feedback-interpretation"].includes(item.predicate))) {
       result.world.knowledge.taskContext.omitted += 1;
       countOmitted(result, "world");
     } else if (!tryAdd(result, result.world.knowledge.taskContext.items, item)) {

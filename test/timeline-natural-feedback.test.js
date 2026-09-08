@@ -28,6 +28,7 @@ const CASES = [
 ];
 const AT = "2026-09-07T05:20:00.000Z";
 const AT_TWO = "2026-09-07T05:21:00.000Z";
+const AT_THREE = "2026-09-07T05:22:00.000Z";
 const NOW = "2026-09-07T06:40:00.000Z";
 const TASK = "task:natural-feedback";
 const PROJECT = "project:natural-feedback";
@@ -161,12 +162,14 @@ test("new session receives exact task, existing result file and source-verified 
     message: { role: "user", content: CASES[0][1] } })}\n`;
   const ambiguousLine = `${JSON.stringify({ timestamp: AT_TWO,
     message: { role: "user", content: CASES[1][1] } })}\n`;
+  const completionLine = `${JSON.stringify({ timestamp: AT_THREE,
+    message: { role: "user", content: CASES[2][1] } })}\n`;
   const historyLines = Array.from({ length: 270 }, (_, index) => `${JSON.stringify({
     timestamp: "2026-09-07T05:10:00.000Z", message: { role: "user", content: `Synthetic note ${index}` }
   })}\n`).join("");
   const measuredLine = `${JSON.stringify({ timestamp: "2026-09-07T05:00:00.000Z",
     message: { role: "tool", content: "Measured result: PASS 1/1" } })}\n`;
-  const original = Buffer.from(measuredLine + historyLines + messageLine + ambiguousLine);
+  const original = Buffer.from(measuredLine + historyLines + messageLine + ambiguousLine + completionLine);
   await writeFile(oldPath, original);
   await writeFile(newPath, `${JSON.stringify({ timestamp: "2026-09-07T05:30:00.000Z",
     message: { role: "user", content: "Bitte setze unseren Auftrag fort." } })}\n`);
@@ -262,8 +265,15 @@ test("new session receives exact task, existing result file and source-verified 
   const secondFields = { ...secondQuery, eventId: secondSearch.events[0].id };
   assert.equal((await processCall(item.root, "session_timeline_capture",
     await guarded(item, "capture", "tool:natural:capture:two", secondFields))).status, "captured");
+  const thirdQuery = { at: AT_THREE, query: "user message", windowSeconds: 1, includePriorSessions: true };
+  const thirdSearch = await processCall(item.root, "session_timeline_search",
+    await guarded(item, "search", "tool:natural:search:three", thirdQuery));
+  assert.equal(thirdSearch.events.length, 1, JSON.stringify(thirdSearch));
+  assert.equal((await processCall(item.root, "session_timeline_capture",
+    await guarded(item, "capture", "tool:natural:capture:three",
+      { ...thirdQuery, eventId: thirdSearch.events[0].id }))).status, "captured");
   const after = await freshWorld(item);
-  assert.equal(after.knowledge.taskContext.items.length, 2,
+  assert.equal(after.knowledge.taskContext.items.length, 3,
     "a single-message proposal loses priority when the active source set becomes ambiguous");
   const candidate = after.knowledge.taskContext.items.find((item) => item.value.sourceText === CASES[0][1]);
   assert.equal(candidate.value.sourceText, CASES[0][1]);
@@ -275,8 +285,9 @@ test("new session receives exact task, existing result file and source-verified 
   assert.equal(after.knowledge.continuation.tasks[0].lastVerifiedStep.summary, "Created result.txt");
   assert.equal(after.facts.some((fact) => fact.predicate === "task.user-feedback"), false);
   const secondFeedback = after.knowledge.taskContext.items.find((item) => item.value.sourceText === CASES[1][1]);
+  const thirdFeedback = after.knowledge.taskContext.items.find((item) => item.value.sourceText === CASES[2][1]);
   const ambiguityQuery = { at: AT_TWO, query: "user message", windowSeconds: 61, includePriorSessions: true };
-  const candidateIds = [candidate.id, secondFeedback.id].sort();
+  const candidateIds = [candidate.id, secondFeedback.id, thirdFeedback.id].sort();
   const ambiguityFields = { ...ambiguityQuery, eventId: secondSearch.events[0].id,
     interpretation: clarification(candidateIds, target.id, "Welche Datei soll ich zuerst verwenden?") };
   const ambiguousAttempt = await processCall(item.root, "session_timeline_capture",
@@ -285,7 +296,7 @@ test("new session receives exact task, existing result file and source-verified 
   assert.equal(ambiguousAttempt.status, "captured", JSON.stringify(ambiguousAttempt));
   assert.deepEqual(ambiguousAttempt.captured.value.sourceFeedbackAssertionIds, candidateIds);
   assert.equal(ambiguousAttempt.captured.value.completionVerified, false);
-  assert.deepEqual(after.knowledge.continuation.tasks[0].nextStep, target.value.nextStep);
+  assert.deepEqual((await freshWorld(item)).knowledge.continuation.tasks[0].nextStep, target.value.nextStep);
   assert.equal((await processCall(item.root, "session_timeline_capture",
     await guarded(item, "capture", "tool:natural:interpret:ambiguous:duplicate", ambiguityFields))).status,
   "duplicate");
@@ -294,8 +305,8 @@ test("new session receives exact task, existing result file and source-verified 
   assert.equal((await processCall(item.root, "session_timeline_capture",
     await guarded(item, "capture", "tool:natural:interpret:ambiguous:conflict", competing))).reason,
   "timeline-feedback-interpretation-conflicted");
-  const partial = { ...ambiguityFields, interpretation: interpretation(secondFeedback.id, target.id,
-    "ambiguous", null, "Welche Datei?") };
+  const partial = { ...ambiguityFields, interpretation: clarification(candidateIds.slice(0, 2), target.id,
+    "Welche Datei?") };
   const partialResult = await processCall(item.root, "session_timeline_capture",
     await guarded(item, "capture", "tool:natural:interpret:ambiguous:partial", partial));
   assert.equal(partialResult.reason, "timeline-feedback-interpretation-source-mismatch");
@@ -308,9 +319,15 @@ test("new session receives exact task, existing result file and source-verified 
   assert.equal(typeof contextText, "string");
   assert.ok(Buffer.byteLength(contextText) <= 16_384,
     `fixed synthetic lifecycle context budget: ${Buffer.byteLength(contextText)}`);
+  const compactRecall = JSON.parse(contextText).briefing.preAnswerRecall;
+  assert.equal(compactRecall.feedbackCandidates.rows.length, 3);
   assert.match(contextText, /Nein, erst die Prüfsumme prüfen/);
   assert.match(contextText, /Nimm dafür die andere Datei/);
+  assert.match(contextText, /Das hatten wir gestern schon erledigt/);
   assert.match(contextText, /result.txt/);
+  const compactIds = compactRecall.feedbackCandidates.rows.map((row) =>
+    `${compactRecall.feedbackCandidates.prefixes[0]}${row[0]}`).sort();
+  assert.deepEqual(compactIds, candidateIds);
   const prompted = await promptHook(item, "turn:new:recall");
   assert.equal(prompted.blocked, false, prompted.reason);
   for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" }, { PLUGIN_ROOT: "/synthetic/codex" }]) {
@@ -318,6 +335,7 @@ test("new session receives exact task, existing result file and source-verified 
     assert.match(output.hookSpecificOutput.additionalContext, /result.txt/);
     assert.match(output.hookSpecificOutput.additionalContext, /Nein, erst die Prüfsumme prüfen/);
     assert.match(output.hookSpecificOutput.additionalContext, /Nimm dafür die andere Datei/);
+    assert.match(output.hookSpecificOutput.additionalContext, /Das hatten wir gestern schon erledigt/);
     assert.match(output.hookSpecificOutput.additionalContext, /multiple-unresolved/);
     assert.match(output.hookSpecificOutput.additionalContext, /Welche Datei soll ich zuerst verwenden/);
     assert.match(output.hookSpecificOutput.additionalContext, /"completionVerified":false/);
@@ -328,10 +346,17 @@ test("new session receives exact task, existing result file and source-verified 
   assert.match(kingOutput.hookSpecificOutput.message, /result.txt/);
   assert.match(kingOutput.hookSpecificOutput.message, /Nein, erst die Prüfsumme prüfen/);
   assert.match(kingOutput.hookSpecificOutput.message, /Nimm dafür die andere Datei/);
+  assert.match(kingOutput.hookSpecificOutput.message, /Das hatten wir gestern schon erledigt/);
   assert.match(kingOutput.hookSpecificOutput.message, /multiple-unresolved/);
   assert.match(kingOutput.hookSpecificOutput.message, /Welche Datei soll ich zuerst verwenden/);
   assert.match(kingOutput.hookSpecificOutput.message, /"completionVerified":false/);
   assert.match(kingOutput.hookSpecificOutput.message, /review-before-claims-and-actions/);
+  const kingRecall = JSON.parse(kingOutput.hookSpecificOutput.message);
+  const restored = kingRecall.feedbackCandidates.rows.map((row) => Object.fromEntries(
+    kingRecall.feedbackCandidates.fields.map((field, index) =>
+      [field, `${kingRecall.feedbackCandidates.prefixes[index]}${row[index]}`])));
+  assert.deepEqual(restored.map((item) => item.id).sort(), candidateIds);
+  assert.deepEqual(restored.map((item) => item.at), [AT_THREE, AT_TWO, AT]);
   gateway(route("thread:foreign"));
   assert.equal((await freshWorld(item)).knowledge.taskContext.items.length, 0);
   gateway(binding);
@@ -349,7 +374,7 @@ test("new session receives exact task, existing result file and source-verified 
   await item.preserve();
   t.diagnostic(JSON.stringify({ contextBytes: Buffer.byteLength(contextText),
     preAnswerBytes: Buffer.byteLength(kingOutput.hookSpecificOutput.message), elapsedMs: performance.now() - started,
-    preservedFeedbackCandidates: "0 -> 2", actionableBindings: "0 -> 2",
+    preservedFeedbackCandidates: "0 -> 3", actionableBindings: "0 -> 3",
     boundClarificationProposals: "0 -> 1", falseAutomaticApplications: 0,
     continuationMutations: 0, realModelRuns: 0,
     semanticAssignment: "unverified", necessaryQuestions: "unverified", unnecessaryQuestions: "unverified",
