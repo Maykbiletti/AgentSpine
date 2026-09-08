@@ -21,7 +21,7 @@ function compactFeedbackCandidates(packet) {
   const origins = ["provider", "session"];
   const sharedKeys = origins.filter((key) =>
     candidates.every((item) => item?.[key] === candidates[0]?.[key]));
-  const fields = ["text", "digest", "message", "at",
+  const fields = ["id", "text", "digest", "at",
     ...origins.filter((key) => !sharedKeys.includes(key))];
   packet.feedbackCandidates = {
     fields,
@@ -29,6 +29,8 @@ function compactFeedbackCandidates(packet) {
       [key, candidates[0][key]])) } : {}),
     rows: candidates.map((item) => fields.map((key) => item[key]))
   };
+  const proposal = packet.feedbackReview?.modelClarification;
+  if (proposal) for (const key of ["completionVerified", "provider", "replaces"]) delete proposal[key];
   return true;
 }
 
@@ -62,6 +64,7 @@ export function preAnswerRecallCapsule(detailed) {
       omitted.push("retrieval");
     }
   }
+  compactFeedbackCandidates(packet);
   if (omitted.length && byteSize({ ...packet, omitted }) <= BLUN_MESSAGE_MAX_BYTES) packet.omitted = omitted;
   return Object.keys(packet).length > 3 ? packet : null;
 }

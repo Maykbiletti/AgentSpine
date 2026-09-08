@@ -60,8 +60,8 @@ function multipleFeedbackContext() {
   context.briefing.preAnswerRecall.feedbackCandidates = [first, { ...first,
     text: "Nimm dafür die andere Datei", digest: "d".repeat(64),
     message: "message:ambiguous", at: "2026-09-07T02:01:00.000Z" }]
-    .map(({ text, provider, digest, session, message, at }) =>
-      ({ text, provider, digest, session, message, at }));
+    .map(({ text, provider, digest, session, message, at }, index) =>
+      ({ id: `assertion:feedback-${index + 1}`, text, provider, digest, session, message, at }));
   delete context.briefing.preAnswerRecall.task.assertionId;
   delete context.briefing.preAnswerRecall.task.lastVerifiedStep.evidenceDigest;
   delete context.briefing.preAnswerRecall.task.lastVerifiedStep.observedAt;
@@ -116,13 +116,13 @@ test("multiple source messages remain visible so hosts cannot hide ambiguity", (
   const capsule = preAnswerRecallCapsule(context);
   assert.equal(capsule.feedbackCandidates.rows.length, 2);
   assert.deepEqual(capsule.feedbackCandidates.fields,
-    ["text", "digest", "message", "at"]);
+    ["id", "text", "digest", "at"]);
   assert.deepEqual(capsule.feedbackCandidates.common,
     { provider: "claude", session: "session-ref:old" });
   assert.equal(capsule.feedbackReview.status, "multiple-unresolved");
   assert.equal(capsule.feedbackReview.completionVerified, false);
   assert.equal("omitted" in capsule.feedbackReview, false);
-  assert.equal(capsule.feedbackCandidates.rows[0][1], "b".repeat(64));
+  assert.equal(capsule.feedbackCandidates.rows[0][2], "b".repeat(64));
   assert.match(JSON.stringify(capsule.mustRemember), /Check configured access/);
   for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" },
     { PLUGIN_ROOT: "/synthetic/codex" }, { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
@@ -140,13 +140,13 @@ test("bounded King recall keeps three ordinary candidates instead of dropping th
   delete context.briefing.preAnswerRecall.task.observedAt;
   const candidates = context.briefing.preAnswerRecall.feedbackCandidates;
   candidates.push({ ...candidates[0], text: "Das hatten wir gestern schon erledigt",
-    digest: "e".repeat(64), message: "message:completion-claim" });
+    id: "assertion:feedback-3", digest: "e".repeat(64), message: "message:completion-claim" });
   const message = blunRuntimeMessage(JSON.stringify(context));
   assert.equal(Buffer.byteLength(message) <= 1200, true);
   assert.match(message, /result\.txt/);
   for (const candidate of candidates) {
     assert.match(message, new RegExp(candidate.digest));
-    assert.match(message, new RegExp(candidate.message));
+    assert.match(message, new RegExp(candidate.id));
     assert.match(message, new RegExp(candidate.text));
   }
   assert.match(message, /multiple-unresolved/);
@@ -159,7 +159,7 @@ test("bounded King recall hands off loaded retrieval beside three source candida
   delete context.briefing.preAnswerRecall.task.observedAt;
   const candidates = context.briefing.preAnswerRecall.feedbackCandidates;
   candidates.push({ ...candidates[0], text: "Das hatten wir gestern schon erledigt",
-    digest: "e".repeat(64), message: "message:completion-claim" });
+    id: "assertion:feedback-3", digest: "e".repeat(64), message: "message:completion-claim" });
   context.preflight.briefing.mustRemember = [];
   context.preflight.briefing.retrieval = [{ providerId: "memory:synthetic", items: [{
     id: "memory:access-check", revision: "1",
@@ -167,7 +167,7 @@ test("bounded King recall hands off loaded retrieval beside three source candida
     source: "source:synthetic", validity: "current", confidence: 1
   }] }];
   const capsule = preAnswerRecallCapsule(context);
-  assert.deepEqual(capsule.feedbackCandidates.fields, ["text", "digest", "message", "at"]);
+  assert.deepEqual(capsule.feedbackCandidates.fields, ["id", "text", "digest", "at"]);
   assert.deepEqual(capsule.feedbackCandidates.common,
     { provider: "claude", session: "session-ref:old" });
   assert.equal(capsule.feedbackCandidates.rows.length, 3);
@@ -182,7 +182,7 @@ test("bounded King recall hands off loaded retrieval beside three source candida
   assert.match(message, /result\.txt/);
   for (const candidate of candidates) {
     assert.match(message, new RegExp(candidate.digest));
-    assert.match(message, new RegExp(candidate.message));
+    assert.match(message, new RegExp(candidate.id));
     assert.match(message, new RegExp(candidate.text));
   }
   assert.match(message, /multiple-unresolved/);

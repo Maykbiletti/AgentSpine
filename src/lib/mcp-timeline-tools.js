@@ -12,6 +12,7 @@ const assertionId = {
 };
 
 export const TIMELINE_INTERPRETATION_SCHEMA = "agentspine.timeline-user-feedback-interpretation-request/v1";
+export const TIMELINE_CLARIFICATION_SCHEMA = "agentspine.timeline-user-feedback-clarification-request/v1";
 const INTERPRETATION_KINDS = new Set([
   "next-step-correction", "completion-claim", "not-current-instruction", "ambiguous"
 ]);
@@ -19,6 +20,19 @@ const INTERPRETATION_KINDS = new Set([
 export function timelineInterpretationRequest(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
     || Object.getPrototypeOf(value) !== Object.prototype) return null;
+  const clarificationKeys = ["schema", "feedbackAssertionIds", "targetAssertionId", "clarificationQuestion"];
+  if (Object.keys(value).sort().join("\0") === clarificationKeys.sort().join("\0")
+    && value.schema === TIMELINE_CLARIFICATION_SCHEMA
+    && Array.isArray(value.feedbackAssertionIds) && value.feedbackAssertionIds.length >= 2
+    && value.feedbackAssertionIds.length <= 3
+    && value.feedbackAssertionIds.every((id) => /^assertion:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/.test(id))
+    && new Set(value.feedbackAssertionIds).size === value.feedbackAssertionIds.length
+    && [...value.feedbackAssertionIds].sort().every((id, index) => id === value.feedbackAssertionIds[index])
+    && /^assertion:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/.test(value.targetAssertionId || "")
+    && typeof value.clarificationQuestion === "string" && Boolean(value.clarificationQuestion.trim())
+    && value.clarificationQuestion.length <= 300 && !/[\r\n]/u.test(value.clarificationQuestion)) {
+    return structuredClone(value);
+  }
   const keys = ["schema", "feedbackAssertionId", "targetAssertionId", "kind",
     "proposedNextStepSummary", "clarificationQuestion"];
   if (Object.keys(value).sort().join("\0") !== keys.sort().join("\0")
@@ -208,18 +222,23 @@ export const sessionTimelineTools = [
         enrollmentDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
         timelineVisibility: { const: "private-verified" }, groupId: { anyOf: [stableId, { type: "null" }] },
         eventId: { type: "string", pattern: "^timeline-event:[a-f0-9]{32}$" },
-        interpretation: {
+        interpretation: { oneOf: [{
           type: "object", additionalProperties: false,
           required: ["schema", "feedbackAssertionId", "targetAssertionId", "kind",
             "proposedNextStepSummary", "clarificationQuestion"],
-          properties: {
-            schema: { const: TIMELINE_INTERPRETATION_SCHEMA },
+          properties: { schema: { const: TIMELINE_INTERPRETATION_SCHEMA },
             feedbackAssertionId: assertionId, targetAssertionId: assertionId,
             kind: { enum: [...INTERPRETATION_KINDS] },
             proposedNextStepSummary: { anyOf: [{ type: "string", minLength: 1, maxLength: 500 }, { type: "null" }] },
-            clarificationQuestion: { anyOf: [{ type: "string", minLength: 1, maxLength: 300 }, { type: "null" }] }
-          }
-        },
+            clarificationQuestion: { anyOf: [{ type: "string", minLength: 1, maxLength: 300 }, { type: "null" }] } }
+        }, {
+          type: "object", additionalProperties: false,
+          required: ["schema", "feedbackAssertionIds", "targetAssertionId", "clarificationQuestion"],
+          properties: { schema: { const: TIMELINE_CLARIFICATION_SCHEMA },
+            feedbackAssertionIds: { type: "array", minItems: 2, maxItems: 3, uniqueItems: true,
+              items: assertionId }, targetAssertionId: assertionId,
+            clarificationQuestion: { type: "string", minLength: 1, maxLength: 300 } }
+        }] },
         at: { type: "string", format: "date-time" }, query: { type: "string", minLength: 3, maxLength: 512 },
         windowSeconds: { type: "integer", minimum: 0, maximum: 900 },
         includePriorSessions: { type: "boolean" }, includePriorProviders: { type: "boolean" } }

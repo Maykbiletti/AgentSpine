@@ -110,13 +110,15 @@ function preAnswerRecall(world, currentTaskId) {
     .sort((left, right) => right.observedAt.localeCompare(left.observedAt));
   const interpretations = (world.knowledge?.taskContext?.items || []).filter((item) =>
     item?.source?.kind === "model-suggestion"
-      && item.value?.schema === "agentspine.timeline-user-feedback-interpretation/v1"
+      && ["agentspine.timeline-user-feedback-interpretation/v1",
+        "agentspine.timeline-user-feedback-clarification/v1"].includes(item.value?.schema)
       && item.value?.targetAssertionId === task.assertionId);
   const taskValue = pick(task, ["taskId", "status", "objective"]);
   taskValue.lastVerifiedStep = task.lastVerifiedStep
     ? pick(task.lastVerifiedStep, ["summary", "result"]) : null;
   taskValue.nextStep = task.nextStep ? pick(task.nextStep, ["summary"]) : null;
-  const values = feedback.slice(0, 3).map(({ value, source, observedAt }) => ({
+  const values = feedback.slice(0, 3).map(({ id, value, source, observedAt }) => ({
+    id,
     text: value.sourceText,
     status: value.interpretationStatus, completionVerified: value.completionVerified,
     provider: value.sourceProvider, digest: value.sourceDigest,
@@ -146,8 +148,19 @@ function preAnswerRecall(world, currentTaskId) {
     ...(values.length === 1 ? { feedback: values[0], interpretationInput: {
       feedbackAssertionId: feedback[0].id, targetAssertionId: feedback[0].value.targetAssertionId } } : {}),
     ...(values.length > 1 ? { feedbackCandidates: values.map((item) =>
-      pick(item, ["text", "provider", "digest", "session", "message", "at"])),
+      pick(item, ["id", "text", "provider", "digest", "session", "message", "at"])),
       feedbackReview: { status: "multiple-unresolved", completionVerified: false,
+        targetAssertionId: feedback[0].value.targetAssertionId,
+        ...(() => {
+          const ids = feedback.slice(0, 3).map((item) => item.id).sort();
+          const proposal = interpretations.find((item) => item.value?.schema
+            === "agentspine.timeline-user-feedback-clarification/v1"
+            && JSON.stringify(item.value.sourceFeedbackAssertionIds) === JSON.stringify(ids));
+          return proposal ? { modelClarification: { status: proposal.value.interpretationStatus,
+            question: proposal.value.clarificationQuestion, provider: proposal.value.modelProvider,
+            replaces: proposal.value.replacedNextStepId, digest: proposal.source.digest,
+            completionVerified: false } } : {};
+        })(),
         ...(feedback.length > 3 ? { omitted: feedback.length - 3 } : {}) } } : {}),
     authority: "context-only"
   };
@@ -299,7 +312,9 @@ export async function sessionBriefing({
       if (preAnswer || !tryAdd(result, result.world.knowledge.continuation[key], item)) countOmitted(result, "world");
     }
   }
-  const contextualIds = new Set(continuationIds);
+  const contextualIds = new Set([...continuationIds, ...world.knowledge.current
+    .filter((item) => ["task.user-feedback", "task.user-feedback-interpretation"]
+      .includes(item.predicate)).map((item) => item.id)]);
   for (const item of world.knowledge.taskContext.items) {
     contextualIds.add(item.id);
     if (preAnswer) {

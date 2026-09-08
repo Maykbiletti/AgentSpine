@@ -45,6 +45,10 @@ const interpretation = (feedbackAssertionId, targetAssertionId, kind = "next-ste
   schema: "agentspine.timeline-user-feedback-interpretation-request/v1",
   feedbackAssertionId, targetAssertionId, kind, proposedNextStepSummary, clarificationQuestion
 });
+const clarification = (feedbackAssertionIds, targetAssertionId, clarificationQuestion) => ({
+  schema: "agentspine.timeline-user-feedback-clarification-request/v1",
+  feedbackAssertionIds: [...feedbackAssertionIds].sort(), targetAssertionId, clarificationQuestion
+});
 
 function route(threadId) {
   return channelTimelineContinuity({ provider: "blun", tenantId: SCOPE.tenantId,
@@ -224,7 +228,7 @@ test("new session receives exact task, existing result file and source-verified 
   assert.equal(proposed.captured.value.replacedNextStepId, target.value.nextStep.id);
   const proposedAgain = await processCall(item.root, "session_timeline_capture",
     await guarded(item, "capture", "tool:natural:interpret:restart", proposalFields));
-  assert.equal(proposedAgain.status, "duplicate");
+  assert.equal(proposedAgain.status, "duplicate", JSON.stringify(proposedAgain));
   const tamperedPermit = await guarded(item, "capture", "tool:natural:interpret:tamper", proposalFields);
   tamperedPermit.interpretation.proposedNextStepSummary = "Tampered after the host permit.";
   assert.equal((await processCall(item.root, "session_timeline_capture", tamperedPermit)).status, "unavailable",
@@ -259,7 +263,8 @@ test("new session receives exact task, existing result file and source-verified 
   assert.equal((await processCall(item.root, "session_timeline_capture",
     await guarded(item, "capture", "tool:natural:capture:two", secondFields))).status, "captured");
   const after = await freshWorld(item);
-  assert.equal(after.knowledge.taskContext.items.length, 3);
+  assert.equal(after.knowledge.taskContext.items.length, 2,
+    "a single-message proposal loses priority when the active source set becomes ambiguous");
   const candidate = after.knowledge.taskContext.items.find((item) => item.value.sourceText === CASES[0][1]);
   assert.equal(candidate.value.sourceText, CASES[0][1]);
   assert.equal(candidate.value.targetAssertionId, target.id);
@@ -270,12 +275,30 @@ test("new session receives exact task, existing result file and source-verified 
   assert.equal(after.knowledge.continuation.tasks[0].lastVerifiedStep.summary, "Created result.txt");
   assert.equal(after.facts.some((fact) => fact.predicate === "task.user-feedback"), false);
   const secondFeedback = after.knowledge.taskContext.items.find((item) => item.value.sourceText === CASES[1][1]);
+  const ambiguityQuery = { at: AT_TWO, query: "user message", windowSeconds: 61, includePriorSessions: true };
+  const candidateIds = [candidate.id, secondFeedback.id].sort();
+  const ambiguityFields = { ...ambiguityQuery, eventId: secondSearch.events[0].id,
+    interpretation: clarification(candidateIds, target.id, "Welche Datei soll ich zuerst verwenden?") };
   const ambiguousAttempt = await processCall(item.root, "session_timeline_capture",
     await guarded(item, "capture", "tool:natural:interpret:ambiguous-set", {
-      ...secondFields, interpretation: interpretation(secondFeedback.id, target.id,
-        "ambiguous", null, "Which file do you mean?") }));
-  assert.equal(ambiguousAttempt.status, "unavailable");
-  assert.equal(ambiguousAttempt.reason, "timeline-feedback-interpretation-ambiguous-set");
+      ...ambiguityFields }));
+  assert.equal(ambiguousAttempt.status, "captured", JSON.stringify(ambiguousAttempt));
+  assert.deepEqual(ambiguousAttempt.captured.value.sourceFeedbackAssertionIds, candidateIds);
+  assert.equal(ambiguousAttempt.captured.value.completionVerified, false);
+  assert.deepEqual(after.knowledge.continuation.tasks[0].nextStep, target.value.nextStep);
+  assert.equal((await processCall(item.root, "session_timeline_capture",
+    await guarded(item, "capture", "tool:natural:interpret:ambiguous:duplicate", ambiguityFields))).status,
+  "duplicate");
+  const competing = { ...ambiguityFields, interpretation: clarification(candidateIds, target.id,
+    "Welche der beiden Dateien meinst du?") };
+  assert.equal((await processCall(item.root, "session_timeline_capture",
+    await guarded(item, "capture", "tool:natural:interpret:ambiguous:conflict", competing))).reason,
+  "timeline-feedback-interpretation-conflicted");
+  const partial = { ...ambiguityFields, interpretation: interpretation(secondFeedback.id, target.id,
+    "ambiguous", null, "Welche Datei?") };
+  const partialResult = await processCall(item.root, "session_timeline_capture",
+    await guarded(item, "capture", "tool:natural:interpret:ambiguous:partial", partial));
+  assert.equal(partialResult.reason, "timeline-feedback-interpretation-source-mismatch");
   const duplicateArgs = await guarded(item, "capture", "tool:natural:restart", fields);
   assert.equal((await processCall(item.root, "session_timeline_capture", duplicateArgs)).status, "duplicate");
   const compact = await runHook({ hook_event_name: "PostCompact", host: "claude", cwd: item.root,
@@ -283,7 +306,8 @@ test("new session receives exact task, existing result file and source-verified 
     tenant_id: SCOPE.tenantId, project_id: PROJECT, task_id: TASK, group_id: null });
   const contextText = compact.context;
   assert.equal(typeof contextText, "string");
-  assert.ok(Buffer.byteLength(contextText) <= 16_384, "fixed synthetic lifecycle context budget");
+  assert.ok(Buffer.byteLength(contextText) <= 16_384,
+    `fixed synthetic lifecycle context budget: ${Buffer.byteLength(contextText)}`);
   assert.match(contextText, /Nein, erst die Prüfsumme prüfen/);
   assert.match(contextText, /Nimm dafür die andere Datei/);
   assert.match(contextText, /result.txt/);
@@ -295,6 +319,7 @@ test("new session receives exact task, existing result file and source-verified 
     assert.match(output.hookSpecificOutput.additionalContext, /Nein, erst die Prüfsumme prüfen/);
     assert.match(output.hookSpecificOutput.additionalContext, /Nimm dafür die andere Datei/);
     assert.match(output.hookSpecificOutput.additionalContext, /multiple-unresolved/);
+    assert.match(output.hookSpecificOutput.additionalContext, /Welche Datei soll ich zuerst verwenden/);
     assert.match(output.hookSpecificOutput.additionalContext, /"completionVerified":false/);
   }
   const kingOutput = hookOutput("UserPromptSubmit", prompted.context,
@@ -304,6 +329,7 @@ test("new session receives exact task, existing result file and source-verified 
   assert.match(kingOutput.hookSpecificOutput.message, /Nein, erst die Prüfsumme prüfen/);
   assert.match(kingOutput.hookSpecificOutput.message, /Nimm dafür die andere Datei/);
   assert.match(kingOutput.hookSpecificOutput.message, /multiple-unresolved/);
+  assert.match(kingOutput.hookSpecificOutput.message, /Welche Datei soll ich zuerst verwenden/);
   assert.match(kingOutput.hookSpecificOutput.message, /"completionVerified":false/);
   assert.match(kingOutput.hookSpecificOutput.message, /review-before-claims-and-actions/);
   gateway(route("thread:foreign"));
@@ -324,7 +350,8 @@ test("new session receives exact task, existing result file and source-verified 
   t.diagnostic(JSON.stringify({ contextBytes: Buffer.byteLength(contextText),
     preAnswerBytes: Buffer.byteLength(kingOutput.hookSpecificOutput.message), elapsedMs: performance.now() - started,
     preservedFeedbackCandidates: "0 -> 2", actionableBindings: "0 -> 2",
-    falseAutomaticApplications: 0, realModelRuns: 0,
+    boundClarificationProposals: "0 -> 1", falseAutomaticApplications: 0,
+    continuationMutations: 0, realModelRuns: 0,
     semanticAssignment: "unverified", necessaryQuestions: "unverified", unnecessaryQuestions: "unverified",
     repeatedJobs: "unverified", newSessionUserAcceptance: "not-passed" }));
 });
@@ -358,5 +385,16 @@ test("uninterpreted feedback cannot claim confirmation, supersede state, or esca
   for (const patch of [{ completionVerified: true }, { interpretationStatus: "confirmed" },
     { proposedNextStepSummary: "invented" }, { modelProvider: "unknown" }]) {
     assert.throws(() => validateUserFeedback(modelInput, { ...modelValue, ...patch }));
+  }
+  const clarificationValue = { schema: "agentspine.timeline-user-feedback-clarification/v1",
+    sourceFeedbackAssertionIds: ["assertion:feedback-a", "assertion:feedback-b"],
+    targetAssertionId: "assertion:target", sourceProvider: "claude", sourceDigest: "d".repeat(64),
+    modelProvider: "codex", interpretationStatus: "model-proposed",
+    clarificationQuestion: "Welche Datei meinst du?", replacedNextStepId: "step:old",
+    completionVerified: false };
+  assert.doesNotThrow(() => validateUserFeedback(modelInput, clarificationValue));
+  for (const ids of [["assertion:feedback-a"], ["assertion:feedback-b", "assertion:feedback-a"]]) {
+    assert.throws(() => validateUserFeedback(modelInput,
+      { ...clarificationValue, sourceFeedbackAssertionIds: ids }));
   }
 });

@@ -38,19 +38,9 @@ claude plugin install agent-spine@agent-spine
 
 Use `claude plugin validate .` in a checkout to validate the manifest and marketplace. Claude Code asks the user to approve executable plugin components according to its trust model.
 
-Version `0.73.0` keeps the `0.72.7` managed common Codex skill, stable launcher, loaded-reader verification, assignment continuation and structured completion contracts, and adds bounded post-compaction session-evidence recall. It leaves host transcripts in place, never injects their full content, and exposes only explicit, scope-bound redacted cards. A verified `UserPromptSubmit` creates an opaque receipt; a direct Claude session stays excluded until the local owner runs `timeline-receipt --root …` and `timeline-enroll --root … --receipt asthr_… --confirm-local-timeline`. Groups stay excluded. Writing deliveries can reuse the verified hook briefing for `delivery_knowledge_query` and `record_delivery_premortem` with the exact hook-issued requirement. These are advisory preparation; missing proof never blocks ordinary authorized work.
+Version `0.73.0` preserves the managed skill/launcher, task continuation, structured completion, and bounded post-compaction evidence recall. Direct transcript recall stays excluded until the owner creates and enrolls a verified timeline receipt. Groups stay excluded. Writing deliveries may reuse the exact hook-issued briefing requirement for advisory knowledge and premortem calls; missing proof does not block ordinary authorized work.
 
-Ordinary assignments may now call [`complete_delivery`](structured-completion.md) after observed tests to store the three completion checks and use a normal final summary. Stop still checks the latest write and current test evidence. Goal and queue deliveries retain their existing completion route. This repository operation does not itself register MCP in a native host or validate a live update.
-
-A contradictory retry is rejected and stored separately without changing the first valid registration. A legacy 0.72 conflict can be preserved and moved to a fresh requirement through either `recover_delivery_premortem` or `agentspine premortem-recover <predecessor-requirement> --root <project>`. The returned requirement must perform all three preflight calls again; recovery never deletes evidence or grants authority.
-
-Version `0.39.0` replaces the `0.38.0` plugin cache identity.
-
-Version `0.38.0` replaces the `0.37.0` plugin cache identity.
-
-Version `0.36.0` replaces the `0.35.0` plugin cache identity.
-
-The Claude manifest explicitly references `./.mcp.json`. The hook bundle remains at Claude Code's native auto-discovery path `hooks/hooks.json`; it is deliberately not registered a second time through the manifest. Codex selects its host-specific `hooks/codex.json` adapter through `.codex-plugin/plugin.json`. Version `0.35.0` replaces the `0.34.0` plugin cache identity. The hook definitions contain only portable documented fields; `hooks/version.json` carries the separately validated bundle release and preflight contract. The repository checks resolve installed-root variables, perform a real MCP `initialize` handshake, validate exactly one native hook command per event, and exercise staged clean install, previous-version cache rejection, upgrade, host-native source resolution, indexed and lazy Claude memory, automatic multilingual briefing, pre-answer recall, authenticated persona graph reconciliation, attention, exact job start, tool checkpoint, new-session resume, purge, and uninstall preservation:
+The Claude manifest references `.mcp.json` and uses only its native `hooks/hooks.json`; Codex selects `hooks/codex.json` from its own manifest. Repository checks validate portable manifests, installed-root expansion, one command per event, a real MCP handshake, clean install/upgrade, source isolation, briefing, continuation, compaction, and uninstall preservation:
 
 ```bash
 npm run host:check
@@ -74,7 +64,7 @@ Open `/mcp` in the new interactive session and approve or reconnect `agent-spine
 
 ## Codex
 
-History uses the native Codex adapter described in [session timeline](session-timeline.md#codex-native-rollout-contract). It does not use Claude enrollment or a Claude-shaped transcript. Installed-host acceptance remains separate from the repository fixtures.
+History uses the native Codex adapter described in [session timeline](session-timeline.md#integrity-and-provider-formats). It does not use Claude enrollment or a Claude-shaped transcript. Installed-host acceptance remains separate from the repository fixtures.
 
 | Component | Path | Purpose |
 |---|---|---|
@@ -83,7 +73,7 @@ History uses the native Codex adapter described in [session timeline](session-ti
 | MCP | Manifest `mcpServers` | Read-only source tools plus external overlay workflows |
 | Hooks | `hooks/codex.json` | Manifest-selected lifecycle guardrails |
 
-Open `/plugins` in Codex CLI after configuring a marketplace that contains AgentSpine, then start a new session. Review the installed hook source and trust state with `/hooks`; Codex also presents a startup warning when a new or changed hook definition needs trust. Codex records trust against the exact hook-definition hash, so an installed, updated, or previously untrusted bundle is skipped until that current definition is reviewed and trusted. This follows the official [Codex hooks trust and plugin discovery contract](https://developers.openai.com/codex/hooks).
+Open `/plugins` in Codex CLI, then start a new session and review `/hooks`. New or changed hook definitions are skipped until the user trusts their exact hash, following the official [Codex hook contract](https://developers.openai.com/codex/hooks).
 
 For a direct npm/package installation, register or update the common user skill and MCP reader together. The command writes only its sealed skill directory and a marked AgentSpine configuration block, refuses unmanaged conflicts, and requires a local confirmation flag:
 
@@ -91,7 +81,7 @@ For a direct npm/package installation, register or update the common user skill 
 agentspine host-install codex --confirm-local-host-install --json
 ```
 
-Use `--codex-home /absolute/profile` and `--skills-root /absolute/user-skills` only for non-default or synthetic roots. The default skill destination is `$HOME/.agents/skills/agent-spine/SKILL.md`, one of Codex's documented [user skill discovery locations](https://developers.openai.com/codex/build-skills). AgentSpine refuses an existing unowned directory at that name, serializes parallel updates and recovers only recognizable sealed partial states. The stable launcher lives below the Codex profile and points through an atomically replaced, digest-sealed registration; `config.toml` does not need a versioned cache path. Start a new Codex process after a successful update. During MCP `initialize`, the launcher checks the canonical package root, exact package/runtime version and required tools before it forwards any state-bearing request. A failed check returns no tools and does not migrate or delete state. User-controlled executable and hook trust remain separate and mandatory. The configuration shape follows the official [Codex MCP configuration contract](https://developers.openai.com/codex/mcp).
+Non-default or synthetic roots may use `--codex-home` and `--skills-root`. The default skill path is `$HOME/.agents/skills/agent-spine/SKILL.md`, a documented [Codex skill location](https://developers.openai.com/codex/build-skills). AgentSpine refuses unowned conflicts and atomically updates sealed state. The launcher verifies package/runtime identity and tools during MCP initialization; failure returns no tools or migration. User trust remains separate. Configuration follows the official [Codex MCP contract](https://developers.openai.com/codex/mcp).
 
 Codex loads `hooks/codex.json` through the explicit plugin-manifest entry. It contains only Codex-documented lifecycle events; Claude Code's additional `InstructionsLoaded` event remains confined to `hooks/hooks.json`. Both files deliberately contain only the documented top-level `description` and `hooks` fields. Cache identity remains in `.codex-plugin/plugin.json`, while Codex records hook trust against the current definition hash. The Codex hook and MCP registrations use the host-native `PLUGIN_ROOT` expansion.
 
@@ -124,7 +114,7 @@ BLUN asks the user to trust a third-party plugin before installation because its
 
 BLUN Code 1.0.109 constructs MCP tool names as `mcp__<server-name>__<tool-name>`. With AgentSpine's exact manifest server name, its timeline calls are therefore `mcp__agent-spine__session_timeline_index`, `mcp__agent-spine__session_timeline_search`, and `mcp__agent-spine__session_timeline_capture`; the BLUN hook matcher admits only those three exact names. This contract was checked on 2026-09-05 against public `Maykbiletti/blun-code` commit `fbb97459a3fa2157f8bfea3d24931be63288ab11` (`mcp-harness-tools.js`, package license `MIT`). The external source is naming evidence only and is treated as untrusted context; no implementation was copied. Repository checks do not prove that an installed King forwards the hook payload or enforces AgentSpine's returned block decision, and they do not replace a live host acceptance test.
 
-History has an independent [King agent-wire adapter](session-timeline.md#king-native-agent-wire-contract). The local launcher must bind the current source and measured wire version through `AGENTSPINE_KING_TIMELINE_SOURCE` and `AGENTSPINE_KING_WIRE_PROTOCOL_VERSION`; AgentSpine neither searches `BLUN_HOME` nor infers either value. Project instructions still resolve through the Codex-compatible hierarchy, while history is enrolled as provider `king` and reads only the explicitly mapped `agents/main/wire.jsonl`. Correct MCP names, a passing Codex adapter, or a model-supplied path do not satisfy this contract.
+History has an independent [King agent-wire adapter](session-timeline.md#integrity-and-provider-formats). The local launcher must bind the current source and measured wire version through `AGENTSPINE_KING_TIMELINE_SOURCE` and `AGENTSPINE_KING_WIRE_PROTOCOL_VERSION`; AgentSpine neither searches `BLUN_HOME` nor infers either value. Project instructions still resolve through the Codex-compatible hierarchy, while history is enrolled as provider `king` and reads only the explicitly mapped `agents/main/wire.jsonl`. Correct MCP names, a passing Codex adapter, or a model-supplied path do not satisfy this contract.
 
 Repository fixtures verify the reviewed BLUN Code `1.0.109` / King SDK `0.12.1` record shape, objective `tool.result` recall across session restart and compaction, source-byte preservation, and denial for wrong protocol, foreign scope, replay, mutation, and unknown records. Fredrik's actual launcher mapping, installed wire version, live A/B recall, and King's enforcement of returned block decisions are still unverified and must be reported separately. No installation or trust configuration is changed by the repository tests.
 
@@ -209,13 +199,10 @@ using its existing claim/completion API, never a fabricated delivery receipt.
 After a crash it recovers this acknowledgement before invoking another host;
 an acknowledgement already claimed by another worker waits for that lease.
 
-Contribution deduplication hashes the normalized output text and stable subject
-with the original provider, tenant, account, binding, agent, project, group, chat,
-thread and session. It ignores the incoming event ID. It reserves the contribution
-when the outbox is prepared, so an uncertain delivery does not provoke a second
-send under another event. Existing outbox recovery handles retries. Changed text
-can produce a new contribution. This is **exact-content**, not semantic,
-deduplication; paraphrases and model-chosen new subject IDs are not proven equal.
+Contribution deduplication binds normalized text and subject to the complete
+origin route, excluding only the event ID. Reservation occurs before delivery;
+outbox recovery handles uncertainty. This is exact-content, not semantic,
+deduplication.
 
 Compatibility and limits: legacy host results containing only `text` keep their
 existing behavior. The ingress v1 record does not authenticate whether a message
@@ -226,14 +213,7 @@ No blanket text filter suppresses normal user answers. Private channels cannot
 use the group-silence contract. No Telegram configuration or live process changes
 are part of this implementation.
 
-Synthetic acceptance is in `test/gateway-group-response.test.js`: five quiet
-events produce zero sends and zero outbox entries; repeated worker ticks do not
-invoke the host again; a new contribution sends once, its exact duplicate sends
-zero times, changed content sends once, and two direct questions receive two
-answers. Budgets are 1024 bytes for this host contract and 10 seconds for the
-five-event task; the fresh-process recovery deadline is 5 seconds. Tests measure
-wall time and actual context bytes, not estimated tokens or model intelligence.
-They also cover exact leases, race, crash, restart, future versions, revocation,
-source mutation, secret-shaped text and immutable source Markdown. No real model
-or Telegram call is made. Real-model relevance, real unnecessary questions and
-token consumption remain unverified.
+Synthetic tests cover silence, direct answers, exact duplicate contributions,
+leases, crash/restart, future versions, revocation, mutation, secrets, immutable
+sources, byte budgets, and fixed deadlines. No model or Telegram call is made;
+real relevance, unnecessary questions, and token use remain unverified.

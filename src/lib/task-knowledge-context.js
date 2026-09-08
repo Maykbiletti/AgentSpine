@@ -54,13 +54,20 @@ export function taskKnowledgeContext(entries, { taskId = null, continuation, max
   const minimumMatches = Math.min(2, queryTerms.length);
   const seen = new Set();
   const ranked = [];
+  const feedbackIds = entries.filter((entry) => relevantUserFeedback(entry, task))
+    .map((entry) => entry.id).sort();
   for (const entry of entries) {
     if (relevantUserFeedback(entry, task)) {
       ranked.push({ entry, matchedTerms: [], score: 100_000 });
       continue;
     }
     if (relevantUserFeedbackInterpretation(entry, task)) {
-      ranked.push({ entry, matchedTerms: [], score: 99_999 });
+      const sourceIds = [...(entry.value.sourceFeedbackAssertionIds
+        || [entry.value.sourceFeedbackAssertionId])].sort();
+      if (sourceIds.length === feedbackIds.length
+        && sourceIds.every((id, index) => id === feedbackIds[index])) {
+        ranked.push({ entry, matchedTerms: [], score: 99_999 });
+      }
       continue;
     }
     if (task.status === "completed") continue;

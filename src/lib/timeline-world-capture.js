@@ -192,7 +192,8 @@ export async function captureSessionTimelineEvidence({
       if (interpretation !== null) {
         const request = timelineInterpretationRequest(interpretation);
         if (!request) return unavailable("timeline-feedback-interpretation-invalid", timeline);
-        const interpreted = await captureTimelineUserInterpretation({ root, scope, event,
+        const events = timeline.events.filter((item) => validEvent(item, timeline, scope));
+        const interpreted = await captureTimelineUserInterpretation({ root, scope, events, event,
           feedback: recorded.assertion, request, modelProvider: host,
           sessionRef: timelineSessionReference(sessionTimelineBinding({ host, sessionId, scope })), now });
         if (interpreted.reason) return unavailable(interpreted.reason, timeline);
