@@ -6,6 +6,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Added
 
+- Development only: a model may preserve one source-bound interpretation of exactly one active natural user-message candidate as an explicit `model-suggestion`. Host-derived provenance, deterministic conflict handling, restart continuity, and `completionVerified:false` are retained; the proposal never mutates continuation or creates confirmation, completion, authority, or semantic-acceptance evidence.
 - Development only: bounded natural user-message candidates can be source-verified into the existing world model and recalled beside their exact task checkpoint after restart/compaction. They remain uninterpreted assumptions, not automatic corrections or completion evidence. New-session semantic acceptance (job recognition, existing result filename, correct natural correction and selective clarification) is explicitly not passed.
 - Added a source-verified timeline correction path for an existing task continuation. Only an enrolled native user message with the exact `Correction: next step:` or `Korrektur: nächster Schritt:` prefix can replace the next step, and only inside the authenticated portal/thread route; ordinary chat and model text remain excluded.
 - Added an explicit timeline-to-world capture path. One exact objective event from a bound search is reopened, byte-verified and recorded in the existing world model with host-derived task, portal/thread, source, message and time provenance; archived chat and caller interpretations are never promoted to facts.

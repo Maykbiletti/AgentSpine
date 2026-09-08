@@ -108,6 +108,10 @@ function preAnswerRecall(world, currentTaskId) {
     item?.source?.kind === "uninterpreted-user-message"
       && item.value?.targetAssertionId === task.assertionId)
     .sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+  const interpretations = (world.knowledge?.taskContext?.items || []).filter((item) =>
+    item?.source?.kind === "model-suggestion"
+      && item.value?.schema === "agentspine.timeline-user-feedback-interpretation/v1"
+      && item.value?.targetAssertionId === task.assertionId);
   const taskValue = pick(task, ["taskId", "status", "objective"]);
   taskValue.lastVerifiedStep = task.lastVerifiedStep
     ? pick(task.lastVerifiedStep, ["summary", "result"]) : null;
@@ -118,6 +122,21 @@ function preAnswerRecall(world, currentTaskId) {
     ...pick(item.source, ["sessionRef", "messageRef"]),
     observedAt: item.observedAt
   }));
+  if (feedbackValues.length === 1) {
+    const proposal = interpretations.find((item) =>
+      item.value.sourceFeedbackAssertionId === feedback[0].id);
+    if (proposal) {
+      const modelInterpretation = {
+      ...pick(proposal.value, ["interpretationStatus", "interpretationKind",
+        "proposedNextStepSummary", "clarificationQuestion", "modelProvider", "replacedNextStepId"]),
+        digest: proposal.source.digest, completionVerified: false
+      };
+      for (const key of ["proposedNextStepSummary", "clarificationQuestion"]) {
+        if (modelInterpretation[key] === null) delete modelInterpretation[key];
+      }
+      feedbackValues[0].modelInterpretation = modelInterpretation;
+    }
+  }
   return {
     schema: "agentspine.pre-answer-recall/v1",
     order: "review-before-claims-and-actions",

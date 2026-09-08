@@ -40,6 +40,11 @@ const ENV_NAMES = ["AGENTSPINE_TIMELINE_SESSION_CAPABILITY", "AGENTSPINE_TIMELIN
   "AGENTSPINE_PROJECT_ID", "AGENTSPINE_TASK_ID", "AGENTSPINE_GOAL_ID", "AGENTSPINE_GOAL_STEP_ID",
   "AGENTSPINE_GROUP_ID", "AGENTSPINE_HOST", "AGENTSPINE_PORTAL_REF", "AGENTSPINE_THREAD_REF"];
 const hash = (value) => createHash("sha256").update(value).digest("hex");
+const interpretation = (feedbackAssertionId, targetAssertionId, kind = "next-step-correction",
+  proposedNextStepSummary = "Verify the checksum before migration.", clarificationQuestion = null) => ({
+  schema: "agentspine.timeline-user-feedback-interpretation-request/v1",
+  feedbackAssertionId, targetAssertionId, kind, proposedNextStepSummary, clarificationQuestion
+});
 
 function route(threadId) {
   return channelTimelineContinuity({ provider: "blun", tenantId: SCOPE.tenantId,
@@ -182,6 +187,47 @@ test("new session receives exact task, existing result file and source-verified 
     assert.equal(result.captured.status, "assumption");
     assert.equal(result.completionVerified, false);
   }
+  const capturedFeedback = captured[0].captured;
+  const proposal = interpretation(capturedFeedback.assertionId, target.id);
+  const proposalFields = { ...query, eventId: found.events[0].id, interpretation: proposal };
+  const proposed = await processCall(item.root, "session_timeline_capture",
+    await guarded(item, "capture", "tool:natural:interpret", proposalFields));
+  assert.equal(proposed.status, "captured", JSON.stringify(proposed));
+  assert.equal(proposed.captured.status, "assumption");
+  assert.equal(proposed.captured.source.kind, "model-suggestion");
+  assert.equal(proposed.captured.value.sourceFeedbackAssertionId, capturedFeedback.assertionId);
+  assert.equal(proposed.captured.value.targetAssertionId, target.id);
+  assert.equal(proposed.captured.value.interpretationStatus, "model-proposed");
+  assert.equal(proposed.captured.value.completionVerified, false);
+  assert.equal(proposed.captured.value.replacedNextStepId, target.value.nextStep.id);
+  const proposedAgain = await processCall(item.root, "session_timeline_capture",
+    await guarded(item, "capture", "tool:natural:interpret:restart", proposalFields));
+  assert.equal(proposedAgain.status, "duplicate");
+  const tamperedPermit = await guarded(item, "capture", "tool:natural:interpret:tamper", proposalFields);
+  tamperedPermit.interpretation.proposedNextStepSummary = "Tampered after the host permit.";
+  assert.equal((await processCall(item.root, "session_timeline_capture", tamperedPermit)).status, "unavailable",
+    "the one-use permit must bind the exact interpretation payload");
+  const conflicted = await processCall(item.root, "session_timeline_capture",
+    await guarded(item, "capture", "tool:natural:interpret:conflict", {
+      ...proposalFields, interpretation: interpretation(capturedFeedback.assertionId, target.id,
+        "next-step-correction", "Use a different unverified next step.") }));
+  assert.equal(conflicted.status, "unavailable");
+  assert.equal(conflicted.reason, "timeline-feedback-interpretation-conflicted");
+  const singlePrompt = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude", cwd: item.root,
+    session_id: "session:new", event_id: "turn:new:proposal", prompt: "Continue the existing task",
+    entity_id: SCOPE.entityId, user_id: SCOPE.userId, tenant_id: SCOPE.tenantId,
+    project_id: PROJECT, task_id: TASK, goal_id: SCOPE.goalId,
+    goal_step_id: SCOPE.goalStepId, group_id: null });
+  assert.match(singlePrompt.context, /model-proposed/);
+  assert.match(singlePrompt.context, /Verify the checksum before migration/);
+  for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" }, { PLUGIN_ROOT: "/synthetic/codex" },
+    { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
+    const native = hookOutput("UserPromptSubmit", singlePrompt.context, env).hookSpecificOutput;
+    const text = native.additionalContext || native.message;
+    assert.match(text, /model-proposed/);
+    assert.match(text, /Verify the checksum before migration/);
+    if (native.message) assert.ok(Buffer.byteLength(native.message) <= 1200);
+  }
   const secondQuery = { at: AT_TWO, query: "user message", windowSeconds: 1, includePriorSessions: true };
   const secondSearch = await processCall(item.root, "session_timeline_search",
     await guarded(item, "search", "tool:natural:search:two", secondQuery));
@@ -190,7 +236,7 @@ test("new session receives exact task, existing result file and source-verified 
   assert.equal((await processCall(item.root, "session_timeline_capture",
     await guarded(item, "capture", "tool:natural:capture:two", secondFields))).status, "captured");
   const after = await freshWorld(item);
-  assert.equal(after.knowledge.taskContext.items.length, 2);
+  assert.equal(after.knowledge.taskContext.items.length, 3);
   const candidate = after.knowledge.taskContext.items.find((item) => item.value.sourceText === CASES[0][1]);
   assert.equal(candidate.value.sourceText, CASES[0][1]);
   assert.equal(candidate.value.targetAssertionId, target.id);
@@ -200,6 +246,13 @@ test("new session receives exact task, existing result file and source-verified 
   assert.deepEqual(after.knowledge.continuation.tasks[0].nextStep, target.value.nextStep);
   assert.equal(after.knowledge.continuation.tasks[0].lastVerifiedStep.summary, "Created result.txt");
   assert.equal(after.facts.some((fact) => fact.predicate === "task.user-feedback"), false);
+  const secondFeedback = after.knowledge.taskContext.items.find((item) => item.value.sourceText === CASES[1][1]);
+  const ambiguousAttempt = await processCall(item.root, "session_timeline_capture",
+    await guarded(item, "capture", "tool:natural:interpret:ambiguous-set", {
+      ...secondFields, interpretation: interpretation(secondFeedback.id, target.id,
+        "ambiguous", null, "Which file do you mean?") }));
+  assert.equal(ambiguousAttempt.status, "unavailable");
+  assert.equal(ambiguousAttempt.reason, "timeline-feedback-interpretation-ambiguous-set");
   const duplicateArgs = await guarded(item, "capture", "tool:natural:restart", fields);
   assert.equal((await processCall(item.root, "session_timeline_capture", duplicateArgs)).status, "duplicate");
   const compact = await runHook({ hook_event_name: "PostCompact", host: "claude", cwd: item.root,
@@ -272,5 +325,18 @@ test("uninterpreted feedback cannot claim confirmation, supersede state, or esca
   for (const patch of [{ interpretationStatus: "confirmed" }, { completionVerified: true },
     { speakerRole: "assistant" }, { schema: "agentspine.timeline-user-feedback/v2" }, { nextStep: "invented" }]) {
     assert.throws(() => validateUserFeedback(input, { ...value, ...patch }));
+  }
+  const modelInput = { ...input, evidenceKind: "model-suggestion",
+    predicate: "task.user-feedback-interpretation" };
+  const modelValue = { schema: "agentspine.timeline-user-feedback-interpretation/v1",
+    sourceFeedbackAssertionId: "assertion:feedback", targetAssertionId: "assertion:target",
+    sourceProvider: "claude", sourceDigest: "d".repeat(64), modelProvider: "codex",
+    interpretationStatus: "model-proposed", interpretationKind: "completion-claim",
+    proposedNextStepSummary: null, clarificationQuestion: null,
+    replacedNextStepId: "step:old", completionVerified: false };
+  assert.doesNotThrow(() => validateUserFeedback(modelInput, modelValue));
+  for (const patch of [{ completionVerified: true }, { interpretationStatus: "confirmed" },
+    { proposedNextStepSummary: "invented" }, { modelProvider: "unknown" }]) {
+    assert.throws(() => validateUserFeedback(modelInput, { ...modelValue, ...patch }));
   }
 });

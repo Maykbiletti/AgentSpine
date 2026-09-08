@@ -1,7 +1,9 @@
 import { canonicalPath } from "./paths.js";
 import { resolveHostSourceCatalog } from "./source-roots.js";
 import { authorizeSessionTimelineInvocation } from "./session-timeline.js";
-import { timelineInvocationRequest, timelineToolKind } from "./mcp-timeline-tools.js";
+import {
+  timelineInterpretationRequest, timelineInvocationRequest, timelineToolKind
+} from "./mcp-timeline-tools.js";
 import { gatewayEnvironmentContext, hookDeliveryId, hostFromInput, sessionId } from "./hook-context.js";
 import { blockedHookOutput } from "./hook-output.js";
 import { sessionTimelineBinding } from "./session-timeline-contract.js";
@@ -125,7 +127,11 @@ function requestInput(tool, args) {
   if (args.includePriorSessions !== undefined && typeof args.includePriorSessions !== "boolean") return null;
   if (args.includePriorProviders !== undefined && typeof args.includePriorProviders !== "boolean") return null;
   if (args.includePriorProviders === true && args.includePriorSessions !== true) return null;
-  return { ...(tool === "capture" ? { eventId: args.eventId } : {}),
+  const interpretation = tool === "capture" && args.interpretation !== undefined
+    ? timelineInterpretationRequest(args.interpretation) : null;
+  if (tool === "capture" && args.interpretation !== undefined && !interpretation) return null;
+  return { ...(tool === "capture" ? { eventId: args.eventId,
+    ...(interpretation ? { interpretation } : {}) } : {}),
     ...(args.at === undefined ? {} : { at: args.at }), ...(args.query === undefined ? {} : { query: args.query }),
     ...(args.windowSeconds === undefined ? {} : { windowSeconds: args.windowSeconds }),
     ...(args.includePriorSessions === undefined ? {} : { includePriorSessions: args.includePriorSessions }),

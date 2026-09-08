@@ -6,6 +6,36 @@ const stableId = {
 };
 
 const optionalId = { anyOf: [stableId, { type: "null" }] };
+const assertionId = {
+  type: "string",
+  pattern: "^assertion:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$"
+};
+
+export const TIMELINE_INTERPRETATION_SCHEMA = "agentspine.timeline-user-feedback-interpretation-request/v1";
+const INTERPRETATION_KINDS = new Set([
+  "next-step-correction", "completion-claim", "not-current-instruction", "ambiguous"
+]);
+
+export function timelineInterpretationRequest(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.getPrototypeOf(value) !== Object.prototype) return null;
+  const keys = ["schema", "feedbackAssertionId", "targetAssertionId", "kind",
+    "proposedNextStepSummary", "clarificationQuestion"];
+  if (Object.keys(value).sort().join("\0") !== keys.sort().join("\0")
+    || value.schema !== TIMELINE_INTERPRETATION_SCHEMA
+    || !/^assertion:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/.test(value.feedbackAssertionId || "")
+    || !/^assertion:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/.test(value.targetAssertionId || "")
+    || !INTERPRETATION_KINDS.has(value.kind)) return null;
+  const next = value.proposedNextStepSummary;
+  const question = value.clarificationQuestion;
+  const validNext = typeof next === "string" && Boolean(next.trim())
+    && next.length <= 500 && !/[\r\n]/u.test(next);
+  const validQuestion = typeof question === "string" && Boolean(question.trim())
+    && question.length <= 300 && !/[\r\n]/u.test(question);
+  if ((value.kind === "next-step-correction" ? !validNext || question !== null
+    : next !== null || (value.kind === "ambiguous" ? !validQuestion : question !== null))) return null;
+  return structuredClone(value);
+}
 
 // Hosts qualify MCP tools differently. These prefixes must stay exact: a
 // foreign MCP server can expose an identically named tool but must never
@@ -124,7 +154,8 @@ export function timelineInvocationRequest(tool, args, root) {
     portalRef: scope.portalRef, threadRef: scope.threadRef,
     enrollmentDigest: input.request.enrollmentDigest };
   if (tool === "index") return { ...request, maxBytes: args.maxBytes ?? 4 * 1024 * 1024 };
-  return { ...request, ...(tool === "capture" ? { eventId: args.eventId ?? null } : {}),
+  return { ...request, ...(tool === "capture" ? { eventId: args.eventId ?? null,
+    interpretation: args.interpretation ?? null } : {}),
     at: args.at ?? null, query: args.query ?? null,
     windowSeconds: args.windowSeconds === undefined ? 0 : args.windowSeconds,
     includePriorSessions: args.includePriorSessions === true,
@@ -168,7 +199,7 @@ export const sessionTimelineTools = [
   },
   {
     name: "session_timeline_capture",
-    description: "Reopen one source-bound event. Objective fields become descriptive task state; strict prefixed corrections may replace the same-thread next step. Natural user messages selected with query 'user message' remain uninterpreted candidates beside their exact checkpoint, never facts, automatic corrections or completion. Caller provenance and interpretations are ignored.",
+    description: "Reopen one source-bound event. Objective fields become descriptive task state; strict prefixed corrections may replace the same-thread next step. Natural user messages remain uninterpreted beside their exact checkpoint. A second source-bound call may preserve one model interpretation as an unconfirmed proposal; it never changes continuation, proves completion or grants authority.",
     inputSchema: {
       type: "object", additionalProperties: false,
       required: ["eventId"],
@@ -177,6 +208,18 @@ export const sessionTimelineTools = [
         enrollmentDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
         timelineVisibility: { const: "private-verified" }, groupId: { anyOf: [stableId, { type: "null" }] },
         eventId: { type: "string", pattern: "^timeline-event:[a-f0-9]{32}$" },
+        interpretation: {
+          type: "object", additionalProperties: false,
+          required: ["schema", "feedbackAssertionId", "targetAssertionId", "kind",
+            "proposedNextStepSummary", "clarificationQuestion"],
+          properties: {
+            schema: { const: TIMELINE_INTERPRETATION_SCHEMA },
+            feedbackAssertionId: assertionId, targetAssertionId: assertionId,
+            kind: { enum: [...INTERPRETATION_KINDS] },
+            proposedNextStepSummary: { anyOf: [{ type: "string", minLength: 1, maxLength: 500 }, { type: "null" }] },
+            clarificationQuestion: { anyOf: [{ type: "string", minLength: 1, maxLength: 300 }, { type: "null" }] }
+          }
+        },
         at: { type: "string", format: "date-time" }, query: { type: "string", minLength: 3, maxLength: 512 },
         windowSeconds: { type: "integer", minimum: 0, maximum: 900 },
         includePriorSessions: { type: "boolean" }, includePriorProviders: { type: "boolean" } }

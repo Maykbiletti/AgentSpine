@@ -266,6 +266,7 @@ async function callTool(name, args = {}, environment = process.env) {
       sessionId: input.request.sessionId, scope: timeline.scope, eventId: args.eventId,
       at: args.at, query: args.query, windowSeconds: args.windowSeconds,
       includePriorSessions: args.includePriorSessions, includePriorProviders: args.includePriorProviders,
+      interpretation: args.interpretation ?? null,
       environment, enrollmentDigest: input.request.enrollmentDigest,
       hostHome: timelineHostHome(timeline.host, environment), transportDigest: timeline.transportDigest,
       invocationRequest }));

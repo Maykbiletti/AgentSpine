@@ -1,4 +1,6 @@
-import { relevantUserFeedback } from "./timeline-user-feedback.js";
+import {
+  relevantUserFeedback, relevantUserFeedbackInterpretation
+} from "./timeline-user-feedback.js";
 
 const MAX_ITEMS = 6;
 const STOP_WORDS = new Set([
@@ -55,6 +57,10 @@ export function taskKnowledgeContext(entries, { taskId = null, continuation, max
   for (const entry of entries) {
     if (relevantUserFeedback(entry, task)) {
       ranked.push({ entry, matchedTerms: [], score: 100_000 });
+      continue;
+    }
+    if (relevantUserFeedbackInterpretation(entry, task)) {
+      ranked.push({ entry, matchedTerms: [], score: 99_999 });
       continue;
     }
     if (task.status === "completed") continue;
