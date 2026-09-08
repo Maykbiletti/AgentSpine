@@ -253,7 +253,7 @@ async function runHookCore(input, payload, options) {
       ({ deliveryVerification, premortem } = contracts);
       if (contracts.blocked) {
         return processAdvisory(input, payload, root, scope, { deliveryVerification, premortem });
-  }
+      }
       try {
         artifactGuard = await verifyDeliveredArtifacts({ input, cwd });
         if (artifactGuard.blocked) {
@@ -469,7 +469,7 @@ async function runHookCore(input, payload, options) {
   if (payload) return { blocked: false, sourceWarning, artifactGuard, attentionEvent, selfstarter,
     learningDelivery, deliveryVerification, premortem, lessonRecall };
   process.stdout.write(`${JSON.stringify(lifecycleOutput(event, artifactGuard, premortem, deliveryVerification, process.env, sourceWarning, lessonRecall))}\n`);
-  }
+}
 export async function runHook(payload = null, options = {}) {
   let input = payload;
   try {
