@@ -6,7 +6,7 @@ const KIND = "uninterpreted-user-message";
 const KEYS = ["schema", "sourceText", "speakerRole", "sourceProvider", "sourceDigest",
   "targetAssertionId", "interpretationStatus", "completionVerified"];
 
-// Provenance is checked by timeline capture. This contract never interprets the quoted language.
+// Provenance only.
 export function validateUserFeedback(input, value) {
   if (input.evidenceKind !== KIND && value?.schema !== USER_FEEDBACK_SCHEMA) return;
   if (input.evidenceKind !== KIND || input.knowledgeKind !== "task-state"

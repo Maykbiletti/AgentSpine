@@ -21,6 +21,7 @@ function recallContext(groupId = null) {
           nextStep: { summary: "Migrate result.txt" }, observedAt: "2026-09-07T01:00:00.000Z"
         },
         feedback: { text: "Nein, erst die Prüfsumme prüfen", interpretationStatus: "unresolved",
+          completionVerified: false,
           sourceProvider: "claude", sourceDigest: "b".repeat(64), sessionRef: "session-ref:old",
           messageRef: "message:correction", observedAt: "2026-09-07T02:00:00.000Z" }
       },
@@ -34,7 +35,8 @@ function recallContext(groupId = null) {
         }], terminal: [] },
         taskContext: { items: [{
           value: { targetAssertionId: "assertion:task", sourceText: "Nein, erst die Prüfsumme prüfen",
-            interpretationStatus: "unresolved", sourceProvider: "claude", sourceDigest: "b".repeat(64) },
+            interpretationStatus: "unresolved", completionVerified: false,
+            sourceProvider: "claude", sourceDigest: "b".repeat(64) },
           source: { kind: "uninterpreted-user-message", sessionRef: "session-ref:old",
             messageRef: "message:correction" }, observedAt: "2026-09-07T02:00:00.000Z"
         }] }
@@ -59,7 +61,9 @@ function multipleFeedbackContext() {
   delete context.briefing.preAnswerRecall.task.assertionId;
   delete context.briefing.preAnswerRecall.task.lastVerifiedStep.evidenceDigest;
   delete context.briefing.preAnswerRecall.task.lastVerifiedStep.observedAt;
-  context.briefing.preAnswerRecall.feedbackReview = { status: "multiple-unresolved", omitted: 0 };
+  context.briefing.preAnswerRecall.feedbackReview = {
+    status: "multiple-unresolved", completionVerified: false
+  };
   return context;
 }
 
@@ -84,6 +88,7 @@ test("pre-answer recall is carried by every host output before claims", () => {
 test("bounded recall preserves uncertainty and suppresses private group projection", () => {
   const capsule = preAnswerRecallCapsule(recallContext());
   assert.equal(capsule.feedback.interpretationStatus, "unresolved");
+  assert.equal(capsule.feedback.completionVerified, false);
   assert.equal(capsule.feedback.sourceDigest, "b".repeat(64));
   assert.equal(recallContext().briefing.world.knowledge.taskContext.items[0].source.sessionRef,
     "session-ref:old");
@@ -101,6 +106,8 @@ test("multiple source messages remain visible so hosts cannot hide ambiguity", (
   const capsule = preAnswerRecallCapsule(context);
   assert.equal(capsule.feedbackCandidates.length, 2);
   assert.equal(capsule.feedbackReview.status, "multiple-unresolved");
+  assert.equal(capsule.feedbackReview.completionVerified, false);
+  assert.equal("omitted" in capsule.feedbackReview, false);
   assert.equal(capsule.feedbackCandidates[0].sourceDigest, "b".repeat(64));
   for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" },
     { PLUGIN_ROOT: "/synthetic/codex" }, { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
@@ -128,6 +135,7 @@ test("bounded King recall keeps three ordinary candidates instead of dropping th
     assert.match(message, new RegExp(candidate.text));
   }
   assert.match(message, /multiple-unresolved/);
+  assert.match(message, /"completionVerified":false/);
   assert.doesNotMatch(message, /Recall unavailable/);
 });
 

@@ -223,6 +223,7 @@ test("new session receives exact task, existing result file and source-verified 
     assert.match(output.hookSpecificOutput.additionalContext, /Nein, erst die Prüfsumme prüfen/);
     assert.match(output.hookSpecificOutput.additionalContext, /Nimm dafür die andere Datei/);
     assert.match(output.hookSpecificOutput.additionalContext, /multiple-unresolved/);
+    assert.match(output.hookSpecificOutput.additionalContext, /"completionVerified":false/);
   }
   const kingOutput = hookOutput("UserPromptSubmit", prompted.context,
     { BLUN_PLUGIN_ROOT: "/synthetic/blun" });
@@ -231,6 +232,7 @@ test("new session receives exact task, existing result file and source-verified 
   assert.match(kingOutput.hookSpecificOutput.message, /Nein, erst die Prüfsumme prüfen/);
   assert.match(kingOutput.hookSpecificOutput.message, /Nimm dafür die andere Datei/);
   assert.match(kingOutput.hookSpecificOutput.message, /multiple-unresolved/);
+  assert.match(kingOutput.hookSpecificOutput.message, /"completionVerified":false/);
   assert.match(kingOutput.hookSpecificOutput.message, /review-before-claims-and-actions/);
   gateway(route("thread:foreign"));
   assert.equal((await freshWorld(item)).knowledge.taskContext.items.length, 0);

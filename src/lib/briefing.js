@@ -114,7 +114,7 @@ function preAnswerRecall(world, currentTaskId) {
   taskValue.nextStep = task.nextStep ? pick(task.nextStep, ["summary"]) : null;
   const feedbackValues = feedback.slice(0, 3).map((item) => ({
     text: item.value.sourceText,
-    ...pick(item.value, ["interpretationStatus", "sourceProvider", "sourceDigest"]),
+    ...pick(item.value, ["interpretationStatus", "completionVerified", "sourceProvider", "sourceDigest"]),
     ...pick(item.source, ["sessionRef", "messageRef"]),
     observedAt: item.observedAt
   }));
@@ -125,7 +125,8 @@ function preAnswerRecall(world, currentTaskId) {
     ...(feedbackValues.length === 1 ? { feedback: feedbackValues[0] } : {}),
     ...(feedbackValues.length > 1 ? { feedbackCandidates: feedbackValues.map((item) =>
       pick(item, ["text", "sourceProvider", "sourceDigest", "sessionRef", "messageRef", "observedAt"])),
-      feedbackReview: { status: "multiple-unresolved", omitted: feedback.length - feedbackValues.length } } : {}),
+      feedbackReview: { status: "multiple-unresolved", completionVerified: false,
+        ...(feedback.length > 3 ? { omitted: feedback.length - 3 } : {}) } } : {}),
     authority: "context-only"
   };
 }
