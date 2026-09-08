@@ -3,9 +3,24 @@ import { open, readFile, stat, unlink, utimes } from "node:fs/promises";
 import { isFileLockContention, isTransientLockMetadataError } from "./filesystem-retry.js";
 
 const LOCK_SCHEMA = "agentspine.owned-file-lock/v1";
+const LOCAL_TAILS = new Map();
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function serialize(path, task) {
+  const previous = LOCAL_TAILS.get(path) || Promise.resolve();
+  let release;
+  const current = new Promise(resolve => { release = resolve; });
+  const tail = previous.catch(() => {}).then(() => current);
+  LOCAL_TAILS.set(path, tail);
+  await previous.catch(() => {});
+  try { return await task(); }
+  finally {
+    release();
+    if (LOCAL_TAILS.get(path) === tail) LOCAL_TAILS.delete(path);
+  }
 }
 
 function lockPayload(token, acquiredAt, leaseMs) {
@@ -66,7 +81,7 @@ async function removeStaleLock(path, staleAfterMs, assertPath = null) {
   }
 }
 
-export async function withOwnedFileLock(path, task, {
+async function acquire(path, task, {
   staleAfterMs = 15000,
   heartbeatIntervalMs = 1000,
   retryDelayMs = 25,
@@ -160,4 +175,8 @@ export async function withOwnedFileLock(path, task, {
       });
     }
   }
+}
+
+export function withOwnedFileLock(path, task, options) {
+  return serialize(path, () => acquire(path, task, options));
 }

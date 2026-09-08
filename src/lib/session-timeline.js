@@ -41,7 +41,6 @@ const ROOM_BYTES = 1024 * 1024;
 const EVENT_OUTCOMES = new Set(["pass", "fail", "blocked", "timeout", "error", "skipped"]);
 const EVENT_LABEL_RE = /^(?:suite-(?:0|[1-9]\d{0,3})|acceptance|audit|npm-check|ci|test)$/;
 const EVENT_KEYS = new Set(["nativeMessageId", "id", "at", "offset", "bytes", "sha256", "kind", "outcome", "count", "testLabel", "nextStepSummary", "terms", "authority"]);
-const MUTATION_TAILS = new Map();
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 function asDate(value) {
@@ -107,20 +106,6 @@ function readState(path, root, assertStable) {
 }
 function saveState(state, path, assertOwned, root, assertStable) {
   return saveTimelineState({ state, path, root, maximumBytes: MAX_STATE_BYTES, assertOwned, assertStable });
-}
-
-async function serializeLocalMutation(key, task) {
-  const previous = MUTATION_TAILS.get(key) || Promise.resolve();
-  let release;
-  const current = new Promise(resolve => { release = resolve; });
-  const tail = previous.catch(() => {}).then(() => current);
-  MUTATION_TAILS.set(key, tail);
-  await previous.catch(() => {});
-  try { return await task(); }
-  finally {
-    release();
-    if (MUTATION_TAILS.get(key) === tail) MUTATION_TAILS.delete(key);
-  }
 }
 
 function status(value, extra = {}) { return { schema: SESSION_TIMELINE_SCHEMA, ...value, ...extra, authority: AUTHORITY }; }
@@ -309,7 +294,7 @@ async function mutateSource(root, scoped, task) {
   let names;
   try { names = await paths(root); }
   catch { return status({ status: "unavailable", reason: "timeline-state-unavailable" }); }
-  return serializeLocalMutation(names.lock, () => withOwnedFileLock(names.lock, async ({ assertOwned }) => {
+  return withOwnedFileLock(names.lock, async ({ assertOwned }) => {
     let state;
     try { state = await readState(names.path, root, names.assertStable); }
     catch { return status({ status: "unavailable", reason: "timeline-state-unavailable" }); }
@@ -325,7 +310,7 @@ async function mutateSource(root, scoped, task) {
     return result.status === "indexed" ? status({ status: source.indexedBytes >= source.size ? "indexed"
       : result.preserveCursor ? "fresh-tail" : "partial", ...sourceMetadata(source), added: result.events.length })
       : status(result);
-  }, { assertPath: names.assertStable })).catch(() =>
+  }, { assertPath: names.assertStable }).catch(() =>
     status({ status: "unavailable", reason: "timeline-state-unavailable" }));
 }
 

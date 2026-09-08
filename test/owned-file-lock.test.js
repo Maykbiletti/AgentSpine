@@ -77,3 +77,70 @@ test("owned learning locks survive long mutations, recover crashes, and preserve
     "the former owner must not delete a replacement lease during cleanup");
   assert.deepEqual(await readFile(sourcePath), source, "lock recovery never changes user sources");
 });
+
+test("same-process contenders queue before spending the external lock budget", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-local-lock-"));
+  const lockPath = join(root, "state.json.lock");
+  const sourcePath = join(root, "source.txt");
+  const source = Buffer.from("synthetic source remains byte exact\n", "utf8");
+  const strictLease = { staleAfterMs: 1000, heartbeatIntervalMs: 100, retryDelayMs: 1, maxAttempts: 1 };
+  await writeFile(sourcePath, source);
+  t.after(async () => rm(root, { recursive: true, force: true }));
+
+  const order = [];
+  const result = await Promise.all(Array.from({ length: 4 }, (_, index) =>
+    withOwnedFileLock(lockPath, async () => {
+      order.push(`start-${index}`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      order.push(`end-${index}`);
+      return index;
+    }, strictLease)));
+
+  assert.deepEqual(result, [0, 1, 2, 3]);
+  assert.deepEqual(order, ["start-0", "end-0", "start-1", "end-1", "start-2", "end-2", "start-3", "end-3"]);
+  assert.deepEqual(await readFile(sourcePath), source, "local queuing never changes user sources");
+  await assert.rejects(readFile(lockPath), /ENOENT/);
+});
+
+test("a failed local owner releases its same-path successor", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-local-lock-failure-"));
+  const lockPath = join(root, "state.json.lock");
+  const strictLease = { staleAfterMs: 1000, heartbeatIntervalMs: 100, retryDelayMs: 1, maxAttempts: 1 };
+  t.after(async () => rm(root, { recursive: true, force: true }));
+
+  const settled = await Promise.allSettled([
+    withOwnedFileLock(lockPath, async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      throw new Error("synthetic owner failure");
+    }, strictLease),
+    withOwnedFileLock(lockPath, async () => "successor-acquired", strictLease)
+  ]);
+
+  assert.equal(settled[0].status, "rejected");
+  assert.match(settled[0].reason.message, /synthetic owner failure/);
+  assert.deepEqual(settled[1], { status: "fulfilled", value: "successor-acquired" });
+  await assert.rejects(readFile(lockPath), /ENOENT/);
+});
+
+test("local serialization remains independent for different lock paths", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-local-lock-paths-"));
+  const strictLease = { staleAfterMs: 1000, heartbeatIntervalMs: 100, retryDelayMs: 1, maxAttempts: 1 };
+  t.after(async () => rm(root, { recursive: true, force: true }));
+  let entered = 0;
+  let release;
+  const bothEntered = new Promise((resolve) => { release = resolve; });
+  const enter = async () => {
+    entered += 1;
+    if (entered === 2) release();
+    await Promise.race([
+      bothEntered,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("unrelated lock paths were serialized")), 500))
+    ]);
+  };
+
+  await Promise.all([
+    withOwnedFileLock(join(root, "left.lock"), enter, strictLease),
+    withOwnedFileLock(join(root, "right.lock"), enter, strictLease)
+  ]);
+  assert.equal(entered, 2);
+});
