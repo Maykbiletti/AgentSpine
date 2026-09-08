@@ -114,7 +114,7 @@ export function blunRuntimeMessage(context) {
     ? ""
     : `\nActive AgentSpine runtime data: ${JSON.stringify(active)}`;
   const recall = runtime.preAnswerRecall
-    ? `\nRecall before claims/actions: ${JSON.stringify(runtime.preAnswerRecall)}`
+    ? `\n${JSON.stringify(runtime.preAnswerRecall)}`
     : "";
   const root = runtime.premortem?.registration?.root;
   const instruction = typeof root === "string"
@@ -130,7 +130,7 @@ export function blunRuntimeMessage(context) {
   }
   const recallOnly = `${base}${recall}${BLUN_BOUND_MARKER}`;
   if (Buffer.byteLength(recallOnly) <= BLUN_MESSAGE_MAX_BYTES) return recallOnly;
-  return `${base}\nRecall unavailable.`;
+  return Buffer.byteLength(recall)<=BLUN_MESSAGE_MAX_BYTES+1?recall.slice(1):`${base}\nRecall unavailable.`;
 }
 
 export function hookOutput(event, context, env = process.env) {

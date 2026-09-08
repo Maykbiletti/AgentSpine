@@ -113,6 +113,24 @@ test("multiple source messages remain visible so hosts cannot hide ambiguity", (
   }
 });
 
+test("bounded King recall keeps three ordinary candidates instead of dropping the task", () => {
+  const context = multipleFeedbackContext();
+  delete context.briefing.preAnswerRecall.task.observedAt;
+  const candidates = context.briefing.preAnswerRecall.feedbackCandidates;
+  candidates.push({ ...candidates[0], text: "Das hatten wir gestern schon erledigt",
+    sourceDigest: "e".repeat(64), messageRef: "message:completion-claim" });
+  const message = blunRuntimeMessage(JSON.stringify(context));
+  assert.equal(Buffer.byteLength(message) <= 1200, true);
+  assert.match(message, /result\.txt/);
+  for (const candidate of candidates) {
+    assert.match(message, new RegExp(candidate.sourceDigest));
+    assert.match(message, new RegExp(candidate.messageRef));
+    assert.match(message, new RegExp(candidate.text));
+  }
+  assert.match(message, /multiple-unresolved/);
+  assert.doesNotMatch(message, /Recall unavailable/);
+});
+
 test("long-path BLUN messages retain mandatory premortem text and bound optional detail", () => {
   const root = `/tmp/${"deep-profile/".repeat(80)}project`;
   const requirementId = `premortem-requirement:${"a".repeat(64)}:${"b".repeat(64)}`;
