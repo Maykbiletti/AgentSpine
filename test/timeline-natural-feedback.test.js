@@ -27,6 +27,7 @@ const CASES = [
   ["de", "Ich möchte gerade nicht, dass du die andere Datei nimmst", "negation"]
 ];
 const AT = "2026-09-07T05:20:00.000Z";
+const AT_TWO = "2026-09-07T05:21:00.000Z";
 const NOW = "2026-09-07T06:40:00.000Z";
 const TASK = "task:natural-feedback";
 const PROJECT = "project:natural-feedback";
@@ -142,12 +143,14 @@ test("new session receives exact task, existing result file and source-verified 
   const newPath = join(directory, "new.jsonl");
   const messageLine = `${JSON.stringify({ timestamp: AT,
     message: { role: "user", content: CASES[0][1] } })}\n`;
+  const ambiguousLine = `${JSON.stringify({ timestamp: AT_TWO,
+    message: { role: "user", content: CASES[1][1] } })}\n`;
   const historyLines = Array.from({ length: 270 }, (_, index) => `${JSON.stringify({
     timestamp: "2026-09-07T05:10:00.000Z", message: { role: "user", content: `Synthetic note ${index}` }
   })}\n`).join("");
   const measuredLine = `${JSON.stringify({ timestamp: "2026-09-07T05:00:00.000Z",
     message: { role: "tool", content: "Measured result: PASS 1/1" } })}\n`;
-  const original = Buffer.from(measuredLine + historyLines + messageLine);
+  const original = Buffer.from(measuredLine + historyLines + messageLine + ambiguousLine);
   await writeFile(oldPath, original);
   await writeFile(newPath, `${JSON.stringify({ timestamp: "2026-09-07T05:30:00.000Z",
     message: { role: "user", content: "Bitte setze unseren Auftrag fort." } })}\n`);
@@ -179,8 +182,16 @@ test("new session receives exact task, existing result file and source-verified 
     assert.equal(result.captured.status, "assumption");
     assert.equal(result.completionVerified, false);
   }
+  const secondQuery = { at: AT_TWO, query: "user message", windowSeconds: 1, includePriorSessions: true };
+  const secondSearch = await processCall(item.root, "session_timeline_search",
+    await guarded(item, "search", "tool:natural:search:two", secondQuery));
+  assert.equal(secondSearch.events.length, 1, JSON.stringify(secondSearch));
+  const secondFields = { ...secondQuery, eventId: secondSearch.events[0].id };
+  assert.equal((await processCall(item.root, "session_timeline_capture",
+    await guarded(item, "capture", "tool:natural:capture:two", secondFields))).status, "captured");
   const after = await freshWorld(item);
-  const candidate = after.knowledge.taskContext.items[0];
+  assert.equal(after.knowledge.taskContext.items.length, 2);
+  const candidate = after.knowledge.taskContext.items.find((item) => item.value.sourceText === CASES[0][1]);
   assert.equal(candidate.value.sourceText, CASES[0][1]);
   assert.equal(candidate.value.targetAssertionId, target.id);
   assert.equal(candidate.source.kind, "uninterpreted-user-message");
@@ -198,6 +209,7 @@ test("new session receives exact task, existing result file and source-verified 
   assert.equal(typeof contextText, "string");
   assert.ok(Buffer.byteLength(contextText) <= 16_384, "fixed synthetic lifecycle context budget");
   assert.match(contextText, /Nein, erst die Prüfsumme prüfen/);
+  assert.match(contextText, /Nimm dafür die andere Datei/);
   assert.match(contextText, /result.txt/);
   const prompted = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude", cwd: item.root,
     session_id: "session:new", event_id: "turn:new:recall", prompt: "Continue the existing task",
@@ -209,12 +221,16 @@ test("new session receives exact task, existing result file and source-verified 
     const output = hookOutput("UserPromptSubmit", prompted.context, env);
     assert.match(output.hookSpecificOutput.additionalContext, /result.txt/);
     assert.match(output.hookSpecificOutput.additionalContext, /Nein, erst die Prüfsumme prüfen/);
+    assert.match(output.hookSpecificOutput.additionalContext, /Nimm dafür die andere Datei/);
+    assert.match(output.hookSpecificOutput.additionalContext, /multiple-unresolved/);
   }
   const kingOutput = hookOutput("UserPromptSubmit", prompted.context,
     { BLUN_PLUGIN_ROOT: "/synthetic/blun" });
   assert.equal(Buffer.byteLength(kingOutput.hookSpecificOutput.message) <= 1200, true);
   assert.match(kingOutput.hookSpecificOutput.message, /result.txt/);
   assert.match(kingOutput.hookSpecificOutput.message, /Nein, erst die Prüfsumme prüfen/);
+  assert.match(kingOutput.hookSpecificOutput.message, /Nimm dafür die andere Datei/);
+  assert.match(kingOutput.hookSpecificOutput.message, /multiple-unresolved/);
   assert.match(kingOutput.hookSpecificOutput.message, /review-before-claims-and-actions/);
   gateway(route("thread:foreign"));
   assert.equal((await freshWorld(item)).knowledge.taskContext.items.length, 0);
@@ -233,7 +249,7 @@ test("new session receives exact task, existing result file and source-verified 
   await item.preserve();
   t.diagnostic(JSON.stringify({ contextBytes: Buffer.byteLength(contextText),
     preAnswerBytes: Buffer.byteLength(kingOutput.hookSpecificOutput.message), elapsedMs: performance.now() - started,
-    preservedFeedbackCandidates: "0 -> 1", falseAutomaticApplications: 0, realModelRuns: 0,
+    preservedFeedbackCandidates: "0 -> 2", falseAutomaticApplications: 0, realModelRuns: 0,
     semanticAssignment: "unverified", necessaryQuestions: "unverified", unnecessaryQuestions: "unverified",
     repeatedJobs: "unverified", newSessionUserAcceptance: "not-passed" }));
 });

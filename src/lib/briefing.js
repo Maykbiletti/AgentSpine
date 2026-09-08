@@ -104,24 +104,28 @@ function preAnswerRecall(world, currentTaskId) {
     ...(world.knowledge?.continuation?.terminal || [])]
     .find((item) => item.taskId === currentTaskId);
   if (!task) return null;
-  const feedback = (world.knowledge?.taskContext?.items || []).find((item) =>
+  const feedback = (world.knowledge?.taskContext?.items || []).filter((item) =>
     item?.source?.kind === "uninterpreted-user-message"
-      && item.value?.targetAssertionId === task.assertionId);
-  const taskValue = pick(task, ["assertionId", "taskId", "status", "objective"]);
+      && item.value?.targetAssertionId === task.assertionId)
+    .sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+  const taskValue = pick(task, ["taskId", "status", "objective"]);
   taskValue.lastVerifiedStep = task.lastVerifiedStep
-    ? pick(task.lastVerifiedStep, ["summary", "result", "evidenceDigest", "observedAt"]) : null;
+    ? pick(task.lastVerifiedStep, ["summary", "result"]) : null;
   taskValue.nextStep = task.nextStep ? pick(task.nextStep, ["summary"]) : null;
-  const feedbackValue = feedback ? {
-    text: feedback.value.sourceText,
-    ...pick(feedback.value, ["interpretationStatus", "sourceProvider", "sourceDigest"]),
-    ...pick(feedback.source, ["sessionRef", "messageRef"]),
-    observedAt: feedback.observedAt
-  } : null;
+  const feedbackValues = feedback.slice(0, 3).map((item) => ({
+    text: item.value.sourceText,
+    ...pick(item.value, ["interpretationStatus", "sourceProvider", "sourceDigest"]),
+    ...pick(item.source, ["sessionRef", "messageRef"]),
+    observedAt: item.observedAt
+  }));
   return {
     schema: "agentspine.pre-answer-recall/v1",
     order: "review-before-claims-and-actions",
     task: taskValue,
-    ...(feedbackValue ? { feedback: feedbackValue } : {}),
+    ...(feedbackValues.length === 1 ? { feedback: feedbackValues[0] } : {}),
+    ...(feedbackValues.length > 1 ? { feedbackCandidates: feedbackValues.map((item) =>
+      pick(item, ["text", "sourceProvider", "sourceDigest", "sessionRef", "messageRef", "observedAt"])),
+      feedbackReview: { status: "multiple-unresolved", omitted: feedback.length - feedbackValues.length } } : {}),
     authority: "context-only"
   };
 }
@@ -224,11 +228,7 @@ export async function sessionBriefing({
       activeSignals: [],
       cue: voiceCue(prompt),
       guidance: [
-        "Lead with the useful outcome.",
-        "Use the active persona naturally; do not imitate emotion or claim consciousness.",
-        "Do not ask again for facts already present in current scoped context.",
-        "Acknowledge current frustration, uncertainty, correction, or success briefly when relevant, then act.",
-        "Be honest about uncertainty and take responsibility for concrete mistakes."
+        "Use scoped facts first; be honest; never claim consciousness; heed corrections; own errors."
       ],
       authority: "context-only"
     },
@@ -256,8 +256,7 @@ export async function sessionBriefing({
       measurement: "compact-json-utf8",
       omitted: { sources: 0, tasks: 0, relationships: 0, voice: 0, learning: 0, shared: 0, world: 0, attention: 0, portfolio: 0 }
     },
-    authority: "context-only",
-    note: "Context only; host rules control rights."
+    authority: "context-only"
   };
   recalculateBudget(result);
   if (result.budget.usedBytes > limit) throw new Error(`maxBytes is too small for the briefing envelope; use at least ${MIN_BYTES}`);

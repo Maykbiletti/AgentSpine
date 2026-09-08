@@ -47,6 +47,22 @@ function recallContext(groupId = null) {
   };
 }
 
+function multipleFeedbackContext() {
+  const context = recallContext();
+  const first = context.briefing.preAnswerRecall.feedback;
+  delete context.briefing.preAnswerRecall.feedback;
+  context.briefing.preAnswerRecall.feedbackCandidates = [first, { ...first,
+    text: "Nimm dafür die andere Datei", sourceDigest: "d".repeat(64),
+    messageRef: "message:ambiguous", observedAt: "2026-09-07T02:01:00.000Z" }]
+    .map(({ text, sourceProvider, sourceDigest, sessionRef, messageRef, observedAt }) =>
+      ({ text, sourceProvider, sourceDigest, sessionRef, messageRef, observedAt }));
+  delete context.briefing.preAnswerRecall.task.assertionId;
+  delete context.briefing.preAnswerRecall.task.lastVerifiedStep.evidenceDigest;
+  delete context.briefing.preAnswerRecall.task.lastVerifiedStep.observedAt;
+  context.briefing.preAnswerRecall.feedbackReview = { status: "multiple-unresolved", omitted: 0 };
+  return context;
+}
+
 test("pre-answer recall is carried by every host output before claims", () => {
   const context = JSON.stringify(recallContext());
   for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" },
@@ -69,13 +85,32 @@ test("bounded recall preserves uncertainty and suppresses private group projecti
   const capsule = preAnswerRecallCapsule(recallContext());
   assert.equal(capsule.feedback.interpretationStatus, "unresolved");
   assert.equal(capsule.feedback.sourceDigest, "b".repeat(64));
-  assert.equal(capsule.feedback.sessionRef, "session-ref:old");
-  assert.equal(capsule.feedback.messageRef, "message:correction");
+  assert.equal(recallContext().briefing.world.knowledge.taskContext.items[0].source.sessionRef,
+    "session-ref:old");
+  assert.equal(recallContext().briefing.world.knowledge.taskContext.items[0].source.messageRef,
+    "message:correction");
   assert.equal(capsule.task.lastVerifiedStep.result, "passed");
   assert.equal(capsule.authority, "context-only");
   assert.equal(preAnswerRecallCapsule(recallContext("group:foreign")), null);
   assert.doesNotMatch(blunRuntimeMessage(JSON.stringify(recallContext("group:foreign"))),
     /result\.txt|Prüfsumme|configured access/);
+});
+
+test("multiple source messages remain visible so hosts cannot hide ambiguity", () => {
+  const context = multipleFeedbackContext();
+  const capsule = preAnswerRecallCapsule(context);
+  assert.equal(capsule.feedbackCandidates.length, 2);
+  assert.equal(capsule.feedbackReview.status, "multiple-unresolved");
+  assert.equal(capsule.feedbackCandidates[0].sourceDigest, "b".repeat(64));
+  for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" },
+    { PLUGIN_ROOT: "/synthetic/codex" }, { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
+    const output = hookOutput("UserPromptSubmit", JSON.stringify(context), env);
+    const value = output.hookSpecificOutput.additionalContext || output.hookSpecificOutput.message;
+    assert.match(value, /Nein, erst die Prüfsumme prüfen/);
+    assert.match(value, /Nimm dafür die andere Datei/);
+    assert.match(value, /multiple-unresolved/);
+    if (env.BLUN_PLUGIN_ROOT) assert.equal(Buffer.byteLength(value) <= 1200, true);
+  }
 });
 
 test("long-path BLUN messages retain mandatory premortem text and bound optional detail", () => {
