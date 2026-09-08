@@ -104,11 +104,16 @@ test("bounded recall preserves uncertainty and suppresses private group projecti
 test("multiple source messages remain visible so hosts cannot hide ambiguity", () => {
   const context = multipleFeedbackContext();
   const capsule = preAnswerRecallCapsule(context);
-  assert.equal(capsule.feedbackCandidates.length, 2);
+  assert.equal(capsule.feedbackCandidates.rows.length, 2);
+  assert.deepEqual(capsule.feedbackCandidates.fields,
+    ["text", "sourceDigest", "messageRef", "observedAt"]);
+  assert.deepEqual(capsule.feedbackCandidates.common,
+    { sourceProvider: "claude", sessionRef: "session-ref:old" });
   assert.equal(capsule.feedbackReview.status, "multiple-unresolved");
   assert.equal(capsule.feedbackReview.completionVerified, false);
   assert.equal("omitted" in capsule.feedbackReview, false);
-  assert.equal(capsule.feedbackCandidates[0].sourceDigest, "b".repeat(64));
+  assert.equal(capsule.feedbackCandidates.rows[0][1], "b".repeat(64));
+  assert.match(JSON.stringify(capsule.mustRemember), /Check configured access/);
   for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" },
     { PLUGIN_ROOT: "/synthetic/codex" }, { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
     const output = hookOutput("UserPromptSubmit", JSON.stringify(context), env);
@@ -137,6 +142,45 @@ test("bounded King recall keeps three ordinary candidates instead of dropping th
   assert.match(message, /multiple-unresolved/);
   assert.match(message, /"completionVerified":false/);
   assert.doesNotMatch(message, /Recall unavailable/);
+});
+
+test("bounded King recall hands off loaded retrieval beside three source candidates", (t) => {
+  const context = multipleFeedbackContext();
+  delete context.briefing.preAnswerRecall.task.observedAt;
+  const candidates = context.briefing.preAnswerRecall.feedbackCandidates;
+  candidates.push({ ...candidates[0], text: "Das hatten wir gestern schon erledigt",
+    sourceDigest: "e".repeat(64), messageRef: "message:completion-claim" });
+  context.preflight.briefing.mustRemember = [];
+  context.preflight.briefing.retrieval = [{ providerId: "memory:synthetic", items: [{
+    id: "memory:access-check", revision: "1",
+    claim: "Check configured access before claiming it is unavailable.",
+    source: "source:synthetic", validity: "current", confidence: 1
+  }] }];
+  const capsule = preAnswerRecallCapsule(context);
+  assert.deepEqual(capsule.feedbackCandidates.fields,
+    ["text", "sourceDigest", "messageRef", "observedAt"]);
+  assert.deepEqual(capsule.feedbackCandidates.common,
+    { sourceProvider: "claude", sessionRef: "session-ref:old" });
+  assert.equal(capsule.feedbackCandidates.rows.length, 3);
+  assert.ok(capsule.retrieval);
+  assert.doesNotMatch(JSON.stringify(capsule.omitted || []), /retrieval/);
+  assert.equal(capsule.retrieval[0].claim,
+    "Check configured access before claiming it is unavailable.");
+  const message = blunRuntimeMessage(JSON.stringify(context));
+  assert.equal(Buffer.byteLength(message) <= 1200, true);
+  assert.match(message, /Check configured access before claiming it is unavailable/);
+  assert.match(message, /memory:synthetic/);
+  assert.match(message, /result\.txt/);
+  for (const candidate of candidates) {
+    assert.match(message, new RegExp(candidate.sourceDigest));
+    assert.match(message, new RegExp(candidate.messageRef));
+    assert.match(message, new RegExp(candidate.text));
+  }
+  assert.match(message, /multiple-unresolved/);
+  assert.match(message, /"completionVerified":false/);
+  t.diagnostic(JSON.stringify({ retrievalClaimsBefore: 0, retrievalClaimsAfter: 1,
+    candidatesPreserved: 3, preAnswerBytes: Buffer.byteLength(message), maximumBytes: 1200,
+    realModelRuns: 0, semanticApplication: "unverified" }));
 });
 
 test("long-path BLUN messages retain mandatory premortem text and bound optional detail", () => {

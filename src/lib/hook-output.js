@@ -5,12 +5,30 @@ function byteSize(value) {
   return Buffer.byteLength(JSON.stringify(value));
 }
 
-function addRecallField(packet, key, value, omitted) {
+function addRecallField(packet, key, value, maximum = 1020) {
   if (value === undefined || value === null) return;
   packet[key] = value;
-  if (byteSize(packet) <= 1020) return;
+  if (byteSize(packet) <= maximum) return true;
   delete packet[key];
-  omitted.push(key);
+  return false;
+}
+
+function compactFeedbackCandidates(packet) {
+  const candidates = packet.feedbackCandidates;
+  if (candidates && !Array.isArray(candidates)
+    && Array.isArray(candidates.fields) && Array.isArray(candidates.rows)) return true;
+  if (!Array.isArray(candidates) || candidates.length < 2) return false;
+  const sharedKeys = ["sourceProvider", "sessionRef"].filter((key) =>
+    candidates.every((item) => item?.[key] === candidates[0]?.[key]));
+  const fields = ["text", "sourceDigest", "messageRef", "observedAt",
+    ...["sourceProvider", "sessionRef"].filter((key) => !sharedKeys.includes(key))];
+  packet.feedbackCandidates = {
+    fields,
+    ...(sharedKeys.length ? { common: Object.fromEntries(sharedKeys.map((key) =>
+      [key, candidates[0][key]])) } : {}),
+    rows: candidates.map((item) => fields.map((key) => item[key]))
+  };
+  return true;
 }
 
 export function preAnswerRecallCapsule(detailed) {
@@ -28,13 +46,22 @@ export function preAnswerRecallCapsule(detailed) {
   const mustRemember = (preflight.mustRemember || []).map((item) => ({
     id: item.id, claim: item.claim, checksum: item.checksum
   }));
-  if (mustRemember.length) addRecallField(packet, "mustRemember", mustRemember, omitted);
+  if (mustRemember.length && !addRecallField(packet, "mustRemember", mustRemember)) {
+    if (!compactFeedbackCandidates(packet)
+      || !addRecallField(packet, "mustRemember", mustRemember, BLUN_MESSAGE_MAX_BYTES)) {
+      omitted.push("mustRemember");
+    }
+  }
   const retrieval = (preflight.retrieval || []).flatMap((provider) =>
     (provider.items || []).map((item) => ({ providerId: provider.providerId,
-      id: item.id, revision: item.revision, claim: item.claim, source: item.source,
-      validity: item.validity, confidence: item.confidence }))).slice(0, 3);
-  if (retrieval.length) addRecallField(packet, "retrieval", retrieval, omitted);
-  if (omitted.length && byteSize({ ...packet, omitted }) <= 1020) packet.omitted = omitted;
+      id: item.id, revision: item.revision, claim: item.claim, source: item.source }))).slice(0, 3);
+  if (retrieval.length && !addRecallField(packet, "retrieval", retrieval)) {
+    if (!compactFeedbackCandidates(packet)
+      || !addRecallField(packet, "retrieval", retrieval, BLUN_MESSAGE_MAX_BYTES)) {
+      omitted.push("retrieval");
+    }
+  }
+  if (omitted.length && byteSize({ ...packet, omitted }) <= BLUN_MESSAGE_MAX_BYTES) packet.omitted = omitted;
   return Object.keys(packet).length > 3 ? packet : null;
 }
 
