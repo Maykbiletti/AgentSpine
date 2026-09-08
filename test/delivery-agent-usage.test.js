@@ -12,6 +12,7 @@ import {
   verifyDeliveryAgentUse
 } from "../src/lib/delivery-agent-usage.js";
 import { preparePremortemRequirement } from "../src/lib/delivery-premortem.js";
+import { premortemSha256, sealPremortem } from "../src/lib/delivery-premortem-codec.js";
 import { projectStateDir } from "../src/lib/paths.js";
 
 const PROJECT = "project:delivery-agent-usage";
@@ -127,7 +128,7 @@ test("real ordered MCP calls unlock only their exact delivery and are single-use
     tool_name: "Write", tool_use_id: "write:before-calls",
     tool_input: { file_path: "target.js", content: "synthetic\n" }
   }));
-  assert.equal(denied.premortem.status, "missing-knowledge");
+  assert.equal(denied.premortem.status, "missing-briefing");
   const call = mcpClient();
   const recorded = await actualPreflight(call, root, requirementId);
   assert.match(recorded.agentSpineUse.briefingReceipt.digest, /^[a-f0-9]{64}$/);
@@ -196,4 +197,24 @@ test("concurrency deduplicates receipts, verification stays bounded, and uncerta
   assert.equal(allowed.blocked, false);
   assert.equal(allowed.premortem.agentSpineUse.status, "degraded");
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), source);
+});
+
+test("historical pre-output receipts remain readable but cannot prove handoff", async (t) => {
+  const { root } = await fixture(t);
+  const requirement = await prepare(root, "session:historical-handoff");
+  const generation = requirement.requirementId.split(":")[2];
+  const path = join(await projectStateDir(await realpath(root)), "delivery-agent-usage", `${generation}.json`);
+  await mkdir(join(path, ".."), { recursive: true });
+  const briefing = sealPremortem({ schema: "agentspine.delivery-agent-use-receipt/v1", stage: "briefing",
+    requirementId: requirement.requirementId, origin: "verified-host-preflight",
+    inputDigest: "a".repeat(64), resultDigest: "b".repeat(64),
+    recordedAt: new Date().toISOString(), authority: "context-only" });
+  const state = { schema: "agentspine.delivery-agent-usage/v1", requirementId: requirement.requirementId,
+    laneDigest: requirement.requirementId.split(":")[1], generationDigest: generation,
+    revision: 1, briefing, knowledge: null, consumedAt: null, consumedDigest: null,
+    authority: "context-only" };
+  state.integrityDigest = premortemSha256(state);
+  await writeFile(path, JSON.stringify(state));
+  assert.equal((await verifyDeliveryAgentUse({ root, requirementId: requirement.requirementId })).status,
+    "handoff-unverified");
 });

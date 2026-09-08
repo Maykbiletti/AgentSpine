@@ -1,4 +1,4 @@
-import { consumeHookBriefingOrigin, recordHookBriefingUse } from "./hook-briefing-use.js";
+import { consumeHookBriefingOrigin } from "./hook-briefing-use.js";
 import { runtimeHostForTimeline, timelineHostForRuntime, timelineHostHome, timelineProtocolFromRuntime, timelineSourceFromRuntime,
   validTimelineHost } from "./session-timeline-provider.js";
 
@@ -30,7 +30,7 @@ function sameInput(left, right) {
     && (left?.protocol_version ?? null) === (right?.protocol_version ?? null);
 }
 
-function consumedResult(origin, briefingUse) { return { consumed: true, origin, briefingUse }; }
+function consumedResult(origin, briefingOrigin) { return { consumed: true, origin, briefingOrigin }; }
 
 function eligibleTimelineOrigin(binding, input) {
   const transcriptPath = input?.transcript_path ?? input?.transcriptPath;
@@ -50,8 +50,6 @@ export async function consumeTimelineHostOrigin({
     resolvedSources, preflight, prompt, environment, now });
   if (!briefingOrigin) return null;
   const receipt = preflight.receipt;
-  const briefingUse = await recordHookBriefingUse({ origin: briefingOrigin,
-    root: resolvedSources.projectRoot, now });
   const timelineHost = timelineHostForRuntime(scope.host, environment);
   const binding = timelineBinding(input, { ...scope, host: timelineHost });
   const expectedReceiptHost = runtimeHostForTimeline(timelineHost);
@@ -59,17 +57,17 @@ export async function consumeTimelineHostOrigin({
     || receipt.hookEvent !== USER_PROMPT_SUBMIT || receipt.sessionId !== binding.sessionId
     || receipt.agentId !== binding.entityId || receipt.userId !== binding.userId || receipt.tenantId !== binding.tenantId
     || receipt.projectId !== binding.projectId || receipt.groupId !== binding.groupId || receipt.taskId !== binding.taskId) {
-    return consumedResult(null, briefingUse);
+    return consumedResult(null, briefingOrigin);
   }
   const sourceInput = { transcript_path: timelineSourceFromRuntime(timelineHost, input, environment),
     event_id: input.event_id ?? input.hook_event_id ?? null,
     protocol_version: timelineProtocolFromRuntime(timelineHost, environment) };
-  if (!eligibleTimelineOrigin(binding, sourceInput)) return consumedResult(null, briefingUse);
+  if (!eligibleTimelineOrigin(binding, sourceInput)) return consumedResult(null, briefingOrigin);
   const origin = Object.freeze({ binding, input: Object.freeze({
     ...sourceInput,
   }), root: resolvedSources.projectRoot, hostHome: timelineHostHome(timelineHost, environment), event });
   verifiedOrigins.add(origin);
-  return consumedResult(origin, briefingUse);
+  return consumedResult(origin, briefingOrigin);
 }
 
 export function validVerifiedTimelineHostOrigin({ origin, root, input, binding, hostHome, event }) {

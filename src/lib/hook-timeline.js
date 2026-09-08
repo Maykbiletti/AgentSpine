@@ -77,14 +77,16 @@ export async function finalizeUserPromptSessionTimeline({
 }) {
   const consumed = await consumeTimelineHostOrigin({ event: "UserPromptSubmit", input, scope, resolvedSources,
     preflight, prompt, environment: process.env, now });
-  if (!consumed?.consumed) return { preflightConsumed: false, timeline: unavailable("preflight-receipt-unavailable") };
+  if (!consumed?.consumed) return { preflightConsumed: false, briefingOrigin: null,
+    timeline: unavailable("preflight-receipt-unavailable") };
   try {
-    return { preflightConsumed: true, timeline: await captureSessionTimelineLifecycle({
+    return { preflightConsumed: true, briefingOrigin: consumed.briefingOrigin,
+      timeline: await captureSessionTimelineLifecycle({
       root, event: "UserPromptSubmit", input, scope, hostHome: resolvedSources.hostHome,
       hostOrigin: consumed.origin, clock: () => new Date(now)
     }) };
   } catch (error) {
-    return { preflightConsumed: true, timeline: {
+    return { preflightConsumed: true, briefingOrigin: consumed.briefingOrigin, timeline: {
       schema: "agentspine.session-timeline/v1", status: "degraded", reason: error.message, authority: AUTHORITY
     } };
   }

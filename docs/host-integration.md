@@ -4,28 +4,20 @@ AgentSpine uses native plugin surfaces instead of asking users to paste a large 
 
 ## Provider contracts and evidence
 
-Provider names are not interchangeable. Shared retrieval, structured knowledge and task continuation remain context-only. Each adapter must separately establish native lifecycle events, instruction roots, transcript format/version, session/message identifiers and authenticated invocation binding. For portal tasks, the host must also carry the gateway-derived opaque portal/thread pair into the process; ordinary hook or MCP arguments cannot establish it. Unknown formats remain unavailable; adapters must not impersonate another host or infer access from remembered text.
-
-Portal continuity is an additional gateway-origin binding. A launcher receives
-`AGENTSPINE_PORTAL_REF` and `AGENTSPINE_THREAD_REF` only as a pair inside the
-existing `agentspine.gateway-start/v1` environment; both are opaque values
-derived from the authenticated channel event. It must preserve them for the
-session lifecycle but must not construct them from chat text or model output.
-The repository contract does not prove that an installed BLUN or King launcher
-forwards these values.
+Provider evidence is not interchangeable. Each adapter separately binds its lifecycle, instruction root, transcript version, session/message IDs and invocation. Portal tasks also require the gateway-issued `AGENTSPINE_PORTAL_REF`/`AGENTSPINE_THREAD_REF` pair from `agentspine.gateway-start/v1`; hooks and MCP may match but never invent it. Direct sessions omit it. All recalled state is context-only, and repository checks do not prove a live launcher forwards it.
 
 | Surface | Claude Code | Codex | BLUN King |
 |---|---|---|---|
 | Project instructions | `CLAUDE.md` hierarchy | `AGENTS.md` hierarchy | `AGENTS.md` through the isolated BLUN profile |
 | Hook package | Native `hooks/hooks.json` | Explicit `hooks/codex.json` | Manifest lifecycle hooks |
-| Verified hook briefing → delivery knowledge | Shared signed preflight bridge | Shared signed preflight bridge; synthetic Codex regression | Shared bridge only if the actual host delivers the verified lifecycle; live acceptance remains open |
-| Historical transcript enrollment | Existing Claude adapter, bounded registered source | Explicit native Codex rollout snapshot; bounded `sessions` source, verified project/session header; synthetic A/B acceptance | Explicit King agent-wire snapshot; protected source/protocol mapping, verified session/header and synthetic A/B acceptance; live mapping remains open |
-| Cross-provider evidence handoff | Disabled unless the local host opts in; source keeps Claude provenance | Disabled unless local capability and exact search selection both opt in; source keeps Codex provenance | Same repository contract; Fredrik's live launcher mapping remains unverified |
+| Verified hook briefing → delivery knowledge | Native `additionalContext` handoff receipt | Native `additionalContext` handoff receipt | Native bounded `message` handoff receipt; live acceptance open |
+| Historical transcript enrollment | Bounded registered Claude source | Bounded Codex `sessions` source with verified headers | Protected King agent-wire mapping; live mapping open |
+| Cross-provider evidence handoff | Explicit opt-in; Claude provenance retained | Explicit opt-in; Codex provenance retained | Same contract; live launcher unverified |
 | Native permissions/trust | Host-owned | Host-owned | Host-owned; enforcement of returned block decisions remains externally unverified |
 
-A successful `SessionStart` alone is not assignment-bound proof. On `UserPromptSubmit`, the exact signed source snapshot is verified and consumed once, then its briefing use is recorded for the current requirement. MCP knowledge and premortem reuse that recorded observation without refetching content. Serialized `loaded: true` claims cannot create the process-local verification capability. Missing or consumed usage evidence yields useful context with `verified: false`, `completionVerified: false` and `automaticRetry: false`; it does not certify delivery or trigger a mandatory fetch. An optional explicit MCP briefing read reports `satisfied-by-host` when the original verified hook observation already exists, preserving that first receipt.
+`UserPromptSubmit` consumes the exact signed snapshot once. Only after stdout accepts the native output does AgentSpine store `agentspine.host-context-handoff/v1`, bound to provider, field, byte count and digest. In-process returns, serialized claims and legacy `verified-host-preflight` receipts do not prove handoff. MCP knowledge may reuse a valid receipt; missing, stale or consumed evidence remains non-blocking and explicitly unverified. The receipt proves transport, not model use or delivery.
 
-Adapter acceptance must use synthetic sessions A/B, a bounded registered project root, exact source bytes and stable provenance, and cover restart, changed sources, foreign project/tenant/group, private-source exclusion and service failure. Cross-provider continuity additionally requires two independent choices: a protected local environment capability and `includePriorProviders: true` coupled to `includePriorSessions: true`. The prior snapshot remains bound to its own signed provider enrollment; the current invocation remains bound to its current provider transport. Report repository tests separately from the installed provider version and live-host observations. Never claim provider or cross-provider history support from package validation, matching tool names or another provider's passing test.
+Adapter acceptance uses bounded synthetic A/B sessions and covers restart, source mutation, foreign scope, private exclusion and service failure. Cross-provider recall still needs local opt-in plus `includePriorProviders: true` with `includePriorSessions: true`. Report repository, installed-host and model observations separately.
 
 ## Claude Code
 
@@ -111,9 +103,7 @@ Verify the live host in a newly started Codex CLI session:
 Trust all and continue
 ```
 
-Acceptance requires four separate observations from that new host process: `skills/list` includes `agent-spine`, `mcpServerStatus/list` shows the configured server, MCP `tools/list` exposes the required tools, and a real hook briefing followed by assignment-bound knowledge and premortem succeeds without another briefing fetch. These are distinct Codex [app-server APIs](https://developers.openai.com/codex/app-server); an isolated server handshake or the presence of `SKILL.md` alone is not native host proof.
-
-`npm run host:check` proves manifest shape, package containment, and a real MCP handshake. `npm run host:install-check` stages an update, verifies the copied skill bytes, restarts the managed reader, lists tools, reads the existing synthetic session and performs the three bound calls. Neither command can manufacture Codex's user-controlled discovery, trust or process state; only those observations in the actual host prove the final boundary.
+Native Codex acceptance separately observes `skills/list`, `mcpServerStatus/list`, MCP `tools/list`, the hook handoff and subsequent bound knowledge/premortem. These are distinct [app-server APIs](https://developers.openai.com/codex/app-server); a handshake or `SKILL.md` alone is insufficient. Repository host checks validate manifests, package bytes and an isolated MCP/install lifecycle, but cannot prove user trust, live discovery or model application.
 
 ## BLUN King
 

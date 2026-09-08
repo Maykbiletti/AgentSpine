@@ -36,7 +36,12 @@ function sealState(state) {
 function validReceipt(value, stage, requirementId) {
   return value && value.schema === RECEIPT_SCHEMA && value.stage === stage
     && value.requirementId === requirementId && value.authority === AUTHORITY
-    && (value.origin === undefined || value.origin === "verified-host-preflight")
+    && [undefined, "verified-host-preflight", "verified-host-handoff"].includes(value.origin)
+    && (value.origin !== "verified-host-handoff" || (value.handoff?.schema === "agentspine.host-context-handoff/v1"
+      && ["additionalContext", "message"].includes(value.handoff.field)
+      && ["claude", "codex", "generic", "king"].includes(value.handoff.host)
+      && Number.isSafeInteger(value.handoff.bytes) && value.handoff.bytes > 0
+      && DIGEST_RE.test(value.handoff.digest || "")))
     && DIGEST_RE.test(value.inputDigest || "") && DIGEST_RE.test(value.resultDigest || "")
     && validTime(value.recordedAt) && validSeal(value);
 }
@@ -103,15 +108,15 @@ async function currentRequirement(root, requirementId) {
   return current;
 }
 
-function receipt(stage, requirementId, input, result, now, verifiedHostBriefing) {
+function receipt(stage, requirementId, input, result, now, verifiedHostHandoff) {
   return seal({ schema: RECEIPT_SCHEMA, stage, requirementId,
-    ...(verifiedHostBriefing ? { origin: "verified-host-preflight" } : {}),
+    ...(verifiedHostHandoff ? { origin: "verified-host-handoff", handoff: structuredClone(result.handoff) } : {}),
     inputDigest: sha256(input), resultDigest: sha256(result),
     recordedAt: at(now), authority: AUTHORITY });
 }
 
 async function recordStage({ root, requirementId, stage, input, result,
-  verifiedHostBriefing = false, preserveConsumed = false, now = new Date() }) {
+  verifiedHostHandoff = false, preserveConsumed = false, now = new Date() }) {
   try {
     const current = await currentRequirement(root, requirementId);
     if (current.status === "degraded" || current.blocked) return current;
@@ -119,18 +124,18 @@ async function recordStage({ root, requirementId, stage, input, result,
     return await withOwnedFileLock(paths.lockPath, async ({ assertOwned }) => {
       let state = await readState(paths.path, paths.parsed)
         || emptyState(requirementId, paths.parsed);
-      if (!preserveConsumed && state.briefing?.origin !== "verified-host-preflight"
+      if (!preserveConsumed && state.briefing?.origin !== "verified-host-handoff"
         && state.consumedAt && stage === "briefing" && current.closed && !current.consumed) {
         state = emptyState(requirementId, paths.parsed);
       } else if (state.consumedAt) return block("reused",
         `AgentSpine usage receipts for ${requirementId} were already consumed.`, { requirementId });
       if (stage === "knowledge" && !state.briefing) return block("missing-briefing",
         "AgentSpine delivery preflight is missing stage 1: session_briefing.", { requirementId });
-      if (stage === "briefing" && !verifiedHostBriefing && state.briefing?.origin === "verified-host-preflight") {
+      if (stage === "briefing" && !verifiedHostHandoff && state.briefing?.origin === "verified-host-handoff") {
         return { status: "satisfied-by-host", blocked: false, requirementId,
           receipt: structuredClone(state.briefing), digest: state.briefing.digest };
       }
-      const proposed = receipt(stage, requirementId, input, result, now, verifiedHostBriefing);
+      const proposed = receipt(stage, requirementId, input, result, now, verifiedHostHandoff);
       if (state[stage]) {
         if (state[stage].inputDigest !== proposed.inputDigest
           || state[stage].resultDigest !== proposed.resultDigest) {
@@ -173,6 +178,8 @@ export async function verifyDeliveryAgentUse({ root, requirementId }) {
     const state = await readState(paths.path, paths.parsed);
     if (!state?.briefing) return block("missing-briefing",
       "AgentSpine delivery preflight is missing stage 1: session_briefing.", { requirementId });
+    if (state.briefing.origin === "verified-host-preflight") return block("handoff-unverified",
+      "The historical hook receipt predates verified host-context handoff.", { requirementId });
     if (!state.knowledge) return block("missing-knowledge",
       "AgentSpine delivery preflight is missing stage 2: delivery_knowledge_query.", { requirementId });
     if (state.consumedAt) return block("reused",

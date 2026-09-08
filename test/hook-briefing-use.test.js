@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +19,8 @@ import { projectStateDir } from "../src/lib/paths.js";
 import { consumeHookBriefingOrigin, recordHookBriefingUse } from "../src/lib/hook-briefing-use.js";
 
 const PROJECT = "project:delivery-agent-usage";
+const HANDOFF = { schema: "agentspine.host-context-handoff/v1", host: "codex",
+  field: "additionalContext", bytes: 512, digest: "a".repeat(64) };
 
 async function fixture(t) {
   const workspace = await mkdtemp(join(tmpdir(), "agentspine-delivery-use-"));
@@ -98,6 +102,18 @@ function body(result) {
   return JSON.parse(result.content[0].text);
 }
 
+function nativeHook(input, pluginEnvironment, field) {
+  const environment = { ...process.env };
+  for (const name of ["BLUN_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT"]) delete environment[name];
+  Object.assign(environment, pluginEnvironment);
+  const child = spawnSync(process.execPath, ["src/hook.js"], { cwd: process.cwd(), encoding: "utf8",
+    timeout: 5_000, input: `${JSON.stringify(input)}\n`, env: environment });
+  assert.equal(child.status, 0, child.stderr);
+  const output = JSON.parse(child.stdout.trim());
+  assert.equal(typeof output.hookSpecificOutput[field], "string");
+  return output;
+}
+
 async function prepare(root, sessionId, goalStepId = null) {
   return preparePremortemRequirement({ root, binding: binding(sessionId, goalStepId) });
 }
@@ -109,7 +125,7 @@ async function actualPreflight(call, root, requirementId) {
   assert.equal(briefing.isError, false);
   assert.match(body(briefing).deliveryUseReceipt.digest, /^[a-f0-9]{64}$/);
   const knowledge = await call("delivery_knowledge_query", { root, requirementId,
-    targetPaths: ["target.js"], contractPaths: ["AGENTS.md"], recentErrorTerms: ["synthetic"],
+    targetPaths: ["target.js"], contractPaths: ["AGENTS.md"],
     recentErrorTerms: ["failure", "foreign receipt"] });
   assert.equal(knowledge.isError, false);
   assert.equal(body(knowledge).targets[0].path, "target.js");
@@ -129,19 +145,45 @@ test("host-loaded Codex briefing feeds knowledge and premortem without MCP refet
   assert.equal(prompted.blocked, false);
   const requirementId = prompted.preflight.premortem.requirementId;
   const call = mcpClient();
-  const knowledge = await call("delivery_knowledge_query", { root, requirementId,
+  const beforeHandoff = await call("delivery_knowledge_query", { root, requirementId,
     targetPaths: ["target.js"], contractPaths: ["AGENTS.md"], recentErrorTerms: ["synthetic"] });
-  assert.equal(knowledge.isError, false, JSON.stringify(body(knowledge)));
-  assert.equal(body(knowledge).deliveryUseReceipt.verified, true);
-  assert.equal(body(knowledge).targets[0].path, "target.js");
+  assert.equal(body(beforeHandoff).deliveryUseReceipt.verified, false,
+    "an in-process context return is not a native host handoff");
+  let nativeRequirementId;
+  for (const adapter of [
+    { host: "claude", field: "additionalContext", env: { CLAUDE_PLUGIN_ROOT: "/synthetic/claude" } },
+    { host: "codex", field: "additionalContext", env: { PLUGIN_ROOT: "/synthetic/codex" } },
+    { host: "king", runtimeHost: "codex", field: "message", env: { BLUN_PLUGIN_ROOT: "/synthetic/blun" } }
+  ]) {
+    const sessionId = `session:native-${adapter.host}`;
+    const output = nativeHook({ ...hookInput(root, sessionId, "UserPromptSubmit", {
+      prompt: "Change the synthetic target safely.", event_id: `event:native-${adapter.host}`
+    }), host: adapter.runtimeHost || adapter.host }, adapter.env, adapter.field);
+    const content = output.hookSpecificOutput[adapter.field];
+    const matched = content.match(/premortem-requirement:[a-f0-9]{64}:[a-f0-9]{64}/);
+    const requirementId = adapter.field === "additionalContext"
+      ? JSON.parse(content).preflight.premortem.requirementId : matched?.[0];
+    assert.ok(requirementId, `${adapter.host} omitted the current requirement`);
+    const knowledge = await call("delivery_knowledge_query", { root, requirementId,
+      targetPaths: ["target.js"], contractPaths: ["AGENTS.md"], recentErrorTerms: ["synthetic"] });
+    assert.equal(body(knowledge).deliveryUseReceipt.verified, true, adapter.host);
+    const verified = await verifyDeliveryAgentUse({ root, requirementId });
+    assert.equal(verified.status, "verified", adapter.host);
+    assert.deepEqual(verified.briefingReceipt.handoff, {
+      schema: "agentspine.host-context-handoff/v1", host: adapter.host, field: adapter.field,
+      bytes: Buffer.byteLength(content), digest: createHash("sha256").update(content).digest("hex")
+    });
+    if (adapter.host === "codex") nativeRequirementId = requirementId;
+  }
   // A new MCP runtime reads the stored, verified hook evidence after restart.
   const resumed = mcpClient();
-  const premortem = await resumed("record_delivery_premortem", { root, requirementId, items: items() });
+  const premortem = await resumed("record_delivery_premortem", { root,
+    requirementId: nativeRequirementId, items: items() });
   assert.equal(premortem.isError, false, JSON.stringify(body(premortem)));
   assert.equal(body(premortem).agentSpineUse.status, "verified");
   const compact = await runHook(hookInput(root, session, "PostCompact"));
   assert.equal(compact.blocked, false);
-  assert.equal((await verifyDeliveryAgentUse({ root, requirementId })).status, "verified");
+  assert.equal((await verifyDeliveryAgentUse({ root, requirementId: nativeRequirementId })).status, "verified");
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), source);
 });
 
@@ -175,7 +217,7 @@ test("serialized loaded claims cannot create host evidence", async (t) => {
   const requirement = await prepare(root, "session:forged");
   for (const origin of [null, { loaded: true, root, requirementId: requirement.requirementId,
     receipt: { status: "ready", host: "codex" } }]) {
-    const result = await recordHookBriefingUse({ root, origin });
+    const result = await recordHookBriefingUse({ root, origin, handoff: HANDOFF });
     assert.equal(result.verified, false);
     assert.equal(result.automaticRetry, false);
   }
@@ -223,13 +265,16 @@ test("host proof is single-use under races and cannot select another requirement
   const origins = await Promise.all([consumeHookBriefingOrigin(args), consumeHookBriefingOrigin(args)]);
   assert.equal(origins.filter(Boolean).length, 1);
   const origin = origins.find(Boolean);
-  const results = await Promise.all([recordHookBriefingUse({ root, origin }), recordHookBriefingUse({ root, origin })]);
+  assert.equal((await recordHookBriefingUse({ root, origin, handoff: null })).verified, false,
+    "an invalid delivery description cannot consume the opaque origin");
+  const results = await Promise.all([recordHookBriefingUse({ root, origin, handoff: HANDOFF }),
+    recordHookBriefingUse({ root, origin, handoff: HANDOFF })]);
   assert.equal(results.filter(result => result.verified).length, 1);
   assert.equal(await consumeHookBriefingOrigin(args), null);
   const other = await prepare(root, "session:other");
   const fresh = await hostPreparation(root, "session:new", "new");
   fresh.preflight.premortem.requirementId = other.requirementId;
-  const wrong = await recordHookBriefingUse({ root, origin: await consumeHookBriefingOrigin(fresh) });
+  const wrong = await recordHookBriefingUse({ root, origin: await consumeHookBriefingOrigin(fresh), handoff: HANDOFF });
   assert.equal(wrong.verified, false);
   assert.equal(wrong.reason, "host-briefing-binding-mismatch");
   assert.equal((await verifyDeliveryAgentUse({ root, requirementId: other.requirementId })).status, "missing-briefing");
@@ -260,7 +305,7 @@ test("unavailable proof service keeps normal Write and Stop allowed and sources 
   const previous = process.env.AGENTSPINE_STATE_DIR;
   try {
     process.env.AGENTSPINE_STATE_DIR = join(root, "target.js");
-    const failed = await recordHookBriefingUse({ root, origin });
+    const failed = await recordHookBriefingUse({ root, origin, handoff: HANDOFF });
     assert.equal(failed.verified, false);
     assert.equal(failed.automaticRetry, false);
   } finally { process.env.AGENTSPINE_STATE_DIR = previous; }

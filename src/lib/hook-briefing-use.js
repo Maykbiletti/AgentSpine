@@ -29,7 +29,16 @@ function unverified(reason) {
     automaticRetry: false, completionVerified: false, authority: "context-only" };
 }
 
-export async function recordHookBriefingUse({ origin, root, now = new Date() }) {
+function validHandoff(value) {
+  return value?.schema === "agentspine.host-context-handoff/v1"
+    && ["additionalContext", "message"].includes(value.field)
+    && ["claude", "codex", "generic", "king"].includes(value.host)
+    && Number.isSafeInteger(value.bytes) && value.bytes > 0
+    && /^[a-f0-9]{64}$/.test(value.digest || "");
+}
+
+export async function recordHookBriefingUse({ origin, root, handoff, now = new Date() }) {
+  if (!validHandoff(handoff)) return unverified("host-context-handoff-unavailable");
   const proof = verified.get(origin);
   if (!verified.delete(origin)) return unverified("host-briefing-origin-unavailable");
   try {
@@ -51,10 +60,11 @@ export async function recordHookBriefingUse({ origin, root, now = new Date() }) 
       return unverified("host-briefing-binding-mismatch");
     }
     const usage = await recordDeliveryBriefingUse({ root, requirementId,
-      preserveConsumed: true, verifiedHostBriefing: true,
+      preserveConsumed: true, verifiedHostHandoff: true,
       input: { origin: "verified-host-preflight", receiptId: receipt.id,
         promptDigest: receipt.promptDigest, requirementId },
-      result: { briefingDigest: receipt.briefingDigest, sourceSnapshotDigest: receipt.bodyDigest }, now });
+      result: { briefingDigest: receipt.briefingDigest, sourceSnapshotDigest: receipt.bodyDigest,
+        handoff: structuredClone(handoff) }, now });
     return { ...usage, verified: ["recorded", "duplicate"].includes(usage.status),
       automaticRetry: false, completionVerified: false };
   } catch { return unverified("host-briefing-service-unavailable"); }

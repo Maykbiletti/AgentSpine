@@ -19,30 +19,29 @@ import { readHookInput, SILENT_OVERSIZE_POST_TOOL_USE, SILENT_OVERSIZE_POST_TOOL
 import { isMainModule } from "./lib/runtime.js";
 import { deliveryActorSession, deliverySuccessEvidence, recordDeliveryToolUse,
   recordDeliveryWriteIntent } from "./lib/delivery-verification.js";
-import {
-  blockPrompt, blockStop, blunRuntimeContext, blunRuntimeMessage, denyTool, hookOutput, lifecycleOutput
-} from "./lib/hook-output.js";
-import {
-  ATTENTION_WRITE_EVENTS, boundedId, captureAttentionLifecycle, hookDeliveryId, hostContextLimit, hostFromInput,
+import { blockPrompt, blockStop, blunRuntimeContext, blunRuntimeMessage, denyTool, hookOutput,
+  lifecycleOutput } from "./lib/hook-output.js";
+import { ATTENTION_WRITE_EVENTS, boundedId, captureAttentionLifecycle, hookDeliveryId, hostContextLimit, hostFromInput,
   promptFromInput, renderContext, runtimeScope, selfstarterInput, selfstarterRootSkipped,
-  selfstarterScope, sessionId, startChannelEvent, startSelfstarter, toolResult, toolSucceeded
-} from "./lib/hook-context.js";
-import {
-  auditGuard, auditSkippedScans, candidatePaths, finishScanFailure, hookScanFailureFailsOpen,
-  isMutationTool, isScanFailOpenTool, shellTargetsProtected
-} from "./lib/hook-protection.js";
-import {
-  captureJavaScriptBeforeWrite, inspectWrittenJavaScript, verifyBaselineBeforeWrite, verifyDeliveredArtifacts
-} from "./lib/hook-artifact-guards.js";
+  selfstarterScope, sessionId, startChannelEvent, startSelfstarter, toolResult,
+  toolSucceeded } from "./lib/hook-context.js";
+import { auditGuard, auditSkippedScans, candidatePaths, finishScanFailure, hookScanFailureFailsOpen,
+  isMutationTool, isScanFailOpenTool, shellTargetsProtected } from "./lib/hook-protection.js";
+import { captureJavaScriptBeforeWrite, inspectWrittenJavaScript, verifyBaselineBeforeWrite,
+  verifyDeliveredArtifacts } from "./lib/hook-artifact-guards.js";
 import { isPremortemWrite, prepareHookPremortem, recordHookPremortemWrite,
   recordHookPremortemWriteIntent, verifyHookPremortemWrite } from "./lib/hook-premortem.js";
 import { verifyHookStopContracts } from "./lib/hook-stop-verification.js";
 import { processAdvisory } from "./lib/hook-process-advisory.js";
+import { recordHookBriefingUse } from "./lib/hook-briefing-use.js";
 export { blunRuntimeContext, blunRuntimeMessage } from "./lib/hook-output.js";
 const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
-const KNOWN_EVENTS = new Set([
-  ...CONTEXT_EVENTS, "InstructionsLoaded", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"
-]);
+const KNOWN_EVENTS = new Set([...CONTEXT_EVENTS, "InstructionsLoaded", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"]);
+async function writeContextOutput(output, host) {
+  const field = Object.hasOwn(output.hookSpecificOutput, "message") ? "message" : "additionalContext", content = output.hookSpecificOutput[field];
+  await new Promise((resolveWrite, rejectWrite) => process.stdout.write(`${JSON.stringify(output)}\n`, (error) => error ? rejectWrite(error) : resolveWrite()));
+  return { schema: "agentspine.host-context-handoff/v1", host, field, bytes: Buffer.byteLength(content), digest: createHash("sha256").update(content).digest("hex") };
+}
 async function runHookCore(input, payload, options) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("hook input must be one JSON object");
   const event = input.hook_event_name || input.event_name || "";
@@ -254,8 +253,7 @@ async function runHookCore(input, payload, options) {
       ({ deliveryVerification, premortem } = contracts);
       if (contracts.blocked) {
         return processAdvisory(input, payload, root, scope, { deliveryVerification, premortem });
-      }
-
+  }
       try {
         artifactGuard = await verifyDeliveredArtifacts({ input, cwd });
         if (artifactGuard.blocked) {
@@ -287,7 +285,6 @@ async function runHookCore(input, payload, options) {
     scope = await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     attentionEvent = await captureAttentionLifecycle(input, event, root, scope, catalog);
   }
-
   if (event === "PostToolUse" && !selfstarterRootSkipped(resolvedSources.diagnostics)) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     const exact = await selfstarterScope(input, scope, root, "effect");
@@ -298,7 +295,6 @@ async function runHookCore(input, payload, options) {
       });
     }
   }
-
   if (["Stop", "SubagentStop"].includes(event)) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     const exact = selfstarterRootSkipped(resolvedSources.diagnostics)
@@ -323,10 +319,10 @@ async function runHookCore(input, payload, options) {
       });
     }
   }
-
   if (CONTEXT_EVENTS.has(event)) {
     let signal = null;
     let preflight = null;
+    let briefingOrigin = null;
     try {
       await syncPersonaRosterFromEnvironment({ root, env: process.env, now: input.timestamp || new Date(), catalog });
       scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
@@ -388,10 +384,11 @@ async function runHookCore(input, payload, options) {
         throw new Error("mandatory preflight context exceeds the host hook injection limit");
       }
       if (event === "UserPromptSubmit") {
-        const { preflightConsumed, timeline } = await finalizeUserPromptSessionTimeline({ root, input, scope, resolvedSources, preflight,
+        const finalized = await finalizeUserPromptSessionTimeline({ root, input, scope, resolvedSources, preflight,
           prompt: promptFromInput(input), now: input.timestamp || new Date() });
-        if (!preflightConsumed) throw new Error("preflight receipt could not be consumed atomically for this exact turn");
-        resolvedSources.diagnostics.timeline = timeline;
+        if (!finalized.preflightConsumed) throw new Error("preflight receipt could not be consumed atomically for this exact turn");
+        briefingOrigin = finalized.briefingOrigin;
+        resolvedSources.diagnostics.timeline = finalized.timeline;
       }
       if (event === "UserPromptSubmit") {
         const activeCanaries = briefing.learning.filter((item) => ["active", "revalidating"].includes(item.outcomeStatus));
@@ -433,7 +430,12 @@ async function runHookCore(input, payload, options) {
         }
       }
       if (payload) return { blocked: false, context, briefing, preflight, signal, attentionEvent, channelEvent, lessonRecall, catalogPath };
-      process.stdout.write(`${JSON.stringify(hookOutput(event, context))}\n`);
+      const output = hookOutput(event, context);
+      const handoff = await writeContextOutput(output, process.env.BLUN_PLUGIN_ROOT ? "king"
+        : process.env.PLUGIN_ROOT ? "codex" : process.env.CLAUDE_PLUGIN_ROOT ? "claude" : scope.host);
+      if (event === "UserPromptSubmit" && briefingOrigin) {
+        await recordHookBriefingUse({ origin: briefingOrigin, root, handoff, now: input.timestamp || new Date() });
+      }
       return;
     } catch (error) {
       if (hookScanFailureFailsOpen(error)) {
@@ -467,8 +469,7 @@ async function runHookCore(input, payload, options) {
   if (payload) return { blocked: false, sourceWarning, artifactGuard, attentionEvent, selfstarter,
     learningDelivery, deliveryVerification, premortem, lessonRecall };
   process.stdout.write(`${JSON.stringify(lifecycleOutput(event, artifactGuard, premortem, deliveryVerification, process.env, sourceWarning, lessonRecall))}\n`);
-}
-
+  }
 export async function runHook(payload = null, options = {}) {
   let input = payload;
   try {
@@ -485,7 +486,6 @@ export async function runHook(payload = null, options = {}) {
     return finishScanFailure(input, payload, "lifecycle", error);
   }
 }
-
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   const silentOversizePostToolUse = args.length === 1 && args[0] === SILENT_OVERSIZE_POST_TOOL_USE_ARG;
