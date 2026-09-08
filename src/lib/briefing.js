@@ -116,34 +116,37 @@ function preAnswerRecall(world, currentTaskId) {
   taskValue.lastVerifiedStep = task.lastVerifiedStep
     ? pick(task.lastVerifiedStep, ["summary", "result"]) : null;
   taskValue.nextStep = task.nextStep ? pick(task.nextStep, ["summary"]) : null;
-  const feedbackValues = feedback.slice(0, 3).map((item) => ({
-    text: item.value.sourceText,
-    ...pick(item.value, ["interpretationStatus", "completionVerified", "sourceProvider", "sourceDigest"]),
-    ...pick(item.source, ["sessionRef", "messageRef"]),
-    observedAt: item.observedAt
+  const values = feedback.slice(0, 3).map(({ value, source, observedAt }) => ({
+    text: value.sourceText,
+    status: value.interpretationStatus, completionVerified: value.completionVerified,
+    provider: value.sourceProvider, digest: value.sourceDigest,
+    session: source.sessionRef, message: source.messageRef, at: observedAt
   }));
-  if (feedbackValues.length === 1) {
+  if (values.length === 1) {
     const proposal = interpretations.find((item) =>
       item.value.sourceFeedbackAssertionId === feedback[0].id);
     if (proposal) {
-      const modelInterpretation = {
-      ...pick(proposal.value, ["interpretationStatus", "interpretationKind",
-        "proposedNextStepSummary", "clarificationQuestion", "modelProvider", "replacedNextStepId"]),
+      const value = proposal.value;
+      const model = {
+        status: value.interpretationStatus, kind: value.interpretationKind,
+        nextStep: value.proposedNextStepSummary, question: value.clarificationQuestion,
+        provider: value.modelProvider, replaces: value.replacedNextStepId,
         digest: proposal.source.digest, completionVerified: false
       };
-      for (const key of ["proposedNextStepSummary", "clarificationQuestion"]) {
-        if (modelInterpretation[key] === null) delete modelInterpretation[key];
+      for (const key of ["nextStep", "question"]) {
+        if (model[key] === null) delete model[key];
       }
-      feedbackValues[0].modelInterpretation = modelInterpretation;
+      values[0].modelInterpretation = model;
     }
   }
   return {
     schema: "agentspine.pre-answer-recall/v1",
     order: "review-before-claims-and-actions",
     task: taskValue,
-    ...(feedbackValues.length === 1 ? { feedback: feedbackValues[0] } : {}),
-    ...(feedbackValues.length > 1 ? { feedbackCandidates: feedbackValues.map((item) =>
-      pick(item, ["text", "sourceProvider", "sourceDigest", "sessionRef", "messageRef", "observedAt"])),
+    ...(values.length === 1 ? { feedback: values[0], interpretationInput: {
+      feedbackAssertionId: feedback[0].id, targetAssertionId: feedback[0].value.targetAssertionId } } : {}),
+    ...(values.length > 1 ? { feedbackCandidates: values.map((item) =>
+      pick(item, ["text", "provider", "digest", "session", "message", "at"])),
       feedbackReview: { status: "multiple-unresolved", completionVerified: false,
         ...(feedback.length > 3 ? { omitted: feedback.length - 3 } : {}) } } : {}),
     authority: "context-only"

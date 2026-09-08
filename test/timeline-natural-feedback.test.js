@@ -84,6 +84,13 @@ async function freshWorld(item) {
   assert.equal(result.isError, false);
   return result;
 }
+function promptHook(item, eventId) {
+  return runHook({ hook_event_name: "UserPromptSubmit", host: "claude", cwd: item.root,
+    session_id: "session:new", event_id: eventId, prompt: "Continue the existing task",
+    entity_id: SCOPE.entityId, user_id: SCOPE.userId, tenant_id: SCOPE.tenantId,
+    project_id: PROJECT, task_id: TASK, goal_id: SCOPE.goalId,
+    goal_step_id: SCOPE.goalStepId, group_id: null });
+}
 
 test("source candidates preserve multilingual and negative utterances without interpreting them", () => {
   for (const [language, text, semanticLabel] of CASES) {
@@ -188,7 +195,22 @@ test("new session receives exact task, existing result file and source-verified 
     assert.equal(result.completionVerified, false);
   }
   const capturedFeedback = captured[0].captured;
-  const proposal = interpretation(capturedFeedback.assertionId, target.id);
+  const actionablePrompt = await promptHook(item, "turn:new:actionable");
+  const actionable = JSON.parse(actionablePrompt.context).briefing.preAnswerRecall;
+  assert.equal(actionable.interpretationInput.feedbackAssertionId, capturedFeedback.assertionId);
+  assert.equal(actionable.interpretationInput.targetAssertionId, target.id);
+  assert.equal(actionable.task.nextStep.summary, target.value.nextStep.summary);
+  for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" }, { PLUGIN_ROOT: "/synthetic/codex" },
+    { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
+    const native = hookOutput("UserPromptSubmit", actionablePrompt.context, env).hookSpecificOutput;
+    const text = native.additionalContext || native.message;
+    for (const bindingId of [capturedFeedback.assertionId, target.id]) {
+      assert.match(text, new RegExp(bindingId));
+    }
+    if (native.message) assert.ok(Buffer.byteLength(native.message) <= 1200);
+  }
+  const proposal = interpretation(actionable.interpretationInput.feedbackAssertionId,
+    actionable.interpretationInput.targetAssertionId);
   const proposalFields = { ...query, eventId: found.events[0].id, interpretation: proposal };
   const proposed = await processCall(item.root, "session_timeline_capture",
     await guarded(item, "capture", "tool:natural:interpret", proposalFields));
@@ -213,11 +235,7 @@ test("new session receives exact task, existing result file and source-verified 
         "next-step-correction", "Use a different unverified next step.") }));
   assert.equal(conflicted.status, "unavailable");
   assert.equal(conflicted.reason, "timeline-feedback-interpretation-conflicted");
-  const singlePrompt = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude", cwd: item.root,
-    session_id: "session:new", event_id: "turn:new:proposal", prompt: "Continue the existing task",
-    entity_id: SCOPE.entityId, user_id: SCOPE.userId, tenant_id: SCOPE.tenantId,
-    project_id: PROJECT, task_id: TASK, goal_id: SCOPE.goalId,
-    goal_step_id: SCOPE.goalStepId, group_id: null });
+  const singlePrompt = await promptHook(item, "turn:new:proposal");
   assert.match(singlePrompt.context, /model-proposed/);
   assert.match(singlePrompt.context, /Verify the checksum before migration/);
   for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" }, { PLUGIN_ROOT: "/synthetic/codex" },
@@ -226,7 +244,12 @@ test("new session receives exact task, existing result file and source-verified 
     const text = native.additionalContext || native.message;
     assert.match(text, /model-proposed/);
     assert.match(text, /Verify the checksum before migration/);
-    if (native.message) assert.ok(Buffer.byteLength(native.message) <= 1200);
+    if (native.message) {
+      assert.ok(Buffer.byteLength(native.message) <= 1200);
+      assert.match(text, /"status":"unresolved"|"interpretationStatus":"unresolved"/);
+      assert.match(text, /"provider":"claude"|"sourceProvider":"claude"/);
+      assert.match(text, /"replaces":"step:migrate"|"replacedNextStepId":"step:migrate"/);
+    }
   }
   const secondQuery = { at: AT_TWO, query: "user message", windowSeconds: 1, includePriorSessions: true };
   const secondSearch = await processCall(item.root, "session_timeline_search",
@@ -264,11 +287,7 @@ test("new session receives exact task, existing result file and source-verified 
   assert.match(contextText, /Nein, erst die Prüfsumme prüfen/);
   assert.match(contextText, /Nimm dafür die andere Datei/);
   assert.match(contextText, /result.txt/);
-  const prompted = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude", cwd: item.root,
-    session_id: "session:new", event_id: "turn:new:recall", prompt: "Continue the existing task",
-    entity_id: SCOPE.entityId, user_id: SCOPE.userId, tenant_id: SCOPE.tenantId,
-    project_id: PROJECT, task_id: TASK, goal_id: SCOPE.goalId,
-    goal_step_id: SCOPE.goalStepId, group_id: null });
+  const prompted = await promptHook(item, "turn:new:recall");
   assert.equal(prompted.blocked, false, prompted.reason);
   for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" }, { PLUGIN_ROOT: "/synthetic/codex" }]) {
     const output = hookOutput("UserPromptSubmit", prompted.context, env);
@@ -304,7 +323,8 @@ test("new session receives exact task, existing result file and source-verified 
   await item.preserve();
   t.diagnostic(JSON.stringify({ contextBytes: Buffer.byteLength(contextText),
     preAnswerBytes: Buffer.byteLength(kingOutput.hookSpecificOutput.message), elapsedMs: performance.now() - started,
-    preservedFeedbackCandidates: "0 -> 2", falseAutomaticApplications: 0, realModelRuns: 0,
+    preservedFeedbackCandidates: "0 -> 2", actionableBindings: "0 -> 2",
+    falseAutomaticApplications: 0, realModelRuns: 0,
     semanticAssignment: "unverified", necessaryQuestions: "unverified", unnecessaryQuestions: "unverified",
     repeatedJobs: "unverified", newSessionUserAcceptance: "not-passed" }));
 });

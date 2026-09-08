@@ -16,14 +16,16 @@ function recallContext(groupId = null) {
         authority: "context-only",
         task: {
           taskId: "task:synthetic", status: "active", objective: "Prepare result.txt",
-          lastVerifiedStep: { summary: "Created result.txt", result: "passed",
-            evidenceDigest: "a".repeat(64), observedAt: "2026-09-07T01:00:00.000Z" },
-          nextStep: { summary: "Migrate result.txt" }, observedAt: "2026-09-07T01:00:00.000Z"
+          lastVerifiedStep: { summary: "Created result.txt", result: "passed" },
+          nextStep: { summary: "Migrate result.txt" }
         },
-        feedback: { text: "Nein, erst die Prüfsumme prüfen", interpretationStatus: "unresolved",
+        feedback: { text: "Nein, erst die Prüfsumme prüfen", status: "unresolved",
           completionVerified: false,
-          sourceProvider: "claude", sourceDigest: "b".repeat(64), sessionRef: "session-ref:old",
-          messageRef: "message:correction", observedAt: "2026-09-07T02:00:00.000Z" }
+          provider: "claude", digest: "b".repeat(64), session: "session-ref:old",
+          message: "message:correction", at: "2026-09-07T02:00:00.000Z" },
+        interpretationInput: {
+          feedbackAssertionId: "assertion:user-feedback", targetAssertionId: "assertion:task"
+        }
       },
       world: { knowledge: {
         continuation: { tasks: [{
@@ -34,6 +36,7 @@ function recallContext(groupId = null) {
           nextStep: { summary: "Migrate result.txt" }, observedAt: "2026-09-07T01:00:00.000Z"
         }], terminal: [] },
         taskContext: { items: [{
+          id: "assertion:user-feedback",
           value: { targetAssertionId: "assertion:task", sourceText: "Nein, erst die Prüfsumme prüfen",
             interpretationStatus: "unresolved", completionVerified: false,
             sourceProvider: "claude", sourceDigest: "b".repeat(64) },
@@ -53,11 +56,12 @@ function multipleFeedbackContext() {
   const context = recallContext();
   const first = context.briefing.preAnswerRecall.feedback;
   delete context.briefing.preAnswerRecall.feedback;
+  delete context.briefing.preAnswerRecall.interpretationInput;
   context.briefing.preAnswerRecall.feedbackCandidates = [first, { ...first,
-    text: "Nimm dafür die andere Datei", sourceDigest: "d".repeat(64),
-    messageRef: "message:ambiguous", observedAt: "2026-09-07T02:01:00.000Z" }]
-    .map(({ text, sourceProvider, sourceDigest, sessionRef, messageRef, observedAt }) =>
-      ({ text, sourceProvider, sourceDigest, sessionRef, messageRef, observedAt }));
+    text: "Nimm dafür die andere Datei", digest: "d".repeat(64),
+    message: "message:ambiguous", at: "2026-09-07T02:01:00.000Z" }]
+    .map(({ text, provider, digest, session, message, at }) =>
+      ({ text, provider, digest, session, message, at }));
   delete context.briefing.preAnswerRecall.task.assertionId;
   delete context.briefing.preAnswerRecall.task.lastVerifiedStep.evidenceDigest;
   delete context.briefing.preAnswerRecall.task.lastVerifiedStep.observedAt;
@@ -67,7 +71,7 @@ function multipleFeedbackContext() {
   return context;
 }
 
-test("pre-answer recall is carried by every host output before claims", () => {
+test("pre-answer recall carries actionable source bindings in every host output", () => {
   const context = JSON.stringify(recallContext());
   for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" },
     { PLUGIN_ROOT: "/synthetic/codex" }]) {
@@ -75,6 +79,9 @@ test("pre-answer recall is carried by every host output before claims", () => {
     assert.match(output.hookSpecificOutput.additionalContext, /result\.txt/);
     assert.match(output.hookSpecificOutput.additionalContext, /Nein, erst die Prüfsumme prüfen/);
     assert.match(output.hookSpecificOutput.additionalContext, /Check configured access/);
+    for (const id of ["assertion:user-feedback", "assertion:task"]) {
+      assert.match(output.hookSpecificOutput.additionalContext, new RegExp(id));
+    }
   }
   const blun = hookOutput("UserPromptSubmit", context, { BLUN_PLUGIN_ROOT: "/synthetic/blun" });
   assert.equal(Buffer.byteLength(blun.hookSpecificOutput.message) <= 1200, true);
@@ -82,14 +89,17 @@ test("pre-answer recall is carried by every host output before claims", () => {
   assert.match(blun.hookSpecificOutput.message, /result\.txt/);
   assert.match(blun.hookSpecificOutput.message, /Nein, erst die Prüfsumme prüfen/);
   assert.match(blun.hookSpecificOutput.message, /Check configured access/);
+  for (const id of ["assertion:user-feedback", "assertion:task"]) {
+    assert.match(blun.hookSpecificOutput.message, new RegExp(id));
+  }
   assert.doesNotMatch(blun.hookSpecificOutput.message, /only on demand/);
 });
 
 test("bounded recall preserves uncertainty and suppresses private group projection", () => {
   const capsule = preAnswerRecallCapsule(recallContext());
-  assert.equal(capsule.feedback.interpretationStatus, "unresolved");
+  assert.equal(capsule.feedback.status, "unresolved");
   assert.equal(capsule.feedback.completionVerified, false);
-  assert.equal(capsule.feedback.sourceDigest, "b".repeat(64));
+  assert.equal(capsule.feedback.digest, "b".repeat(64));
   assert.equal(recallContext().briefing.world.knowledge.taskContext.items[0].source.sessionRef,
     "session-ref:old");
   assert.equal(recallContext().briefing.world.knowledge.taskContext.items[0].source.messageRef,
@@ -106,9 +116,9 @@ test("multiple source messages remain visible so hosts cannot hide ambiguity", (
   const capsule = preAnswerRecallCapsule(context);
   assert.equal(capsule.feedbackCandidates.rows.length, 2);
   assert.deepEqual(capsule.feedbackCandidates.fields,
-    ["text", "sourceDigest", "messageRef", "observedAt"]);
+    ["text", "digest", "message", "at"]);
   assert.deepEqual(capsule.feedbackCandidates.common,
-    { sourceProvider: "claude", sessionRef: "session-ref:old" });
+    { provider: "claude", session: "session-ref:old" });
   assert.equal(capsule.feedbackReview.status, "multiple-unresolved");
   assert.equal(capsule.feedbackReview.completionVerified, false);
   assert.equal("omitted" in capsule.feedbackReview, false);
@@ -130,13 +140,13 @@ test("bounded King recall keeps three ordinary candidates instead of dropping th
   delete context.briefing.preAnswerRecall.task.observedAt;
   const candidates = context.briefing.preAnswerRecall.feedbackCandidates;
   candidates.push({ ...candidates[0], text: "Das hatten wir gestern schon erledigt",
-    sourceDigest: "e".repeat(64), messageRef: "message:completion-claim" });
+    digest: "e".repeat(64), message: "message:completion-claim" });
   const message = blunRuntimeMessage(JSON.stringify(context));
   assert.equal(Buffer.byteLength(message) <= 1200, true);
   assert.match(message, /result\.txt/);
   for (const candidate of candidates) {
-    assert.match(message, new RegExp(candidate.sourceDigest));
-    assert.match(message, new RegExp(candidate.messageRef));
+    assert.match(message, new RegExp(candidate.digest));
+    assert.match(message, new RegExp(candidate.message));
     assert.match(message, new RegExp(candidate.text));
   }
   assert.match(message, /multiple-unresolved/);
@@ -149,7 +159,7 @@ test("bounded King recall hands off loaded retrieval beside three source candida
   delete context.briefing.preAnswerRecall.task.observedAt;
   const candidates = context.briefing.preAnswerRecall.feedbackCandidates;
   candidates.push({ ...candidates[0], text: "Das hatten wir gestern schon erledigt",
-    sourceDigest: "e".repeat(64), messageRef: "message:completion-claim" });
+    digest: "e".repeat(64), message: "message:completion-claim" });
   context.preflight.briefing.mustRemember = [];
   context.preflight.briefing.retrieval = [{ providerId: "memory:synthetic", items: [{
     id: "memory:access-check", revision: "1",
@@ -157,10 +167,9 @@ test("bounded King recall hands off loaded retrieval beside three source candida
     source: "source:synthetic", validity: "current", confidence: 1
   }] }];
   const capsule = preAnswerRecallCapsule(context);
-  assert.deepEqual(capsule.feedbackCandidates.fields,
-    ["text", "sourceDigest", "messageRef", "observedAt"]);
+  assert.deepEqual(capsule.feedbackCandidates.fields, ["text", "digest", "message", "at"]);
   assert.deepEqual(capsule.feedbackCandidates.common,
-    { sourceProvider: "claude", sessionRef: "session-ref:old" });
+    { provider: "claude", session: "session-ref:old" });
   assert.equal(capsule.feedbackCandidates.rows.length, 3);
   assert.ok(capsule.retrieval);
   assert.doesNotMatch(JSON.stringify(capsule.omitted || []), /retrieval/);
@@ -172,8 +181,8 @@ test("bounded King recall hands off loaded retrieval beside three source candida
   assert.match(message, /memory:synthetic/);
   assert.match(message, /result\.txt/);
   for (const candidate of candidates) {
-    assert.match(message, new RegExp(candidate.sourceDigest));
-    assert.match(message, new RegExp(candidate.messageRef));
+    assert.match(message, new RegExp(candidate.digest));
+    assert.match(message, new RegExp(candidate.message));
     assert.match(message, new RegExp(candidate.text));
   }
   assert.match(message, /multiple-unresolved/);

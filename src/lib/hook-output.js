@@ -18,10 +18,11 @@ function compactFeedbackCandidates(packet) {
   if (candidates && !Array.isArray(candidates)
     && Array.isArray(candidates.fields) && Array.isArray(candidates.rows)) return true;
   if (!Array.isArray(candidates) || candidates.length < 2) return false;
-  const sharedKeys = ["sourceProvider", "sessionRef"].filter((key) =>
+  const origins = ["provider", "session"];
+  const sharedKeys = origins.filter((key) =>
     candidates.every((item) => item?.[key] === candidates[0]?.[key]));
-  const fields = ["text", "sourceDigest", "messageRef", "observedAt",
-    ...["sourceProvider", "sessionRef"].filter((key) => !sharedKeys.includes(key))];
+  const fields = ["text", "digest", "message", "at",
+    ...origins.filter((key) => !sharedKeys.includes(key))];
   packet.feedbackCandidates = {
     fields,
     ...(sharedKeys.length ? { common: Object.fromEntries(sharedKeys.map((key) =>
