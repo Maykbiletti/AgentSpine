@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { PassThrough } from "node:stream";
 import { runHook } from "../src/hook.js";
 import { startMcpServer } from "../src/mcp.js";
 import { channelTimelineContinuity } from "../src/lib/channel-continuity.js";
+import { recordWorldAssertion } from "../src/lib/world-model.js";
 import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
 
 const TASK = "task:timeline-capture";
@@ -115,7 +116,8 @@ async function fixture(t) {
       message: { role: "tool", content: "Measured portal backup Suite 0; result: FAIL 0/15." } })}\n${JSON.stringify({
       timestamp: "2026-09-07T04:31:00.000Z",
       message: { role: "tool", content: "Measured portal backup Suite 0; result: PASS 15/15." }
-    })}\n`),
+    })}\n${JSON.stringify({ timestamp: "2026-09-07T04:50:00.000Z",
+      message: { role: "tool", content: "Measured portal backup test; result: PASS 1/1." } })}\n`),
     writeFile(current, `${JSON.stringify({ timestamp: "2026-09-07T04:40:00.000Z",
       message: { role: "user", content: "Continue from the measured result." } })}\n`)
   ]);
@@ -168,6 +170,43 @@ async function guarded(item, tool, id, fields) {
   const result = await runHook(toolInput(item, tool, id, fields));
   assert.equal(result.blocked, false, result.reason);
   return result.updatedInput;
+}
+
+function hash(value) {
+  return createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
+}
+
+async function taskState(item, binding, { id, value, observedAt, evidenceKind = "objective-measurement",
+  supersedes = [], recordedAt = "2026-09-07T04:29:00.000Z" }) {
+  return recordWorldAssertion({ root: item.project, id, subjectId: TASK,
+    predicate: value.schema === "agentspine.task-continuation/v1"
+      ? "task.continuation" : "task.timeline-outcome-contract",
+    value, evidenceKind, evidenceId: `${evidenceKind === "explicit-user-feedback" ? "user" : "measurement"}:${hash(id).slice(0, 24)}`,
+    evidenceDigest: hash(value), observedAt, projectId: PROJECT, groupId: null, privacy: "private",
+    knowledgeKind: "task-state", sessionRef: `session-ref:${"c".repeat(32)}`,
+    messageRef: `message:${hash(`message\0${id}`).slice(0, 24)}`, supersedes,
+    requireActiveSupersedes: supersedes.length > 0,
+    reason: "Synthetic pre-existing task outcome contract.", portalRef: binding.portalRef,
+    threadRef: binding.threadRef, now: recordedAt });
+}
+
+function continuation(nextStep, openQuestions = []) {
+  return { schema: "agentspine.task-continuation/v1", taskId: TASK, status: "active",
+    objective: "Verify result.txt using the pre-agreed Suite 0 outcome contract.",
+    lastVerifiedStep: null, openQuestions, nextStep };
+}
+
+function outcomeContract(step, onSuccess, measurement = { testLabel: "suite-0", total: 15, successCount: 15 }) {
+  return { schema: "agentspine.timeline-continuation-outcome-contract/v1", taskId: TASK, step,
+    measurement, onSuccess };
+}
+
+async function captureQuery(item, query, searchId, captureId) {
+  const found = await mcpClient()("session_timeline_search",
+    await guarded(item, "search", searchId, query));
+  assert.equal(found.value.events.length, 1, JSON.stringify(found.value));
+  return mcpClient()("session_timeline_capture", await guarded(item, "capture", captureId,
+    { ...query, eventId: found.value.events[0].id }));
 }
 
 test("verified timeline evidence becomes exact-thread structured context without model provenance claims", async (t) => {
@@ -285,4 +324,134 @@ test("capture rejects direct calls, changed sources, invalid bindings, and group
   const grouped = await runHook({ ...toolInput(item, "capture", "tool:security:group", { ...query, eventId }),
     group_id: "group:synthetic" });
   assert.equal(grouped.blocked, true);
+});
+
+test("a pre-existing objective contract advances only its exact continuation and preserves measured conflict", async (t) => {
+  const started = performance.now();
+  const item = await fixture(t);
+  const binding = route("thread:contract");
+  const sourceBefore = await readFile(item.source);
+  await enroll(item, "session:prior", item.source, binding);
+  await enroll(item, "session:current", item.current, binding);
+  setGateway(binding);
+  process.env.AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID = "session:current";
+  const measured = { id: "step:suite-0", summary: "Run Suite 0 against result.txt." };
+  const next = { id: "step:publish", summary: "Publish the verified result.txt report." };
+  await taskState(item, binding, { id: "assertion:contract-baseline",
+    value: continuation(measured), observedAt: "2026-09-07T04:00:00.000Z",
+    recordedAt: "2026-09-07T04:01:00.000Z" });
+  await taskState(item, binding, { id: "assertion:suite-0-contract",
+    value: outcomeContract(measured, { status: "active", nextStep: next }),
+    observedAt: "2026-09-07T04:10:00.000Z", recordedAt: "2026-09-07T04:11:00.000Z",
+    evidenceKind: "explicit-user-feedback" });
+
+  const failed = await captureQuery(item, { query: "Suite FAIL", includePriorSessions: true },
+    "tool:contract:fail-search", "tool:contract:fail-capture");
+  assert.equal(failed.value.continuationUpdate.status, "updated", JSON.stringify(failed.value));
+  assert.equal(failed.value.continuationUpdate.continuation.value.lastVerifiedStep.result, "failed");
+  assert.deepEqual(failed.value.continuationUpdate.continuation.value.nextStep, measured);
+  assert.equal(failed.value.continuationUpdate.automaticRetry, false);
+  const failedRestart = freshWorldContext(item, binding);
+  assert.equal(failedRestart.knowledge.continuation.tasks[0].lastVerifiedStep.result, "failed");
+  assert.deepEqual(failedRestart.knowledge.continuation.tasks[0].nextStep, measured);
+
+  const passed = await captureQuery(item, { query: "Suite PASS", includePriorSessions: true },
+    "tool:contract:pass-search", "tool:contract:pass-capture");
+  assert.equal(passed.value.continuationUpdate.status, "updated", JSON.stringify(passed.value));
+  assert.equal(passed.value.completionVerified, false);
+  const passedRestart = freshWorldContext(item, binding);
+  assert.equal(passedRestart.knowledge.continuation.tasks[0].lastVerifiedStep.result, "passed");
+  assert.deepEqual(passedRestart.knowledge.continuation.tasks[0].nextStep, next);
+  assert.equal(passedRestart.uncertainty.conflicts, 1,
+    "the raw fail/pass measurements remain visibly contradictory instead of being erased");
+  const duplicate = await captureQuery(item, { query: "Suite PASS", includePriorSessions: true },
+    "tool:contract:duplicate-search", "tool:contract:duplicate-capture");
+  assert.equal(duplicate.value.status, "duplicate");
+  assert.equal(duplicate.value.continuationUpdate.status, "duplicate");
+  assert.deepEqual(await readFile(item.source), sourceBefore);
+  t.diagnostic(JSON.stringify({ correctThreadUpdates: "0 -> 2", falseTaskUpdates: 0,
+    preservedConflicts: 1, automaticRetries: 0, repeatedWorkAfterPass: 0,
+    restartContinuity: "2/2", elapsedMs: performance.now() - started, realModelRuns: 0 }));
+});
+
+test("newer user correction defeats an old outcome contract and explicit replacement can complete", async (t) => {
+  const item = await fixture(t);
+  const binding = route("thread:correction-priority");
+  await enroll(item, "session:prior", item.source, binding);
+  await enroll(item, "session:current", item.current, binding);
+  setGateway(binding);
+  process.env.AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID = "session:current";
+  const oldStep = { id: "step:suite-0", summary: "Run Suite 0 against result.txt." };
+  const corrected = { id: "step:checksum-first", summary: "Check the result.txt checksum first." };
+  const baseline = await taskState(item, binding, { id: "assertion:priority-baseline",
+    value: continuation(oldStep), observedAt: "2026-09-07T04:00:00.000Z",
+    recordedAt: "2026-09-07T04:01:00.000Z" });
+  const oldContract = await taskState(item, binding, { id: "assertion:priority-old-contract",
+    value: outcomeContract(oldStep, { status: "completed", nextStep: null }),
+    observedAt: "2026-09-07T04:05:00.000Z", recordedAt: "2026-09-07T04:06:00.000Z",
+    evidenceKind: "explicit-user-feedback" });
+  const correction = await taskState(item, binding, { id: "assertion:priority-correction",
+    value: continuation(corrected), observedAt: "2026-09-07T04:20:00.000Z",
+    recordedAt: "2026-09-07T04:21:00.000Z",
+    evidenceKind: "explicit-user-feedback", supersedes: [baseline.assertion.id] });
+  const rejected = await captureQuery(item, { query: "Suite PASS", includePriorSessions: true },
+    "tool:priority:old-search", "tool:priority:old-capture");
+  assert.equal(rejected.value.continuationUpdate.status, "unavailable");
+  assert.equal(rejected.value.continuationUpdate.reason, "timeline-outcome-contract-superseded");
+  assert.deepEqual(freshWorldContext(item, binding).knowledge.continuation.tasks[0].nextStep, corrected);
+
+  const hindsight = await taskState(item, binding, { id: "assertion:priority-hindsight-contract",
+    value: outcomeContract(corrected, { status: "completed", nextStep: null }),
+    observedAt: "2026-09-07T04:20:00.000Z", recordedAt: "2026-09-07T04:40:00.000Z",
+    evidenceKind: "explicit-user-feedback",
+    supersedes: [oldContract.assertion.id] });
+  const postdated = await captureQuery(item, { query: "Suite PASS", includePriorSessions: true },
+    "tool:priority:postdated-search", "tool:priority:postdated-capture");
+  assert.equal(postdated.value.continuationUpdate.reason, "timeline-outcome-contract-postdated");
+  await taskState(item, binding, { id: "assertion:priority-new-contract",
+    value: outcomeContract(corrected, { status: "completed", nextStep: null },
+      { testLabel: "test", total: 1, successCount: 1 }),
+    observedAt: "2026-09-07T04:45:00.000Z", recordedAt: "2026-09-07T04:46:00.000Z",
+    evidenceKind: "explicit-user-feedback", supersedes: [hindsight.assertion.id] });
+  const accepted = await captureQuery(item, { query: "test PASS", includePriorSessions: true },
+    "tool:priority:new-search", "tool:priority:new-capture");
+  assert.equal(accepted.value.status, "captured");
+  assert.equal(accepted.value.continuationUpdate.status, "updated");
+  assert.equal(accepted.value.completionVerified, true);
+  const restarted = freshWorldContext(item, binding);
+  assert.equal(restarted.knowledge.continuation.tasks.length, 0);
+  assert.equal(restarted.knowledge.continuation.terminal[0].status, "completed");
+  assert.equal(restarted.knowledge.continuation.terminal[0].lastVerifiedStep.result, "passed");
+  assert.equal(restarted.knowledge.continuation.terminal[0].nextStep, null);
+  assert.equal(restarted.knowledge.current.some((entry) => entry.id === correction.assertion.id), false,
+    "the correction is superseded only by its explicitly matching objective contract");
+});
+
+test("outcome contracts reject model authority, loose scope, and invalid success transitions", async (t) => {
+  const item = await fixture(t);
+  const binding = route("thread:contract-validation");
+  const step = { id: "step:suite-0", summary: "Run Suite 0 against result.txt." };
+  const value = outcomeContract(step, { status: "active",
+    nextStep: { id: "step:publish", summary: "Publish result.txt." } });
+  const base = { root: item.project, id: "assertion:validation-contract", subjectId: TASK,
+    predicate: "task.timeline-outcome-contract", value, evidenceKind: "explicit-user-feedback",
+    evidenceId: "user:validation-contract", evidenceDigest: hash(value),
+    observedAt: "2026-09-07T04:10:00.000Z", projectId: PROJECT, groupId: null,
+    privacy: "private", knowledgeKind: "task-state", sessionRef: `session-ref:${"d".repeat(32)}`,
+    messageRef: "message:validation-contract", reason: "Synthetic validation contract.",
+    portalRef: binding.portalRef, threadRef: binding.threadRef, now: "2026-09-07T04:11:00.000Z" };
+  await assert.doesNotReject(recordWorldAssertion(base));
+  for (const patch of [{ evidenceKind: "model-suggestion" }, { privacy: "shared" },
+    { portalRef: null, threadRef: null }, { groupId: "group:foreign", privacy: "group" }]) {
+    await assert.rejects(recordWorldAssertion({ ...base, ...patch,
+      id: `assertion:invalid-${hash(JSON.stringify(patch)).slice(0, 16)}` }),
+    /private source-bound task contract/);
+  }
+  for (const changed of [
+    { ...value, measurement: { ...value.measurement, successCount: 16 } },
+    { ...value, onSuccess: { status: "completed", nextStep: value.onSuccess.nextStep } }
+  ]) {
+    await assert.rejects(recordWorldAssertion({ ...base, value: changed,
+      evidenceDigest: hash(changed), id: `assertion:invalid-${hash(changed).slice(0, 16)}` }));
+  }
 });

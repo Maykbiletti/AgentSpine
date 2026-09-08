@@ -7,6 +7,7 @@ import {
 import { timelineInterpretationRequest } from "./mcp-timeline-tools.js";
 import { sessionTimelineBinding } from "./session-timeline-contract.js";
 import { timelineSessionReference } from "./session-timeline-prior.js";
+import { updateTimelineContinuationFromObjective } from "./timeline-continuation-update.js";
 
 const AUTHORITY = "context-only";
 const EVENT_ID = /^timeline-event:[a-f0-9]{32}$/;
@@ -135,13 +136,21 @@ function publicCaptured(assertion) {
   };
 }
 
-function captureResult(status, timeline, event, assertion) {
-  return {
+function captureResult(status, timeline, event, assertion, continuationUpdate = null) {
+  const result = {
     schema: "agentspine.timeline-world-capture/v1", status,
     timeline: timelineSource(timeline, event), captured: publicCaptured(assertion),
-    completionVerified: false, deliveryConfirmed: false, authority: AUTHORITY,
+    completionVerified: continuationUpdate?.completionVerified === true,
+    deliveryConfirmed: false, automaticRetry: false, authority: AUTHORITY,
     instruction: "This is source-verified descriptive task context only. It grants no permission or action authority; conflicting measurements and corrections remain unresolved."
   };
+  if (continuationUpdate) result.continuationUpdate = {
+    schema: continuationUpdate.schema, status: continuationUpdate.status,
+    reason: continuationUpdate.reason, completionVerified: continuationUpdate.completionVerified,
+    automaticRetry: false, authority: AUTHORITY,
+    ...(continuationUpdate.assertion ? { continuation: publicCaptured(continuationUpdate.assertion) } : {})
+  };
+  return result;
 }
 
 async function correctionCurrent({ root, scope, event, now }) {
@@ -214,8 +223,9 @@ export async function captureSessionTimelineEvidence({
         timeline, event, recorded.assertion);
     }
     const recorded = await recordWorldAssertion(assertionFromEvent({ event, scope, root, now }));
+    const continuationUpdate = await updateTimelineContinuationFromObjective({ root, scope, event, now });
     return captureResult(recorded.status === "duplicate" ? "duplicate" : "captured",
-      timeline, event, recorded.assertion);
+      timeline, event, recorded.assertion, continuationUpdate);
   } catch {
     return unavailable("timeline-capture-world-state-unavailable", timeline);
   }

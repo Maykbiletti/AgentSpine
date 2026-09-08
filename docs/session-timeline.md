@@ -67,6 +67,17 @@ bounded form shares repeated values and prefixes, so all IDs, messages, times,
 provider, session, and source digest reconstruct within the unchanged 1200-byte
 host field.
 
+An objective result may advance continuation only when the same private task
+and route already contain one confirmed
+`agentspine.timeline-continuation-outcome-contract/v1`. The contract fixes the
+exact current step, test label, total, success count, and success state before
+the event. Capture reopens the source, retains the raw measurement, and then
+updates `lastVerifiedStep`; failure keeps the agreed step without retrying,
+while success applies only the contract's explicit next step or terminal state.
+Postdated, stale, conflicting, foreign, superseded, or model-suggested contracts
+cannot advance work. A newer user correction wins because its step no longer
+matches the old contract. Raw contradictory outcomes remain visible uncertainty.
+
 The deterministic lane still requires a whole native line beginning
 `Correction: next step:` or `Korrektur: nächster Schritt:` and changes only
 `nextStep` on one same-thread active conflict-free continuation. Ordinary,

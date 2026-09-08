@@ -9,6 +9,7 @@ const SESSION_REF = /^session-ref:[a-f0-9]{32}$/;
 const MESSAGE_REF = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/;
 const SECRET_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk[-_](?:proj[-_])?|gh[opusu]_)[A-Za-z0-9_-]{20,}\b|\b(?:xox[bapcrs]-|github_pat_|glpat-|npm_)[A-Za-z0-9_-]{12,}\b|\bAKIA[0-9A-Z]{16}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i;
 const TASK_CONTINUATION_SCHEMA = "agentspine.task-continuation/v1";
+export const TIMELINE_OUTCOME_CONTRACT_SCHEMA = "agentspine.timeline-continuation-outcome-contract/v1";
 const TASK_STATUSES = new Set(["active", "blocked", "paused", "completed"]);
 const STEP_RESULTS = new Set(["passed", "failed", "blocked"]);
 const STABLE_ID = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/;
@@ -105,6 +106,48 @@ function validateContinuation(input, value) {
   }
 }
 
+function validateTimelineOutcomeContract(input, value) {
+  if (value?.schema !== TIMELINE_OUTCOME_CONTRACT_SCHEMA) return;
+  exactKeys(value, ["schema", "taskId", "step", "measurement", "onSuccess"],
+    "timeline outcome contract");
+  if (input.knowledgeKind !== "task-state" || input.predicate !== "task.timeline-outcome-contract"
+    || value.taskId !== input.subjectId || !STABLE_ID.test(value.taskId || "")
+    || input.privacy !== "private" || input.groupId !== null || !input.portalRef || !input.threadRef
+    || !["explicit-user-feedback", "objective-measurement"].includes(input.evidenceKind)) {
+    throw new Error("timeline outcome contract must be a private source-bound task contract");
+  }
+  exactKeys(value.step, ["id", "summary"], "timeline outcome contract step");
+  if (!STABLE_ID.test(value.step.id || "")) throw new Error("timeline outcome contract step id is invalid");
+  boundedText(value.step.summary, "timeline outcome contract step", 500);
+  exactKeys(value.measurement, ["testLabel", "total", "successCount"],
+    "timeline outcome contract measurement");
+  const label = value.measurement.testLabel;
+  const total = value.measurement.total;
+  const successCount = value.measurement.successCount;
+  if (!/^(?:suite-(?:0|[1-9]\d{0,3})|acceptance|audit|npm-check|ci|test)$/.test(label || "")
+    || !(total === null || Number.isSafeInteger(total) && total > 0)
+    || !(successCount === null || Number.isSafeInteger(successCount) && successCount >= 0)
+    || (total === null) !== (successCount === null)
+    || (total !== null && successCount > total)) {
+    throw new Error("timeline outcome contract measurement is invalid");
+  }
+  exactKeys(value.onSuccess, ["status", "nextStep"], "timeline outcome contract success state");
+  if (!["active", "paused", "completed"].includes(value.onSuccess.status)) {
+    throw new Error("timeline outcome contract success status is invalid");
+  }
+  if (value.onSuccess.status === "completed") {
+    if (value.onSuccess.nextStep !== null) {
+      throw new Error("completed timeline outcome contract cannot define a next step");
+    }
+  } else {
+    exactKeys(value.onSuccess.nextStep, ["id", "summary"], "timeline outcome contract next step");
+    if (!STABLE_ID.test(value.onSuccess.nextStep.id || "")) {
+      throw new Error("timeline outcome contract next step id is invalid");
+    }
+    boundedText(value.onSuccess.nextStep.summary, "timeline outcome contract next step", 500);
+  }
+}
+
 export function normalizeKnowledgeFields(input, evidenceKind, value) {
   validateUserFeedback(input, value);
   const kind = input.knowledgeKind ?? null;
@@ -119,6 +162,7 @@ export function normalizeKnowledgeFields(input, evidenceKind, value) {
     throw new Error("secret-shaped content cannot enter structured knowledge");
   }
   validateContinuation(input, value);
+  validateTimelineOutcomeContract(input, value);
   if (kind === "user-preference" && !["explicit-user-feedback", "model-suggestion"].includes(evidenceKind)) {
     throw new Error("user preferences require explicit feedback or remain a model suggestion");
   }
@@ -145,6 +189,7 @@ export function validKnowledgeFields(assertion) {
   if (kind === "decision" && !assertion.reason) return false;
   try {
     validateContinuation(assertion, assertion.value);
+    validateTimelineOutcomeContract(assertion, assertion.value);
     pairedSourceRefs(assertion.sessionRef ?? null, assertion.messageRef ?? null);
     return true;
   } catch {
