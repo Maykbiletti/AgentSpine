@@ -42,7 +42,7 @@ function assertion(root, id, kind, predicate, value, extra = {}) {
     root, id, subjectId: extra.subjectId || "project:synthetic-task-context", predicate, value,
     evidenceKind: extra.evidenceKind || "objective-measurement",
     evidenceId: extra.evidenceId || `measurement:${id.split(":")[1]}`,
-    evidenceDigest: digest(value), knowledgeKind: kind,
+    evidenceDigest: extra.evidenceDigest || digest(value), knowledgeKind: kind,
     sessionRef: extra.sessionRef === undefined ? SESSION_REF : extra.sessionRef,
     messageRef: extra.messageRef === undefined ? `timeline-event:${id.split(":")[1]}` : extra.messageRef,
     observedAt: extra.observedAt || "2035-06-07T10:00:00.000Z",
@@ -191,7 +191,12 @@ test("only current confirmed knowledge in the exact project and group can guide 
     lastVerifiedStep: { ...continuation().lastVerifiedStep, id: "step:complete", result: "passed",
       evidenceId: "measurement:complete", evidenceDigest: digest("complete") } };
   await recordWorldAssertion(checkpoint(root, "assertion:task-complete", {
-    value: completed, observedAt: "2035-06-07T13:30:00.000Z", supersedes: ["assertion:task-checkpoint"]
+    value: completed, evidenceId: completed.lastVerifiedStep.evidenceId,
+    evidenceDigest: completed.lastVerifiedStep.evidenceDigest,
+    observedAt: completed.lastVerifiedStep.observedAt,
+    sessionRef: completed.lastVerifiedStep.sessionRef,
+    messageRef: completed.lastVerifiedStep.messageRef,
+    supersedes: ["assertion:task-checkpoint"]
   }));
   context = await worldContext({ root, projectId: PROJECT, continuationTaskId: TASK, now: NOW });
   assert.equal(context.knowledge.taskContext.status, "terminal");

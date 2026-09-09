@@ -101,6 +101,14 @@ function validateContinuation(input, value) {
   if (value.status === "completed" && input.evidenceKind !== "objective-measurement") {
     throw new Error("completed task continuation requires objective measurement evidence");
   }
+  if (value.status === "completed") {
+    const step = value.lastVerifiedStep;
+    if (input.evidenceId !== step.evidenceId || input.evidenceDigest !== step.evidenceDigest
+      || input.observedAt !== step.observedAt || (input.sessionRef ?? null) !== step.sessionRef
+      || (input.messageRef ?? null) !== step.messageRef) {
+      throw new Error("completed task continuation evidence must match its passed verified step");
+    }
+  }
   if (value.status !== "completed" && value.nextStep === null) {
     throw new Error("resumable task continuation requires a next step");
   }

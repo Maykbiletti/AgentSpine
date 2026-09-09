@@ -196,9 +196,16 @@ test("authenticated portal threads resume only their own task knowledge across l
 
   const callA = mcpClient(gatewayEnvironment(routeA));
   const callB = mcpClient(gatewayEnvironment(routeB));
+  const completedB = continuation("unused", "completed");
   const [checkpointA] = await Promise.all([
     writeThroughGateway(callA, assertion(item.project, "assertion:route-a", continuation("checksum"))),
-    writeThroughGateway(callB, assertion(item.project, "assertion:route-b", continuation("unused", "completed")))
+    writeThroughGateway(callB, assertion(item.project, "assertion:route-b", completedB, {
+      evidenceId: completedB.lastVerifiedStep.evidenceId,
+      evidenceDigest: completedB.lastVerifiedStep.evidenceDigest,
+      observedAt: completedB.lastVerifiedStep.observedAt,
+      sessionRef: completedB.lastVerifiedStep.sessionRef,
+      messageRef: completedB.lastVerifiedStep.messageRef
+    }))
   ]);
   const oldDecisionA = await writeThroughGateway(callA, decision(item.project,
     "assertion:decision-a-old", "Run the portal backup release verification."));

@@ -187,7 +187,11 @@ test("suggestions and conflicts do not resume; correction and completion preserv
     lastVerifiedStep: step("step:final-suite", "passed"), openQuestions: [], nextStep: null
   });
   await recordWorldAssertion(assertion(root, "assertion:completed", completedValue, {
-    evidenceId: "measurement:completed", observedAt: "2034-05-04T13:30:00.000Z",
+    evidenceId: completedValue.lastVerifiedStep.evidenceId,
+    evidenceDigest: completedValue.lastVerifiedStep.evidenceDigest,
+    observedAt: completedValue.lastVerifiedStep.observedAt,
+    sessionRef: completedValue.lastVerifiedStep.sessionRef,
+    messageRef: completedValue.lastVerifiedStep.messageRef,
     supersedes: ["assertion:corrected"]
   }));
   context = await worldContext({ root, projectId: PROJECT, continuationTaskId: TASK, now: NOW });
@@ -222,6 +226,27 @@ test("continuation enforces exact scope, bounded structure, integrity, and sourc
     capsule("completed", { lastVerifiedStep: step("step:user-complete"), openQuestions: [], nextStep: null }), {
     evidenceKind: "explicit-user-feedback", evidenceId: "user-turn:complete"
   })), /objective measurement evidence/);
+  const boundCompletion = capsule("completed", {
+    lastVerifiedStep: step("step:bound-complete"), openQuestions: [], nextStep: null
+  });
+  const boundSource = {
+    evidenceId: boundCompletion.lastVerifiedStep.evidenceId,
+    evidenceDigest: boundCompletion.lastVerifiedStep.evidenceDigest,
+    observedAt: boundCompletion.lastVerifiedStep.observedAt,
+    sessionRef: boundCompletion.lastVerifiedStep.sessionRef,
+    messageRef: boundCompletion.lastVerifiedStep.messageRef
+  };
+  for (const mismatch of [
+    { evidenceId: "measurement:different" },
+    { evidenceDigest: digest("different completion evidence") },
+    { observedAt: "2034-05-04T12:31:00.000Z" },
+    { sessionRef: "session-ref:fedcba9876543210fedcba9876543210" },
+    { messageRef: "timeline-event:different" }
+  ]) {
+    await assert.rejects(recordWorldAssertion(assertion(root,
+      `assertion:mismatched-complete-${Object.keys(mismatch)[0]}`, boundCompletion,
+      { ...boundSource, ...mismatch })), /evidence must match its passed verified step/);
+  }
   await assert.rejects(recordWorldAssertion(assertion(root, "assertion:invalid-open",
     capsule("active", { nextStep: null }))), /requires a next step/);
   await assert.rejects(recordWorldAssertion(assertion(root, "assertion:future-step",
