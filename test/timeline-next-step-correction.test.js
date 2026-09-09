@@ -7,6 +7,7 @@ import { fixture, processCall } from "./mcp-bounded-fixture.js";
 import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
 import { runHook } from "../src/hook.js";
 import { channelTimelineContinuity } from "../src/lib/channel-continuity.js";
+import { hookOutput } from "../src/lib/hook-output.js";
 import { recordWorldAssertion } from "../src/lib/world-model.js";
 import { sessionTimelineStatePaths } from "../src/lib/session-timeline-auth.js";
 
@@ -159,6 +160,27 @@ test("explicit user correction atomically replaces only the exact-thread continu
   assert.equal(after.knowledge.continuation.tasks[0].source.kind, "explicit-user-feedback");
   assert.equal(after.knowledge.history.filter((entry) => entry.predicate === "task.continuation").length, 1);
   assert.ok(Buffer.byteLength(JSON.stringify(after)) < 16_384, "fresh-process context remains bounded");
+  await runHook({ hook_event_name: "PostCompact", host: "claude", cwd: item.root,
+    session_id: "session:current", ...SCOPE });
+  const prompted = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude",
+    cwd: item.root, session_id: "session:current", prompt: "Setze den exakten Faden fort.",
+    event_id: "event:correction:next-turn", ...SCOPE });
+  const recall = JSON.parse(prompted.context).briefing.preAnswerRecall;
+  assert.equal(recall.task.correctionStatus, "applied-source-verified");
+  assert.equal(recall.task.source.digest, after.knowledge.continuation.tasks[0].source.digest);
+  assert.equal(recall.task.scope.threadRef, routeA.threadRef);
+  let kingBytes = null;
+  for (const environment of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" },
+    { PLUGIN_ROOT: "/synthetic/codex" }, { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
+    const native = hookOutput("UserPromptSubmit", prompted.context, environment).hookSpecificOutput;
+    const context = native.additionalContext || native.message;
+    assert.match(context, /applied-source-verified/);
+    assert.match(context, new RegExp(after.knowledge.continuation.tasks[0].source.digest));
+    if (native.message) {
+      kingBytes = Buffer.byteLength(native.message);
+      assert.ok(kingBytes <= 1200);
+    }
+  }
 
   setGateway(routeB);
   const foreign = await world(item);
@@ -172,6 +194,7 @@ test("explicit user correction atomically replaces only the exact-thread continu
     "index, search, capture, race and restart preserve the enrolled user source byte-for-byte");
   console.info(JSON.stringify({ beforeCorrectNextSteps: 0, afterCorrectNextSteps: 1,
     staleCorrectionsApplied: 0, foreignThreadContinuations: foreign.knowledge.continuation.tasks.length,
+    appliedCorrectionHandoffs: "0 -> 3", correctionStatusFalseNegatives: "1 -> 0", kingBytes,
     contextBytes: Buffer.byteLength(JSON.stringify(after)), elapsedMs: performance.now() - started,
     unnecessaryQuestions: null, repeatedErrors: null, tokens: null, realModelRuns: 0 }));
   await item.preserve();

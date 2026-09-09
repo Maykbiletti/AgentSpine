@@ -143,7 +143,8 @@ function preAnswerRecall(world, currentTaskId) {
     Object.assign(taskValue, pick(task, ["assertionId", "observedAt"]));
     taskValue.source = pick(task.source, ["kind", "id", "digest", "sessionRef", "messageRef"]);
     taskValue.scope = pick(task.scope, ["projectId", "groupId", "privacy", "portalRef", "threadRef"]);
-    taskValue.correctionStatus = "none-current";
+    taskValue.correctionStatus = task.source.kind === "explicit-user-feedback"
+      ? "applied-source-verified" : "none-current";
   }
   if (values.length === 1) {
     const proposal = interpretations.find((item) =>
