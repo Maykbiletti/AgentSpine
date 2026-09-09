@@ -171,7 +171,10 @@ test("one clarification preserves and rechecks candidates from two prior session
     entity_id: SCOPE.entityId, user_id: SCOPE.userId, tenant_id: SCOPE.tenantId,
     project_id: PROJECT, task_id: TASK, goal_id: SCOPE.goalId,
     goal_step_id: SCOPE.goalStepId, group_id: null });
-  const capsule = preAnswerRecallCapsule(JSON.parse(prompted));
+  const packet = JSON.parse(prompted);
+  assert.equal(packet.briefing.root, undefined, "pre-answer context omits redundant absolute paths");
+  assert.equal(packet.briefing.cwd, undefined, "pre-answer context omits redundant absolute paths");
+  const capsule = preAnswerRecallCapsule(packet);
   t.diagnostic(JSON.stringify({ capsuleBytes: Buffer.byteLength(JSON.stringify(capsule)) }));
   for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" }, { PLUGIN_ROOT: "/synthetic/codex" },
     { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
@@ -194,5 +197,6 @@ test("one clarification preserves and rechecks candidates from two prior session
   await item.preserve();
   t.diagnostic(JSON.stringify({ sources: "1 -> 2", exactBindings: "0 -> 2",
     falseAutomaticApplications: 0, contextBytes: Buffer.byteLength(compact.context),
+    preAnswerBriefingBytes: packet.briefing.budget.usedBytes,
     elapsedMs: performance.now() - started, realModelRuns: 0 }));
 });

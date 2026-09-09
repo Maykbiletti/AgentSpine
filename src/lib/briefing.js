@@ -258,8 +258,7 @@ export async function sessionBriefing({
 
   const result = {
     schema: "agentspine.session-briefing/v1",
-    root: catalog.root,
-    cwd: sources.cwd,
+    ...(preAnswer ? {} : { root: catalog.root, cwd: sources.cwd }),
     host,
     scope: { entityId, userId, tenantId, groupId, projectId, includePrivate,
       ...(portalRef && threadRef ? { portalRef, threadRef } : {}) },
