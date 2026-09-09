@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fixture, processCall } from "./mcp-bounded-fixture.js";
 import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
 import { runHook } from "../src/hook.js";
@@ -12,6 +14,7 @@ import { channelTimelineContinuity } from "../src/lib/channel-continuity.js";
 import { recordWorldAssertion } from "../src/lib/world-model.js";
 
 const NOW = "2026-09-08T08:00:00.000Z";
+const HOOK_PATH = fileURLToPath(new URL("../src/hook.js", import.meta.url));
 const TASK = "task:multisession-feedback";
 const PROJECT = "project:multisession-feedback";
 const SCOPE = { entityId: "agent:multisession-feedback", userId: "person:multisession-feedback",
@@ -70,6 +73,19 @@ async function capture(item, sessionId, at, suffix) {
       { ...query, eventId: found.events[0].id }, sessionId));
   assert.equal(result.status, "captured", JSON.stringify(result));
   return { query, found, assertion: result.captured };
+}
+
+function nativeClaudePrompt(root, input) {
+  const env = { ...process.env, CLAUDE_PLUGIN_ROOT: "/synthetic/claude" };
+  delete env.PLUGIN_ROOT;
+  delete env.BLUN_PLUGIN_ROOT;
+  const child = spawnSync(process.execPath, [HOOK_PATH], {
+    cwd: root, env, input: JSON.stringify(input), encoding: "utf8", timeout: 5000
+  });
+  assert.equal(child.status, 0, child.stderr || child.stdout);
+  const context = JSON.parse(child.stdout).hookSpecificOutput?.additionalContext;
+  assert.equal(typeof context, "string", child.stdout);
+  return context;
 }
 
 test("one clarification preserves and rechecks candidates from two prior sessions", async (t) => {
@@ -150,16 +166,16 @@ test("one clarification preserves and rechecks candidates from two prior session
     tenant_id: SCOPE.tenantId, project_id: PROJECT, task_id: TASK,
     goal_id: SCOPE.goalId, goal_step_id: SCOPE.goalStepId, group_id: null });
   assert.match(compact.context, /Welche der beiden Sitzungsdateien/);
-  const prompted = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude", cwd: item.root,
+  const prompted = nativeClaudePrompt(item.root, { hook_event_name: "UserPromptSubmit", host: "claude", cwd: item.root,
     session_id: currentSession, event_id: "turn:multisession:recall", prompt: "Setze den Auftrag fort",
     entity_id: SCOPE.entityId, user_id: SCOPE.userId, tenant_id: SCOPE.tenantId,
     project_id: PROJECT, task_id: TASK, goal_id: SCOPE.goalId,
     goal_step_id: SCOPE.goalStepId, group_id: null });
-  const capsule = preAnswerRecallCapsule(JSON.parse(prompted.context));
+  const capsule = preAnswerRecallCapsule(JSON.parse(prompted));
   t.diagnostic(JSON.stringify({ capsuleBytes: Buffer.byteLength(JSON.stringify(capsule)) }));
   for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" }, { PLUGIN_ROOT: "/synthetic/codex" },
     { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
-    const native = hookOutput("UserPromptSubmit", prompted.context, env).hookSpecificOutput;
+    const native = hookOutput("UserPromptSubmit", prompted, env).hookSpecificOutput;
     const text = native.additionalContext || native.message;
     assert.match(text, /Datei aus Sitzung A/);
     assert.match(text, /andere Datei/);
