@@ -139,6 +139,12 @@ function preAnswerRecall(world, currentTaskId) {
     provider: value.sourceProvider, digest: value.sourceDigest,
     session: source.sessionRef, message: source.messageRef, at: observedAt
   }));
+  if (values.length && task.status === "completed" && task.source?.kind === "objective-measurement") {
+    taskValue.completionEvidence = {
+      status: "objective-verified", assertionId: task.assertionId, observedAt: task.observedAt,
+      source: pick(task.source, ["kind", "id", "digest", "sessionRef", "messageRef"])
+    };
+  }
   if (!values.length) {
     Object.assign(taskValue, pick(task, ["assertionId", "observedAt"]));
     taskValue.source = pick(task.source, ["kind", "id", "digest", "sessionRef", "messageRef"]);
@@ -167,8 +173,10 @@ function preAnswerRecall(world, currentTaskId) {
     schema: "agentspine.pre-answer-recall/v1",
     order: "review-before-claims-and-actions",
     task: taskValue,
-    ...(values.length === 1 ? { feedback: values[0], interpretationInput: {
-      feedbackAssertionId: feedback[0].id, targetAssertionId: feedback[0].value.targetAssertionId } } : {}),
+    ...(values.length === 1 ? { feedback: values[0], ...(task.status === "completed" ? {} : {
+      interpretationInput: { feedbackAssertionId: feedback[0].id,
+        targetAssertionId: feedback[0].value.targetAssertionId }
+    }) } : {}),
     ...(values.length > 1 ? { feedbackCandidates: feedbackCandidates(values),
       feedbackReview: { status: "multiple-unresolved", completionVerified: false,
         targetAssertionId: feedback[0].value.targetAssertionId,

@@ -27,10 +27,10 @@ const ENV_NAMES = ["AGENTSPINE_TIMELINE_SESSION_CAPABILITY", "AGENTSPINE_TIMELIN
   "AGENTSPINE_GROUP_ID", "AGENTSPINE_HOST", "AGENTSPINE_PORTAL_REF", "AGENTSPINE_THREAD_REF"];
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
-function route() {
+function route(threadId = "thread:a") {
   return channelTimelineContinuity({ provider: "blun", tenantId: SCOPE.tenantId,
     accountId: "account:multisession-feedback", bindingId: "binding:multisession-feedback",
-    chatId: "chat:multisession-feedback", threadId: "thread:a", sessionKey: "portal:multisession-feedback",
+    chatId: "chat:multisession-feedback", threadId, sessionKey: "portal:multisession-feedback",
     agentId: SCOPE.entityId, projectId: PROJECT, groupId: null });
 }
 
@@ -199,4 +199,92 @@ test("one clarification preserves and rechecks candidates from two prior session
     falseAutomaticApplications: 0, contextBytes: Buffer.byteLength(compact.context),
     preAnswerBriefingBytes: packet.briefing.budget.usedBytes,
     elapsedMs: performance.now() - started, realModelRuns: 0 }));
+});
+
+test("a natural completion claim carries separate objective completion provenance into the next session", async (t) => {
+  const item = await fixture(t, { homeRoot: false });
+  const previous = Object.fromEntries(ENV_NAMES.map((name) => [name, process.env[name]]));
+  t.after(() => { for (const [name, value] of Object.entries(previous)) {
+    if (value === undefined) delete process.env[name]; else process.env[name] = value;
+  } });
+  process.env.AGENTSPINE_TIMELINE_SESSION_CAPABILITY = `astc_${randomBytes(32).toString("base64url")}`;
+  const binding = route("thread:completed");
+  gateway(binding);
+  const artifact = join(item.root, "result.txt");
+  const artifactBytes = Buffer.from("synthetic completed result\r\n");
+  await writeFile(artifact, artifactBytes);
+  const completedAt = "2026-09-08T05:00:00.000Z";
+  const evidenceId = "evidence:objective-completion";
+  const evidenceDigest = hash(artifactBytes);
+  const completed = { root: item.root, id: "assertion:completed-baseline", subjectId: TASK,
+    predicate: "task.continuation", value: { schema: "agentspine.task-continuation/v1", taskId: TASK,
+      status: "completed", objective: "Prepare and verify result.txt",
+      lastVerifiedStep: { id: "step:verify-result", summary: "Verified result.txt", result: "passed",
+        evidenceId, evidenceDigest, observedAt: completedAt, sessionRef: `session-ref:${"a".repeat(32)}`,
+        messageRef: "message:objective-completion" }, openQuestions: [], nextStep: null },
+    evidenceKind: "objective-measurement", evidenceId, evidenceDigest, observedAt: completedAt,
+    projectId: PROJECT, groupId: null, privacy: "private", knowledgeKind: "task-state",
+    sessionRef: `session-ref:${"a".repeat(32)}`, messageRef: "message:objective-completion",
+    portalRef: binding.portalRef, threadRef: binding.threadRef, now: new Date(NOW) };
+  await recordWorldAssertion(completed);
+  const directory = join(process.env.CLAUDE_CONFIG_DIR, "projects", "completed-feedback");
+  await mkdir(directory, { recursive: true });
+  const priorPath = join(directory, "prior.jsonl");
+  const feedbackAt = "2026-09-08T05:20:00.000Z";
+  const feedbackText = "Das hatten wir gestern schon erledigt";
+  const sourceBytes = Buffer.from(`${JSON.stringify({ timestamp: feedbackAt,
+    message: { role: "user", content: feedbackText } })}\n`);
+  await writeFile(priorPath, sourceBytes);
+  await enroll(item, binding, "session:completed-prior", priorPath);
+  assert.equal((await processCall(item.root, "session_timeline_index",
+    await guarded(item, "index", "tool:completed:index", { maxBytes: 65_536 },
+      "session:completed-prior"))).status, "indexed");
+  const currentPath = join(directory, "current.jsonl");
+  await writeFile(currentPath, `${JSON.stringify({ timestamp: "2026-09-08T06:00:00.000Z",
+    message: { role: "user", content: "Bitte setze den Auftrag fort." } })}\n`);
+  await enroll(item, binding, "session:completed-current", currentPath);
+  const captured = await capture(item, "session:completed-current", feedbackAt, "completed");
+  assert.equal(captured.assertion.value.completionVerified, false,
+    "the user's natural claim is not objective completion evidence");
+  const prompted = nativeClaudePrompt(item.root, { hook_event_name: "UserPromptSubmit", host: "claude",
+    cwd: item.root, session_id: "session:completed-current", event_id: "turn:completed:recall",
+    prompt: "Setze den Auftrag fort", entity_id: SCOPE.entityId, user_id: SCOPE.userId,
+    tenant_id: SCOPE.tenantId, project_id: PROJECT, task_id: TASK, goal_id: SCOPE.goalId,
+    goal_step_id: SCOPE.goalStepId, group_id: null });
+  const recall = JSON.parse(prompted).briefing.preAnswerRecall;
+  assert.equal(recall.feedback.text, feedbackText);
+  assert.equal(recall.feedback.completionVerified, false);
+  assert.equal(recall.task.status, "completed");
+  assert.equal(recall.task.completionEvidence.status, "objective-verified");
+  assert.equal(recall.task.completionEvidence.assertionId, completed.id);
+  assert.equal(recall.task.completionEvidence.observedAt, completedAt);
+  assert.deepEqual(recall.task.completionEvidence.source, {
+    kind: "objective-measurement", id: evidenceId, digest: evidenceDigest,
+    sessionRef: completed.sessionRef, messageRef: completed.messageRef
+  });
+  t.diagnostic(JSON.stringify({ completedCapsuleBytes:
+    Buffer.byteLength(JSON.stringify(preAnswerRecallCapsule(JSON.parse(prompted)))) }));
+  for (const env of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" }, { PLUGIN_ROOT: "/synthetic/codex" },
+    { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
+    const native = hookOutput("UserPromptSubmit", prompted, env).hookSpecificOutput;
+    const text = native.additionalContext || native.message;
+    assert.match(text, /Das hatten wir gestern schon erledigt/);
+    assert.match(text, /objective-verified/);
+    assert.match(text, new RegExp(evidenceDigest));
+    assert.match(text, /"completionVerified":false/);
+    if (native.message) assert.ok(Buffer.byteLength(native.message) <= 1200);
+  }
+  gateway(route("thread:foreign-completed"));
+  const foreign = nativeClaudePrompt(item.root, { hook_event_name: "UserPromptSubmit", host: "claude",
+    cwd: item.root, session_id: "session:foreign", event_id: "turn:foreign:completed",
+    prompt: "Continue", entity_id: SCOPE.entityId, user_id: SCOPE.userId, tenant_id: SCOPE.tenantId,
+    project_id: PROJECT, task_id: TASK, goal_id: SCOPE.goalId,
+    goal_step_id: SCOPE.goalStepId, group_id: null });
+  assert.equal(JSON.parse(foreign).briefing.preAnswerRecall, null,
+    "objective completion and the user claim cannot cross the opaque thread boundary");
+  assert.deepEqual(await readFile(priorPath), sourceBytes);
+  assert.deepEqual(await readFile(artifact), artifactBytes);
+  await item.preserve();
+  t.diagnostic(JSON.stringify({ verifiedCompletionProvenance: "0 -> 1", unverifiedUserClaim: 1,
+    falseCompletionUpgrades: 0, foreignThreadHandoffs: 0, realModelRuns: 0 }));
 });

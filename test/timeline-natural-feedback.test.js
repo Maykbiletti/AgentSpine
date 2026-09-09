@@ -325,6 +325,8 @@ test("new session receives exact task, existing result file and source-verified 
     `fixed synthetic lifecycle context budget: ${Buffer.byteLength(contextText)}`);
   const compactRecall = JSON.parse(contextText).briefing.preAnswerRecall;
   assert.equal(compactRecall.feedbackCandidates.rows.length, 3);
+  assert.equal(compactRecall.task.completionEvidence, undefined,
+    "a natural completion claim cannot add objective completion evidence to an active task");
   assert.match(contextText, /Nein, erst die Prüfsumme prüfen/);
   assert.match(contextText, /Nimm dafür die andere Datei/);
   assert.match(contextText, /Das hatten wir gestern schon erledigt/);
