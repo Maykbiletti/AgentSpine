@@ -126,7 +126,7 @@ function preAnswerRecall(world, currentTaskId) {
   const interpretations = (world.knowledge?.taskContext?.items || []).filter((item) =>
     item?.source?.kind === "model-suggestion"
       && ["agentspine.timeline-user-feedback-interpretation/v1",
-        "agentspine.timeline-user-feedback-clarification/v1"].includes(item.value?.schema)
+        "agentspine.timeline-user-feedback-clarification/v2"].includes(item.value?.schema)
       && item.value?.targetAssertionId === task.assertionId);
   const taskValue = pick(task, ["taskId", "status", "objective"]);
   taskValue.lastVerifiedStep = task.lastVerifiedStep
@@ -175,8 +175,9 @@ function preAnswerRecall(world, currentTaskId) {
         ...(() => {
           const ids = feedback.slice(0, 3).map((item) => item.id).sort();
           const proposal = interpretations.find((item) => item.value?.schema
-            === "agentspine.timeline-user-feedback-clarification/v1"
-            && JSON.stringify(item.value.sourceFeedbackAssertionIds) === JSON.stringify(ids));
+            === "agentspine.timeline-user-feedback-clarification/v2"
+            && JSON.stringify(item.value.sourceBindings.map((source) => source.feedbackAssertionId))
+              === JSON.stringify(ids));
           return proposal ? { modelClarification: { status: proposal.value.interpretationStatus,
             question: proposal.value.clarificationQuestion, provider: proposal.value.modelProvider,
             replaces: proposal.value.replacedNextStepId, digest: proposal.source.digest,

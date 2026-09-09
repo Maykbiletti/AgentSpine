@@ -47,7 +47,7 @@ const interpretation = (feedbackAssertionId, targetAssertionId, kind = "next-ste
   feedbackAssertionId, targetAssertionId, kind, proposedNextStepSummary, clarificationQuestion
 });
 const clarification = (feedbackAssertionIds, targetAssertionId, clarificationQuestion) => ({
-  schema: "agentspine.timeline-user-feedback-clarification-request/v1",
+  schema: "agentspine.timeline-user-feedback-clarification-request/v2",
   feedbackAssertionIds: [...feedbackAssertionIds].sort(), targetAssertionId, clarificationQuestion
 });
 
@@ -294,12 +294,16 @@ test("new session receives exact task, existing result file and source-verified 
     await guarded(item, "capture", "tool:natural:interpret:ambiguous-set", {
       ...ambiguityFields }));
   assert.equal(ambiguousAttempt.status, "captured", JSON.stringify(ambiguousAttempt));
-  assert.deepEqual(ambiguousAttempt.captured.value.sourceFeedbackAssertionIds, candidateIds);
+  assert.deepEqual(ambiguousAttempt.captured.value.sourceBindings
+    .map((item) => item.feedbackAssertionId), candidateIds);
   assert.equal(ambiguousAttempt.captured.value.completionVerified, false);
+  const storedClarification = (await freshWorld(item)).knowledge.taskContext.items.find((entry) =>
+    entry.value?.schema === "agentspine.timeline-user-feedback-clarification/v2");
+  assert.deepEqual(storedClarification.value, ambiguousAttempt.captured.value);
   assert.deepEqual((await freshWorld(item)).knowledge.continuation.tasks[0].nextStep, target.value.nextStep);
-  assert.equal((await processCall(item.root, "session_timeline_capture",
-    await guarded(item, "capture", "tool:natural:interpret:ambiguous:duplicate", ambiguityFields))).status,
-  "duplicate");
+  const duplicateClarification = await processCall(item.root, "session_timeline_capture",
+    await guarded(item, "capture", "tool:natural:interpret:ambiguous:duplicate", ambiguityFields));
+  assert.equal(duplicateClarification.status, "duplicate", JSON.stringify(duplicateClarification));
   const competing = { ...ambiguityFields, interpretation: clarification(candidateIds, target.id,
     "Welche der beiden Dateien meinst du?") };
   assert.equal((await processCall(item.root, "session_timeline_capture",
@@ -411,15 +415,20 @@ test("uninterpreted feedback cannot claim confirmation, supersede state, or esca
     { proposedNextStepSummary: "invented" }, { modelProvider: "unknown" }]) {
     assert.throws(() => validateUserFeedback(modelInput, { ...modelValue, ...patch }));
   }
-  const clarificationValue = { schema: "agentspine.timeline-user-feedback-clarification/v1",
-    sourceFeedbackAssertionIds: ["assertion:feedback-a", "assertion:feedback-b"],
-    targetAssertionId: "assertion:target", sourceProvider: "claude", sourceDigest: "d".repeat(64),
+  const sourceBinding = (id, suffix) => ({ feedbackAssertionId: id,
+    eventId: `timeline-event:${suffix}`, messageDigest: suffix.repeat(64), sourceProvider: "claude",
+    sourceDigest: suffix.repeat(64), sessionRef: `session-ref:${suffix}`,
+    messageRef: `timeline-event:${suffix}`, observedAt: `2026-09-07T02:0${suffix === "a" ? 0 : 1}:00.000Z` });
+  const clarificationValue = { schema: "agentspine.timeline-user-feedback-clarification/v2",
+    sourceBindings: [sourceBinding("assertion:feedback-a", "a"),
+      sourceBinding("assertion:feedback-b", "b")], targetAssertionId: "assertion:target",
     modelProvider: "codex", interpretationStatus: "model-proposed",
     clarificationQuestion: "Welche Datei meinst du?", replacedNextStepId: "step:old",
     completionVerified: false };
   assert.doesNotThrow(() => validateUserFeedback(modelInput, clarificationValue));
-  for (const ids of [["assertion:feedback-a"], ["assertion:feedback-b", "assertion:feedback-a"]]) {
+  for (const bindings of [[sourceBinding("assertion:feedback-a", "a")],
+    [sourceBinding("assertion:feedback-b", "b"), sourceBinding("assertion:feedback-a", "a")]]) {
     assert.throws(() => validateUserFeedback(modelInput,
-      { ...clarificationValue, sourceFeedbackAssertionIds: ids }));
+      { ...clarificationValue, sourceBindings: bindings }));
   }
 });

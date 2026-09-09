@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
-import { mkdir, open } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { withOwnedFileLock } from "./owned-file-lock.js";
 import {
@@ -23,7 +22,8 @@ import { timelineContinuationCapsule, timelineSearchResult } from "./session-tim
 import { seekTimelineEvidence, verifyTimelineEvent } from "./session-timeline-search.js";
 import { eventFromTimelineLine, extractTimelineTimestamp } from "./session-timeline-event-extract.js";
 import { verifiedTimelineEventFromLine } from "./session-timeline-event-extract.js";
-import { matchesSourceMetadata, pathMatchesSource } from "./session-timeline-source.js";
+import { pathMatchesSource } from "./session-timeline-source.js";
+import { readRange, unchangedHandle, validatedHandle } from "./session-timeline-source-open.js";
 import { readTimelineState, saveTimelineState } from "./session-timeline-state.js";
 import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 import { priorTimelineHint, selectPriorTimelineSource, timelineSessionReference } from "./session-timeline-prior.js";
@@ -227,29 +227,6 @@ function mergeEvents(existing, additions) {
     .slice(available ? -available : ordered.length);
   return [...evidence, ...feedback].sort((left, right) => left.at.localeCompare(right.at) || left.offset - right.offset);
 }
-async function unchangedHandle(handle, source, hostHome = null) {
-  try {
-    const metadata = await handle.stat({ bigint: true });
-    return matchesSourceMetadata(metadata, source) && await pathMatchesSource(source, hostHome);
-  } catch { return false; }
-}
-
-async function validatedHandle(source, hostHome = null) {
-  if (!await pathMatchesSource(source, hostHome)) return { status: "unavailable", reason: "transcript-changed" };
-  let handle;
-  try { handle = await open(source.path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0)); }
-  catch { return { status: "unavailable", reason: "transcript-changed" }; }
-  if (!await unchangedHandle(handle, source, hostHome)) {
-    await handle.close();
-    return { status: "unavailable", reason: "transcript-changed" };
-  }
-  return { status: "open", handle, size: source.size };
-}
-async function readRange(handle, offset, length) {
-  const buffer = Buffer.alloc(length);
-  const { bytesRead } = await handle.read(buffer, 0, length, offset);
-  return buffer.subarray(0, bytesRead);
-}
 function parsedEvents(buffer, start, dropFirst = false, host = "claude", includeUserMessages = false) {
   const result = [];
   let index = 0;
@@ -381,6 +358,49 @@ export async function authorizeSessionTimelineInvocation({
       root, tool, binding: scoped, sourceDigest, request, toolUseId, transportDigest
     });
     return { sourceDigest, authority: AUTHORITY };
+  } catch { return null; }
+}
+
+// Reopen only exact, already-captured sources needed by one interpretation.
+// The outer capture invocation remains the sole public gate.
+export async function reverifyTimelineFeedbackSources({
+  root, host, sessionId, scope, references, includePriorProviders = false,
+  environment = process.env, hostHome = null
+}) {
+  const scoped = sessionTimelineBinding({ host, sessionId, scope });
+  if (!completeTimelineBinding(scoped) || !hasVerifiedTimelinePrivateScope(scope)
+    || !Array.isArray(references) || !references.length || references.length > 3
+    || includePriorProviders && !crossProviderTimelineEnabled(environment)) return null;
+  try {
+    await ensureSessionTimelineTrust();
+    const names = await paths(root);
+    const state = await readState(names.path, root, names.assertStable);
+    const fields = ["entityId", "userId", "tenantId", "projectId", "taskId", "groupId", "portalRef", "threadRef"];
+    const eligible = state.sources.filter((source) => fields.every((key) =>
+      (source.binding[key] ?? null) === (scoped[key] ?? null))
+      && (includePriorProviders || source.binding.host === scoped.host));
+    const verified = [];
+    for (const reference of references) {
+      const source = eligible.find((item) => item.binding.host === reference.sourceProvider
+        && timelineSessionReference(item.binding) === reference.sessionRef
+        && sourceMetadata(item).sourceDigest === reference.sourceDigest);
+      const sourceHome = source?.binding.host === scoped.host ? hostHome : source?.profileRoot;
+      const indexed = source?.events.find((item) => item.id === reference.eventId
+        && item.sha256 === reference.messageDigest && item.at === reference.observedAt);
+      if (!source || !indexed || reference.messageRef !== reference.eventId
+        || !await confirmedSourceEnrollment({ root, scoped: source.binding, source, hostHome: sourceHome })) return null;
+      const opened = await validatedHandle(source, sourceHome);
+      if (opened.status !== "open") return null;
+      try {
+        const current = await verifyTimelineEvent({ handle: opened.handle, event: indexed, readRange, digest,
+          eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY, source.binding.host) });
+        if (!current || current.kind !== "user-message-candidate"
+          || !await unchangedHandle(opened.handle, source, sourceHome)) return null;
+        verified.push({ ...current, sourceDigest: reference.sourceDigest,
+          sourceProvider: reference.sourceProvider, sessionRef: reference.sessionRef });
+      } finally { await opened.handle.close(); }
+    }
+    return verified;
   } catch { return null; }
 }
 

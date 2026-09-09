@@ -53,11 +53,13 @@ supersession, permission, or action.
 
 One active candidate may receive a source-bound
 `agentspine.timeline-user-feedback-interpretation-request/v1` proposal. Two or
-three same-source candidates accept only an
-`agentspine.timeline-user-feedback-clarification-request/v1` bound to the full
-sorted assertion set. Partial, reordered, changed, cross-source, or larger sets
-fail. Each line is reopened and digest-checked; replay deduplicates and competing
-proposals conflict.
+three same-task candidates accept only an
+`agentspine.timeline-user-feedback-clarification-request/v2` bound to the full
+sorted assertion set. Each candidate keeps its own provider, session, message,
+source digest, message digest and timestamp. Each registered source is reopened
+and rechecked within the capture gate; partial, reordered, changed,
+foreign-scope, unregistered, or larger sets fail. Replay deduplicates and
+competing proposals conflict.
 
 Both private `model-suggestion` forms keep model/source provenance, target,
 replaced next step, and `completionVerified:false`; neither mutates continuation

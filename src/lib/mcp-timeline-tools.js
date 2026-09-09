@@ -12,7 +12,7 @@ const assertionId = {
 };
 
 export const TIMELINE_INTERPRETATION_SCHEMA = "agentspine.timeline-user-feedback-interpretation-request/v1";
-export const TIMELINE_CLARIFICATION_SCHEMA = "agentspine.timeline-user-feedback-clarification-request/v1";
+export const TIMELINE_CLARIFICATION_SCHEMA = "agentspine.timeline-user-feedback-clarification-request/v2";
 const INTERPRETATION_KINDS = new Set([
   "next-step-correction", "completion-claim", "not-current-instruction", "ambiguous"
 ]);

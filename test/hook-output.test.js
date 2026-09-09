@@ -116,7 +116,7 @@ test("multiple source messages remain visible so hosts cannot hide ambiguity", (
   const capsule = preAnswerRecallCapsule(context);
   assert.equal(capsule.feedbackCandidates.rows.length, 2);
   assert.deepEqual(capsule.feedbackCandidates.fields,
-    ["id", "text", "digest", "at"]);
+    ["id", "text", "digest", "message", "at"]);
   assert.deepEqual(capsule.feedbackCandidates.common,
     { provider: "claude", session: "session-ref:old" });
   assert.equal(capsule.feedbackReview.status, "multiple-unresolved");
@@ -141,12 +141,17 @@ test("bounded King recall keeps three ordinary candidates instead of dropping th
   const candidates = context.briefing.preAnswerRecall.feedbackCandidates;
   candidates.push({ ...candidates[0], text: "Das hatten wir gestern schon erledigt",
     id: "assertion:feedback-3", digest: "e".repeat(64), message: "message:completion-claim" });
+  const capsule = preAnswerRecallCapsule(context);
   const message = blunRuntimeMessage(JSON.stringify(context));
   assert.equal(Buffer.byteLength(message) <= 1200, true);
   assert.match(message, /result\.txt/);
+  const restored = capsule.feedbackCandidates.rows.map((row) => Object.fromEntries(
+    capsule.feedbackCandidates.fields.map((field, index) =>
+      [field, `${capsule.feedbackCandidates.prefixes[index]}${row[index]}`])));
+  assert.deepEqual(restored.map((item) => item.id), candidates.map((item) => item.id));
+  assert.deepEqual(restored.map((item) => item.message), candidates.map((item) => item.message));
   for (const candidate of candidates) {
     assert.match(message, new RegExp(candidate.digest));
-    assert.match(message, new RegExp(candidate.id));
     assert.match(message, new RegExp(candidate.text));
   }
   assert.match(message, /multiple-unresolved/);
@@ -167,7 +172,7 @@ test("bounded King recall hands off loaded retrieval beside three source candida
     source: "source:synthetic", validity: "current", confidence: 1
   }] }];
   const capsule = preAnswerRecallCapsule(context);
-  assert.deepEqual(capsule.feedbackCandidates.fields, ["id", "text", "digest", "at"]);
+  assert.deepEqual(capsule.feedbackCandidates.fields, ["id", "text", "digest", "message", "at"]);
   assert.deepEqual(capsule.feedbackCandidates.common,
     { provider: "claude", session: "session-ref:old" });
   assert.equal(capsule.feedbackCandidates.rows.length, 3);
@@ -180,9 +185,13 @@ test("bounded King recall hands off loaded retrieval beside three source candida
   assert.match(message, /Check configured access before claiming it is unavailable/);
   assert.match(message, /memory:synthetic/);
   assert.match(message, /result\.txt/);
+  const restored = capsule.feedbackCandidates.rows.map((row) => Object.fromEntries(
+    capsule.feedbackCandidates.fields.map((field, index) =>
+      [field, `${capsule.feedbackCandidates.prefixes[index]}${row[index]}`])));
+  assert.deepEqual(restored.map((item) => item.id), candidates.map((item) => item.id));
+  assert.deepEqual(restored.map((item) => item.message), candidates.map((item) => item.message));
   for (const candidate of candidates) {
     assert.match(message, new RegExp(candidate.digest));
-    assert.match(message, new RegExp(candidate.id));
     assert.match(message, new RegExp(candidate.text));
   }
   assert.match(message, /multiple-unresolved/);

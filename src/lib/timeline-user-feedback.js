@@ -4,21 +4,36 @@ import { TIMELINE_CLARIFICATION_SCHEMA, TIMELINE_INTERPRETATION_SCHEMA } from ".
 
 export const USER_FEEDBACK_SCHEMA = "agentspine.timeline-user-feedback/v1";
 export const USER_FEEDBACK_INTERPRETATION_SCHEMA = "agentspine.timeline-user-feedback-interpretation/v1";
-export const USER_FEEDBACK_CLARIFICATION_SCHEMA = "agentspine.timeline-user-feedback-clarification/v1";
+export const USER_FEEDBACK_CLARIFICATION_SCHEMA = "agentspine.timeline-user-feedback-clarification/v2";
 const KIND = "uninterpreted-user-message";
 const KEYS = ["schema", "sourceText", "speakerRole", "sourceProvider", "sourceDigest",
   "targetAssertionId", "interpretationStatus", "completionVerified"];
 const INTERPRETATION_KEYS = ["schema", "sourceFeedbackAssertionId", "targetAssertionId",
   "sourceProvider", "sourceDigest", "modelProvider", "interpretationStatus", "interpretationKind",
   "proposedNextStepSummary", "clarificationQuestion", "replacedNextStepId", "completionVerified"];
-const CLARIFICATION_KEYS = ["schema", "sourceFeedbackAssertionIds", "targetAssertionId",
-  "sourceProvider", "sourceDigest", "modelProvider", "interpretationStatus", "clarificationQuestion",
+const CLARIFICATION_KEYS = ["schema", "sourceBindings", "targetAssertionId",
+  "modelProvider", "interpretationStatus", "clarificationQuestion",
   "replacedNextStepId", "completionVerified"];
+const SOURCE_BINDING_KEYS = ["feedbackAssertionId", "eventId", "messageDigest", "sourceProvider",
+  "sourceDigest", "sessionRef", "messageRef", "observedAt"];
 const ASSERTION_ID = /^assertion:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/;
 const STABLE_ID = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/;
 
 function exactKeys(value, keys) {
   return value && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+}
+
+function validSourceBindings(bindings) {
+  if (!Array.isArray(bindings) || bindings.length < 2 || bindings.length > 3) return false;
+  const ids = bindings.map((item) => item?.feedbackAssertionId);
+  return new Set(ids).size === ids.length && [...ids].sort().every((id, index) => id === ids[index])
+    && bindings.every((item) => exactKeys(item, SOURCE_BINDING_KEYS)
+      && ASSERTION_ID.test(item.feedbackAssertionId || "") && STABLE_ID.test(item.eventId || "")
+      && item.messageRef === item.eventId && STABLE_ID.test(item.sessionRef || "")
+      && ["claude", "codex", "king"].includes(item.sourceProvider)
+      && /^[a-f0-9]{64}$/.test(item.sourceDigest || "")
+      && /^[a-f0-9]{64}$/.test(item.messageDigest || "")
+      && Number.isFinite(new Date(item.observedAt).getTime()));
 }
 
 function validateInterpretation(input, value) {
@@ -35,16 +50,12 @@ function validateInterpretation(input, value) {
     || !exactKeys(value, clarification ? CLARIFICATION_KEYS : INTERPRETATION_KEYS)
     || value.interpretationStatus !== "model-proposed"
     || value.completionVerified !== false
-    || (clarification ? !Array.isArray(value.sourceFeedbackAssertionIds)
-      || value.sourceFeedbackAssertionIds.length < 2 || value.sourceFeedbackAssertionIds.length > 3
-      || value.sourceFeedbackAssertionIds.some((id) => !ASSERTION_ID.test(id))
-      || new Set(value.sourceFeedbackAssertionIds).size !== value.sourceFeedbackAssertionIds.length
-      || ![...value.sourceFeedbackAssertionIds].sort().every((id, index) => id === value.sourceFeedbackAssertionIds[index])
+    || (clarification ? !validSourceBindings(value.sourceBindings)
       : !ASSERTION_ID.test(value.sourceFeedbackAssertionId || ""))
     || !ASSERTION_ID.test(value.targetAssertionId || "") || !STABLE_ID.test(value.replacedNextStepId || "")
-    || !["claude", "codex", "king"].includes(value.sourceProvider)
     || !["claude", "codex", "king"].includes(value.modelProvider)
-    || !/^[a-f0-9]{64}$/.test(value.sourceDigest || "")
+    || (!clarification && (!["claude", "codex", "king"].includes(value.sourceProvider)
+      || !/^[a-f0-9]{64}$/.test(value.sourceDigest || "")))
     || (!clarification && !["next-step-correction", "completion-claim", "not-current-instruction", "ambiguous"].includes(kind))
     || (!clarification && (kind === "next-step-correction"
       ? typeof next !== "string" || !next.trim() || next.length > 500 || /[\r\n]/u.test(next) || question !== null
@@ -126,8 +137,14 @@ export function relevantUserFeedbackInterpretation(entry, task) {
     && entry.observedAt >= task.observedAt;
 }
 
+function sourceBinding(item) {
+  return { feedbackAssertionId: item.id, eventId: item.source.id, messageDigest: item.source.digest,
+    sourceProvider: item.value.sourceProvider, sourceDigest: item.value.sourceDigest,
+    sessionRef: item.source.sessionRef, messageRef: item.source.messageRef, observedAt: item.observedAt };
+}
+
 export async function captureTimelineUserInterpretation({
-  root, scope, events, event, feedback, request, modelProvider, sessionRef, now
+  root, scope, verifySources, event, feedback, request, modelProvider, sessionRef, now
 }) {
   if (!request || ![TIMELINE_INTERPRETATION_SCHEMA, TIMELINE_CLARIFICATION_SCHEMA].includes(request.schema)
     || !["claude", "codex", "king"].includes(modelProvider) || !sessionRef) {
@@ -142,17 +159,12 @@ export async function captureTimelineUserInterpretation({
   const candidates = context.knowledge.current.filter((item) => relevantUserFeedback(item, task || {}));
   const clarification = request.schema === TIMELINE_CLARIFICATION_SCHEMA;
   const source = candidates.find((item) => item.id === feedback.id && item.source.id === event.id);
-  const ids = candidates.map((item) => item.id).sort();
+  const sourceBindings = candidates.map(sourceBinding)
+    .sort((left, right) => left.feedbackAssertionId.localeCompare(right.feedbackAssertionId));
+  const ids = sourceBindings.map((item) => item.feedbackAssertionId);
   const requestedIds = clarification ? request.feedbackAssertionIds : [request.feedbackAssertionId];
-  const sourcesVerified = candidates.every((item) =>
-    item.value.sourceDigest === source?.value.sourceDigest
-    && item.value.sourceProvider === source?.value.sourceProvider
-    && events.some((candidate) => candidate.id === item.source.id
-      && candidate.messageDigest === item.source.digest
-      && candidate.sourceDigest === item.value.sourceDigest
-      && candidate.sourceProvider === item.value.sourceProvider));
   if (!task || !source || request.targetAssertionId !== task.assertionId
-    || source.value.targetAssertionId !== task.assertionId || !sourcesVerified
+    || source.value.targetAssertionId !== task.assertionId
     || requestedIds.length !== ids.length || !requestedIds.every((id, index) => id === ids[index])) {
     return { reason: "timeline-feedback-interpretation-source-mismatch" };
   }
@@ -160,10 +172,17 @@ export async function captureTimelineUserInterpretation({
   if (clarification !== (candidates.length > 1) || candidates.length > 3) {
     return { reason: "timeline-feedback-interpretation-ambiguous-set" };
   }
+  const verified = typeof verifySources === "function" ? await verifySources(sourceBindings) : null;
+  if (!verified || verified.length !== sourceBindings.length
+    || verified.some((item, index) => item.id !== sourceBindings[index].eventId
+      || item.sha256 !== sourceBindings[index].messageDigest
+      || item.sourceText !== candidates.find((candidate) => candidate.id
+        === sourceBindings[index].feedbackAssertionId)?.value.sourceText)) {
+    return { reason: "timeline-feedback-interpretation-source-mismatch" };
+  }
   const value = clarification ? {
-    schema: USER_FEEDBACK_CLARIFICATION_SCHEMA, sourceFeedbackAssertionIds: ids,
-    targetAssertionId: task.assertionId, sourceProvider: source.value.sourceProvider,
-    sourceDigest: source.value.sourceDigest, modelProvider, interpretationStatus: "model-proposed",
+    schema: USER_FEEDBACK_CLARIFICATION_SCHEMA, sourceBindings,
+    targetAssertionId: task.assertionId, modelProvider, interpretationStatus: "model-proposed",
     clarificationQuestion: request.clarificationQuestion, replacedNextStepId: task.nextStep.id,
     completionVerified: false
   } : {
@@ -176,15 +195,15 @@ export async function captureTimelineUserInterpretation({
   };
   const id = `assertion:user-feedback-interpretation-${createHash("sha256")
     .update(`${requestedIds.join("\0")}\0${task.assertionId}`).digest("hex").slice(0, 24)}`;
+  const material = JSON.stringify({ request, sourceBindings, targetId: task.assertionId,
+    modelProvider, sessionRef });
+  const evidenceDigest = createHash("sha256").update(material).digest("hex");
   const existing = context.knowledge.current.find((item) => item.id === id);
   if (existing) {
-    return Object.keys(value).every((key) => JSON.stringify(existing.value[key]) === JSON.stringify(value[key]))
+    return existing.source.digest === evidenceDigest
       ? { status: "duplicate", assertion: existing }
       : { reason: "timeline-feedback-interpretation-conflicted" };
   }
-  const material = JSON.stringify({ request, sourceIds: requestedIds, targetId: task.assertionId,
-    sourceDigest: source.value.sourceDigest, modelProvider, sessionRef });
-  const evidenceDigest = createHash("sha256").update(material).digest("hex");
   return recordWorldAssertion({ root, id, subjectId: scope.currentTaskId,
     predicate: "task.user-feedback-interpretation", value, evidenceKind: "model-suggestion",
     evidenceId: `evidence:model-interpretation-${evidenceDigest.slice(0, 24)}`, evidenceDigest,

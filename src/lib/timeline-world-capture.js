@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { searchSessionTimeline } from "./session-timeline.js";
+import { reverifyTimelineFeedbackSources, searchSessionTimeline } from "./session-timeline.js";
 import { recordWorldAssertion, worldContext } from "./world-model.js";
 import {
   captureTimelineUserFeedback, captureTimelineUserInterpretation
@@ -201,8 +201,9 @@ export async function captureSessionTimelineEvidence({
       if (interpretation !== null) {
         const request = timelineInterpretationRequest(interpretation);
         if (!request) return unavailable("timeline-feedback-interpretation-invalid", timeline);
-        const events = timeline.events.filter((item) => validEvent(item, timeline, scope));
-        const interpreted = await captureTimelineUserInterpretation({ root, scope, events, event,
+        const verifySources = (references) => reverifyTimelineFeedbackSources({
+          root, host, sessionId, scope, references, includePriorProviders, environment, hostHome });
+        const interpreted = await captureTimelineUserInterpretation({ root, scope, verifySources, event,
           feedback: recorded.assertion, request, modelProvider: host,
           sessionRef: timelineSessionReference(sessionTimelineBinding({ host, sessionId, scope })), now });
         if (interpreted.reason) return unavailable(interpreted.reason, timeline);

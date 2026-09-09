@@ -62,7 +62,7 @@ export function taskKnowledgeContext(entries, { taskId = null, continuation, max
       continue;
     }
     if (relevantUserFeedbackInterpretation(entry, task)) {
-      const sourceIds = [...(entry.value.sourceFeedbackAssertionIds
+      const sourceIds = [...(entry.value.sourceBindings?.map((item) => item.feedbackAssertionId)
         || [entry.value.sourceFeedbackAssertionId])].sort();
       if (sourceIds.length === feedbackIds.length
         && sourceIds.every((id, index) => id === feedbackIds[index])) {

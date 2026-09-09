@@ -13,8 +13,16 @@ function addRecallField(packet, key, value, maximum = 1020) {
   return false;
 }
 
-function compactThreeCandidateRows(packet, candidates) {
-  if (candidates.rows.length < 3) return;
+function sharedPrefix(values) {
+  let prefix = values[0] || "";
+  for (const value of values.slice(1)) {
+    while (prefix && !value.startsWith(prefix)) prefix = prefix.slice(0, -1);
+  }
+  return prefix.length >= 4 ? prefix : "";
+}
+
+function compactCandidateRows(packet, candidates) {
+  if (candidates.rows.length < 2) return;
   if (!candidates.prefixes) {
     const digest = candidates.fields.indexOf("digest");
     if (digest >= 0 && candidates.rows.every((row) => row[digest] === candidates.rows[0][digest])) {
@@ -22,11 +30,11 @@ function compactThreeCandidateRows(packet, candidates) {
       candidates.fields.splice(digest, 1);
       for (const row of candidates.rows) row.splice(digest, 1);
     }
-    const expected = { id: "assertion:user-feedback-", message: "timeline-event:" };
     candidates.prefixes = candidates.fields.map((field, index) => {
       const values = candidates.rows.map((row) => row[index]);
-      const prefix = expected[field] || (field === "at" && values.every((value) =>
-        /^\d{4}-\d{2}-\d{2}T\d{2}:/.test(value)) ? values[0].slice(0, 14) : "");
+      const prefix = ["id", "message", "session"].includes(field) ? sharedPrefix(values)
+        : field === "at" && values.every((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:/.test(value))
+          ? values[0].slice(0, 14) : "";
       if (!prefix || !values.every((value) => value.startsWith(prefix))) return "";
       for (const row of candidates.rows) row[index] = row[index].slice(prefix.length);
       return prefix;
@@ -39,7 +47,7 @@ function compactThreeCandidateRows(packet, candidates) {
   const review = packet.feedbackReview;
   if (review?.modelClarification) packet.feedbackReview = {
     status: review.status, completionVerified: false, target: review.targetAssertionId,
-    modelQuestion: review.modelClarification.question, modelStatus: review.modelClarification.status
+    question: review.modelClarification.question, model: true
   };
 }
 
@@ -49,14 +57,14 @@ function compactFeedbackCandidates(packet) {
   if (proposal) for (const key of ["completionVerified", "provider", "replaces"]) delete proposal[key];
   if (candidates && !Array.isArray(candidates)
     && Array.isArray(candidates.fields) && Array.isArray(candidates.rows)) {
-    compactThreeCandidateRows(packet, candidates);
+    compactCandidateRows(packet, candidates);
     return true;
   }
   if (!Array.isArray(candidates) || candidates.length < 2) return false;
   const origins = ["provider", "session"];
   const sharedKeys = origins.filter((key) =>
     candidates.every((item) => item?.[key] === candidates[0]?.[key]));
-  const fields = ["id", "text", "digest", "at",
+  const fields = ["id", "text", "digest", "message", "at",
     ...origins.filter((key) => !sharedKeys.includes(key))];
   packet.feedbackCandidates = {
     fields,
@@ -64,7 +72,7 @@ function compactFeedbackCandidates(packet) {
       [key, candidates[0][key]])) } : {}),
     rows: candidates.map((item) => fields.map((key) => item[key]))
   };
-  compactThreeCandidateRows(packet, packet.feedbackCandidates);
+  compactCandidateRows(packet, packet.feedbackCandidates);
   return true;
 }
 
