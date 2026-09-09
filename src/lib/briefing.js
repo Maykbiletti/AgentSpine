@@ -139,6 +139,12 @@ function preAnswerRecall(world, currentTaskId) {
     provider: value.sourceProvider, digest: value.sourceDigest,
     session: source.sessionRef, message: source.messageRef, at: observedAt
   }));
+  if (!values.length) {
+    Object.assign(taskValue, pick(task, ["assertionId", "observedAt"]));
+    taskValue.source = pick(task.source, ["kind", "id", "digest", "sessionRef", "messageRef"]);
+    taskValue.scope = pick(task.scope, ["projectId", "groupId", "privacy", "portalRef", "threadRef"]);
+    taskValue.correctionStatus = "none-current";
+  }
   if (values.length === 1) {
     const proposal = interpretations.find((item) =>
       item.value.sourceFeedbackAssertionId === feedback[0].id);

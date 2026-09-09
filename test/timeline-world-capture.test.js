@@ -9,6 +9,7 @@ import { PassThrough } from "node:stream";
 import { runHook } from "../src/hook.js";
 import { startMcpServer } from "../src/mcp.js";
 import { channelTimelineContinuity } from "../src/lib/channel-continuity.js";
+import { hookOutput } from "../src/lib/hook-output.js";
 import { recordWorldAssertion } from "../src/lib/world-model.js";
 import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
 
@@ -364,6 +365,36 @@ test("a pre-existing objective contract advances only its exact continuation and
   assert.deepEqual(passedRestart.knowledge.continuation.tasks[0].nextStep, next);
   assert.equal(passedRestart.uncertainty.conflicts, 1,
     "the raw fail/pass measurements remain visibly contradictory instead of being erased");
+  const compacted = await runHook({ hook_event_name: "PostCompact", host: "claude",
+    cwd: item.project, session_id: "session:current", ...hookScope() });
+  assert.match(compacted.context, /Publish the verified result\.txt report/);
+  const prompted = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude",
+    cwd: item.project, session_id: "session:current", prompt: "Continue this exact task.",
+    event_id: "event:contract:next-turn", ...hookScope() });
+  assert.equal(prompted.blocked, false, prompted.reason);
+  const recall = JSON.parse(prompted.context).briefing.preAnswerRecall;
+  assert.equal(recall.task.lastVerifiedStep.result, "passed");
+  assert.equal(recall.task.nextStep.summary, next.summary);
+  assert.equal(recall.task.assertionId, passedRestart.knowledge.continuation.tasks[0].assertionId);
+  assert.equal(recall.task.source.id, passedRestart.knowledge.continuation.tasks[0].source.id);
+  assert.equal(recall.task.source.digest, passedRestart.knowledge.continuation.tasks[0].source.digest);
+  assert.equal(recall.task.scope.threadRef, binding.threadRef);
+  assert.equal(recall.task.correctionStatus, "none-current");
+  let kingBytes = null;
+  for (const environment of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" },
+    { PLUGIN_ROOT: "/synthetic/codex" }, { BLUN_PLUGIN_ROOT: "/synthetic/blun" }]) {
+    const native = hookOutput("UserPromptSubmit", prompted.context, environment).hookSpecificOutput;
+    const modelContext = native.additionalContext || native.message;
+    assert.match(modelContext, /Publish the verified result\.txt report/);
+    assert.match(modelContext, /"result":"passed"/);
+    assert.match(modelContext, new RegExp(recall.task.source.digest));
+    assert.match(modelContext, new RegExp(binding.threadRef));
+    assert.match(modelContext, /objective-measurement|none-current/);
+    if (native.message) {
+      kingBytes = Buffer.byteLength(native.message);
+      assert.ok(kingBytes <= 1200);
+    }
+  }
   const duplicate = await captureQuery(item, { query: "Suite PASS", includePriorSessions: true },
     "tool:contract:duplicate-search", "tool:contract:duplicate-capture");
   assert.equal(duplicate.value.status, "duplicate");
@@ -371,7 +402,8 @@ test("a pre-existing objective contract advances only its exact continuation and
   assert.deepEqual(await readFile(item.source), sourceBefore);
   t.diagnostic(JSON.stringify({ correctThreadUpdates: "0 -> 2", falseTaskUpdates: 0,
     preservedConflicts: 1, automaticRetries: 0, repeatedWorkAfterPass: 0,
-    restartContinuity: "2/2", elapsedMs: performance.now() - started, realModelRuns: 0 }));
+    restartContinuity: "2/2", postCompactHandoffs: "0 -> 3", kingBytes,
+    elapsedMs: performance.now() - started, realModelRuns: 0 }));
 });
 
 test("newer user correction defeats an old outcome contract and explicit replacement can complete", async (t) => {
