@@ -67,6 +67,7 @@ async function runMode(mode) {
     "hook.test.js",
     "cross-provider-history.test.js",
     "delivery-completion.test.js",
+    "hook-briefing-use.test.js",
     "king-history.test.js",
     "lesson-recall.test.js",
     "mcp-bounded-preflight.test.js",
@@ -74,6 +75,7 @@ async function runMode(mode) {
     "package.test.js",
     "portal-thread-continuity.test.js",
     "mcp.test.js",
+    "owned-file-lock.test.js",
     "session-timeline-host-origin.test.js",
     "session-timeline-invocation.test.js",
     "timeline-natural-feedback.test.js"
