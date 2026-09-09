@@ -10,6 +10,8 @@ Claude Code uses its resolved user and project `CLAUDE.md` hierarchy. Codex uses
 
 Claude Code's `InstructionsLoaded` lifecycle event is registered as an additional observability signal, while `UserPromptSubmit` remains the blocking and injection boundary. Codex uses its own manifest-selected hook set without that unsupported Claude-only event. The preflight does not rely on the model remembering to read a file or call a tool.
 
+Codex `UserPromptSubmit` binds the receipt to the native string `turn_id`; if an exact event ID is also present, both IDs are digest-bound. Claude's supported `UserPromptSubmit` input has no turn ID, so the adapter issues a process-local invocation capability that only the parsed hook-input object can consume. This lets two legitimate identical prompts run separately while a copied object cannot reconstruct the receipt binding. Numeric or otherwise unsupported turn identifiers are rejected rather than treated as King/BLUN lifecycle evidence.
+
 ## Required retrieval providers
 
 Retrieval policy is a separate local policy file outside every project. Configure it only through the local CLI:
@@ -66,4 +68,4 @@ Confirmed entries are scoped, checksummed, append-only and versioned. A new vers
 
 Claude Code documents that a command hook killed by the host timeout is fail-open, even though an explicit exit code 2 blocks. Therefore an absolute guarantee against process termination requires the host or TUI to invoke the same preflight contract as a wrapper-hard gate immediately before its model API call. AgentSpine does not mislabel a merely installed command hook as proof against host-enforced timeout. A release is only live-proven after the target host shows fresh consumed receipts across consecutive turns, restart, and compaction.
 
-Host hierarchy and lifecycle behavior were checked on 2026-08-30 against the official [Claude Code hook reference](https://code.claude.com/docs/en/hooks) and [Codex AGENTS.md reference](https://developers.openai.com/codex/agent-configuration/agents-md).
+Host hierarchy and lifecycle behavior were checked on 2026-09-09 against the official [Claude Code hook reference](https://code.claude.com/docs/en/hooks) and [Codex hook reference](https://learn.chatgpt.com/docs/hooks).

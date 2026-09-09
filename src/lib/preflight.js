@@ -5,6 +5,7 @@ import { lstat, mkdir, open, readFile, realpath, stat, unlink, writeFile } from 
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
 import { ancestorsBetween, isInside, stateRoot } from "./paths.js";
+import { preflightDeliveryId } from "./preflight-delivery-id.js";
 import { resolveHostSourceCatalog } from "./source-roots.js";
 
 export const PREFLIGHT_SCHEMA = "agentspine.preflight/v2";
@@ -493,8 +494,8 @@ export async function runPreflight({ input, scope, resolvedSources, prompt, now 
   if (typeof prompt !== "string" || !prompt.length || Buffer.byteLength(prompt) > 64 * 1024) throw new Error("preflight requires one bounded prompt");
   const exactScope = scopeFromInput({ input, scope, resolvedSources, env });
   const promptDigest = sha256(prompt);
-  const deliveryId = exactId(input.event_id ?? input.hook_event_id, "hookEventId",
-    `prompt:${sha256(`${exactScope.sessionId}\0${promptDigest}`).slice(0, 32)}`);
+  const deliveryId = preflightDeliveryId(input, { issue: true });
+  if (!deliveryId) throw new Error("preflight hook invocation identity is unavailable");
   const paths = storagePaths(env);
   const policy = validatePolicy(await readJson(paths.policy, MAX_POLICY_BYTES, emptyPolicy));
   const profile = policy.profiles.find((item) => item.enabled && item.agentId === exactScope.agentId && item.host === exactScope.host
@@ -590,8 +591,7 @@ export async function verifyPreflightReceipt({ receipt, input, scope, resolvedSo
     || receipt.tenantId !== exactScope.tenantId || receipt.host !== exactScope.host || receipt.profileId !== exactScope.profileId
     || receipt.sessionId !== exactScope.sessionId || receipt.projectId !== exactScope.projectId || receipt.cwdDigest !== sha256(exactScope.cwd)
     || receipt.taskId !== exactScope.taskId || receipt.groupId !== exactScope.groupId) return false;
-  const deliveryId = exactId(input.event_id ?? input.hook_event_id, "hookEventId",
-    `prompt:${sha256(`${exactScope.sessionId}\0${sha256(prompt)}`).slice(0, 32)}`);
+  const deliveryId = preflightDeliveryId(input);
   if (receipt.deliveryId !== deliveryId) return false;
   const { id: _id, bodyDigest, signature, ...body } = receipt;
   if (digestObject(body) !== bodyDigest) return false;
