@@ -364,7 +364,8 @@ export async function checkInstall(root = process.cwd()) {
     await mkdir(userProject, { recursive: true });
     await writeFile(source, "# Existing soul\n\nNever modify me.\n", "utf8");
     await writeFile(join(userProject, "CLAUDE.md"), "# Installed Claude rules\n\nLoad this before every answer.\n", "utf8");
-    await writeFile(join(userProject, "AGENTS.md"), "# Installed Codex rules\n\nLoad this before every answer.\n", "utf8");
+    const largeCodexRules = `# Installed Codex rules\n\n${"x".repeat(17_590 - 25)}`;
+    await writeFile(join(userProject, "AGENTS.md"), largeCodexRules, "utf8");
     const protectedInstallSources = [source, join(userProject, "CLAUDE.md"), join(userProject, "AGENTS.md")];
     const sourceHashes = new Map(await Promise.all(protectedInstallSources.map(async (path) => [path, hash(await readFile(path))])));
 

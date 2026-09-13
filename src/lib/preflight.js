@@ -23,7 +23,7 @@ const MAX_POLICY_BYTES = 1024 * 1024;
 const MAX_STATE_BYTES = 8 * 1024 * 1024;
 const MAX_PROVIDER_BYTES = 1024 * 1024;
 const STANDARD_REQUIRED_INSTRUCTIONS_BYTES = 8 * 1024;
-const MAX_CLAUDE_REQUIRED_INSTRUCTIONS_BYTES = 16 * 1024;
+const MAX_CLAUDE_REQUIRED_INSTRUCTIONS_BYTES = 16 * 1024, MAX_CODEX_REQUIRED_INSTRUCTIONS_BYTES = 32 * 1024;
 const MAX_REQUIRED_MEMORY_BYTES = 6 * 1024;
 const RECEIPT_TTL_MS = 60_000;
 const FORBIDDEN_MEMORY = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\b(?:password|passwort|secret|token|api[-_ ]?key|credential|permission|rights?|roles?|delegat|authoriz|berechtig|freigabe|approval|tool access|file access|network|production|payment|zahlung|policy)\b/i;
@@ -381,10 +381,10 @@ function instructionDocuments(catalog, host) {
 function instructionBudget(host, usedBytes = 0) {
   const hardLimitBytes = host === "claude"
     ? MAX_CLAUDE_REQUIRED_INSTRUCTIONS_BYTES
-    : STANDARD_REQUIRED_INSTRUCTIONS_BYTES;
+    : host === "codex" ? MAX_CODEX_REQUIRED_INSTRUCTIONS_BYTES : STANDARD_REQUIRED_INSTRUCTIONS_BYTES;
   const overflowBytes = Math.max(0, usedBytes - STANDARD_REQUIRED_INSTRUCTIONS_BYTES);
   return {
-    mode: overflowBytes ? "claude-required-overflow" : "standard",
+    mode: overflowBytes ? `${host}-required-overflow` : "standard",
     standardBytes: STANDARD_REQUIRED_INSTRUCTIONS_BYTES,
     hardLimitBytes,
     usedBytes,
