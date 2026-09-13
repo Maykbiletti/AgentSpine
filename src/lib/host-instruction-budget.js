@@ -1,17 +1,11 @@
-const STANDARD_BYTES = 8 * 1024;
-export const KING_SOURCE_MAX_BYTES = 4 * 1024 * 1024;
-export const KING_TOTAL_MAX_BYTES = 8 * 1024 * 1024;
-
-export function isKingHost(env = process.env) {
-  return Boolean(env.BLUN_PLUGIN_ROOT && env.BLUN_HOME);
-}
+const STANDARD = 8192;
+export const KING_SOURCE_BYTES = 4194304;
+const KING_TOTAL = 8388608;
+export const isKingHost = (env = process.env) => !!(env.BLUN_PLUGIN_ROOT && env.BLUN_HOME);
 
 export function instructionBudget(host, usedBytes = 0, env = process.env) {
-  const hardLimitBytes = host === "codex" && isKingHost(env) ? KING_TOTAL_MAX_BYTES
-    : host === "claude" ? 16 * 1024 : host === "codex" ? 32 * 1024 : STANDARD_BYTES;
-  const overflowBytes = Math.max(0, usedBytes - STANDARD_BYTES);
-  return {
-    mode: overflowBytes ? `${host}-required-overflow` : "standard",
-    standardBytes: STANDARD_BYTES, hardLimitBytes, usedBytes, overflowBytes
-  };
+  const hardLimitBytes = host === "codex" && isKingHost(env) ? KING_TOTAL
+    : host === "claude" ? 16384 : host === "codex" ? 32768 : STANDARD;
+  return { mode: usedBytes > STANDARD ? `${host}-required-overflow` : "standard",
+    standardBytes: STANDARD, hardLimitBytes, usedBytes, overflowBytes: Math.max(0, usedBytes - STANDARD) };
 }

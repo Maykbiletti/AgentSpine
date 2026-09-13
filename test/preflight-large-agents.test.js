@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +14,16 @@ const EXACT_RULE_BYTES = 17_590;
 
 function exactRules(bytes, fill = "x") {
   const header = "# Synthetic Codex rules\n\n";
-  return `${header}${fill.repeat(bytes - Buffer.byteLength(header))}`;
+  const remaining = bytes - Buffer.byteLength(header);
+  return `${header}${fill.repeat(Math.ceil(remaining / fill.length)).slice(0, remaining)}`;
+}
+
+function digest(value) { return createHash("sha256").update(value).digest("hex"); }
+
+function exactUtf8Rules(bytes) {
+  const header = "# Synthetische Regeln: Größe\n\n";
+  const remaining = bytes - Buffer.byteLength(header);
+  return `${header}${"ä".repeat(Math.floor(remaining / 2))}${remaining % 2 ? "x" : ""}`;
 }
 
 async function setup(t) {
@@ -29,15 +39,15 @@ async function setup(t) {
   return { root, state, hostHome, env };
 }
 
-function input(root, eventId) {
+function input(root, eventId, prompt = "Please clean up AGENTS.md without deleting any instructions.") {
   return { hook_event_name: "UserPromptSubmit", host: "codex", cwd: root,
     session_id: `session:${eventId}`, event_id: `turn:${eventId}`,
-    prompt: "Please clean up AGENTS.md without deleting any instructions." };
+    prompt };
 }
 
-async function installedHook({ root, env, eventId }) {
+async function installedHook({ root, env, eventId, prompt, hookInput, pluginRoot: installedRoot = pluginRoot }) {
   return await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [join(pluginRoot, "src", "hook.js")], {
+    const child = spawn(process.execPath, [join(installedRoot, "src", "hook.js")], {
       cwd: root, env, stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "";
@@ -51,7 +61,7 @@ async function installedHook({ root, env, eventId }) {
       if (code !== 0) return reject(new Error(`hook exited ${code}: ${stderr}`));
       try { resolve(JSON.parse(stdout)); } catch (error) { reject(error); }
     });
-    child.stdin.end(JSON.stringify(input(root, eventId)));
+    child.stdin.end(JSON.stringify(hookInput || input(root, eventId, prompt)));
   });
 }
 
@@ -94,7 +104,7 @@ test("the installed King envelope accepts the same cleanup turn without rewritin
 for (const [name, projectBytes, userBytes, fill] of [
   ["single-44000", 44000, 0, "x"],
   ["combined-44000", 25000, 19000, "x"],
-  ["escaped-32768", 32768, 0, '"']
+  ["escaped-32768", 32768, 0, "\"\\\\\n"]
 ]) test(`King preserves complete instructions and stays quiet: ${name}`, async (t) => {
   const item = await setup(t);
   const path = join(item.root, "AGENTS.md");
@@ -116,15 +126,40 @@ for (const [name, projectBytes, userBytes, fill] of [
   assert.equal(await verifyPreflightReceipt({ ...args, receipt: preflight.receipt, prompt: "different" }), false);
   assert.equal(await verifyPreflightReceipt({ ...args, receipt: preflight.receipt, consume: true }), true);
   assert.equal(await verifyPreflightReceipt({ ...args, receipt: preflight.receipt }), false);
-  const output = await installedHook({ ...item, eventId: `hook-${name}` });
-  assert.equal(output.decision, undefined, JSON.stringify(output));
-  assert.equal(Object.hasOwn(output.hookSpecificOutput, "message"), false);
-  assert.equal(Buffer.byteLength(output.hookSpecificOutput.additionalContext) <= 1200, true);
+  for (const [suffix, prompt] of [["ordinary", "Continue the current task."],
+    ["cleanup", "Please clean up AGENTS.md without deleting any instructions."]]) {
+    const output = await installedHook({ ...item, eventId: `hook-${name}-${suffix}`, prompt });
+    assert.equal(output.decision, undefined, JSON.stringify(output));
+    assert.equal(Object.hasOwn(output.hookSpecificOutput, "message"), false);
+    assert.equal(Buffer.byteLength(output.hookSpecificOutput.additionalContext) <= 1200, true);
+  }
   assert.deepEqual(await readFile(path), source);
   if (userSource) assert.deepEqual(await readFile(userPath), userSource);
 });
 
-test("King uses its own profile and retains the source-reader safety limit", async (t) => {
+for (const [name, source] of [
+  ...[8191, 8192, 8193, 17590, 32767, 32768, 32769, 65536, 131072]
+    .map((bytes) => [`bytes-${bytes}`, Buffer.from(exactRules(bytes))]),
+  ["utf8-65537", Buffer.from(exactUtf8Rules(65537))]
+]) test(`King loads exact instruction bytes through the real hook: ${name}`, async (t) => {
+  const item = await setup(t);
+  const path = join(item.root, "AGENTS.md");
+  await writeFile(path, source);
+  const sourceDigest = digest(source);
+  assert.equal((await readFile(path)).length, source.length);
+  if (name.startsWith("utf8")) assert.notEqual(source.length, source.toString("utf8").length);
+  for (const [eventId, prompt] of [[`${name}-ordinary`, "Continue the current task."],
+    [`${name}-cleanup`, "Please clean up AGENTS.md without deleting any instructions."]]) {
+    const output = await installedHook({ ...item, eventId, prompt });
+    assert.equal(output.decision, undefined, JSON.stringify(output));
+    assert.equal(Object.hasOwn(output.hookSpecificOutput, "message"), false);
+  }
+  const preserved = await readFile(path);
+  assert.deepEqual(preserved, source);
+  assert.equal(digest(preserved), sourceDigest);
+});
+
+test("King resource limits stay non-blocking and explicitly unverified", async (t) => {
   const item = await setup(t);
   const foreignHome = join(item.root, "foreign-profile");
   await mkdir(foreignHome);
@@ -136,6 +171,88 @@ test("King uses its own profile and retains the source-reader safety limit", asy
   const resolved = await resolveHostSourceCatalog({ host: "codex", cwd: item.root, env: item.env });
   assert.equal(resolved.catalog.documents.some((entry) => entry.sourceScope === "user"), false);
   assert.deepEqual(await readFile(path), source);
-  await writeFile(path, exactRules(4 * 1024 * 1024 + 1));
-  await assert.rejects(resolveHostSourceCatalog({ host: "codex", cwd: item.root, env: item.env }), /source exceeds its byte limit/);
+  const oversized = Buffer.from(exactRules(4 * 1024 * 1024 + 1));
+  await writeFile(path, oversized);
+  const limited = await resolveHostSourceCatalog({ host: "codex", cwd: item.root, env: item.env });
+  assert.equal(limited.diagnostics.status, "incomplete");
+  assert.deepEqual(limited.unverified.map((entry) => ({ id: entry.id, bytes: entry.bytes })),
+    [{ id: "codex:project/AGENTS.md", bytes: oversized.length }]);
+  for (const [eventId, prompt] of [["ordinary-oversized", "Continue the current task."],
+    ["cleanup-oversized", "Please clean up AGENTS.md without deleting any instructions."]]) {
+    const output = await installedHook({ ...item, eventId, prompt });
+    assert.equal(output.decision, undefined, JSON.stringify(output));
+    assert.match(output.hookSpecificOutput.message, /did not load or verify/);
+    assert.match(output.hookSpecificOutput.message, /Continue; no retry/);
+  }
+  const protectedWrite = await installedHook({ ...item, eventId: "write-oversized", hookInput: {
+    ...input(item.root, "write-oversized"), hook_event_name: "PreToolUse", tool_name: "Write",
+    tool_use_id: "tool:write-oversized", tool_input: { file_path: "AGENTS.md", content: "changed" }
+  } });
+  assert.equal(protectedWrite.decision, "block");
+  assert.match(protectedWrite.reason, /codex:project\/AGENTS\.md/);
+  assert.deepEqual(await readFile(path), oversized);
+});
+
+test("King cumulative resource overflow stays non-blocking and preserves every source", async (t) => {
+  const item = await setup(t);
+  const nested = join(item.root, "nested");
+  await mkdir(nested);
+  const sources = [
+    [join(item.hostHome, "AGENTS.md"), Buffer.from(exactRules(3 * 1024 * 1024, "u"))],
+    [join(item.root, "AGENTS.md"), Buffer.from(exactRules(3 * 1024 * 1024, "r"))],
+    [join(nested, "AGENTS.md"), Buffer.from(exactRules(3 * 1024 * 1024, "n"))]
+  ];
+  for (const [path, source] of sources) await writeFile(path, source);
+  const limited = await resolveHostSourceCatalog({ host: "codex", cwd: nested, env: item.env });
+  assert.equal(limited.diagnostics.status, "incomplete");
+  assert.equal(limited.unverified.length, 1);
+  for (const [suffix, prompt] of [["ordinary", "Continue the current task."],
+    ["cleanup", "Please clean up AGENTS.md without deleting any instructions."]]) {
+    const output = await installedHook({ ...item, root: nested,
+      eventId: `cumulative-${suffix}`, prompt });
+    assert.equal(output.decision, undefined, JSON.stringify(output));
+    assert.match(output.hookSpecificOutput.message, /total reader budget/);
+  }
+  const protectedWrite = await installedHook({ ...item, root: nested, eventId: "write-cumulative", hookInput: {
+    ...input(nested, "write-cumulative"), hook_event_name: "PreToolUse", tool_name: "Write",
+    tool_use_id: "tool:write-cumulative", tool_input: { file_path: "AGENTS.md", content: "changed" }
+  } });
+  assert.equal(protectedWrite.decision, "block");
+  for (const [path, source] of sources) assert.deepEqual(await readFile(path), source);
+});
+
+test("fresh and upgraded package copies preserve the King size contract", async (t) => {
+  const item = await setup(t);
+  const installs = [join(item.root, "fresh-package"), join(item.root, "upgraded-package")];
+  for (const installedRoot of installs) {
+    await mkdir(installedRoot);
+    await cp(join(pluginRoot, "src"), join(installedRoot, "src"), { recursive: true });
+    await cp(join(pluginRoot, "package.json"), join(installedRoot, "package.json"));
+  }
+  await writeFile(join(installs[1], "src", "hook.js"), "// stale package\n");
+  await cp(join(pluginRoot, "src"), join(installs[1], "src"), { recursive: true, force: true });
+  const path = join(item.root, "AGENTS.md");
+  for (const [installIndex, installedRoot] of installs.entries()) {
+    const installState = join(item.state, String(installIndex));
+    await mkdir(installState);
+    const env = { ...item.env, AGENTSPINE_STATE_DIR: installState, BLUN_PLUGIN_ROOT: installedRoot };
+    for (const [name, source] of [
+      ...[8191, 8192, 8193, 17590, 32767, 32768, 32769, 65536, 131072]
+        .map((bytes) => [`bytes-${bytes}`, Buffer.from(exactRules(bytes))]),
+      ["escaped-32768", Buffer.from(exactRules(32768, "\"\\\\\n"))],
+      ["utf8-65537", Buffer.from(exactUtf8Rules(65537))],
+      ["reader-overflow", Buffer.from(exactRules(4 * 1024 * 1024 + 1))]
+    ]) {
+      await writeFile(path, source);
+      const before = digest(source);
+      for (const [suffix, prompt] of [["ordinary", "Continue the current task."],
+        ["cleanup", "Please clean up AGENTS.md without deleting any instructions."]]) {
+        const output = await installedHook({ ...item, env, pluginRoot: installedRoot,
+          eventId: `${installIndex}-${name}-${suffix}`, prompt });
+        assert.equal(output.decision, undefined, JSON.stringify(output));
+        if (name === "reader-overflow") assert.match(output.hookSpecificOutput.message, /did not load or verify/);
+      }
+      assert.equal(digest(await readFile(path)), before);
+    }
+  }
 });

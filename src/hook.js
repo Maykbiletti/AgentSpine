@@ -100,14 +100,12 @@ async function runHookCore(input, payload, options) {
   const root = resolvedSources.projectRoot;
   const catalog = resolvedSources.catalog;
   const catalogPath = await saveCatalog(catalog), sourceWarning = resolvedSources.diagnostics.warning || null;
-  let scope = null;
-  let selfstarter = null;
-  let channelEvent = null;
-  let learningDelivery = null;
-  let deliveryVerification = null;
-  let artifactGuard = null;
-  let premortem = null;
-  let lessonRecall = null;
+  if (CONTEXT_EVENTS.has(event) && resolvedSources.unverified.length) {
+    if (payload) return { blocked: false, sourceUnverified: true, sourceWarning };
+    process.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: event, message: sourceWarning } })}\n`); return;
+  }
+  let scope = null, selfstarter = null, channelEvent = null, learningDelivery = null;
+  let deliveryVerification = null, artifactGuard = null, premortem = null, lessonRecall = null;
   if (event === "PreToolUse" && isScanFailOpenTool(input.tool_name) && resolvedSources.diagnostics.skipped?.length) {
     await auditSkippedScans(input, "source-resolution", resolvedSources.diagnostics.skipped);
   }
@@ -129,7 +127,8 @@ async function runHookCore(input, payload, options) {
         }
       }
     }
-    const protectedDocuments = catalog.documents.filter((doc) => protectedRelative.has(doc.relativePath));
+    const protectedDocuments = [...catalog.documents.filter((doc) => protectedRelative.has(doc.relativePath)),
+      ...resolvedSources.unverified.map((item) => ({ path: item.path, relativePath: item.id }))];
     const protectedPaths = new Set(protectedDocuments.map((doc) => resolve(doc.path)));
     const targets = await Promise.all(candidatePaths(input.tool_input || input.tool_args).map(async (path) => {
       const target = resolve(cwd, path);
@@ -141,7 +140,8 @@ async function runHookCore(input, payload, options) {
     const hit = targets.find((path) => protectedPaths.has(path));
     const shellHit = shellTargetsProtected(input, protectedDocuments, cwd, root);
     if (hit || shellHit) {
-      const relativePath = shellHit?.relativePath || catalog.documents.find((doc) => resolve(doc.path) === hit)?.relativePath || hit;
+      const relativePath = shellHit?.relativePath
+        || protectedDocuments.find((doc) => resolve(doc.path) === hit)?.relativePath || hit;
       const reason = `AgentSpine protected source: ${relativePath}. Existing identity, rule, soul, and memory documents are read-only to agents.`;
       if (payload) return { blocked: true, reason };
       denyTool(reason);
