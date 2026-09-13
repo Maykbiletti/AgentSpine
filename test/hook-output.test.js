@@ -84,15 +84,16 @@ test("pre-answer recall carries actionable source bindings in every host output"
     }
   }
   const blun = hookOutput("UserPromptSubmit", context, { BLUN_PLUGIN_ROOT: "/synthetic/blun" });
-  assert.equal(Buffer.byteLength(blun.hookSpecificOutput.message) <= 1200, true);
-  assert.match(blun.hookSpecificOutput.message, /review-before-claims-and-actions/);
-  assert.match(blun.hookSpecificOutput.message, /result\.txt/);
-  assert.match(blun.hookSpecificOutput.message, /Nein, erst die Prüfsumme prüfen/);
-  assert.match(blun.hookSpecificOutput.message, /Check configured access/);
+  assert.equal(Object.hasOwn(blun.hookSpecificOutput, "message"), false);
+  assert.equal(Buffer.byteLength(blun.hookSpecificOutput.additionalContext) <= 1200, true);
+  assert.match(blun.hookSpecificOutput.additionalContext, /review-before-claims-and-actions/);
+  assert.match(blun.hookSpecificOutput.additionalContext, /result\.txt/);
+  assert.match(blun.hookSpecificOutput.additionalContext, /Nein, erst die Prüfsumme prüfen/);
+  assert.match(blun.hookSpecificOutput.additionalContext, /Check configured access/);
   for (const id of ["assertion:user-feedback", "assertion:task"]) {
-    assert.match(blun.hookSpecificOutput.message, new RegExp(id));
+    assert.match(blun.hookSpecificOutput.additionalContext, new RegExp(id));
   }
-  assert.doesNotMatch(blun.hookSpecificOutput.message, /only on demand/);
+  assert.doesNotMatch(blun.hookSpecificOutput.additionalContext, /only on demand/);
 });
 
 test("bounded recall preserves uncertainty and suppresses private group projection", () => {
@@ -255,8 +256,8 @@ test("PostToolUse lifecycle receipts preserve each host's context field", () => 
   const blun = lifecycleOutput("PostToolUse", null, {
     writeDigest: digest, writeIntent: false
   }, null, { BLUN_PLUGIN_ROOT: "/synthetic/blun" });
-  assert.deepEqual(Object.keys(blun.hookSpecificOutput).sort(), ["hookEventName", "message"]);
-  assert.match(blun.hookSpecificOutput.message, new RegExp(`Premortem latest write sha256 ${digest}`));
+  assert.deepEqual(Object.keys(blun.hookSpecificOutput).sort(), ["additionalContext", "hookEventName"]);
+  assert.match(blun.hookSpecificOutput.additionalContext, new RegExp(`Premortem latest write sha256 ${digest}`));
 
   const claude = lifecycleOutput("PostToolUse", null, {
     writeDigest: digest, writeIntent: false

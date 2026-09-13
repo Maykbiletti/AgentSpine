@@ -10,7 +10,7 @@ Provider evidence is not interchangeable. Each adapter separately binds its life
 |---|---|---|---|
 | Project instructions | `CLAUDE.md` hierarchy | `AGENTS.md` hierarchy | `AGENTS.md` through the isolated BLUN profile |
 | Hook package | Native `hooks/hooks.json` | Explicit `hooks/codex.json` | Manifest lifecycle hooks |
-| Verified hook briefing → delivery knowledge | Native `additionalContext` handoff receipt | Native `additionalContext` handoff receipt | Native bounded `message` handoff receipt; live acceptance open |
+| Verified hook briefing → delivery knowledge | Native `additionalContext` handoff receipt | Native `additionalContext` handoff receipt | Bounded model-only `additionalContext` handoff receipt; live acceptance open |
 | Historical transcript enrollment | Bounded registered Claude source | Bounded Codex `sessions` source with verified headers | Protected King agent-wire mapping; live mapping open |
 | Cross-provider evidence handoff | Explicit opt-in; Claude provenance retained | Explicit opt-in; Codex provenance retained | Same contract; live launcher unverified |
 | Native permissions/trust | Host-owned | Host-owned | Host-owned; enforcement of returned block decisions remains externally unverified |
@@ -18,6 +18,20 @@ Provider evidence is not interchangeable. Each adapter separately binds its life
 `UserPromptSubmit` consumes the exact signed snapshot once. Only after stdout accepts the native output does AgentSpine store `agentspine.host-context-handoff/v1`, bound to provider, field, byte count and digest. In-process returns, serialized claims and legacy `verified-host-preflight` receipts do not prove handoff. MCP knowledge may reuse a valid receipt; missing, stale or consumed evidence remains non-blocking and explicitly unverified. The receipt proves transport, not model use or delivery.
 
 Adapter acceptance uses bounded synthetic A/B sessions and covers restart, source mutation, foreign scope, private exclusion and service failure. Cross-provider recall still needs local opt-in plus `includePriorProviders: true` with `includePriorSessions: true`. Report repository, installed-host and model observations separately.
+
+King preparation, lifecycle receipts and process advisories do not emit visible
+`message` prompts. Required instructions remain byte-exact; `UserPromptSubmit`
+uses model-only `additionalContext`. Other events also return that quiet field;
+whether the host consumes it is a separate lifecycle contract. Actual deny/block
+decisions retain their original error schema.
+King uses the existing source-reader safety bounds of 4 MiB per document and
+8 MiB for the source set, not Codex's 32 KiB instruction cap. When both King
+environment bindings are present, `BLUN_HOME` owns the profile even if an unrelated
+`CODEX_HOME` is inherited. These are resource limits, not recommended file sizes.
+Codex/King internal hook envelopes account for the serialized verified briefing,
+including JSON escaping. King's emitted runtime context remains at most 1200
+bytes; its native instruction loader separately supplies full instructions.
+Claude's existing instruction and context limits remain unchanged.
 
 ## Claude Code
 

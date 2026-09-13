@@ -208,7 +208,7 @@ export function blunRuntimeMessage(context) {
 
 export function hookOutput(event, context, env = process.env) {
   if (env.BLUN_PLUGIN_ROOT) {
-    return { hookSpecificOutput: { hookEventName: event, message: blunRuntimeMessage(context) } };
+    return { hookSpecificOutput: { hookEventName: event, additionalContext: blunRuntimeMessage(context) } };
   }
   return { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
 }
@@ -259,6 +259,5 @@ export function lifecycleOutput(event, artifactGuard, premortem, deliveryVerific
     }));
   }
   if (!messages.length) return {};
-  const field = env.BLUN_PLUGIN_ROOT ? "message" : "additionalContext";
-  return { hookSpecificOutput: { hookEventName: event, [field]: messages.join("\n") } };
+  return { hookSpecificOutput: { hookEventName: event, additionalContext: messages.join("\n") } };
 }

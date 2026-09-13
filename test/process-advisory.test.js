@@ -8,14 +8,17 @@ import { fileURLToPath } from "node:url";
 
 const hook = fileURLToPath(new URL("../src/hook.js", import.meta.url));
 
-test("real restarted hooks allow unverified programming and replies without certifying success", async t => {
+for (const host of ["codex", "king"]) test(`real ${host} hooks allow unverified programming and replies without certifying success`, async t => {
   const base = await mkdtemp(join(tmpdir(), "agentspine-advisory-"));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = join(base, "project");
   await mkdir(join(root, ".git"), { recursive: true });
   const source = "# Synthetic contract\nPreserve these bytes.\n";
   await writeFile(join(root, "AGENTS.md"), source);
-  const env = { ...process.env, AGENTSPINE_STATE_DIR: join(base, "state") };
+  const home = join(base, "home");
+  await mkdir(home);
+  const env = { ...process.env, AGENTSPINE_STATE_DIR: join(base, "state"),
+    ...(host === "king" ? { BLUN_HOME: home, BLUN_PLUGIN_ROOT: "/synthetic/blun" } : {}) };
   function invoke(event, extra = {}) {
     const result = spawnSync(process.execPath, [hook], {
       cwd: root, env, encoding: "utf8", timeout: 10000,
@@ -31,6 +34,7 @@ test("real restarted hooks allow unverified programming and replies without cert
     tool_input: { file_path: "artifact.txt", content: "synthetic" } };
   const allowed = invoke("PreToolUse", write);
   assert.equal(allowed.decision, undefined);
+  assert.equal(Object.hasOwn(allowed.hookSpecificOutput, "message"), false);
   const diagnostic = JSON.parse(allowed.hookSpecificOutput.additionalContext);
   assert.equal(diagnostic.presentation, "internal-only");
   assert.equal(diagnostic.completionVerified, false);

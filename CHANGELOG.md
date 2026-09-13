@@ -58,6 +58,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Fixed
 
+- King keeps complete instructions within the existing source-reader resource bounds, resolves its isolated profile first, and accounts for JSON escaping without adding an instruction-size gate. Routine hooks, lifecycle receipts and process advisories use quiet `additionalContext`; actual denials and exact source/receipt checks remain unchanged. Synthetic fresh/upgrade probes cover large and combined sources, escaping and byte preservation. Package allowance grows by 4 KiB unpacked for the helper and install checks; packed and file-count limits stay fixed. Live King/macOS acceptance remains separate.
 - The portal/thread lifecycle probe that starts a fresh process now runs outside the shared Windows I/O pool. Its existing assertions and process deadlines are unchanged.
 - The hermetic runner isolates the real host-origin source-attestation probe from concurrent Windows filesystem pressure, preserving its existing fail-closed result and timing boundaries without increasing a timeout.
 - Reuse host-verified, assignment-bound briefing observations in MCP delivery preparation without a second content fetch; keep missing proof advisory and document provider-specific history limits.

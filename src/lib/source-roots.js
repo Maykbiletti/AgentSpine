@@ -8,6 +8,7 @@ import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.j
 import { purgeIndexedMemoryCache, resolveIndexedMemory } from "./indexed-memory.js";
 import { hookMemoryQuery, loadLessonRecallSelection, rememberLessonRecallSelection } from "./lesson-recall-session.js";
 import { catalogScanPolicy } from "./catalog.js";
+import { isKingHost, KING_SOURCE_MAX_BYTES } from "./host-instruction-budget.js";
 import {
   SOURCE_SCAN_INCOMPLETE, boundedMarkdownTree, existingDirectory, existingRegular, sourceScanError
 } from "./source-tree-scan.js";
@@ -358,9 +359,10 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   let hostDetails = {};
   let rootResolution = "explicit-root";
   if (host === "codex") {
-    const codexHome = env.CODEX_HOME || env.BLUN_HOME || join(homedir(), ".codex");
+    const codexHome = isKingHost(env) ? env.BLUN_HOME : env.CODEX_HOME || env.BLUN_HOME || join(homedir(), ".codex");
     hostHome = await existingDirectory(resolve(codexHome)) || resolve(codexHome);
     const config = await codexConfig(hostHome);
+    if (isKingHost(env)) config.maxBytes = KING_SOURCE_MAX_BYTES;
     if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
     else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, config.rootMarkers));
     sources = await codexSources({ cwd: canonicalCwd, projectRoot, codexHome: hostHome, config });

@@ -7,7 +7,7 @@ import { resolveSessionJob, startOrResumeJob } from "./selfstarter.js";
 
 const STANDARD_HOST_CONTEXT_BYTES = 9500;
 const MAX_CLAUDE_OVERFLOW_CONTEXT_BYTES = 32 * 1024;
-const MAX_CODEX_OVERFLOW_CONTEXT_BYTES = 64 * 1024;
+const CODEX_CONTEXT_ENVELOPE_BYTES = 32 * 1024;
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_.@/-]{0,127}$/;
 export const ATTENTION_WRITE_EVENTS = new Set(["UserPromptSubmit", "PostToolUse", "Stop", "SubagentStop"]);
 const SELFSTART_EVENTS = new Set(["SessionStart", "PostCompact"]);
@@ -44,9 +44,12 @@ export function promptFromInput(input) {
 }
 
 export function hostContextLimit(preflight) {
+  // Source budgets bound the content; JSON escaping must not create another gate.
+  if (preflight?.receipt?.instructionHost === "codex") {
+    return CODEX_CONTEXT_ENVELOPE_BYTES + Buffer.byteLength(JSON.stringify(preflight.briefing || {}));
+  }
   const mode = preflight?.receipt?.instructionBudget?.mode;
   if (mode === "claude-required-overflow") return MAX_CLAUDE_OVERFLOW_CONTEXT_BYTES;
-  if (mode === "codex-required-overflow") return MAX_CODEX_OVERFLOW_CONTEXT_BYTES;
   return STANDARD_HOST_CONTEXT_BYTES;
 }
 

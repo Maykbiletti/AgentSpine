@@ -119,8 +119,13 @@ test("staged install, stale-cache upgrade, and uninstall preserve one bundle and
   assert.deepEqual(result.blockingProtocols.fresh, blockingProtocols);
   assert.deepEqual(result.blockingProtocols.upgrade, blockingProtocols);
   for (const installed of [result.blunPostWriteDigest.fresh, result.blunPostWriteDigest.upgrade]) {
-    assert.equal(installed.contextField, "message");
+    assert.equal(installed.contextField, "additionalContext");
     assert.match(installed.latestWriteDigest, /^[a-f0-9]{64}$/);
+  }
+  for (const installed of [result.kingInstructions.fresh, result.kingInstructions.upgrade]) {
+    assert.deepEqual(installed.map((item) => item.instructionBytes), [44000, 44000, 32768]);
+    assert.equal(installed.every((item) => item.contextField === "additionalContext"
+      && item.contextBytes > 0 && item.contextBytes <= 1200 && item.sourcePreserved), true);
   }
   for (const installed of [result.automaticAttention.fresh, result.automaticAttention.upgrade]) {
     assert.equal(installed.captured, "promise");

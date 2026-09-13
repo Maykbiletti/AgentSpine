@@ -12,6 +12,7 @@ import {
   invokeInstalledBlockingProtocols, invokeInstalledBlunPostWriteDigest, invokeInstalledHook
 } from "./check-install-hook.js";
 import { invokeInstalledSelfstarter as runInstalledSelfstarter } from "./check-install-selfstarter.js";
+import { invokeInstalledKingInstructions } from "./check-install-king.js";
 
 function hash(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -372,6 +373,7 @@ export async function checkInstall(root = process.cwd()) {
     const fresh = join(workspace, "fresh", "agent-spine");
     await copyBundle(root, fresh);
     const freshResult = await checkHosts(fresh);
+    const freshKing = await invokeInstalledKingInstructions(fresh, join(workspace, "king-fresh"));
     const aliasRoot = join(workspace, "fresh-alias");
     await symlink(join(workspace, "fresh"), aliasRoot, process.platform === "win32" ? "junction" : "dir");
     const aliasResult = await checkHosts(join(aliasRoot, "agent-spine"));
@@ -411,6 +413,7 @@ export async function checkInstall(root = process.cwd()) {
     await removeTree(installed);
     await rename(staging, installed);
     const upgraded = await checkHosts(installed);
+    const upgradedKing = await invokeInstalledKingInstructions(installed, join(workspace, "king-upgrade"));
     const upgradeState = join(workspace, "state-upgrade");
     const upgradedHook = await invokeInstalledHook(installed, userProject, upgradeState, "codex");
     const upgradedBlockingProtocols = await invokeInstalledBlockingProtocols(
@@ -440,6 +443,7 @@ export async function checkInstall(root = process.cwd()) {
       automaticBriefing: { fresh: freshHook, upgrade: upgradedHook },
       blockingProtocols: { fresh: freshBlockingProtocols, upgrade: upgradedBlockingProtocols },
       blunPostWriteDigest: { fresh: freshBlunPost, upgrade: upgradedBlunPost },
+      kingInstructions: { fresh: freshKing, upgrade: upgradedKing },
       automaticAttention: { fresh: freshAttention, upgrade: upgradedAttention },
       automaticSelfstarter: { fresh: freshSelfstarter, upgrade: upgradedSelfstarter },
       automaticChannelWake: { fresh: freshChannelWake, upgrade: upgradedChannelWake },

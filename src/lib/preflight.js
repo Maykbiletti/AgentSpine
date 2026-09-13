@@ -7,6 +7,7 @@ import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.j
 import { ancestorsBetween, isInside, stateRoot } from "./paths.js";
 import { preflightDeliveryId } from "./preflight-delivery-id.js";
 import { resolveHostSourceCatalog } from "./source-roots.js";
+import { instructionBudget } from "./host-instruction-budget.js";
 
 export const PREFLIGHT_SCHEMA = "agentspine.preflight/v2";
 export const PREFLIGHT_POLICY_SCHEMA = "agentspine.preflight-policy/v1";
@@ -22,8 +23,6 @@ const ENV_RE = /^[A-Z_][A-Z0-9_]{0,127}$/;
 const MAX_POLICY_BYTES = 1024 * 1024;
 const MAX_STATE_BYTES = 8 * 1024 * 1024;
 const MAX_PROVIDER_BYTES = 1024 * 1024;
-const STANDARD_REQUIRED_INSTRUCTIONS_BYTES = 8 * 1024;
-const MAX_CLAUDE_REQUIRED_INSTRUCTIONS_BYTES = 16 * 1024, MAX_CODEX_REQUIRED_INSTRUCTIONS_BYTES = 32 * 1024;
 const MAX_REQUIRED_MEMORY_BYTES = 6 * 1024;
 const RECEIPT_TTL_MS = 60_000;
 const FORBIDDEN_MEMORY = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|gh[opusu])_[A-Za-z0-9_-]{20,}\b|\b(?:password|passwort|secret|token|api[-_ ]?key|credential|permission|rights?|roles?|delegat|authoriz|berechtig|freigabe|approval|tool access|file access|network|production|payment|zahlung|policy)\b/i;
@@ -378,19 +377,6 @@ function instructionDocuments(catalog, host) {
   return catalog.documents.filter((item) => item.layer === "constitution" && pattern.test(item.relativePath))
     .sort((left, right) => left.precedence - right.precedence || left.relativePath.localeCompare(right.relativePath));
 }
-function instructionBudget(host, usedBytes = 0) {
-  const hardLimitBytes = host === "claude"
-    ? MAX_CLAUDE_REQUIRED_INSTRUCTIONS_BYTES
-    : host === "codex" ? MAX_CODEX_REQUIRED_INSTRUCTIONS_BYTES : STANDARD_REQUIRED_INSTRUCTIONS_BYTES;
-  const overflowBytes = Math.max(0, usedBytes - STANDARD_REQUIRED_INSTRUCTIONS_BYTES);
-  return {
-    mode: overflowBytes ? `${host}-required-overflow` : "standard",
-    standardBytes: STANDARD_REQUIRED_INSTRUCTIONS_BYTES,
-    hardLimitBytes,
-    usedBytes,
-    overflowBytes
-  };
-}
 async function rejectKnownInstructionSymlinks(resolvedSources, host) {
   const candidates = host === "claude"
     ? [join(resolvedSources.hostHome, "CLAUDE.md"), ...ancestorsBetween(resolvedSources.projectRoot, resolvedSources.cwd)
@@ -505,7 +491,7 @@ export async function runPreflight({ input, scope, resolvedSources, prompt, now 
   const documents = instructionDocuments(resolvedSources.catalog, instructionHost);
   const requiredInstructions = [];
   let instructionBytes = 0;
-  const maximumInstructionBytes = instructionBudget(instructionHost).hardLimitBytes;
+  const maximumInstructionBytes = instructionBudget(instructionHost, 0, env).hardLimitBytes;
   for (const document of documents) {
     const allowedRoot = document.sourceScope === "user" ? resolvedSources.hostHome : resolvedSources.projectRoot;
     const snapshot = await safeReadRequired(document.path, allowedRoot, maximumInstructionBytes, fileHooks);
@@ -517,7 +503,7 @@ export async function runPreflight({ input, scope, resolvedSources, prompt, now 
     requiredInstructions.push({ path: document.path, displayPath: document.relativePath, scope: document.sourceScope,
       bytes: snapshot.bytes, sha256: snapshot.sha256, identity: snapshot.identity, content: snapshot.content });
   }
-  const appliedInstructionBudget = instructionBudget(instructionHost, instructionBytes);
+  const appliedInstructionBudget = instructionBudget(instructionHost, instructionBytes, env);
   const memoryState = validateMemories(await readJson(paths.memories, MAX_STATE_BYTES, emptyMemories));
   const mustRemember = memoryState.entries.filter((item) => memoryMatches(item, exactScope));
   if (Buffer.byteLength(JSON.stringify(mustRemember.map((item) => item.claim))) > MAX_REQUIRED_MEMORY_BYTES) {
@@ -620,7 +606,7 @@ export async function verifyPreflightReceipt({ receipt, input, scope, resolvedSo
     if (currentDocuments.length !== receipt.instructionFiles.length
       || currentDocuments.some((document, index) => document.path !== receipt.instructionFiles[index]?.path)) return false;
     let instructionBytes = 0;
-    const maximumInstructionBytes = instructionBudget(receipt.instructionHost).hardLimitBytes;
+    const maximumInstructionBytes = instructionBudget(receipt.instructionHost, 0, env).hardLimitBytes;
     for (const instruction of receipt.instructionFiles) {
       const allowedRoot = instruction.scope === "user" ? freshSources.hostHome : freshSources.projectRoot;
       const currentSnapshot = await safeReadRequired(instruction.path, allowedRoot, maximumInstructionBytes);
@@ -629,7 +615,7 @@ export async function verifyPreflightReceipt({ receipt, input, scope, resolvedSo
       instructionBytes += currentSnapshot.bytes;
     }
     if (instructionBytes > maximumInstructionBytes
-      || canonical(receipt.instructionBudget) !== canonical(instructionBudget(receipt.instructionHost, instructionBytes))) return false;
+      || canonical(receipt.instructionBudget) !== canonical(instructionBudget(receipt.instructionHost, instructionBytes, env))) return false;
   } catch { return false; }
   if (consume) {
     const paths = storagePaths(env);
