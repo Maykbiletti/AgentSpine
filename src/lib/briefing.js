@@ -106,9 +106,12 @@ function feedbackCandidates(values) {
   const fields = ["id", "text", "message", "at",
     ...["provider", "digest", "session"].filter((key) => !shared.includes(key))];
   const expected = { id: "assertion:user-feedback-", message: "timeline-event:" };
-  const prefixes = fields.map((key) => expected[key] || (key === "at"
-    && values.every((item) => /^\d{4}-\d{2}-\d{2}T\d{2}:/.test(item[key]))
-    ? values[0][key].slice(0, 14) : ""));
+  const prefixes = fields.map((key) => {
+    const prefix = expected[key] || (key === "at"
+      && values.every((item) => /^\d{4}-\d{2}-\d{2}T\d{2}:/.test(item[key]))
+      ? values[0][key].slice(0, 14) : "");
+    return values.every((item) => item[key].startsWith(prefix)) ? prefix : "";
+  });
   return { fields, common: Object.fromEntries(shared.map((key) => [key, values[0][key]])), prefixes,
     rows: values.map((item) => fields.map((key, index) => item[key].slice(prefixes[index].length))) };
 }
