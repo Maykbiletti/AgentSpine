@@ -4,8 +4,6 @@ import { lstat, mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Numeric FileSystemRights values and SDDL tokens are stable across Windows
-// display languages. Friendly account names never enter the authorization path.
 const FULL_CONTROL = 0x001f01ff;
 const WRITE_MASK = 0x000d0156;
 const GENERIC_WRITE_MASK = 0x50000000;
@@ -168,8 +166,6 @@ async function readNativeWindowsAcl(path, env, runCommand, run, identity) {
   }
 }
 
-// Retained only for dependency-injected compatibility tests. Production uses
-// icacls /save and parses its SID/SDDL export without starting PowerShell.
 export function windowsSidAclCommand(path) {
   const encodedPath = Buffer.from(path, "utf8").toString("base64");
   const script = [

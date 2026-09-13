@@ -2,8 +2,6 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { completeTimelineBinding, safeTimelineId } from "./session-timeline-contract.js";
 import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 
-// This capability is deliberately supplied only by a locally configured host
-// transport. It is never a MCP argument, stored value, hook output, or card.
 export const TIMELINE_TRANSPORT_CAPABILITY_ENV = "AGENTSPINE_TIMELINE_SESSION_CAPABILITY";
 export const TIMELINE_TRANSPORT_SESSION_ENV = "AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID";
 
@@ -27,9 +25,6 @@ function capability(environment) {
   return typeof value === "string" && CAPABILITY_RE.test(value) && sessionId ? { value, sessionId } : null;
 }
 
-// The environment must carry a freshly generated 32-byte capability for the
-// exact host session. A global or argument-supplied fallback is intentionally
-// absent: standard MCP stdio does not authenticate callers by itself.
 export function timelineTransportDigest({ root, binding, environment = process.env }) {
   const current = capability(environment);
   if (typeof root !== "string" || !root || !completeTimelineBinding(binding) || !current
@@ -45,6 +40,3 @@ export function sameTimelineTransportDigest(left, right) {
   if (!validTimelineTransportDigest(left) || !validTimelineTransportDigest(right)) return false;
   return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
 }
-
-// The one-use record is valid only while the exact local enrollment that
-// produced it is still active. This check occurs before the record is removed.

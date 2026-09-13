@@ -119,9 +119,6 @@ export function createWindowsTimelineAclVerifier({ platform = process.platform, 
   };
 }
 
-// Every boundary supplies fresh file metadata. On Windows, changing a security
-// descriptor changes ctime, so only an identical file identity/change-time can
-// reuse a parsed ACL. A changed DACL therefore misses this cache and is denied.
 export function createWindowsTimelineFileAclVerifier({ platform = process.platform, env = process.env, run = spawnSync } = {}) {
   const cache = new Map();
   let identity = null;

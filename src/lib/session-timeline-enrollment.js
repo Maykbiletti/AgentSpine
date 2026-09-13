@@ -177,10 +177,6 @@ async function saveState(state, path, headPath, root, assertOwned, assertStable)
   });
 }
 
-// The normal path remains read-only.  If a crash left one verified state
-// generation ahead of its signed head, retry under the existing owned lock so
-// storage can perform its exact one-step repair; every other failure remains
-// unavailable and yields no enrollment or source data.
 async function loadStateWithRecovery(rootPath, { create = false } = {}) {
   const names = await enrollmentPaths(rootPath, { create });
   try {
@@ -212,9 +208,6 @@ async function canonicalRoot(root) {
   catch { return null; }
 }
 
-// This is called only by a verified provider UserPromptSubmit lifecycle adapter. It
-// records a signed, short-lived observation; the opaque token itself is never
-// returned through hook context or a briefing.
 export async function issueHostTranscriptReceipt({
   root, host, sessionId, scope, transcriptPath, hostHome, event, eventId = null,
   hostOrigin = null, clock = null, environment = process.env
@@ -241,8 +234,6 @@ export async function issueHostTranscriptReceipt({
     protocolVersion: timelineProtocolFromRuntime(host, environment) })) {
     return hostReceiptUnavailable("king-history-format-version-or-binding-mismatch");
   }
-  // This bounded 4 KiB digest is an immutable source binding, not transcript
-  // capture: receipt issuance never retains or injects the source text.
   const snapshot = await normalizePrivateTimelineSource(source);
   if (!snapshot) return hostReceiptUnavailable("transcript-snapshot-unavailable");
   try {
@@ -270,9 +261,6 @@ export async function issueHostTranscriptReceipt({
   }
 }
 
-// The local owner can retrieve only the opaque current-session token.  The
-// protected transport capability proves the caller's host session; no source
-// path, scope, or transcript content is returned to a generic CLI process.
 export async function currentHostTranscriptReceipt({ root, clock = null, environment = process.env }) {
   const current = runtimeDate(clock);
   if (!current) return hostReceiptUnavailable("invalid-host-receipt-time");
@@ -292,9 +280,6 @@ export async function currentHostTranscriptReceipt({ root, clock = null, environ
   }
 }
 
-// Internal state-only lookup for bootstrap and lifecycle hints. It reads the
-// signed enrollment record but deliberately never opens, stats, or hashes the
-// transcript; callers still need the normal resolver before any evidence read.
 export async function loadPrivateSessionTimelineEnrollment({
   root, host = null, sessionId = null, scope = null, enrollmentDigest: wantedDigest = null,
   expectedTransportDigest = null, clock = null
@@ -356,9 +341,6 @@ export async function inspectPrivateSessionTimelineEnrollment({
     const candidates = state.enrollments.filter((item) => item.binding.host === host && item.binding.sessionId === activeSessionId);
     const requestedPath = typeof transcriptPath === "string" && transcriptPath
       ? transcriptPath : candidates.length === 1 ? candidates[0].source.path : null;
-    // Post-compaction input may omit a host profile root. In that case, the
-    // sealed root from the one matching enrollment is the only allowed
-    // fallback; an environment or arbitrary caller path is never consulted.
     const trustedHome = hostHome === null || hostHome === undefined
       ? candidates.length === 1 ? candidates[0].source.profileRoot : null
       : isAbsolute(hostHome) ? hostHome : null;
@@ -399,10 +381,6 @@ export async function mutatePrivateSessionTimelineEnrollment({ root, task }) {
   }
 }
 
-// A first state write interrupted before any signed head exists is not
-// distinguishable from a deleted head.  It is never auto-accepted: a local
-// owner may explicitly discard all enrollment state, then obtain a fresh host
-// receipt.  This function exposes no historic binding, path, or transcript.
 export async function resetPrivateSessionTimelineEnrollment({ root, confirmation }) {
   if (confirmation !== LOCAL_TIMELINE_ENROLLMENT_RECOVERY_CONFIRMATION) return false;
   const rootPath = await canonicalRoot(root);

@@ -71,9 +71,6 @@ export function matchesSourceMetadata(metadata, source) {
 }
 
 export async function pathMatchesSource(source, hostHome = null) {
-  // A post-compaction read may not have a fresh host root. The persisted
-  // enrollment root is the sealed authority in that case; ambient process
-  // configuration must never redirect a previously bound transcript.
   const trustedHome = isAbsolute(hostHome || "") ? hostHome : source?.profileRoot;
   if (!isAbsolute(trustedHome || "")) return false;
   const current = await sourcePath(source.path, trustedHome, source.binding?.host || "claude");
