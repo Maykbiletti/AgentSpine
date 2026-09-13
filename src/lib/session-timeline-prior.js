@@ -49,9 +49,7 @@ at: latest.event.at,
 outcome: latest.event.outcome,
 testLabel: latest.event.testLabel
 } : null,
-instruction: sources.length
-? `Use session_timeline_search with includePriorSessions${includePriorProviders ? " and includePriorProviders" : ""} only for a relevant exact-time or two-term question.`
-: null,
+instruction: null,
 freshness: "source-not-read",
 authority: "context-only"
 };

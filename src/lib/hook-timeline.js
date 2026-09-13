@@ -76,7 +76,9 @@ export async function captureSessionTimelineLifecycle({
       turnId,
       environment: process.env
     }) : timelineRecallNotFound();
-  return result({ ...lifecycle, preAnswerRecall });
+  const prior = lifecycle.priorSessions;
+  return result({ ...lifecycle, priorSessions: prior && { available: prior.available, sessions: prior.sessions,
+    indexedEvents: prior.indexedEvents, freshness: prior.freshness, authority: prior.authority }, preAnswerRecall });
 }
 
 export async function finalizeUserPromptSessionTimeline({
