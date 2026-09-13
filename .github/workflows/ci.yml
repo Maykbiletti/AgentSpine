@@ -12,7 +12,9 @@ jobs:
   test:
     name: Node ${{ matrix.node }} · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # Run 34751499432 reached the job cap during a passing Windows second profile.
+    # Individual test and hook deadlines remain unchanged.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 25 || 20 }}
     strategy:
       fail-fast: false
       matrix:
