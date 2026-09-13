@@ -57,6 +57,7 @@ function hostPrompt({ root, host, sessionId, scope, transcriptPath, eventId, clo
     hook_event_name: "UserPromptSubmit", host, cwd: root, session_id: sessionId, event_id: eventId,
     entity_id: scope.entityId, user_id: scope.userId, tenant_id: scope.tenantId, project_id: scope.projectId,
     task_id: scope.currentTaskId, goal_id: scope.goalId, goal_step_id: scope.goalStepId, group_id: scope.groupId,
+    portal_ref: scope.portalRef ?? null, thread_ref: scope.threadRef ?? null,
     profile_id: "profile:synthetic-timeline-host", transcript_path: transcriptPath,
     prompt, ...(clock ? { timestamp: clock().toISOString() } : {})
   };
@@ -73,7 +74,7 @@ export async function requestTimelineHostReceipt({
   await prepareHostPromptScope(root, scope);
   const result = await runHook(hostPrompt({ root, host: host === "king" ? "codex" : host, sessionId, scope, transcriptPath,
     eventId: eventId === undefined ? `test-timeline-receipt:${sessionId}:${++receiptSequence}` : eventId, clock, prompt }));
-  if (result.blocked) return unavailable("host-prompt-rejected");
+  if (result.blocked) return unavailable(`host-prompt-rejected:${result.error || result.reason || "unknown"}`);
   if (result.timeline?.hostReceipt?.status === "unavailable") return result.timeline.hostReceipt;
   if (host === "king") {
     const timeline = JSON.parse(result.context).sourceResolution?.timeline;

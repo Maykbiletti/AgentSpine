@@ -76,6 +76,17 @@ function compactFeedbackCandidates(packet) {
   return true;
 }
 
+function compactTimelineRecall(timeline) {
+  return {
+    status: timeline.status, awaited: timeline.awaited, completionVerified: false,
+    naturalMessages: "unresolved", trust: "untrusted-session-history",
+    ...(timeline.source ? { source: timeline.source } : { sources: timeline.sources }),
+    prefixes: timeline.prefixes,
+    fields: timeline.fields, rows: timeline.events,
+    omitted: timeline.omittedEvents || 0
+  };
+}
+
 export function preAnswerRecallCapsule(detailed) {
   if (detailed?.event !== "UserPromptSubmit" || !detailed.loaded) return null;
   const briefing = detailed.briefing;
@@ -88,6 +99,15 @@ export function preAnswerRecallCapsule(detailed) {
     order: "review-before-claims-and-actions",
     authority: "context-only"
   };
+  const timeline = detailed.sourceResolution?.timeline?.preAnswerRecall;
+  if (timeline?.status === "recalled") {
+    const candidate = compactTimelineRecall(timeline);
+    while (!addRecallField(packet, "timeline", candidate) && candidate.rows?.length) {
+      candidate.rows.pop();
+      candidate.omitted += 1;
+    }
+    if (!packet.timeline) packet.timelineOmitted = true;
+  }
   const mustRemember = (preflight.mustRemember || []).map((item) => ({
     id: item.id, claim: item.claim, checksum: item.checksum
   }));

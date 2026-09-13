@@ -69,7 +69,6 @@ function validateInterpretation(input, value) {
   return true;
 }
 
-// Provenance only.
 export function validateUserFeedback(input, value) {
   if (validateInterpretation(input, value)) return;
   if (input.evidenceKind !== KIND && value?.schema !== USER_FEEDBACK_SCHEMA) return;

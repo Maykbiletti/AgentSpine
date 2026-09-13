@@ -13,22 +13,18 @@ import { syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
 import { captureMustRememberPrompt, recordPreflightFailure, runPreflight, verifyPreflightReceipt } from "./lib/preflight.js";
 import { actionLessonRecall } from "./lib/action-lesson-recall.js";
 import { captureSessionTimelineLifecycle, finalizeUserPromptSessionTimeline } from "./lib/hook-timeline.js";
+import { fitTimelineRecallToHostContext } from "./lib/pre-answer-timeline-recall.js";
 import { timelineToolKind } from "./lib/mcp-timeline-tools.js";
 import { emitTimelineToolGuard, runTimelineToolGuard } from "./lib/timeline-tool-guard.js";
 import { readHookInput, SILENT_OVERSIZE_POST_TOOL_USE, SILENT_OVERSIZE_POST_TOOL_USE_ARG } from "./lib/hook-input.js";
 import { isMainModule } from "./lib/runtime.js";
-import { deliveryActorSession, deliverySuccessEvidence, recordDeliveryToolUse,
-  recordDeliveryWriteIntent } from "./lib/delivery-verification.js";
-import { blockPrompt, blockStop, blunRuntimeContext, blunRuntimeMessage, denyTool, hookOutput,
-  lifecycleOutput } from "./lib/hook-output.js";
+import { deliveryActorSession, deliverySuccessEvidence, recordDeliveryToolUse, recordDeliveryWriteIntent } from "./lib/delivery-verification.js";
+import { blockPrompt, blockStop, blunRuntimeContext, blunRuntimeMessage, denyTool, hookOutput, lifecycleOutput } from "./lib/hook-output.js";
 import { ATTENTION_WRITE_EVENTS, boundedId, captureAttentionLifecycle, hookDeliveryId, hostContextLimit, hostFromInput,
-  promptFromInput, renderContext, runtimeScope, selfstarterInput, selfstarterRootSkipped,
-  selfstarterScope, sessionId, startChannelEvent, startSelfstarter, toolResult,
-  toolSucceeded } from "./lib/hook-context.js";
-import { auditGuard, auditSkippedScans, candidatePaths, finishScanFailure, hookScanFailureFailsOpen,
-  isMutationTool, isScanFailOpenTool, shellTargetsProtected } from "./lib/hook-protection.js";
-import { captureJavaScriptBeforeWrite, inspectWrittenJavaScript, verifyBaselineBeforeWrite,
-  verifyDeliveredArtifacts } from "./lib/hook-artifact-guards.js";
+  promptFromInput, renderContext, runtimeScope, selfstarterInput, selfstarterRootSkipped, selfstarterScope, sessionId,
+  startChannelEvent, startSelfstarter, toolResult, toolSucceeded } from "./lib/hook-context.js";
+import { auditGuard, auditSkippedScans, candidatePaths, finishScanFailure, hookScanFailureFailsOpen, isMutationTool, isScanFailOpenTool, shellTargetsProtected } from "./lib/hook-protection.js";
+import { captureJavaScriptBeforeWrite, inspectWrittenJavaScript, verifyBaselineBeforeWrite, verifyDeliveredArtifacts } from "./lib/hook-artifact-guards.js";
 import { isPremortemWrite, prepareHookPremortem, recordHookPremortemWrite,
   recordHookPremortemWriteIntent, verifyHookPremortemWrite } from "./lib/hook-premortem.js";
 import { verifyHookStopContracts } from "./lib/hook-stop-verification.js";
@@ -420,8 +416,12 @@ async function runHookCore(input, payload, options) {
             status: "degraded", receipts: [], reason: error.message, authority: "context-only"
           };
         }
-        const enriched = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent,
-          resolvedSources.diagnostics, preflight, lessonRecall);
+        const fitted = fitTimelineRecallToHostContext({ timeline: resolvedSources.diagnostics.timeline,
+          maximumBytes: hostContextLimit(preflight), render: (timeline) => renderContext(event, catalog, briefing,
+            signal, attentionEvent, selfstarter, channelEvent, { ...resolvedSources.diagnostics, timeline },
+            preflight, lessonRecall) });
+        resolvedSources.diagnostics.timeline = fitted.timeline;
+        const enriched = fitted.context;
         if (Buffer.byteLength(enriched) <= hostContextLimit(preflight)) context = enriched;
         else if (preflight.learningApplications.status === "degraded") {
           preflight.learningApplications = null;

@@ -38,10 +38,6 @@ function eligibleTimelineOrigin(binding, input) {
     && typeof transcriptPath === "string" && transcriptPath.length > 0;
 }
 
-// The opaque object is process-local and recorded in a WeakSet only after the
-// exact preflight receipt was atomically consumed for this UserPromptSubmit.
-// It is never serialized, persisted, returned to a model, or accepted from a
-// raw CLI/API object. A raw issuer can therefore not simulate host origin.
 export async function consumeTimelineHostOrigin({
   event, input, scope, resolvedSources, preflight, prompt, environment = process.env, now = new Date()
 }) {

@@ -2,6 +2,9 @@ import { sessionTimelineLifecycleHint } from "./session-timeline.js";
 import { issueHostTranscriptReceipt } from "./session-timeline-enrollment.js";
 import { consumeTimelineHostOrigin } from "./session-timeline-host-origin.js";
 import {
+  automaticPreAnswerTimelineRecall, timelineRecallNotFound
+} from "./pre-answer-timeline-recall.js";
+import {
   timelineHostForRuntime, timelineHostHome, timelineProtocolFromRuntime, timelineSourceFromRuntime
 } from "./session-timeline-provider.js";
 
@@ -21,7 +24,6 @@ function hasRawTimelineGroupSignal(input) {
     }
     return values.some((value) => value !== undefined && value !== null && value !== "");
   } catch {
-    // Parser-shaped uncertainty must not turn a lifecycle hint into a denial.
     return false;
   }
 }
@@ -36,8 +38,6 @@ function receiptObservation(receipt) {
     expiresAt: receipt.expiresAt || null, authority: AUTHORITY };
 }
 
-// This observes a provider hook payload but never returns the
-// opaque enrollment token through model-visible context.
 export async function observeHostTranscriptReceipt({ root, event, input, scope, hostHome, hostOrigin = null, clock = null }) {
   if (event !== "UserPromptSubmit") return receiptObservation({ status: "not-applicable" });
   if (hasRawTimelineGroupSignal(input)) return receiptObservation({ status: "unavailable", reason: "raw-group-scope" });
@@ -50,7 +50,9 @@ export async function observeHostTranscriptReceipt({ root, event, input, scope, 
   return receiptObservation(receipt);
 }
 
-export async function captureSessionTimelineLifecycle({ root, event, input, scope, hostHome, hostOrigin = null, clock = null }) {
+export async function captureSessionTimelineLifecycle({
+  root, event, input, scope, hostHome, hostOrigin = null, clock = null, turnId = null
+}) {
   if (hasRawTimelineGroupSignal(input)) return groupSuppressed("raw-group-scope");
   if (!scope || scope.groupId !== null) return groupSuppressed("computed-group-scope");
   let hostReceipt = null;
@@ -64,14 +66,21 @@ export async function captureSessionTimelineLifecycle({ root, event, input, scop
   const result = (value) => hostReceipt ? { ...value, hostReceipt } : value;
   const host = timelineHostForRuntime(scope.host, process.env);
   if (!host || (host === "king" && !timelineProtocolFromRuntime(host))) return unavailable("host-not-supported");
-  return result(await sessionTimelineLifecycleHint({ root, host,
-    sessionId: input.session_id ?? input.sessionId, scope, environment: process.env }));
+  const session = input.session_id ?? input.sessionId;
+  const lifecycle = await sessionTimelineLifecycleHint({ root, host,
+    sessionId: session, scope, environment: process.env });
+  if (event !== "UserPromptSubmit" || !hostOrigin) return result(lifecycle);
+  const preAnswerRecall = lifecycle.priorSessions?.available
+    ? await automaticPreAnswerTimelineRecall({
+      root, host, sessionId: session, scope, hostHome, eventId: input.event_id ?? input.hook_event_id,
+      turnId,
+      environment: process.env
+    }) : timelineRecallNotFound();
+  const prior = lifecycle.priorSessions;
+  return result({ ...lifecycle, priorSessions: prior && { available: prior.available, sessions: prior.sessions,
+    indexedEvents: prior.indexedEvents, freshness: prior.freshness, authority: prior.authority }, preAnswerRecall });
 }
 
-// The calling hook performs this only at its final pre-answer boundary.  The
-// origin helper consumes the exact signed preflight receipt before this can
-// touch timeline receipt state. Failure to form a timeline origin is optional
-// and yields no opaque receipt; failure to consume preflight remains blocking.
 export async function finalizeUserPromptSessionTimeline({
   root, input, scope, resolvedSources, preflight, prompt, now = new Date()
 }) {
@@ -83,7 +92,7 @@ export async function finalizeUserPromptSessionTimeline({
     return { preflightConsumed: true, briefingOrigin: consumed.briefingOrigin,
       timeline: await captureSessionTimelineLifecycle({
       root, event: "UserPromptSubmit", input, scope, hostHome: resolvedSources.hostHome,
-      hostOrigin: consumed.origin, clock: () => new Date(now)
+      hostOrigin: consumed.origin, clock: () => new Date(now), turnId: preflight.receipt.id
     }) };
   } catch (error) {
     return { preflightConsumed: true, briefingOrigin: consumed.briefingOrigin, timeline: {

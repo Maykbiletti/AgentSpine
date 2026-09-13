@@ -11,8 +11,6 @@ const RECORDS = new Set(["session_meta", "response_item", "event_msg", "compacte
   "token_usage_record", "world_state", "retained_context", "security_risk_score", "realtime_item",
   "inter_agent_communication", "inter_agent_communication_metadata"]);
 
-// Read only the explicitly supplied native source. No directory discovery,
-// decompression, inherited-history traversal or source rewriting is allowed.
 export async function validateCodexTimelineHeader({ source, root, sessionId }) {
   let handle;
   try {
@@ -37,8 +35,6 @@ export async function validateCodexTimelineHeader({ source, root, sessionId }) {
   finally { await handle?.close(); }
 }
 
-// Whitelist actual Responses output records, never assistant/user assertions.
-// The caller applies the common secret/injection filter to the original line.
 export function codexTimelineToolResult(line) {
   if (!RECORDS.has(line?.type) || line.schema_version !== undefined) {
     throw new Error("codex-history-format-mismatch");

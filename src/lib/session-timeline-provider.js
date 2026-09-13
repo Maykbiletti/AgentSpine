@@ -11,9 +11,6 @@ export function crossProviderTimelineEnabled(environment = process.env) {
   return environment?.[TIMELINE_CROSS_PROVIDER_ENV] === "1";
 }
 
-// BLUN currently shares the Codex-compatible AGENTS.md hierarchy, but its
-// persisted agent wire is a distinct provider contract. Keep those identities
-// separate so a passing Codex adapter can never stand in for King history.
 export function timelineHostForRuntime(host, environment = process.env) {
   if (environment?.BLUN_HOME || environment?.BLUN_PLUGIN_ROOT) return "king";
   return validTimelineHost(host) ? host : null;
