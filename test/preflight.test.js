@@ -112,7 +112,7 @@ test("changed, deleted, oversized, and symlinked required instructions never reu
   await assert.rejects(runPreflight({ ...turn(setup, "turn:large"), resolvedSources: largeSources, prompt: setup.input.prompt }), /mandatory limit is 16384 bytes/);
 });
 
-test("CLAUDE instructions get one explicit overflow budget while other hosts stay at 8 KiB", async (t) => {
+test("CLAUDE and Codex instructions get explicit bounded overflow budgets", async (t) => {
   const claude = await fixture(t);
   await writeFile(join(claude.root, "CLAUDE.md"), `# Required Claude rules\n${"x".repeat(9000)}\n`, "utf8");
   const claudeSources = await resolveHostSourceCatalog({ host: "claude", cwd: claude.root, input: claude.input, env: claude.env });
@@ -130,8 +130,15 @@ test("CLAUDE instructions get one explicit overflow budget while other hosts sta
   const codex = await fixture(t, "codex");
   await writeFile(join(codex.root, "AGENTS.md"), `# Required Codex rules\n${"x".repeat(9000)}\n`, "utf8");
   const codexSources = await resolveHostSourceCatalog({ host: "codex", cwd: codex.root, input: codex.input, env: codex.env });
-  await assert.rejects(runPreflight({ ...turn(codex, "turn:codex-oversized"), resolvedSources: codexSources,
-    prompt: codex.input.prompt }), /mandatory limit is 8192 bytes/);
+  const codexPreflight = await runPreflight({ ...turn(codex, "turn:codex-overflow"), resolvedSources: codexSources,
+    prompt: codex.input.prompt });
+  assert.equal(codexPreflight.receipt.instructionBudget.mode, "codex-required-overflow");
+  assert.equal(codexPreflight.receipt.instructionBudget.hardLimitBytes, 32 * 1024);
+  assert.equal(codexPreflight.briefing.instructions.some((item) => item.content.includes("x".repeat(9000))), true);
+
+  await writeFile(join(codex.root, "AGENTS.md"), `# Too large Codex rules\n${"x".repeat(33 * 1024)}\n`, "utf8");
+  await assert.rejects(resolveHostSourceCatalog({ host: "codex", cwd: codex.root,
+    input: codex.input, env: codex.env }), /source exceeds its byte limit/);
 });
 
 test("a required instruction replaced through its pathname during the handle read fails closed", async (t) => {

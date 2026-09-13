@@ -29,9 +29,8 @@ export async function processAdvisory(input, payload, root, scope, details) {
     diagnostic: fresh ? diagnostic : null
   };
   if (payload) return result;
-  const field = process.env.BLUN_PLUGIN_ROOT ? "message" : "additionalContext";
   const output = fresh ? { hookSpecificOutput: {
-    hookEventName: event, [field]: JSON.stringify(diagnostic)
+    hookEventName: event, additionalContext: JSON.stringify(diagnostic)
   } } : {};
   process.stdout.write(`${JSON.stringify(output)}\n`);
 }

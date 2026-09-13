@@ -348,16 +348,18 @@ test("new session receives exact task, existing result file and source-verified 
   }
   const kingOutput = hookOutput("UserPromptSubmit", prompted.context,
     { BLUN_PLUGIN_ROOT: "/synthetic/blun" });
-  assert.equal(Buffer.byteLength(kingOutput.hookSpecificOutput.message) <= 1200, true);
-  assert.match(kingOutput.hookSpecificOutput.message, /result.txt/);
-  assert.match(kingOutput.hookSpecificOutput.message, /Nein, erst die Prüfsumme prüfen/);
-  assert.match(kingOutput.hookSpecificOutput.message, /Nimm dafür die andere Datei/);
-  assert.match(kingOutput.hookSpecificOutput.message, /Das hatten wir gestern schon erledigt/);
-  assert.match(kingOutput.hookSpecificOutput.message, /multiple-unresolved/);
-  assert.match(kingOutput.hookSpecificOutput.message, /Welche Datei soll ich zuerst verwenden/);
-  assert.match(kingOutput.hookSpecificOutput.message, /"completionVerified":false/);
-  assert.match(kingOutput.hookSpecificOutput.message, /review-before-claims-and-actions/);
-  const kingRecall = JSON.parse(kingOutput.hookSpecificOutput.message);
+  assert.equal(Object.hasOwn(kingOutput.hookSpecificOutput, "message"), false);
+  const kingContext = kingOutput.hookSpecificOutput.additionalContext;
+  assert.equal(Buffer.byteLength(kingContext) <= 1200, true);
+  assert.match(kingContext, /result.txt/);
+  assert.match(kingContext, /Nein, erst die Prüfsumme prüfen/);
+  assert.match(kingContext, /Nimm dafür die andere Datei/);
+  assert.match(kingContext, /Das hatten wir gestern schon erledigt/);
+  assert.match(kingContext, /multiple-unresolved/);
+  assert.match(kingContext, /Welche Datei soll ich zuerst verwenden/);
+  assert.match(kingContext, /"completionVerified":false/);
+  assert.match(kingContext, /review-before-claims-and-actions/);
+  const kingRecall = JSON.parse(kingContext);
   const restored = kingRecall.feedbackCandidates.rows.map((row) => Object.fromEntries(
     kingRecall.feedbackCandidates.fields.map((field, index) =>
       [field, `${kingRecall.feedbackCandidates.prefixes[index]}${row[index]}`])));
@@ -379,7 +381,7 @@ test("new session receives exact task, existing result file and source-verified 
   assert.deepEqual(await readFile(artifact), artifactBytes);
   await item.preserve();
   t.diagnostic(JSON.stringify({ contextBytes: Buffer.byteLength(contextText),
-    preAnswerBytes: Buffer.byteLength(kingOutput.hookSpecificOutput.message), elapsedMs: performance.now() - started,
+    preAnswerBytes: Buffer.byteLength(kingContext), elapsedMs: performance.now() - started,
     preservedFeedbackCandidates: "0 -> 3", actionableBindings: "0 -> 3",
     boundClarificationProposals: "0 -> 1", falseAutomaticApplications: 0,
     continuationMutations: 0, realModelRuns: 0,

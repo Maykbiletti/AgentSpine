@@ -153,16 +153,17 @@ test("host-loaded Codex briefing feeds knowledge and premortem without MCP refet
   for (const adapter of [
     { host: "claude", field: "additionalContext", env: { CLAUDE_PLUGIN_ROOT: "/synthetic/claude" } },
     { host: "codex", field: "additionalContext", env: { PLUGIN_ROOT: "/synthetic/codex" } },
-    { host: "king", runtimeHost: "codex", field: "message", env: { BLUN_PLUGIN_ROOT: "/synthetic/blun" } }
+    { host: "king", runtimeHost: "codex", field: "additionalContext", env: { BLUN_PLUGIN_ROOT: "/synthetic/blun" } }
   ]) {
     const sessionId = `session:native-${adapter.host}`;
     const output = nativeHook({ ...hookInput(root, sessionId, "UserPromptSubmit", {
       prompt: "Change the synthetic target safely.", event_id: `event:native-${adapter.host}`
     }), host: adapter.runtimeHost || adapter.host }, adapter.env, adapter.field);
     const content = output.hookSpecificOutput[adapter.field];
+    assert.equal(Object.hasOwn(output.hookSpecificOutput, "message"), false);
     const matched = content.match(/premortem-requirement:[a-f0-9]{64}:[a-f0-9]{64}/);
-    const requirementId = adapter.field === "additionalContext"
-      ? JSON.parse(content).preflight.premortem.requirementId : matched?.[0];
+    const requirementId = adapter.host === "king"
+      ? matched?.[0] : JSON.parse(content).preflight.premortem.requirementId;
     assert.ok(requirementId, `${adapter.host} omitted the current requirement`);
     const knowledge = await call("delivery_knowledge_query", { root, requirementId,
       targetPaths: ["target.js"], contractPaths: ["AGENTS.md"], recentErrorTerms: ["synthetic"] });

@@ -58,6 +58,7 @@ All notable changes to AgentSpine will be documented here. The project follows [
 
 ### Fixed
 
+- King reader overflow stays explicit and non-blocking; sources remain unchanged.
 - The portal/thread lifecycle probe that starts a fresh process now runs outside the shared Windows I/O pool. Its existing assertions and process deadlines are unchanged.
 - The hermetic runner isolates the real host-origin source-attestation probe from concurrent Windows filesystem pressure, preserving its existing fail-closed result and timing boundaries without increasing a timeout.
 - Reuse host-verified, assignment-bound briefing observations in MCP delivery preparation without a second content fetch; keep missing proof advisory and document provider-specific history limits.

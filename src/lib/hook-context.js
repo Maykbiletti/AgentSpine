@@ -43,9 +43,10 @@ export function promptFromInput(input) {
 }
 
 export function hostContextLimit(preflight) {
-  return preflight?.receipt?.instructionBudget?.mode === "claude-required-overflow"
-    ? MAX_CLAUDE_OVERFLOW_CONTEXT_BYTES
-    : STANDARD_HOST_CONTEXT_BYTES;
+  if (preflight?.receipt?.instructionHost === "codex") return 32768 + Buffer.byteLength(JSON.stringify(preflight.briefing || {}));
+  const mode = preflight?.receipt?.instructionBudget?.mode;
+  if (mode === "claude-required-overflow") return MAX_CLAUDE_OVERFLOW_CONTEXT_BYTES;
+  return STANDARD_HOST_CONTEXT_BYTES;
 }
 
 export function hostFromInput(input) {

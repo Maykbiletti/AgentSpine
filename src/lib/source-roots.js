@@ -8,6 +8,7 @@ import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.j
 import { purgeIndexedMemoryCache, resolveIndexedMemory } from "./indexed-memory.js";
 import { hookMemoryQuery, loadLessonRecallSelection, rememberLessonRecallSelection } from "./lesson-recall-session.js";
 import { catalogScanPolicy } from "./catalog.js";
+import { isKingHost, KING_SOURCE_BYTES } from "./host-instruction-budget.js";
 import {
   SOURCE_SCAN_INCOMPLETE, boundedMarkdownTree, existingDirectory, existingRegular, sourceScanError
 } from "./source-tree-scan.js";
@@ -24,6 +25,20 @@ const SOURCE_RESOLUTION_MS = 2000;
 const SAFE_NAME = /^[A-Za-z0-9._-]{1,128}$/;
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
+async function partitionSources(sources, env) {
+  if (!isKingHost(env)) return { sources, unverified: [] };
+  const loaded = [], unverified = []; let used = 0;
+  for (const source of sources) {
+    if (!source.id.startsWith("codex:")) { loaded.push(source); continue; }
+    const bytes = (await lstat(source.path)).size, limit = source.maxBytes || KING_SOURCE_BYTES;
+    const total = bytes <= limit && used + bytes > MAX_TOTAL_SOURCE_BYTES;
+    if (bytes <= limit && !total) { loaded.push(source); used += bytes; continue; }
+    const ceiling = total ? MAX_TOTAL_SOURCE_BYTES : limit;
+    const message = `King rule ${source.id} (${bytes} bytes) exceeds AgentSpine's ${ceiling}-byte ${total ? "total " : ""}reader budget; AgentSpine did not load or verify it. Native rules apply. Continue; no retry.`;
+    unverified.push({ id: source.id, path: source.path, bytes, message });
+  }
+  return { sources: loaded, unverified };
+}
 function registryPath(env = process.env) { return join(stateRoot(env), "source-roots.json"); }
 function emptyRegistry() { return { schema: SOURCE_REGISTRY_SCHEMA, revision: 0, bindings: [], history: [] }; }
 
@@ -353,14 +368,15 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   const { registry } = await readRegistry(env);
   let hostHome;
   let projectRoot;
-  let sources;
+  let sources, unverified;
   let skipped = [];
   let hostDetails = {};
   let rootResolution = "explicit-root";
   if (host === "codex") {
-    const codexHome = env.CODEX_HOME || env.BLUN_HOME || join(homedir(), ".codex");
+    const codexHome = isKingHost(env) ? env.BLUN_HOME : env.CODEX_HOME || env.BLUN_HOME || join(homedir(), ".codex");
     hostHome = await existingDirectory(resolve(codexHome)) || resolve(codexHome);
     const config = await codexConfig(hostHome);
+    if (isKingHost(env)) config.maxBytes = KING_SOURCE_BYTES;
     if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
     else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, config.rootMarkers));
     sources = await codexSources({ cwd: canonicalCwd, projectRoot, codexHome: hostHome, config });
@@ -392,6 +408,7 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   }
   sources = [...new Map(sources.map((item) => [item.path, item])).values()];
   if (sources.length > MAX_SOURCES) throw new Error(`host-native required source set exceeds ${MAX_SOURCES} files`);
+  ({ sources, unverified } = await partitionSources(sources, env));
   const nativeNames = new Set(host === "codex"
     ? ["AGENTS.override.md", "AGENTS.md", ...(hostDetails.fallbackNames || [])]
     : host === "claude" ? ["CLAUDE.md", "CLAUDE.local.md"] : ["AGENTS.md", "SOUL.md", "MEMORY.md"]);
@@ -428,16 +445,17 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   const orderedSkipped = skipped.sort((a, b) => a.path.localeCompare(b.path) || a.operation.localeCompare(b.operation));
   const warnings = orderedSkipped.filter((item) => item.code === SOURCE_SCAN_INCOMPLETE);
   const diagnostics = {
-    schema: SOURCE_REGISTRY_SCHEMA, host, status: documents.length ? "loaded" : "empty", projectRoot,
+    schema: SOURCE_REGISTRY_SCHEMA, host, status: unverified.length ? "incomplete" : documents.length ? "loaded" : "empty", projectRoot,
     hostHomeDigest: digest(hostHome).slice(0, 16), checked: ["host-profile", "project-chain", ...(host === "claude" ? ["project-memory"] : [])],
     scopes: Object.fromEntries(["user", "project", "project-memory"].map((scope) => [scope, documents.filter((item) => item.sourceScope === scope).length])),
-    reason: documents.length ? null : "No regular, non-symlink host-native Markdown source exists in the checked scope.",
+    reason: unverified.length ? unverified[0].message
+      : documents.length ? null : "No regular, non-symlink host-native Markdown source exists in the checked scope.",
     personalContinuityLoaded: documents.some((item) => item.sourceScope === "user") || Boolean(activeUserState),
     broadHomeScan: false, projectTreeScan: skippedFallbackHomeTree ? "skipped-unmarked-home"
       : skippedHomeTree ? "skipped-home-root" : skippedProfileTree ? "skipped-profile-root"
         : warnings.length ? "bounded-truncated" : "bounded",
-    incomplete: warnings.length > 0,
-    warning: warnings[0]?.message || null,
+    incomplete: Boolean(unverified.length || warnings.length),
+    warning: unverified[0]?.message || warnings[0]?.message || null,
     warnings,
     skipped: orderedSkipped,
     rootResolution, registryRevision: registry.revision,
@@ -458,6 +476,6 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     summary: { total: documents.length, protected: documents.filter((item) => item.protected).length, conflicts: 0,
       byLayer: Object.fromEntries([...new Set(documents.map((item) => item.layer))].sort().map((layer) => [layer, documents.filter((item) => item.layer === layer).length])) }
   };
-  return { host, hostHome, projectRoot, cwd: canonicalCwd, catalog, diagnostics,
+  return { host, hostHome, projectRoot, cwd: canonicalCwd, catalog, diagnostics, unverified,
     userStateRoot: activeUserState?.sourceRoot || null, memoryRoot: hostDetails.memoryRoot || null };
 }
