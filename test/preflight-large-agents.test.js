@@ -86,6 +86,27 @@ test("a 17,590-byte AGENTS.md remains byte-exact and cannot block its own cleanu
   assert.deepEqual(await readFile(path), source);
 });
 
+test("completed King source resolution stays non-blocking after its time budget", async (t) => {
+  const item = await setup(t);
+  const path = join(item.root, "AGENTS.md");
+  const source = Buffer.from(exactRules(EXACT_RULE_BYTES));
+  await writeFile(path, source);
+  const env = { ...item.env, HOME: item.root, USERPROFILE: item.root };
+  const actualNow = Date.now;
+  let clockReads = 0;
+  try {
+    Date.now = () => clockReads++ === 0 ? 1_000 : 3_001;
+    const resolved = await resolveHostSourceCatalog({ host: "codex", cwd: item.root, env });
+    assert.equal(resolved.diagnostics.status, "loaded");
+    assert.equal(resolved.diagnostics.incomplete, false);
+  } finally {
+    Date.now = actualNow;
+  }
+  assert.deepEqual(await readFile(path), source);
+  const output = await installedHook({ ...item, env, eventId: "elapsed-source-budget" });
+  assert.equal(output.decision, undefined, JSON.stringify(output));
+});
+
 test("the installed King envelope accepts the same cleanup turn without rewriting AGENTS.md", async (t) => {
   const item = await setup(t);
   const path = join(item.root, "AGENTS.md");

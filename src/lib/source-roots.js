@@ -425,19 +425,12 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   }
   sources = [...new Map(sources.map((item) => [item.path, item])).values()];
   if (sources.length > MAX_SOURCES) throw new Error(`host-native source set exceeds ${MAX_SOURCES} files`);
-  const projectScanIncomplete = skipped.some((item) => item.code === SOURCE_SCAN_INCOMPLETE);
-  if (Date.now() > deadline && !projectScanIncomplete) {
-    throw new Error(`host-native source resolution exceeded ${SOURCE_RESOLUTION_MS} ms`);
-  }
   let documents;
   try {
     documents = await indexExplicitDocuments(sources);
   } catch (error) {
     if (typeof error?.code === "string" && (error.path || error.syscall)) throw sourceScanError(error);
     throw error;
-  }
-  if (Date.now() > deadline && !projectScanIncomplete) {
-    throw new Error(`host-native source resolution exceeded ${SOURCE_RESOLUTION_MS} ms`);
   }
   const totalBytes = documents.reduce((sum, document) => sum + document.bytes, 0);
   if (totalBytes > MAX_TOTAL_SOURCE_BYTES) throw new Error("host-native source set exceeds 8 MiB");
