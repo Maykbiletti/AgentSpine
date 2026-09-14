@@ -51,7 +51,7 @@ export async function observeHostTranscriptReceipt({ root, event, input, scope, 
 }
 
 export async function captureSessionTimelineLifecycle({
-  root, event, input, scope, hostHome, hostOrigin = null, clock = null, turnId = null
+  root, event, input, scope, hostHome, hostOrigin = null, clock = null, turnId = null, prompt
 }) {
   if (hasRawTimelineGroupSignal(input)) return groupSuppressed("raw-group-scope");
   if (!scope || scope.groupId !== null) return groupSuppressed("computed-group-scope");
@@ -73,7 +73,7 @@ export async function captureSessionTimelineLifecycle({
   const preAnswerRecall = lifecycle.priorSessions?.available
     ? await automaticPreAnswerTimelineRecall({
       root, host, sessionId: session, scope, hostHome, eventId: input.event_id ?? input.hook_event_id,
-      turnId,
+      turnId, prompt,
       environment: process.env
     }) : timelineRecallNotFound();
   const prior = lifecycle.priorSessions;
@@ -92,7 +92,7 @@ export async function finalizeUserPromptSessionTimeline({
     return { preflightConsumed: true, briefingOrigin: consumed.briefingOrigin,
       timeline: await captureSessionTimelineLifecycle({
       root, event: "UserPromptSubmit", input, scope, hostHome: resolvedSources.hostHome,
-      hostOrigin: consumed.origin, clock: () => new Date(now), turnId: preflight.receipt.id
+      hostOrigin: consumed.origin, clock: () => new Date(now), turnId: preflight.receipt.id, prompt
     }) };
   } catch (error) {
     return { preflightConsumed: true, briefingOrigin: consumed.briefingOrigin, timeline: {
