@@ -67,6 +67,8 @@ function priorTranscript() {
   }));
   const target = { timestamp: "2026-09-04T12:40:11.000Z", message: { role: "tool",
     content: "Measured CSS archive Suite 0 in result.txt; result: FAIL 0/15." } };
+  const newerUnrelated = { timestamp: "2026-09-04T12:40:19.000Z", message: { role: "tool",
+    content: "Measured unrelated typography audit in other.log; result: PASS 1/1." } };
   const feedback = [
     "Nein, erst die Prüfsumme prüfen",
     "Nimm dafür die andere Datei",
@@ -80,7 +82,8 @@ function priorTranscript() {
     timestamp: "2026-09-04T12:41:00.000Z", type: "memory-link",
     memory_link: { id: `memory:prior:${index}` }, payload: "x".repeat(1800)
   }));
-  return [...lessons, target, ...feedback, ...links].map((item) => JSON.stringify(item)).join("\n") + "\n";
+  return [...lessons, target, newerUnrelated, ...feedback, ...links]
+    .map((item) => JSON.stringify(item)).join("\n") + "\n";
 }
 
 async function fixture(t) {
@@ -156,7 +159,7 @@ test("a restarted task recalls one indexed prior-session result with stable sour
   assert.equal(indexGuard.blocked, false, indexGuard.reason);
   const indexed = await client()("session_timeline_index", indexGuard.updatedInput);
   assert.equal(indexed.status, "indexed", JSON.stringify(indexed));
-  assert.equal(indexed.events, 9);
+  assert.equal(indexed.events, 10);
 
   process.env.AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID = SESSION_B;
   await enroll(item, SESSION_B, item.transcriptB);
@@ -169,7 +172,7 @@ test("a restarted task recalls one indexed prior-session result with stable sour
   const timeline = JSON.parse(started.context).sourceResolution.timeline;
   assert.equal(timeline.priorSessions.available, true);
   assert.equal(timeline.priorSessions.sessions, 1);
-  assert.equal(timeline.priorSessions.indexedEvents, 9);
+  assert.equal(timeline.priorSessions.indexedEvents, 10);
   assert.doesNotMatch(started.context, /Measured CSS archive Suite 0/);
 
   const fields = { at: "2026-09-04T12:40:11.000Z", windowSeconds: 0 };
@@ -217,7 +220,7 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
   const prompt = async (eventId, value) => runHook({ hook_event_name: "UserPromptSubmit", host: "claude",
     cwd: item.project, session_id: SESSION_B, transcript_path: item.transcriptB,
     event_id: eventId, prompt: value, ...hookScope() });
-  const direct = await prompt("event:prior:auto-direct", "What was the measured Suite 0 result?");
+  const direct = await prompt("event:prior:auto-direct", "What was the CSS archive Suite 0 result in result.txt?");
   const continuation = await prompt(undefined, "Continue the existing task.");
   for (const result of [direct, continuation]) {
     assert.equal(result.blocked, false, result.reason);
@@ -228,13 +231,19 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
     assert.equal(recall.sourceReads, 2);
     assert.equal(recall.fields.includes("value"), true);
     const events = JSON.stringify(recall.events);
-    assert.match(events, /Measured CSS archive Suite 0 in result\.txt; result: FAIL 0\/15\./);
     assert.match(events, /Nein, erst die Prüfsumme prüfen/);
     assert.match(events, /Nimm dafür die andere Datei/);
     assert.match(events, /Das hatten wir schon erledigt/);
     const kind = recall.fields.indexOf("kind");
     assert.equal(recall.events.filter((event) => event[kind] === "user").length, 3);
   }
+  const directEvents = JSON.stringify(JSON.parse(direct.context).sourceResolution.timeline.preAnswerRecall.events);
+  assert.match(directEvents, /Measured CSS archive Suite 0 in result\.txt; result: FAIL 0\/15\./);
+  assert.doesNotMatch(directEvents, /other\.log/);
+  const continuationEvents = JSON.stringify(
+    JSON.parse(continuation.context).sourceResolution.timeline.preAnswerRecall.events
+  );
+  assert.match(continuationEvents, /Measured unrelated typography audit in other\.log; result: PASS 1\/1\./);
   for (const environment of [{ CLAUDE_PLUGIN_ROOT: "/synthetic/claude" },
     { PLUGIN_ROOT: "/synthetic/codex" }, { BLUN_PLUGIN_ROOT: "/synthetic/king" }]) {
     const output = hookOutput("UserPromptSubmit", direct.context, environment);
