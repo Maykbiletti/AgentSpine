@@ -79,11 +79,16 @@ function priorTranscript() {
     timestamp: `2026-09-04T12:40:${String(20 + index).padStart(2, "0")}.000Z`,
     message: { role: "user", content }
   }));
+  const laterChatter = ["Danke für die Erklärung", "Bitte antworte künftig kurz",
+    "Die Schriftgröße ist jetzt passend", "Morgen machen wir weiter"].map((content, index) => ({
+    timestamp: `2026-09-04T12:${String(50 + index).padStart(2, "0")}:00.000Z`,
+    message: { role: "user", content }
+  }));
   const links = Array.from({ length: 2500 }, (_, index) => ({
     timestamp: "2026-09-04T12:41:00.000Z", type: "memory-link",
     memory_link: { id: `memory:prior:${index}` }, payload: "x".repeat(1800)
   }));
-  return [...lessons, target, newerUnrelated, ...feedback, ...links]
+  return [...lessons, target, newerUnrelated, ...feedback, ...laterChatter, ...links]
     .map((item) => JSON.stringify(item)).join("\n") + "\n";
 }
 
@@ -164,7 +169,7 @@ test("a restarted task recalls one indexed prior-session result with stable sour
   assert.equal(indexGuard.blocked, false, indexGuard.reason);
   const indexed = await client()("session_timeline_index", indexGuard.updatedInput);
   assert.equal(indexed.status, "indexed", JSON.stringify(indexed));
-  assert.equal(indexed.events, 10);
+  assert.equal(indexed.events, 14);
 
   process.env.AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID = SESSION_B;
   await enroll(item, SESSION_B, item.transcriptB);
@@ -177,7 +182,7 @@ test("a restarted task recalls one indexed prior-session result with stable sour
   const timeline = JSON.parse(started.context).sourceResolution.timeline;
   assert.equal(timeline.priorSessions.available, true);
   assert.equal(timeline.priorSessions.sessions, 1);
-  assert.equal(timeline.priorSessions.indexedEvents, 10);
+  assert.equal(timeline.priorSessions.indexedEvents, 14);
   assert.doesNotMatch(started.context, /Measured CSS archive Suite 0/);
 
   const fields = { at: "2026-09-04T12:40:11.000Z", windowSeconds: 0 };

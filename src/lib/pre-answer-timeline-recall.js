@@ -38,19 +38,19 @@ function compact(events){
     : { sources, prefixes, fields, events: rows };
 }
 
-async function lane({root,enrollment,hostHome,transport,turnId,name,query,ref,environment}){
-  const {binding,enrollmentDigest,timelineVisibility}=enrollment,{host,...fields}=binding;
-  const scope = exactScope(binding, timelineVisibility);
-  const runtime = { root, host, sessionId: binding.sessionId, scope, hostHome, environment };
+async function lane({root,enrollment,hostHome,transport,turnId,name,query,ref,at,environment}){
+  const {binding:b,enrollmentDigest:d,timelineVisibility:v}=enrollment,{host,...fields}=b,w=at?900:0;
+  const scope = exactScope(b,v);
+  const runtime = { root, host, sessionId:b.sessionId, scope, hostHome, environment };
   const request = { root, tool: "search", ...fields, groupId: null,
-    timelineVisibility, enrollmentDigest, at: null, query, windowSeconds: 0,
+    timelineVisibility:v, enrollmentDigest:d, at:at||null, query, windowSeconds:w,
     includePriorSessions: true, includePriorProviders: false, ...(ref && { ref }) };
   const authorized = await authorizeSessionTimelineInvocation({ ...runtime, tool: "search", request,
-    toolUseId: `automatic-pre-answer:${hash(`${turnId}\0${name}\0${enrollmentDigest}`)}`,
-    transportDigest: transport, enrollmentDigest });
-  return authorized && searchSessionTimeline({ ...runtime, query, windowSeconds: 0, includePriorSessions: true,
+    toolUseId: `automatic-pre-answer:${hash(`${turnId}\0${name}\0${d}`)}`,
+    transportDigest: transport, enrollmentDigest:d });
+  return authorized && searchSessionTimeline({ ...runtime, at, query, windowSeconds:w, includePriorSessions: true,
     includePriorProviders: false, invocationRequest: request, invocationTool: "search", transportDigest: transport,
-    enrollmentDigest });
+    enrollmentDigest:d });
 }
 
 export async function automaticPreAnswerTimelineRecall({ root, host, sessionId, scope, hostHome, eventId,
@@ -71,7 +71,7 @@ export async function automaticPreAnswerTimelineRecall({ root, host, sessionId, 
       ({ ...item, terms: timelineTerms(item.excerpt) })), terms)[0];
     sourceReads++;
     const natural = await lane({ root, enrollment, hostHome, transport, turnId: recallId,
-      name: "natural-feedback", query: "user message", ref: selected?.sessionRef, environment });
+      name: "natural-feedback", query: "user message", ref: selected?.sessionRef, at:selected?.at, environment });
     if (!natural || natural.blocked) return unavailable("timeline-search-unavailable", sourceReads);
     const events = [...selected ? [selected] : [], ...(natural.events || []).slice(0, 3)];
     const unique = [...new Map(events.map((item) => [`${item.sourceDigest}\0${item.id}`, item])).values()];
