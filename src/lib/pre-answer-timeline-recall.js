@@ -21,15 +21,15 @@ function prefix(values){
 }
 
 function compact(events){
-  const sources = [], indices = new Map(), messagePrefix = prefix(events.map((item) => item.messageRef)),
-    timePrefix = prefix(events.map((item) => item.at));
-  const rows = events.map((item) => {
-    const key = `${item.sourceDigest}\0${item.sourceProvider}\0${item.sessionRef}`;
-    let source = indices.get(key);
-    if (source === undefined) { source = sources.length; indices.set(key, source);
-      sources.push({ digest: item.sourceDigest, provider: item.sourceProvider, session: item.sessionRef }); }
-    const kind = item.kind === "objective-result" ? "result" : item.kind === "user-message-candidate" ? "user" : "correction";
-    const value = kind === "result" ? [item.outcome, item.count?.value ?? null, item.count?.total ?? null,
+  const sources=[],indices=new Map(),messagePrefix=prefix(events.map(item=>item.messageRef)),
+    timePrefix=prefix(events.map(item=>item.at));
+  const rows=events.map(item=>{
+    const key=`${item.sourceDigest}\0${item.sourceProvider}\0${item.sessionRef}`;
+    let source=indices.get(key);
+    if(source===undefined){source=sources.length;indices.set(key,source);
+      sources.push({digest:item.sourceDigest,provider:item.sourceProvider,session:item.sessionRef});}
+    const kind=item.kind === "objective-result" ? "result" : item.kind === "user-message-candidate" ? "user" : "correction";
+    const value=kind === "result" ? [item.outcome,item.count?.value ?? null,item.count?.total ?? null,
       item.testLabel, item.excerpt] : kind === "correction" ? item.nextStepSummary : item.sourceText;
     return [source, item.messageRef.slice(messagePrefix.length), item.at.slice(timePrefix.length), kind, value];
   });
@@ -76,7 +76,8 @@ export async function automaticPreAnswerTimelineRecall({ root, host, sessionId, 
     const events = [...selected ? [selected] : [], ...(natural.events || []).slice(0, 3)];
     const unique = [...new Map(events.map((item) => [`${item.sourceDigest}\0${item.id}`, item])).values()];
     return { schema: SCHEMA, status: unique.length ? "recalled" : "not-found", awaited: true,
-      sourceReads, ...compact(unique), omittedEvents: 0, completionVerified: false,
+      sourceReads, ...compact(unique), omittedEvents:(objective.events?.length||0)
+        +(natural.events?.length||0)-unique.length,completionVerified:false,
       naturalMessages: "unresolved", trust: "untrusted-session-history", authority: AUTHORITY };
   } catch { return unavailable("timeline-search-unavailable", sourceReads); }
 }
