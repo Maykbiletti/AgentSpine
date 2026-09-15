@@ -106,7 +106,8 @@ async function fixture(t) {
     writeFile(transcriptC, `${JSON.stringify({ timestamp: "2026-09-04T13:10:00.000Z",
       message: { role: "user", content: "Continue in a different private thread." } })}\n`),
     writeFile(transcriptD, `${JSON.stringify({ timestamp: "2026-09-04T13:20:00.000Z",
-      message: { role: "tool", content: "Measured newer unrelated typography in other.log; result: PASS 1/1." } })}\n`)
+      message: { role: "tool", content: "Measured newer unrelated typography in other.log; result: PASS 1/1." } })}\n${JSON.stringify({ timestamp: "2026-09-04T13:20:01.000Z",
+      message: { role: "user", content: "Nein, ändere zuerst die Schriftgröße in other.log" } })}\n`)
   ]);
   const names = ["AGENTSPINE_STATE_DIR", "CLAUDE_CONFIG_DIR", "AGENTSPINE_TIMELINE_SESSION_CAPABILITY",
     "AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID", "AGENTSPINE_GATEWAY_CONTEXT", "AGENTSPINE_HOST",
@@ -268,6 +269,8 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
 
 test("a direct prompt selects the relevant result across multiple prior sessions", async (t) => {
   const item = await fixture(t);
+  const beforeA = sha256(await readFile(item.transcriptA));
+  const beforeD = sha256(await readFile(item.transcriptD));
   await enroll(item, SESSION_A, item.transcriptA);
   const oldGuard = await runHook(toolInput(item, SESSION_A, "tool:prior:multi-old",
     { maxBytes: 16 * 1024 * 1024 }));
@@ -292,15 +295,22 @@ test("a direct prompt selects the relevant result across multiple prior sessions
   const recall = JSON.parse(result.context).sourceResolution.timeline.preAnswerRecall;
   assert.equal(recall.status, "recalled");
   assert.equal(recall.sourceReads, 2);
+  assert.equal(recall.sources, undefined, "result and feedback must share one verified source");
   assert.match(JSON.stringify(recall.events), /result\.txt/);
   assert.doesNotMatch(JSON.stringify(recall.events), /other\.log/);
   const handoff = hookOutput("UserPromptSubmit", result.context,
     { BLUN_PLUGIN_ROOT: "/synthetic/king" }).hookSpecificOutput.additionalContext;
   assert.match(handoff, /result\.txt/);
   assert.doesNotMatch(handoff, /other\.log/);
+  assert.match(handoff, /Nein, erst die Prüfsumme prüfen/);
+  assert.doesNotMatch(handoff, /Schriftgröße/);
   const continuationRecall = JSON.parse(continuation.context).sourceResolution.timeline.preAnswerRecall;
   assert.equal(continuationRecall.status, "recalled");
   assert.match(JSON.stringify(continuationRecall.events), /other\.log/);
+  assert.match(JSON.stringify(continuationRecall.events), /Schriftgröße/);
+  assert.equal(continuationRecall.sources, undefined);
+  assert.equal(sha256(await readFile(item.transcriptA)), beforeA);
+  assert.equal(sha256(await readFile(item.transcriptD)), beforeD);
 });
 
 test("automatic recall isolates private threads and fails open when prior evidence changes", async (t) => {

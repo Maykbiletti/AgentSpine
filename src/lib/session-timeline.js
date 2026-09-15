@@ -314,7 +314,7 @@ if (includePriorProviders && (request?.includePriorSessions !== true || !crossPr
 const query = tool !== "index" ? timelineQuery({ at: request?.at, query: request?.query }) : null;
 const source = request?.includePriorSessions === true
 ? selectPriorTimelineSource(state, scoped, { ...query, windowMs: request.windowSeconds * 1000,
-includePriorProviders }) : currentSource;
+includePriorProviders, sessionRef: request?.ref }) : currentSource;
 const sourceHome = source?.binding.host === scoped.host ? hostHome : source?.profileRoot;
 if (!source || !await pathMatchesSource(source, sourceHome)
 || !await confirmedSourceEnrollment({ root, scoped: source.binding, source, hostHome: sourceHome })) return null;
@@ -406,7 +406,7 @@ return { blocked: true, reason: "session timeline is unavailable", authority: AU
 }
 const source = includePriorSessions
 ? selectPriorTimelineSource(state, scoped, { target, wanted, windowMs: boundedWindowSeconds * 1000,
-includePriorProviders })
+includePriorProviders, sessionRef: invocationRequest?.ref })
 : currentSource;
 const sourceHome = source?.binding.host === scoped.host ? hostHome : source?.profileRoot;
 if (!source || !await pathMatchesSource(source, sourceHome)
