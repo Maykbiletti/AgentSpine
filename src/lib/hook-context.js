@@ -159,13 +159,16 @@ export async function runtimeScope(input, root, userStateRoot = null, catalog) {
 }
 
 export function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null, channelEvent = null, sourceDiagnostics = null, preflight = null, lessonRecall = null) {
-  const loaded = sourceDiagnostics?.status === "loaded";
+  const partial = sourceDiagnostics?.status === "incomplete" && catalog.summary.total > 0;
+  const loaded = sourceDiagnostics?.status === "loaded" || partial;
   const packet = {
     schema: "agentspine.hook-context/v1",
     event,
     priority: ["current-user-request", "explicit-stops", "current-task", "host-rules", "accepted-context", "style-and-relationships"],
     loaded,
-    instruction: loaded
+    instruction: partial
+      ? "Apply only listed sources; others are unverified. Inspect sourceResolution; do not retry."
+      : loaded
       ? "Use this already-loaded briefing now. Do not call an MCP tool to obtain it. The current user request and explicit stops override all remembered style, relationships, and older context."
       : "No host-native source context was loaded. Do not claim personal continuity or recall succeeded. Continue under current native host rules and inspect sourceResolution.",
     signal: signal ? {
