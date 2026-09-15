@@ -10,8 +10,8 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const base = await mkdtemp(join(tmpdir(), "agentspine-hermetic-tests-"));
 const testFiles = selectTestShard((await readdir(join(root, "test")))
   .filter((name) => name.endsWith(".test.js")).sort(), process.env.AGENTSPINE_TEST_SHARD);
-const concurrencyCeiling = process.platform === "win32" ? 3 : 4;
-const concurrency = Math.max(1, Math.min(concurrencyCeiling, cpus().length));
+const win=process.platform==="win32";
+const concurrency = Math.max(1, Math.min(win ? 3 : 4, cpus().length));
 const testTimeoutMs = configuredTestTimeout();
 const slowTestTimeouts = new Map([
   ["indexed-memory.test.js", 300_000]
@@ -74,9 +74,7 @@ async function runMode(mode) {
     "session-timeline-invocation.test.js",
     "timeline-natural-feedback.test.js"
   ]);
-  if (process.platform === "win32" && process.versions.node.startsWith("20.")) {
-    isolatedNames.add("timeline-world-capture.test.js");
-  }
+  if(win)for (const name of "preflight-large-agents,timeline-natural-feedback-multisession,timeline-next-step-correction,timeline-world-capture".split(",")) isolatedNames.add(name+".test.js");
   const isolated = indexed.filter(item => isolatedNames.has(item.file));
   const queue = indexed.filter(item => !isolatedNames.has(item.file));
   for (const item of isolated) results.push(await runOne(item.file, mode, item.index));

@@ -10,7 +10,7 @@ export function selectTestShard(files, spec) {
   if (!spec) return files;
   const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(spec);
   const index = +match?.[1]; const count = +match?.[2];
-  if (!match || count < 2 || index > count) throw new Error("AGENTSPINE_TEST_SHARD");
+  if (!match || count < 2 || index > count) throw new Error("SHARD");
   return files.filter((_, i) => i % count === index - 1);
 }
 

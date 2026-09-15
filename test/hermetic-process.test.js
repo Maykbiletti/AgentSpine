@@ -32,7 +32,7 @@ test("hermetic shards are deterministic, disjoint, and complete", () => {
   assert.equal(left.some((file) => right.includes(file)), false);
   assert.deepEqual(selectTestShard(files), files);
   for (const invalid of ["0/2", "3/2", "1/1", "one/two", "1/0"]) {
-    assert.throws(() => selectTestShard(files, invalid), /AGENTSPINE_TEST_SHARD/);
+    assert.throws(() => selectTestShard(files, invalid), /SHARD/);
   }
 });
 
