@@ -244,6 +244,33 @@ test("King cumulative resource overflow stays non-blocking and preserves every s
   for (const [path, source] of sources) assert.deepEqual(await readFile(path), source);
 });
 
+test("King reports every source omitted by the cumulative reader budget", async (t) => {
+  const item = await setup(t);
+  const nested = join(item.root, "nested");
+  const deep = join(nested, "deep");
+  await mkdir(deep, { recursive: true });
+  const sources = [join(item.hostHome, "AGENTS.md"), join(item.root, "AGENTS.md"),
+    join(nested, "AGENTS.md"), join(deep, "AGENTS.md")]
+    .map((path, index) => [path, Buffer.from(exactRules(3 * 1024 * 1024, String(index)))]);
+  for (const [path, source] of sources) await writeFile(path, source);
+  const limited = await resolveHostSourceCatalog({ host: "codex", cwd: deep, env: item.env });
+  assert.deepEqual(limited.unverified.map((item) => item.id),
+    ["codex:project/nested/AGENTS.md", "codex:project/nested/deep/AGENTS.md"]);
+  const output = await installedHook({ ...item, root: deep,
+    eventId: "multiple-cumulative-overflow", prompt: "Continue the current task." });
+  assert.equal(output.decision, undefined, JSON.stringify(output));
+  assert.match(output.hookSpecificOutput.message, /2 King rules/);
+  assert.doesNotMatch(output.hookSpecificOutput.message, /^King rule /);
+  assert.match(output.hookSpecificOutput.additionalContext, /2 King rules/);
+  assert.equal(Buffer.byteLength(output.hookSpecificOutput.message) <= 900, true);
+  assert.equal(Buffer.byteLength(output.hookSpecificOutput.additionalContext) <= 1200, true);
+  for (const [path, source] of sources) {
+    const preserved = await readFile(path);
+    assert.deepEqual(preserved, source);
+    assert.equal(digest(preserved), digest(source));
+  }
+});
+
 test("fresh and upgraded package copies preserve the King size contract", async (t) => {
   const item = await setup(t);
   const installs = [join(item.root, "fresh-package"), join(item.root, "upgraded-package")];
