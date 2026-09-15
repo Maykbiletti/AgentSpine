@@ -9,10 +9,8 @@ import { configuredTestTimeout, runBoundedProcess } from "./hermetic-process.js"
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const base = await mkdtemp(join(tmpdir(), "agentspine-hermetic-tests-"));
 const testFiles = (await readdir(join(root, "test"))).filter((name) => name.endsWith(".test.js")).sort();
-// Windows process creation and antivirus-backed temporary I/O contend sharply
-// when several hermetic files each spawn MCP children. Preserve the real child
-// deadlines by reducing runner load there, rather than relaxing any deadline.
-const concurrencyCeiling = process.platform === "win32" ? 2 : 4;
+// Limit Windows process/I/O contention without relaxing child deadlines.
+const concurrencyCeiling = process.platform === "win32" ? 3 : 4;
 const concurrency = Math.max(1, Math.min(concurrencyCeiling, cpus().length));
 const testTimeoutMs = configuredTestTimeout();
 const slowTestTimeouts = new Map([
@@ -80,6 +78,9 @@ async function runMode(mode) {
     "session-timeline-invocation.test.js",
     "timeline-natural-feedback.test.js"
   ]);
+  if (process.platform === "win32" && process.versions.node.startsWith("20.")) {
+    isolatedNames.add("timeline-world-capture.test.js");
+  }
   const isolated = indexed.filter(item => isolatedNames.has(item.file));
   const queue = indexed.filter(item => !isolatedNames.has(item.file));
   for (const item of isolated) results.push(await runOne(item.file, mode, item.index));
