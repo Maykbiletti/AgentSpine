@@ -76,12 +76,12 @@ function priorTranscript() {
     "Das hatten wir schon erledigt",
     "Korrektur: nächster Schritt: Prüfsumme validieren"
   ].map((content, index) => ({
-    timestamp: `2026-09-04T12:40:${String(20 + index).padStart(2, "0")}.000Z`,
+    timestamp: `2026-09-04T13:00:${String(20 + index).padStart(2, "0")}.000Z`,
     message: { role: "user", content }
   }));
   const laterChatter = ["Danke für die Erklärung", "Bitte antworte künftig kurz",
     "Die Schriftgröße ist jetzt passend", "Morgen machen wir weiter"].map((content, index) => ({
-    timestamp: `2026-09-04T12:${String(50 + index).padStart(2, "0")}:00.000Z`,
+    timestamp: `2026-09-04T13:${String(10 + index).padStart(2, "0")}:00.000Z`,
     message: { role: "user", content }
   }));
   const links = Array.from({ length: 2500 }, (_, index) => ({

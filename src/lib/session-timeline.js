@@ -404,24 +404,25 @@ if (!currentSource) return { blocked: true, reason: "session timeline is unavail
 if (!await confirmedSourceEnrollment({ root, scoped, source: currentSource, hostHome })) {
 return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY };
 }
-const source = includePriorSessions
-? selectPriorTimelineSource(state, scoped, { target, wanted, windowMs: boundedWindowSeconds * 1000,
-includePriorProviders, sessionRef: invocationRequest?.ref })
+const source=includePriorSessions
+?selectPriorTimelineSource(state,scoped,{target,wanted,windowMs:boundedWindowSeconds*1000,
+includePriorProviders,sessionRef:invocationRequest?.ref})
 : currentSource;
-const sourceHome = source?.binding.host === scoped.host ? hostHome : source?.profileRoot;
-if (!source || !await pathMatchesSource(source, sourceHome)
-|| !await confirmedSourceEnrollment({ root, scoped: source.binding, source, hostHome: sourceHome })) {
+const sourceHome=source?.binding.host===scoped.host?hostHome:source?.profileRoot;
+if(!source||!await pathMatchesSource(source,sourceHome)
+||!await confirmedSourceEnrollment({root,scoped:source.binding,source,hostHome:sourceHome})) {
 return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY };
 }
-const sourceDigest = sourceMetadata(source).sourceDigest;
-if (!/^(search|capture)$/.test(invocationTool) || !invocationRequest
-|| !await timelineTransportEnrollmentMatches({ root, binding: scoped, enrollmentDigest, transportDigest, hostHome })
-|| !await consumeSessionTimelineInvocation({ root, tool: invocationTool, binding: scoped, sourceDigest,
-request: invocationRequest, transportDigest })) {
+const sourceDigest=sourceMetadata(source).sourceDigest;
+if(!/^(search|capture)$/.test(invocationTool)||!invocationRequest
+||!await timelineTransportEnrollmentMatches({root,binding:scoped,enrollmentDigest,transportDigest,hostHome})
+||!await consumeSessionTimelineInvocation({root,tool:invocationTool,binding:scoped,sourceDigest,
+request:invocationRequest,transportDigest})) {
 return { blocked: true, reason: "session timeline invocation is unavailable", authority: AUTHORITY };
 }
-const indexed = rankTimelineEvents(source.events
-.filter((event) => matchesTimelineEvent(event, wanted, target, boundedWindowSeconds * 1000)), wanted, target).slice(0, 8);
+const matchAt=invocationRequest?.ref&&target&&query==="user message"?null:target;
+const indexed=rankTimelineEvents(source.events
+.filter(event=>matchesTimelineEvent(event,wanted,matchAt,boundedWindowSeconds*1000)),wanted,target).slice(0,8);
 if (includePriorSessions && !indexed.length) {
 return searchResult(source, target, wanted, "prior-index", [], { priorSession: true,
 priorProvider: source.binding.host !== scoped.host }, invocationTool === "capture");
@@ -433,7 +434,7 @@ const verified = [];
 for (const event of indexed) {
 const current = await verifyTimelineEvent({ handle: opened.handle, event, readRange, digest,
 eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY, source.binding.host) });
-if (!current || !matchesTimelineEvent(current, wanted, target, boundedWindowSeconds * 1000)) return { blocked: true, reason: "timeline evidence changed", authority: AUTHORITY };
+if(!current||!matchesTimelineEvent(current,wanted,matchAt,boundedWindowSeconds*1000)) return { blocked: true, reason: "timeline evidence changed", authority: AUTHORITY };
 verified.push(current);
 }
 if (verified.length) {
