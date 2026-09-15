@@ -239,6 +239,7 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
     assert.equal(recall.awaited, true);
     assert.equal(recall.completionVerified, false);
     assert.equal(recall.sourceReads, 2);
+    assert.ok(recall.omittedEvents > 0, "bounded recall must disclose matching events it did not hand off");
     assert.equal(recall.fields.includes("value"), true);
     const events = JSON.stringify(recall.events);
     assert.match(events, /Nein, erst die Prüfsumme prüfen/);
@@ -247,7 +248,10 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
     const kind = recall.fields.indexOf("kind");
     assert.equal(recall.events.filter((event) => event[kind] === "user").length, 3);
   }
-  const directEvents = JSON.stringify(JSON.parse(direct.context).sourceResolution.timeline.preAnswerRecall.events);
+  const directRecall = JSON.parse(direct.context).sourceResolution.timeline.preAnswerRecall;
+  assert.equal(directRecall.omittedEvents, 9,
+    "bounded result and feedback candidates stay disclosed");
+  const directEvents = JSON.stringify(directRecall.events);
   assert.match(directEvents, /Measured CSS archive Suite 0 in result\.txt; result: FAIL 0\/15\./);
   assert.doesNotMatch(directEvents, /other\.log/);
   const continuationEvents = JSON.stringify(
@@ -263,6 +267,7 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
     assert.match(handoff, /Nimm dafür die andere Datei/);
     assert.match(handoff, /Das hatten wir schon erledigt/);
     assert.match(handoff, /completionVerified(?:\\?"|&quot;):false/);
+    assert.match(handoff, /omitted(?:Events)?(?:\\?"|&quot;):[1-9]/);
     if (environment.BLUN_PLUGIN_ROOT) assert.equal(Buffer.byteLength(handoff) <= 1200, true);
   }
   assert.equal(sha256(await readFile(item.transcriptA)), beforeA);
