@@ -6,6 +6,14 @@ export const TIMEOUT_EXIT_CODE = 124;
 const MAX_CAPTURE_CHARS = 1_000_000;
 const TASKKILL_TIMEOUT_MS = 5_000;
 
+export function selectTestShard(files, spec) {
+  if (!spec) return files;
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(spec);
+  const index = +match?.[1]; const count = +match?.[2];
+  if (!match || count < 2 || index > count) throw new Error("AGENTSPINE_TEST_SHARD");
+  return files.filter((_, i) => i % count === index - 1);
+}
+
 function running(child) {
   return child?.pid && child.exitCode === null && child.signalCode === null;
 }

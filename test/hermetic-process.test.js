@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
-import { runBoundedProcess } from "../scripts/hermetic-process.js";
+import { runBoundedProcess, selectTestShard } from "../scripts/hermetic-process.js";
 
 function capture() {
   const stream = new PassThrough();
@@ -21,6 +21,20 @@ function processExists(pid) {
     throw error;
   }
 }
+
+test("hermetic shards are deterministic, disjoint, and complete", () => {
+  const files = Array.from({ length: 151 }, (_, index) => `test-${String(index).padStart(3, "0")}.js`);
+  const left = selectTestShard(files, "1/2");
+  const right = selectTestShard(files, "2/2");
+  assert.equal(left.length, 76);
+  assert.equal(right.length, 75);
+  assert.deepEqual([...left, ...right].sort(), files);
+  assert.equal(left.some((file) => right.includes(file)), false);
+  assert.deepEqual(selectTestShard(files), files);
+  for (const invalid of ["0/2", "3/2", "1/1", "one/two", "1/0"]) {
+    assert.throws(() => selectTestShard(files, invalid), /AGENTSPINE_TEST_SHARD/);
+  }
+});
 
 test("bounded process runner preserves a successful child and reports progress", async () => {
   const progress = capture();
