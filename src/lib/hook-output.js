@@ -226,11 +226,10 @@ export function blunRuntimeMessage(context) {
   return Buffer.byteLength(recall)<=BLUN_MESSAGE_MAX_BYTES+1?recall.slice(1):`${base}\nRecall unavailable.`;
 }
 
-export function hookOutput(event, context, env = process.env) {
-  if (env.BLUN_PLUGIN_ROOT) {
-    return { hookSpecificOutput: { hookEventName: event, additionalContext: blunRuntimeMessage(context) } };
-  }
-  return { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
+export function hookOutput(event, context, env = process.env, sourceWarning = null) {
+  return { hookSpecificOutput: { hookEventName: event,
+    additionalContext: env.BLUN_PLUGIN_ROOT ? blunRuntimeMessage(context) : context,
+    ...(sourceWarning ? { message: sourceWarning } : {}) } };
 }
 
 export function blockedHookOutput(event, reason, env = process.env) {

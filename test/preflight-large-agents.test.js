@@ -233,6 +233,8 @@ test("King cumulative resource overflow stays non-blocking and preserves every s
       eventId: `cumulative-${suffix}`, prompt });
     assert.equal(output.decision, undefined, JSON.stringify(output));
     assert.match(output.hookSpecificOutput.message, /total reader budget/);
+    assert.match(output.hookSpecificOutput.additionalContext, /^AgentSpine ready: 2 sources indexed\./);
+    assert.match(output.hookSpecificOutput.additionalContext, /Warning: .*did not load or verify/);
   }
   const protectedWrite = await installedHook({ ...item, root: nested, eventId: "write-cumulative", hookInput: {
     ...input(nested, "write-cumulative"), hook_event_name: "PreToolUse", tool_name: "Write",

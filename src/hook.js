@@ -34,7 +34,7 @@ export { blunRuntimeContext, blunRuntimeMessage } from "./lib/hook-output.js";
 const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
 const KNOWN_EVENTS = new Set([...CONTEXT_EVENTS, "InstructionsLoaded", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"]);
 async function writeContextOutput(output, host) {
-  const field = Object.hasOwn(output.hookSpecificOutput, "message") ? "message" : "additionalContext", content = output.hookSpecificOutput[field];
+  const field = Object.hasOwn(output.hookSpecificOutput, "additionalContext") ? "additionalContext" : "message", content = output.hookSpecificOutput[field];
   await new Promise((resolveWrite, rejectWrite) => process.stdout.write(`${JSON.stringify(output)}\n`, (error) => error ? rejectWrite(error) : resolveWrite()));
   return { schema: "agentspine.host-context-handoff/v1", host, field, bytes: Buffer.byteLength(content), digest: createHash("sha256").update(content).digest("hex") };
 }
@@ -96,7 +96,7 @@ async function runHookCore(input, payload, options) {
   const root = resolvedSources.projectRoot;
   const catalog = resolvedSources.catalog;
   const catalogPath = await saveCatalog(catalog), sourceWarning = resolvedSources.diagnostics.warning || null;
-  if (CONTEXT_EVENTS.has(event) && resolvedSources.unverified.length) {
+  if (CONTEXT_EVENTS.has(event) && resolvedSources.unverified.length && !catalog.summary.total) {
     if (payload) return { blocked: false, sourceUnverified: true, sourceWarning };
     process.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: event, message: sourceWarning } })}\n`); return;
   }
@@ -430,7 +430,7 @@ async function runHookCore(input, payload, options) {
         }
       }
       if (payload) return { blocked: false, context, briefing, preflight, signal, attentionEvent, channelEvent, lessonRecall, catalogPath };
-      const output = hookOutput(event, context);
+      const output = hookOutput(event, context, process.env, sourceWarning);
       const handoff = await writeContextOutput(output, process.env.BLUN_PLUGIN_ROOT ? "king"
         : process.env.PLUGIN_ROOT ? "codex" : process.env.CLAUDE_PLUGIN_ROOT ? "claude" : scope.host);
       if (event === "UserPromptSubmit" && briefingOrigin) {
