@@ -62,18 +62,18 @@ export async function automaticPreAnswerTimelineRecall({ root, host, sessionId, 
     if (enrollment.status !== "enrolled") return unavailable("private-enrollment-unavailable");
     const transport = timelineTransportDigest({ root, binding: enrollment.binding, environment });
     if (!transport) return unavailable("timeline-transport-unavailable");
-    const recallTurnId = turnId || eventId || "turn";
+    const recallId = turnId || eventId || "turn";
     sourceReads++;
-    const objectiveResult = await lane({ root, enrollment, hostHome, transport, turnId: recallTurnId,
-      name: "objective", query: "objective result", environment });
-    if (!objectiveResult || objectiveResult.blocked) return unavailable("timeline-search-unavailable", sourceReads);
+    const objective = await lane({ root, enrollment, hostHome, transport, turnId: recallId,
+      name: "objective", query: ["objective result", ...timelineTerms(prompt).slice(0, 8)].join(" "), environment });
+    if (!objective || objective.blocked) return unavailable("timeline-search-unavailable", sourceReads);
     sourceReads++;
-    const natural = await lane({ root, enrollment, hostHome, transport, turnId: recallTurnId,
+    const natural = await lane({ root, enrollment, hostHome, transport, turnId: recallId,
       name: "natural-feedback", query: "user message", environment });
     if (!natural || natural.blocked) return unavailable("timeline-search-unavailable", sourceReads);
-    const objective = rankTimelineEvents((objectiveResult.events || []).map((item) =>
+    const selected = rankTimelineEvents((objective.events || []).map((item) =>
       ({ ...item, terms: timelineTerms(item.excerpt) })), timelineTerms(prompt).slice(0, 8))[0];
-    const events = [...objective ? [objective] : [], ...(natural.events || []).slice(0, 3)];
+    const events = [...selected ? [selected] : [], ...(natural.events || []).slice(0, 3)];
     const unique = [...new Map(events.map((item) => [`${item.sourceDigest}\0${item.id}`, item])).values()];
     return { schema: SCHEMA, status: unique.length ? "recalled" : "not-found", awaited: true,
       sourceReads, ...compact(unique), omittedEvents: 0, completionVerified: false,

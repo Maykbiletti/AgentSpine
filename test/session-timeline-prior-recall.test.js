@@ -13,6 +13,7 @@ import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-sup
 const SESSION_A = "session:prior-recall-a";
 const SESSION_B = "session:prior-recall-b";
 const SESSION_C = "session:prior-recall-c";
+const SESSION_D = "session:prior-recall-d";
 
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
 
@@ -95,6 +96,7 @@ async function fixture(t) {
   const transcriptA = join(sessions, "session-a.jsonl");
   const transcriptB = join(sessions, "session-b.jsonl");
   const transcriptC = join(sessions, "session-c.jsonl");
+  const transcriptD = join(sessions, "session-d.jsonl");
   await Promise.all([mkdir(state), mkdir(join(project, ".git"), { recursive: true }), mkdir(sessions, { recursive: true })]);
   await Promise.all([
     writeFile(join(project, "AGENTS.md"), "# Synthetic prior-session recall project\n"),
@@ -102,7 +104,9 @@ async function fixture(t) {
     writeFile(transcriptB, `${JSON.stringify({ timestamp: "2026-09-04T13:00:00.000Z",
       message: { role: "user", content: "Continue the archive after restart." } })}\n`),
     writeFile(transcriptC, `${JSON.stringify({ timestamp: "2026-09-04T13:10:00.000Z",
-      message: { role: "user", content: "Continue in a different private thread." } })}\n`)
+      message: { role: "user", content: "Continue in a different private thread." } })}\n`),
+    writeFile(transcriptD, `${JSON.stringify({ timestamp: "2026-09-04T13:20:00.000Z",
+      message: { role: "tool", content: "Measured newer unrelated typography in other.log; result: PASS 1/1." } })}\n`)
   ]);
   const names = ["AGENTSPINE_STATE_DIR", "CLAUDE_CONFIG_DIR", "AGENTSPINE_TIMELINE_SESSION_CAPABILITY",
     "AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID", "AGENTSPINE_GATEWAY_CONTEXT", "AGENTSPINE_HOST",
@@ -132,7 +136,7 @@ async function fixture(t) {
     }
     await rm(workspace, { recursive: true, force: true, maxRetries: 3 });
   });
-  return { project, profile, transcriptA, transcriptB, transcriptC };
+  return { project, profile, transcriptA, transcriptB, transcriptC, transcriptD };
 }
 
 function toolInput(item, sessionId, toolUseId, fields, overrides = {}) {
@@ -260,6 +264,43 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
   t.diagnostic(JSON.stringify({ sourceRetrieval: "verified", contextHandoff: "repository-hook-only",
     modelRuns: 0, semanticApplication: "unverified", directPrompt: "recalled",
     continuationWithoutSearchHint: "recalled" }));
+});
+
+test("a direct prompt selects the relevant result across multiple prior sessions", async (t) => {
+  const item = await fixture(t);
+  await enroll(item, SESSION_A, item.transcriptA);
+  const oldGuard = await runHook(toolInput(item, SESSION_A, "tool:prior:multi-old",
+    { maxBytes: 16 * 1024 * 1024 }));
+  await client()("session_timeline_index", oldGuard.updatedInput);
+
+  process.env.AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID = SESSION_D;
+  await enroll(item, SESSION_D, item.transcriptD);
+  const newerGuard = await runHook(toolInput(item, SESSION_D, "tool:prior:multi-new",
+    { maxBytes: 16 * 1024 * 1024 }));
+  await client()("session_timeline_index", newerGuard.updatedInput);
+
+  process.env.AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID = SESSION_B;
+  await enroll(item, SESSION_B, item.transcriptB);
+  const result = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude",
+    cwd: item.project, session_id: SESSION_B, transcript_path: item.transcriptB,
+    event_id: "event:prior:multi-relevant",
+    prompt: "What was the CSS archive Suite 0 result in result.txt?", ...hookScope() });
+  const continuation = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude",
+    cwd: item.project, session_id: SESSION_B, transcript_path: item.transcriptB,
+    event_id: "event:prior:multi-continuation", prompt: "Continue the existing task.", ...hookScope() });
+  assert.equal(result.blocked, false, result.reason);
+  const recall = JSON.parse(result.context).sourceResolution.timeline.preAnswerRecall;
+  assert.equal(recall.status, "recalled");
+  assert.equal(recall.sourceReads, 2);
+  assert.match(JSON.stringify(recall.events), /result\.txt/);
+  assert.doesNotMatch(JSON.stringify(recall.events), /other\.log/);
+  const handoff = hookOutput("UserPromptSubmit", result.context,
+    { BLUN_PLUGIN_ROOT: "/synthetic/king" }).hookSpecificOutput.additionalContext;
+  assert.match(handoff, /result\.txt/);
+  assert.doesNotMatch(handoff, /other\.log/);
+  const continuationRecall = JSON.parse(continuation.context).sourceResolution.timeline.preAnswerRecall;
+  assert.equal(continuationRecall.status, "recalled");
+  assert.match(JSON.stringify(continuationRecall.events), /other\.log/);
 });
 
 test("automatic recall isolates private threads and fails open when prior evidence changes", async (t) => {
