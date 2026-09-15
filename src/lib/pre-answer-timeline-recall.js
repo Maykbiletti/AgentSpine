@@ -1,26 +1,26 @@
-import { createHash } from "node:crypto";
-import { authorizeSessionTimelineInvocation, searchSessionTimeline } from "./session-timeline.js";
-import { resolvePrivateSessionTimelineEnrollment } from "./session-timeline-enrollment.js";
-import { rankTimelineEvents, timelineTerms } from "./session-timeline-query.js";
-import { timelineTransportDigest } from "./session-timeline-transport.js";
+import {createHash} from "node:crypto";
+import {authorizeSessionTimelineInvocation,searchSessionTimeline} from "./session-timeline.js";
+import {resolvePrivateSessionTimelineEnrollment} from "./session-timeline-enrollment.js";
+import {rankTimelineEvents,timelineTerms} from "./session-timeline-query.js";
+import {timelineTransportDigest} from "./session-timeline-transport.js";
 
-const SCHEMA = "agentspine.pre-answer-timeline-recall/v1", AUTHORITY = "context-only";
-const hash = (value) => createHash("sha256").update(value).digest("hex");
-const unavailable = (reason, sourceReads = 0) => ({ schema: SCHEMA, status: "unavailable", reason,
-  awaited: true, sourceReads, events: [], omittedEvents: 0, completionVerified: false, authority: AUTHORITY });
+const SCHEMA="agentspine.pre-answer-timeline-recall/v1", AUTHORITY="context-only";
+const hash=value=>createHash("sha256").update(value).digest("hex");
+const unavailable=(reason,sourceReads=0)=>({schema:SCHEMA,status:"unavailable",reason,awaited:true,
+  sourceReads,events:[],omittedEvents:0,completionVerified:false,authority:AUTHORITY});
 
-function exactScope(binding, visibility) {
-  const { host, sessionId, taskId, ...continuity } = binding;
-  return { ...continuity, groupId: null, currentTaskId: taskId, timelineVisibility: visibility };
+function exactScope(binding,visibility){
+  const {host,sessionId,taskId,...continuity}=binding;
+  return {...continuity,groupId:null,currentTaskId:taskId,timelineVisibility:visibility};
 }
 
-function prefix(values) {
-  let value = values[0] || "";
-  for (const item of values.slice(1)) while (value && !item.startsWith(value)) value = value.slice(0, -1);
+function prefix(values){
+  let value=values[0]||"";
+  for (const item of values.slice(1)) while(value&&!item.startsWith(value)) value=value.slice(0,-1);
   return value;
 }
 
-function compact(events) {
+function compact(events){
   const sources = [], indices = new Map(), messagePrefix = prefix(events.map((item) => item.messageRef)),
     timePrefix = prefix(events.map((item) => item.at));
   const rows = events.map((item) => {
@@ -38,19 +38,19 @@ function compact(events) {
     : { sources, prefixes, fields, events: rows };
 }
 
-async function lane({ root, enrollment, hostHome, transport, turnId, name, query, environment }) {
-  const binding = enrollment.binding, { host, ...fields } = binding;
-  const scope = exactScope(binding, enrollment.timelineVisibility);
+async function lane({root,enrollment,hostHome,transport,turnId,name,query,ref,environment}){
+  const {binding,enrollmentDigest,timelineVisibility}=enrollment,{host,...fields}=binding;
+  const scope = exactScope(binding, timelineVisibility);
   const runtime = { root, host, sessionId: binding.sessionId, scope, hostHome, environment };
   const request = { root, tool: "search", ...fields, groupId: null,
-    timelineVisibility: enrollment.timelineVisibility, enrollmentDigest: enrollment.enrollmentDigest,
-    at: null, query, windowSeconds: 0, includePriorSessions: true, includePriorProviders: false };
+    timelineVisibility, enrollmentDigest, at: null, query, windowSeconds: 0,
+    includePriorSessions: true, includePriorProviders: false, ...(ref && { ref }) };
   const authorized = await authorizeSessionTimelineInvocation({ ...runtime, tool: "search", request,
-    toolUseId: `automatic-pre-answer:${hash(`${turnId}\0${name}\0${enrollment.enrollmentDigest}`)}`,
-    transportDigest: transport, enrollmentDigest: enrollment.enrollmentDigest });
+    toolUseId: `automatic-pre-answer:${hash(`${turnId}\0${name}\0${enrollmentDigest}`)}`,
+    transportDigest: transport, enrollmentDigest });
   return authorized && searchSessionTimeline({ ...runtime, query, windowSeconds: 0, includePriorSessions: true,
     includePriorProviders: false, invocationRequest: request, invocationTool: "search", transportDigest: transport,
-    enrollmentDigest: enrollment.enrollmentDigest });
+    enrollmentDigest });
 }
 
 export async function automaticPreAnswerTimelineRecall({ root, host, sessionId, scope, hostHome, eventId,
@@ -62,17 +62,17 @@ export async function automaticPreAnswerTimelineRecall({ root, host, sessionId, 
     if (enrollment.status !== "enrolled") return unavailable("private-enrollment-unavailable");
     const transport = timelineTransportDigest({ root, binding: enrollment.binding, environment });
     if (!transport) return unavailable("timeline-transport-unavailable");
-    const recallId = turnId || eventId || "turn";
+    const recallId = turnId || eventId || "turn", terms = timelineTerms(prompt).slice(0, 8);
     sourceReads++;
     const objective = await lane({ root, enrollment, hostHome, transport, turnId: recallId,
-      name: "objective", query: ["objective result", ...timelineTerms(prompt).slice(0, 8)].join(" "), environment });
+      name: "objective", query: ["objective result", ...terms].join(" "), environment });
     if (!objective || objective.blocked) return unavailable("timeline-search-unavailable", sourceReads);
+    const selected = rankTimelineEvents((objective.events || []).map((item) =>
+      ({ ...item, terms: timelineTerms(item.excerpt) })), terms)[0];
     sourceReads++;
     const natural = await lane({ root, enrollment, hostHome, transport, turnId: recallId,
-      name: "natural-feedback", query: "user message", environment });
+      name: "natural-feedback", query: "user message", ref: selected?.sessionRef, environment });
     if (!natural || natural.blocked) return unavailable("timeline-search-unavailable", sourceReads);
-    const selected = rankTimelineEvents((objective.events || []).map((item) =>
-      ({ ...item, terms: timelineTerms(item.excerpt) })), timelineTerms(prompt).slice(0, 8))[0];
     const events = [...selected ? [selected] : [], ...(natural.events || []).slice(0, 3)];
     const unique = [...new Map(events.map((item) => [`${item.sourceDigest}\0${item.id}`, item])).values()];
     return { schema: SCHEMA, status: unique.length ? "recalled" : "not-found", awaited: true,

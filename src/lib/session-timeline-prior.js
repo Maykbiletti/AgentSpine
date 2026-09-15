@@ -22,8 +22,9 @@ export function priorTimelineSources(state, scoped, { includePriorProviders = fa
 return state.sources.filter((source) => sameContinuationScope(source.binding, scoped, includePriorProviders))
 .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
-export function selectPriorTimelineSource(state, scoped, { target, wanted, windowMs, includePriorProviders = false }) {
-const eligible = priorTimelineSources(state, scoped, { includePriorProviders });
+export function selectPriorTimelineSource(state, scoped, { target, wanted, windowMs, includePriorProviders = false, sessionRef = null }) {
+const eligible = priorTimelineSources(state, scoped, { includePriorProviders })
+.filter((source) => !sessionRef || timelineSessionReference(source.binding) === sessionRef);
 const indexed = eligible.flatMap((source, sourceIndex) => rankTimelineEvents(source.events
 .filter((event) => matchesTimelineEvent(event, wanted, target, windowMs)), wanted, target)
 .slice(0, 8).map((event) => ({ ...event, sourceIndex })));
