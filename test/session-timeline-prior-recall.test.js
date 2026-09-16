@@ -285,6 +285,28 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
     continuationWithoutSearchHint: "recalled" }));
 });
 
+test("host-context fitting preserves measured recall evidence when optional detail is removed", () => {
+  const recall={schema:"agentspine.pre-answer-timeline-recall/v1",status:"recalled",awaited:true,
+    sourceReads:2,events:[],omittedEvents:9,completionVerified:false,authority:"context-only",
+    optionalDetail:"x".repeat(512)};
+  const timeline={schema:"agentspine.session-timeline/v1",status:"indexed",preAnswerRecall:recall,
+    authority:"context-only"};
+  const unavailableRecall={schema:recall.schema,status:"unavailable",reason:"host-context-budget",
+    awaited:true,sourceReads:2,events:[],omittedEvents:9,completionVerified:false,
+    authority:"context-only"};
+  const maximumBytes=Buffer.byteLength(JSON.stringify({...timeline,preAnswerRecall:unavailableRecall}));
+  const before=JSON.parse(JSON.stringify(timeline));
+  const fit=()=>fitTimelineRecallToHostContext({timeline,render:JSON.stringify,maximumBytes});
+  const first=fit();
+  assert.equal(Buffer.byteLength(first.context)<=maximumBytes,true);
+  assert.equal(first.timeline.preAnswerRecall.status,"unavailable");
+  assert.equal(first.timeline.preAnswerRecall.reason,"host-context-budget");
+  assert.equal(first.timeline.preAnswerRecall.sourceReads,2);
+  assert.equal(first.timeline.preAnswerRecall.omittedEvents,9);
+  assert.deepEqual(timeline,before);
+  assert.deepEqual(fit(),first);
+});
+
 test("a direct prompt selects the relevant result across multiple prior sessions", async (t) => {
   const item = await fixture(t);
   const beforeA = sha256(await readFile(item.transcriptA));

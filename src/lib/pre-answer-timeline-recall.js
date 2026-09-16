@@ -86,17 +86,18 @@ const removeLast=r=>r.events.length>1?{...r,events:r.events.slice(0,-1),omittedE
   :unavailable("host-context-budget",r.sourceReads,r.omittedEvents+1);
 export const timelineRecallNotFound = () => ({ ...unavailable(null), status: "not-found" });
 
-export function fitTimelineRecallToHostContext({ timeline, render, maximumBytes }) {
-  let fitted = timeline, recall = timeline?.preAnswerRecall, context = render(fitted);
-  while (Buffer.byteLength(context) > maximumBytes && recall?.events?.length) {
-    recall = removeLast(recall); fitted = { ...fitted, preAnswerRecall: recall }; context = render(fitted);
+export function fitTimelineRecallToHostContext({timeline,render,maximumBytes}) {
+  let fitted=timeline,recall=timeline?.preAnswerRecall,context=render(fitted);
+  while (Buffer.byteLength(context)>maximumBytes&&recall?.events?.length) {
+    recall=removeLast(recall); fitted={...fitted,preAnswerRecall:recall}; context=render(fitted);
   }
-  if (Buffer.byteLength(context) > maximumBytes && recall) {
-    fitted = { ...fitted, preAnswerRecall: unavailable("host-context-budget") }; context = render(fitted);
+  if (Buffer.byteLength(context)>maximumBytes&&recall) {
+    fitted={...fitted,preAnswerRecall:unavailable("host-context-budget",recall.sourceReads,
+      recall.omittedEvents)}; context=render(fitted);
   }
-  if (Buffer.byteLength(context) > maximumBytes) {
-    fitted = { schema: "agentspine.session-timeline/v1", status: "unavailable",
+  if (Buffer.byteLength(context)>maximumBytes) {
+    fitted={schema:"agentspine.session-timeline/v1",status:"unavailable",
       reason: "host-context-budget", authority: AUTHORITY }; context = render(fitted);
   }
-  return { timeline: fitted, context };
+  return {timeline:fitted,context};
 }
