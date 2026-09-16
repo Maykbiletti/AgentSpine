@@ -2,72 +2,71 @@ const BLUN_MESSAGE_MAX_BYTES=1200;
 const BLUN_BOUND_MARKER="\n[optional runtime detail omitted: 1200-byte bound]";
 const byteSize=value=>Buffer.byteLength(JSON.stringify(value));
 
-function addRecallField(packet, key, value, maximum = 1020) {
-  if (value === undefined || value === null) return;
-  packet[key] = value;
-  if (byteSize(packet) <= maximum) return true;
+function addRecallField(packet,key,value,maximum=1020){
+  if(value===undefined||value===null)return;
+  packet[key]=value;
+  if(byteSize(packet)<=maximum)return true;
   delete packet[key];
   return false;
 }
 
-function sharedPrefix(values) {
-  let prefix = values[0] || "";
-  for (const value of values.slice(1)) {
-    while (prefix && !value.startsWith(prefix)) prefix = prefix.slice(0, -1);
+function sharedPrefix(values){
+  let prefix=values[0]||"";
+  for(const value of values.slice(1)){
+    while(prefix&&!value.startsWith(prefix))prefix=prefix.slice(0,-1);
   }
-  return prefix.length >= 4 ? prefix : "";
+  return prefix.length>=4?prefix:"";
 }
 
-function compactCandidateRows(packet, candidates) {
-  if (candidates.rows.length < 2) return;
-  if (!candidates.prefixes) {
-    const digest = candidates.fields.indexOf("digest");
-    if (digest >= 0 && candidates.rows.every((row) => row[digest] === candidates.rows[0][digest])) {
-      candidates.common = { ...(candidates.common || {}), digest: candidates.rows[0][digest] };
-      candidates.fields.splice(digest, 1);
-      for (const row of candidates.rows) row.splice(digest, 1);
+function compactCandidateRows(packet,candidates){
+  if(candidates.rows.length<2)return;
+  if(!candidates.prefixes){
+    const digest=candidates.fields.indexOf("digest");
+    if(digest>=0&&candidates.rows.every(row=>row[digest]===candidates.rows[0][digest])){
+      candidates.common={...(candidates.common||{}),digest:candidates.rows[0][digest]};
+      candidates.fields.splice(digest,1);
+      for(const row of candidates.rows)row.splice(digest,1);
     }
-    candidates.prefixes = candidates.fields.map((field, index) => {
-      const values = candidates.rows.map((row) => row[index]);
-      const prefix = ["id", "message", "session"].includes(field) ? sharedPrefix(values)
-        : field === "at" && values.every((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:/.test(value))
-          ? values[0].slice(0, 14) : "";
-      if (!prefix || !values.every((value) => value.startsWith(prefix))) return "";
-      for (const row of candidates.rows) row[index] = row[index].slice(prefix.length);
+    candidates.prefixes=candidates.fields.map((field,index)=>{
+      const values=candidates.rows.map(row=>row[index]);
+      const prefix=["id","message","session"].includes(field)?sharedPrefix(values)
+        :field==="at"&&values.every(value=>/^\d{4}-\d{2}-\d{2}T\d{2}:/.test(value))
+          ?values[0].slice(0,14):"";
+      if(!prefix||!values.every(value=>value.startsWith(prefix)))return"";
+      for(const row of candidates.rows)row[index]=row[index].slice(prefix.length);
       return prefix;
     });
   }
-  if (packet.task) {
+  if(packet.task){
     delete packet.task.status;
-    if (packet.task.lastVerifiedStep) delete packet.task.lastVerifiedStep.result;
+    if(packet.task.lastVerifiedStep)delete packet.task.lastVerifiedStep.result;
   }
-  const review = packet.feedbackReview;
-  if (review?.modelClarification) packet.feedbackReview = {
-    status: review.status, completionVerified: false, target: review.targetAssertionId,
-    question: review.modelClarification.question, model: true
+  const review=packet.feedbackReview;
+  if(review?.modelClarification)packet.feedbackReview={
+    status:review.status,completionVerified:false,target:review.targetAssertionId,
+    question:review.modelClarification.question,model:true
   };
 }
 
-function compactFeedbackCandidates(packet) {
-  const candidates = packet.feedbackCandidates;
-  const proposal = packet.feedbackReview?.modelClarification;
-  if (proposal) for (const key of ["completionVerified", "provider", "replaces"]) delete proposal[key];
-  if (candidates && !Array.isArray(candidates)
-    && Array.isArray(candidates.fields) && Array.isArray(candidates.rows)) {
+function compactFeedbackCandidates(packet){
+  const candidates=packet.feedbackCandidates;
+  const proposal=packet.feedbackReview?.modelClarification;
+  if(proposal)for(const key of ["completionVerified","provider","replaces"])delete proposal[key];
+  if(candidates&&!Array.isArray(candidates)
+    &&Array.isArray(candidates.fields)&&Array.isArray(candidates.rows)){
     compactCandidateRows(packet, candidates);
     return true;
   }
-  if (!Array.isArray(candidates) || candidates.length < 2) return false;
-  const origins = ["provider", "session"];
-  const sharedKeys = origins.filter((key) =>
-    candidates.every((item) => item?.[key] === candidates[0]?.[key]));
-  const fields = ["id", "text", "digest", "message", "at",
-    ...origins.filter((key) => !sharedKeys.includes(key))];
-  packet.feedbackCandidates = {
+  if(!Array.isArray(candidates)||candidates.length<2)return false;
+  const origins=["provider","session"];
+  const sharedKeys=origins.filter(key=>candidates.every(item=>item?.[key]===candidates[0]?.[key]));
+  const fields=["id","text","digest","message","at",
+    ...origins.filter(key=>!sharedKeys.includes(key))];
+  packet.feedbackCandidates={
     fields,
-    ...(sharedKeys.length ? { common: Object.fromEntries(sharedKeys.map((key) =>
-      [key, candidates[0][key]])) } : {}),
-    rows: candidates.map((item) => fields.map((key) => item[key]))
+    ...(sharedKeys.length?{common:Object.fromEntries(sharedKeys.map(key=>
+      [key,candidates[0][key]]))}:{}),
+    rows:candidates.map(item=>fields.map(key=>item[key]))
   };
   compactCandidateRows(packet, packet.feedbackCandidates);
   return true;
@@ -79,7 +78,7 @@ function compactTimelineRecall(t){
   return{status:t.status,awaited:t.awaited,reads:t.sourceReads,completionVerified:false,
     naturalMessages:"unresolved",trust:"untrusted-session-history",
     ...(t.source?{source:t.source}:{sources:t.sources}),prefixes:t.prefixes,
-    fields:t.fields,rows:t.events,omitted:t.omittedEvents||0}
+    fields:t.fields,rows:t.events.map(row=>[...row]),omitted:t.omittedEvents||0}
 }
 
 export function preAnswerRecallCapsule(detailed){
@@ -94,12 +93,14 @@ export function preAnswerRecallCapsule(detailed){
     order: "review-before-claims-and-actions",
     authority: "context-only"
   };
-  const timeline = detailed.sourceResolution?.timeline?.preAnswerRecall;
-  if(timeline?.awaited) {
-    const candidate = compactTimelineRecall(timeline);
-    while (!addRecallField(packet, "timeline", candidate) && candidate.rows?.length) {
+  const timeline=detailed.sourceResolution?.timeline?.preAnswerRecall;
+  if(timeline?.awaited){
+    let candidate=compactTimelineRecall(timeline);
+    while(!addRecallField(packet,"timeline",candidate)&&candidate.rows?.length){
       candidate.rows.pop();
       candidate.omitted += 1;
+      if(!candidate.rows.length)candidate={status:"unavailable",reason:"host-context-budget",
+        awaited:candidate.awaited,reads:candidate.reads,completionVerified:false,omitted:candidate.omitted};
     }
     if (!packet.timeline) packet.timelineOmitted = true;
   }
