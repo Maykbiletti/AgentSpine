@@ -62,7 +62,7 @@ export async function automaticPreAnswerTimelineRecall({root,host,sessionId,scop
     if(enrollment.status!=="enrolled")return unavailable("private-enrollment-unavailable");
     const transport=timelineTransportDigest({root,binding:enrollment.binding,environment});
     if(!transport)return unavailable("timeline-transport-unavailable");
-    const recallId=turnId||eventId||"turn",terms=timelineTerms(prompt).slice(0,8);
+    const recallId=turnId||eventId||"turn",terms=timelineTerms(prompt);
     sourceReads++;
     const objective = await lane({ root, enrollment, hostHome, transport, turnId: recallId,
       name: "objective", query: ["objective result", ...terms].join(" ").slice(0,512), environment });

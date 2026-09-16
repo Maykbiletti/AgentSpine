@@ -335,7 +335,7 @@ test("automatic recall does not return unanchored prior messages without an obje
   assert.equal(sha256(await readFile(item.transcriptA)),before);
 });
 
-test("automatic recall bounds generated queries when the prompt contains an oversized term", async (t) => {
+test("automatic recall bounds generated queries without losing later relevance terms", async (t) => {
   const item=await fixture(t);
   const before=sha256(await readFile(item.transcriptA));
   await enroll(item,SESSION_A,item.transcriptA);
@@ -346,7 +346,8 @@ test("automatic recall bounds generated queries when the prompt contains an over
   await enroll(item,SESSION_B,item.transcriptB);
   const result=await runHook({hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.project,
     session_id:SESSION_B,transcript_path:item.transcriptB,event_id:"event:prior:oversized-query",
-    prompt:`Continue ${"x".repeat(600)} result.txt`,...hookScope()});
+    prompt:`Continue ${"x".repeat(600)} alpha beta gamma delta epsilon zeta eta theta iota result.txt`,
+    ...hookScope()});
   assert.equal(result.blocked,false,result.reason);
   const recall=JSON.parse(result.context).sourceResolution.timeline.preAnswerRecall;
   assert.equal(recall.status,"recalled");
