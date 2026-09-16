@@ -1,11 +1,11 @@
-const BLUN_MESSAGE_MAX_BYTES=1200;
-const BLUN_BOUND_MARKER="\n[optional runtime detail omitted: 1200-byte bound]";
-const byteSize=value=>Buffer.byteLength(JSON.stringify(value));
+const MAX_BYTES=1200;
+const BOUND="\n[optional runtime detail omitted: 1200-byte bound]";
+const bytes=value=>Buffer.byteLength(JSON.stringify(value));
 
 function addRecallField(packet,key,value,maximum=1020){
   if(value===undefined||value===null)return;
   packet[key]=value;
-  if(byteSize(packet)<=maximum)return true;
+  if(bytes(packet)<=maximum)return true;
   delete packet[key];
   return false;
 }
@@ -18,7 +18,7 @@ function sharedPrefix(values){
   return prefix.length>=4?prefix:"";
 }
 
-function compactCandidateRows(packet,candidates){
+function compactRows(packet,candidates){
   if(candidates.rows.length<2)return;
   if(!candidates.prefixes){
     const digest=candidates.fields.indexOf("digest");
@@ -48,13 +48,13 @@ function compactCandidateRows(packet,candidates){
   };
 }
 
-function compactFeedbackCandidates(packet){
+function compactFeedback(packet){
   const candidates=packet.feedbackCandidates;
   const proposal=packet.feedbackReview?.modelClarification;
   if(proposal)for(const key of ["completionVerified","provider","replaces"])delete proposal[key];
   if(candidates&&!Array.isArray(candidates)
     &&Array.isArray(candidates.fields)&&Array.isArray(candidates.rows)){
-    compactCandidateRows(packet, candidates);
+    compactRows(packet,candidates);
     return true;
   }
   if(!Array.isArray(candidates)||candidates.length<2)return false;
@@ -68,11 +68,11 @@ function compactFeedbackCandidates(packet){
       [key,candidates[0][key]]))}:{}),
     rows:candidates.map(item=>fields.map(key=>item[key]))
   };
-  compactCandidateRows(packet, packet.feedbackCandidates);
+  compactRows(packet,packet.feedbackCandidates);
   return true;
 }
 
-function compactTimelineRecall(t){
+function timelineRecall(t){
   if(!t.events?.length)return{status:t.status,reason:t.reason,awaited:t.awaited,
     reads:t.sourceReads,completionVerified:false,omitted:t.omittedEvents||0};
   return{status:t.status,awaited:t.awaited,reads:t.sourceReads,completionVerified:false,
@@ -95,21 +95,25 @@ export function preAnswerRecallCapsule(detailed){
   };
   const timeline=detailed.sourceResolution?.timeline?.preAnswerRecall;
   if(timeline?.awaited){
-    let candidate=compactTimelineRecall(timeline);
+    let candidate=timelineRecall(timeline);
     while(!addRecallField(packet,"timeline",candidate)&&candidate.rows?.length){
       candidate.rows.pop();
       candidate.omitted += 1;
       if(!candidate.rows.length)candidate={status:"unavailable",reason:"host-context-budget",
         awaited:candidate.awaited,reads:candidate.reads,completionVerified:false,omitted:candidate.omitted};
     }
-    if (!packet.timeline) packet.timelineOmitted = true;
+    if(!packet.timeline&&bytes(packet)>MAX_BYTES){
+      const keys=Object.keys(packet).filter(key=>!/^schema$|^order$|^authority$/.test(key));
+      for(const key of keys)delete packet[key];
+      packet.timeline=candidate;packet.omitted=keys;
+    }else if(!packet.timeline)packet.timelineOmitted=true;
   }
   const mustRemember = (preflight.mustRemember || []).map((item) => ({
     id: item.id, claim: item.claim, checksum: item.checksum
   }));
   if (mustRemember.length && !addRecallField(packet, "mustRemember", mustRemember)) {
-    if (!compactFeedbackCandidates(packet)
-      || !addRecallField(packet, "mustRemember", mustRemember, BLUN_MESSAGE_MAX_BYTES)) {
+    if (!compactFeedback(packet)
+      || !addRecallField(packet, "mustRemember", mustRemember, MAX_BYTES)) {
       omitted.push("mustRemember");
     }
   }
@@ -117,13 +121,13 @@ export function preAnswerRecallCapsule(detailed){
     (provider.items || []).map((item) => ({ providerId: provider.providerId,
       id: item.id, revision: item.revision, claim: item.claim, source: item.source }))).slice(0, 3);
   if (retrieval.length && !addRecallField(packet, "retrieval", retrieval)) {
-    if (!compactFeedbackCandidates(packet)
-      || !addRecallField(packet, "retrieval", retrieval, BLUN_MESSAGE_MAX_BYTES)) {
+    if (!compactFeedback(packet)
+      || !addRecallField(packet, "retrieval", retrieval, MAX_BYTES)) {
       omitted.push("retrieval");
     }
   }
-  compactFeedbackCandidates(packet);
-  if (omitted.length && byteSize({ ...packet, omitted }) <= BLUN_MESSAGE_MAX_BYTES) packet.omitted = omitted;
+  compactFeedback(packet);
+  if(omitted.length&&bytes({...packet,omitted})<=MAX_BYTES)packet.omitted=omitted;
   return Object.keys(packet).length > 3 ? packet : null;
 }
 
@@ -211,15 +215,15 @@ export function blunRuntimeMessage(context) {
     : runtime.premortem?.instruction;
   const premortem = instruction ? `\n${instruction}` : "";
   const message = `${base}${recall}${details}${premortem}`;
-  if (Buffer.byteLength(message) <= BLUN_MESSAGE_MAX_BYTES) return message;
-  const compact = `${base}${recall}${BLUN_BOUND_MARKER}\n${compactPremortemRegistration(runtime.premortem)}`;
-  if (Buffer.byteLength(compact) <= BLUN_MESSAGE_MAX_BYTES) return compact;
+  if (Buffer.byteLength(message) <= MAX_BYTES) return message;
+  const compact = `${base}${recall}${BOUND}\n${compactPremortemRegistration(runtime.premortem)}`;
+  if (Buffer.byteLength(compact) <= MAX_BYTES) return compact;
   if (!runtime.preAnswerRecall) {
-    return `${base}${BLUN_BOUND_MARKER}\n${compactPremortemRegistration(runtime.premortem, false)}`;
+    return `${base}${BOUND}\n${compactPremortemRegistration(runtime.premortem, false)}`;
   }
-  const recallOnly = `${base}${recall}${BLUN_BOUND_MARKER}`;
-  if (Buffer.byteLength(recallOnly) <= BLUN_MESSAGE_MAX_BYTES) return recallOnly;
-  return Buffer.byteLength(recall)<=BLUN_MESSAGE_MAX_BYTES+1?recall.slice(1):`${base}\nRecall unavailable.`;
+  const recallOnly = `${base}${recall}${BOUND}`;
+  if (Buffer.byteLength(recallOnly) <= MAX_BYTES) return recallOnly;
+  return Buffer.byteLength(recall)<=MAX_BYTES+1?recall.slice(1):`${base}\nRecall unavailable.`;
 }
 
 export function hookOutput(event, context, env = process.env) {

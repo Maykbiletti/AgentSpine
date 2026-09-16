@@ -104,6 +104,28 @@ test("bounded King recall preserves unavailable and not-found source status", ()
   }
 });
 
+test("bounded King recall keeps status when valid maximum fields displace content", () => {
+  const context=recallContext();
+  context.briefing.preAnswerRecall.task={taskId:TASK,status:"active",objective:"o".repeat(500),
+    lastVerifiedStep:{summary:"s".repeat(500),result:"passed"},
+    nextStep:{summary:"n".repeat(500)}};
+  context.briefing.preAnswerRecall.feedback.text="f".repeat(2048);
+  context.preflight.briefing.mustRemember=[];
+  context.sourceResolution.timeline={preAnswerRecall:{status:"unavailable",
+    reason:"host-context-budget",awaited:true,sourceReads:2,events:[],omittedEvents:4,
+    completionVerified:false}};
+  const capsule=preAnswerRecallCapsule(context);
+  const message=blunRuntimeMessage(JSON.stringify(context));
+  assert.deepEqual(capsule.timeline,{status:"unavailable",reason:"host-context-budget",
+    awaited:true,reads:2,completionVerified:false,omitted:4});
+  assert.deepEqual(capsule.omitted,["task","feedback","interpretationInput"]);
+  assert.equal(Buffer.byteLength(message)<=1200,true);
+  assert.match(message,/host-context-budget/);
+  assert.match(message,/"reads":2/);
+  assert.match(message,/"completionVerified":false/);
+  assert.doesNotMatch(message,/Recall unavailable\./);
+});
+
 test("bounded King recall does not claim an empty evicted timeline was recalled", () => {
   const source = { status: "recalled", awaited: true, sourceReads: 2,
     source: { digest: "d".repeat(64), provider: "claude", session: "s".repeat(40) },
