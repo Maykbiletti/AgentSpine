@@ -53,22 +53,23 @@ async function lane({root,enrollment,hostHome,transport,turnId,name,query,ref,at
     enrollmentDigest:d });
 }
 
-export async function automaticPreAnswerTimelineRecall({ root, host, sessionId, scope, hostHome, eventId,
-  turnId, prompt, environment = process.env }) {
-  if (!scope || scope.groupId !== null || !scope.currentTaskId) return unavailable("private-task-scope-unavailable");
-  let sourceReads = 0;
+export async function automaticPreAnswerTimelineRecall({root,host,sessionId,scope,hostHome,eventId,
+  turnId,prompt,environment=process.env}) {
+  if(!scope||scope.groupId!==null||!scope.currentTaskId)return unavailable("private-task-scope-unavailable");
+  let sourceReads=0;
   try {
-    const enrollment = await resolvePrivateSessionTimelineEnrollment({ root, host, sessionId, hostHome });
-    if (enrollment.status !== "enrolled") return unavailable("private-enrollment-unavailable");
-    const transport = timelineTransportDigest({ root, binding: enrollment.binding, environment });
-    if (!transport) return unavailable("timeline-transport-unavailable");
-    const recallId = turnId || eventId || "turn", terms = timelineTerms(prompt).slice(0, 8);
+    const enrollment=await resolvePrivateSessionTimelineEnrollment({root,host,sessionId,hostHome});
+    if(enrollment.status!=="enrolled")return unavailable("private-enrollment-unavailable");
+    const transport=timelineTransportDigest({root,binding:enrollment.binding,environment});
+    if(!transport)return unavailable("timeline-transport-unavailable");
+    const recallId=turnId||eventId||"turn",terms=timelineTerms(prompt).slice(0,8);
     sourceReads++;
     const objective = await lane({ root, enrollment, hostHome, transport, turnId: recallId,
       name: "objective", query: ["objective result", ...terms].join(" "), environment });
     if (!objective || objective.blocked) return unavailable("timeline-search-unavailable", sourceReads);
     const selected = rankTimelineEvents((objective.events || []).map((item) =>
       ({ ...item, terms: timelineTerms(item.excerpt) })), terms)[0];
+    if(!selected)return timelineRecallNotFound(sourceReads);
     sourceReads++;
     const natural = await lane({ root, enrollment, hostHome, transport, turnId: recallId,
       name: "natural-feedback", query: "user message", ref: selected?.sessionRef, at:selected?.at, environment });
@@ -84,7 +85,7 @@ export async function automaticPreAnswerTimelineRecall({ root, host, sessionId, 
 
 const removeLast=r=>r.events.length>1?{...r,events:r.events.slice(0,-1),omittedEvents:r.omittedEvents+1}
   :unavailable("host-context-budget",r.sourceReads,r.omittedEvents+1);
-export const timelineRecallNotFound = () => ({ ...unavailable(null), status: "not-found" });
+export const timelineRecallNotFound=(s=0)=>({...unavailable(null,s),status:"not-found"});
 
 export function fitTimelineRecallToHostContext({timeline,render,maximumBytes}) {
   let fitted=timeline,recall=timeline?.preAnswerRecall,context=render(fitted);

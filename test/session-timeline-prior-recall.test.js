@@ -307,6 +307,34 @@ test("host-context fitting preserves measured recall evidence when optional deta
   assert.deepEqual(fit(),first);
 });
 
+test("automatic recall does not return unanchored prior messages without an objective result", async (t) => {
+  const item=await fixture(t);
+  const unanchored=`${JSON.stringify({timestamp:"2026-09-04T12:40:11.000Z",
+    message:{role:"user",content:"Use unrelated-unanchored.txt for a different request."}})}\n`;
+  await writeFile(item.transcriptA,unanchored);
+  const before=sha256(await readFile(item.transcriptA));
+  await enroll(item,SESSION_A,item.transcriptA);
+  const indexGuard=await runHook(toolInput(item,SESSION_A,"tool:prior:unanchored-index",
+    {maxBytes:16*1024*1024}));
+  const indexed=await client()("session_timeline_index",indexGuard.updatedInput);
+  assert.equal(indexed.status,"indexed",JSON.stringify(indexed));
+  assert.equal(indexed.events,1);
+
+  process.env.AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID=SESSION_B;
+  await enroll(item,SESSION_B,item.transcriptB);
+  const result=await runHook({hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.project,
+    session_id:SESSION_B,transcript_path:item.transcriptB,event_id:"event:prior:unanchored",
+    prompt:"Continue the existing task.",...hookScope()});
+  assert.equal(result.blocked,false,result.reason);
+  const recall=JSON.parse(result.context).sourceResolution.timeline.preAnswerRecall;
+  assert.equal(recall.status,"not-found");
+  assert.equal(recall.awaited,true);
+  assert.equal(recall.sourceReads,1);
+  assert.deepEqual(recall.events,[]);
+  assert.doesNotMatch(result.context,/unrelated-unanchored\.txt/);
+  assert.equal(sha256(await readFile(item.transcriptA)),before);
+});
+
 test("a direct prompt selects the relevant result across multiple prior sessions", async (t) => {
   const item = await fixture(t);
   const beforeA = sha256(await readFile(item.transcriptA));
