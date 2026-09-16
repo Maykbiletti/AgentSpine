@@ -42,6 +42,19 @@ test("King lifecycle warnings stay visible while successful context stays hidden
   assert.doesNotMatch(output.hookSpecificOutput.message, new RegExp(digest));
 });
 
+test("King source warnings stay visible without duplicating successful preparation", () => {
+  const warning = "Project Markdown scan is incomplete; one source was not verified.";
+  const context = JSON.stringify({ event: "UserPromptSubmit", loaded: true, indexedSources: 3,
+    sourceResolution: { status: "loaded", incomplete: true, warning } });
+  const output = hookOutput("UserPromptSubmit", context, env);
+  assert.deepEqual(Object.keys(output.hookSpecificOutput).sort(),
+    ["additionalContext", "hookEventName", "message"]);
+  assert.equal(output.hookSpecificOutput.message, `AgentSpine source warning: ${warning}`);
+  assert.match(output.hookSpecificOutput.additionalContext, /^AgentSpine ready: 3 sources indexed\./);
+  assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /incomplete|not verified/i);
+  assert.doesNotMatch(output.hookSpecificOutput.message, /AgentSpine ready/i);
+});
+
 test("Codex instruction contexts account for JSON escaping, including standard-size files", () => {
   for (const bytes of [8192, 32768, 44000]) {
     const preflight = { receipt: { instructionHost: "codex", instructionBudget: {

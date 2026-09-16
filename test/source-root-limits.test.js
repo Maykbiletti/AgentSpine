@@ -106,7 +106,27 @@ test("project Markdown cap has deterministic before/after truncation without dis
   const context = JSON.parse(session.context);
   assert.equal(context.sourceResolution.projectTreeScan, "bounded-truncated");
   assert.match(context.sourceResolution.warning, /remaining files were skipped/i);
-  assert.match(blunRuntimeMessage(session.context), /Warning: .*context is incomplete.*remaining files were skipped/i);
+  assert.match(blunRuntimeMessage(session.context), /^AgentSpine ready:/);
+  assert.doesNotMatch(blunRuntimeMessage(session.context), /context is incomplete|remaining files were skipped/i);
+
+  for (const prompt of ["Bitte arbeite weiter.", "Bitte räume AGENTS.md auf."]) {
+    const result = spawnSync(process.execPath, [HOOK_PATH], {
+      cwd: project, encoding: "utf8",
+      env: { ...process.env, BLUN_HOME: process.env.CODEX_HOME,
+        BLUN_PLUGIN_ROOT: fileURLToPath(new URL("..", import.meta.url)) },
+      input: JSON.stringify({ hook_event_name: "UserPromptSubmit", host: "codex", cwd: project,
+        session_id: "session:synthetic-warning", event_id: `turn:${hash(prompt)}`, prompt })
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.notEqual(output.decision, "block", output.reason);
+    const { message, additionalContext } = output.hookSpecificOutput;
+    assert.match(message, /source warning: .*context is incomplete.*remaining files were skipped/i);
+    assert.doesNotMatch(message, /AgentSpine ready/);
+    assert.doesNotMatch(additionalContext, /context is incomplete|remaining files were skipped/i);
+    assert.ok(Buffer.byteLength(additionalContext) <= 1200);
+    assert.equal(result.stdout.trim().split("\n").length, 1);
+  }
 
   const toolCases = [
     ["Write", { file_path: "allowed-output.txt", content: "allowed\n" }],

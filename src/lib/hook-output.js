@@ -186,11 +186,10 @@ export function blunRuntimeContext(context) {
 
 export function blunRuntimeMessage(context) {
   const runtime = JSON.parse(blunRuntimeContext(context));
-  const warning = runtime.sourceResolution?.incomplete ? ` Warning: ${runtime.sourceResolution.warning}` : "";
   const base = runtime.loaded
     ? runtime.preAnswerRecall
-      ? `AgentSpine ready: ${runtime.indexedSources} sources indexed.${warning}`
-      : `AgentSpine ready: ${runtime.indexedSources} sources indexed. Load detailed continuity only on demand through session_briefing.${warning}`
+      ? `AgentSpine ready: ${runtime.indexedSources} sources indexed.`
+      : `AgentSpine ready: ${runtime.indexedSources} sources indexed. Load detailed continuity only on demand through session_briefing.`
     : `AgentSpine unavailable${runtime.sourceResolution?.reason ? `: ${runtime.sourceResolution.reason}` : ""}. ${runtime.instruction}`;
   const active = {};
   if (runtime.signal && (runtime.signal.captured || runtime.signal.accepted
@@ -228,7 +227,9 @@ export function blunRuntimeMessage(context) {
 
 export function hookOutput(event, context, env = process.env) {
   if (env.BLUN_PLUGIN_ROOT) {
-    return { hookSpecificOutput: { hookEventName: event, additionalContext: blunRuntimeMessage(context) } };
+    const source=JSON.parse(context).sourceResolution,w=source?.incomplete&&source.warning;
+    return {hookSpecificOutput:{hookEventName:event,additionalContext:blunRuntimeMessage(context),
+      ...(w?{message:`AgentSpine source warning: ${w}`}:{})}};
   }
   return { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
 }
