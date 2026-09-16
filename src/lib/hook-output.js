@@ -1,9 +1,6 @@
-const BLUN_MESSAGE_MAX_BYTES = 1200;
-const BLUN_BOUND_MARKER = "\n[optional runtime detail omitted: 1200-byte bound]";
-
-function byteSize(value) {
-  return Buffer.byteLength(JSON.stringify(value));
-}
+const BLUN_MESSAGE_MAX_BYTES=1200;
+const BLUN_BOUND_MARKER="\n[optional runtime detail omitted: 1200-byte bound]";
+const byteSize=value=>Buffer.byteLength(JSON.stringify(value));
 
 function addRecallField(packet, key, value, maximum = 1020) {
   if (value === undefined || value === null) return;
@@ -76,14 +73,15 @@ function compactFeedbackCandidates(packet) {
   return true;
 }
 
-function compactTimelineRecall(timeline) {
+function compactTimelineRecall(t){
+  if(!t.events?.length)return{status:t.status,reason:t.reason,awaited:t.awaited,omitted:t.omittedEvents||0};
   return {
-    status: timeline.status, awaited: timeline.awaited, completionVerified: false,
+    status: t.status, awaited: t.awaited, completionVerified: false,
     naturalMessages: "unresolved", trust: "untrusted-session-history",
-    ...(timeline.source ? { source: timeline.source } : { sources: timeline.sources }),
-    prefixes: timeline.prefixes,
-    fields: timeline.fields, rows: timeline.events,
-    omitted: timeline.omittedEvents || 0
+    ...(t.source ? { source: t.source } : { sources: t.sources }),
+    prefixes: t.prefixes,
+    fields: t.fields, rows: t.events,
+    omitted: t.omittedEvents || 0
   };
 }
 
@@ -100,7 +98,7 @@ export function preAnswerRecallCapsule(detailed) {
     authority: "context-only"
   };
   const timeline = detailed.sourceResolution?.timeline?.preAnswerRecall;
-  if (timeline?.status === "recalled") {
+  if(timeline?.awaited) {
     const candidate = compactTimelineRecall(timeline);
     while (!addRecallField(packet, "timeline", candidate) && candidate.rows?.length) {
       candidate.rows.pop();

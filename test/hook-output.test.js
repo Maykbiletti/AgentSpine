@@ -112,6 +112,22 @@ test("bounded recall preserves uncertainty and suppresses private group projecti
     /result\.txt|Prüfsumme|configured access/);
 });
 
+test("bounded King recall preserves unavailable and not-found source status", () => {
+  for (const [status,reason] of [["unavailable","host-context-budget"],["not-found",null]]) {
+    const context=recallContext();
+    context.sourceResolution.timeline={preAnswerRecall:{status,reason,awaited:true,
+      sourceReads:2,events:[],omittedEvents:4,completionVerified:false}};
+    const capsule=preAnswerRecallCapsule(context);
+    assert.equal(capsule.timeline.status,status);
+    assert.equal(capsule.timeline.reason,reason);
+    assert.equal(capsule.timeline.omitted,4);
+    const message=blunRuntimeMessage(JSON.stringify(context));
+    assert.equal(Buffer.byteLength(message)<=1200,true);
+    assert.match(message,new RegExp(status));
+    if(reason)assert.match(message,new RegExp(reason));
+  }
+});
+
 test("multiple source messages remain visible so hosts cannot hide ambiguity", () => {
   const context = multipleFeedbackContext();
   const capsule = preAnswerRecallCapsule(context);
