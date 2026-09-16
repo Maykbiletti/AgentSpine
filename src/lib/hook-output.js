@@ -88,10 +88,10 @@ export function preAnswerRecallCapsule(detailed){
   if(!briefing||!preflight)return null;
   if(briefing.scope?.groupId!==null&&briefing.scope?.groupId!==undefined)return null;
   const omitted=[];
-  const packet = briefing.preAnswerRecall ? { ...briefing.preAnswerRecall } : {
-    schema: "agentspine.pre-answer-recall/v1",
-    order: "review-before-claims-and-actions",
-    authority: "context-only"
+  const packet=briefing.preAnswerRecall?structuredClone(briefing.preAnswerRecall):{
+    schema:"agentspine.pre-answer-recall/v1",
+    order:"review-before-claims-and-actions",
+    authority:"context-only"
   };
   const timeline=detailed.sourceResolution?.timeline?.preAnswerRecall;
   if(timeline?.awaited){

@@ -150,6 +150,20 @@ test("multiple source messages remain visible so hosts cannot hide ambiguity", (
   }
 });
 
+test("bounded King recall projection does not mutate its source briefing", () => {
+  const context = multipleFeedbackContext();
+  context.briefing.preAnswerRecall.feedbackReview.modelClarification = {
+    question: "Welche Datei?", completionVerified: false,
+    provider: "claude", replaces: "assertion:feedback-1"
+  };
+  const source = structuredClone(context.briefing.preAnswerRecall);
+  const first = preAnswerRecallCapsule(context);
+  const second = preAnswerRecallCapsule(context);
+  assert.deepEqual(context.briefing.preAnswerRecall, source);
+  assert.deepEqual(second, first);
+  assert.equal(first.feedbackReview.question, "Welche Datei?");
+});
+
 test("bounded King recall keeps three ordinary candidates instead of dropping the task", () => {
   const context = multipleFeedbackContext();
   delete context.briefing.preAnswerRecall.task.observedAt;
