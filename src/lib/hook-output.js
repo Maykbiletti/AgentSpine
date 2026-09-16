@@ -74,15 +74,12 @@ function compactFeedbackCandidates(packet) {
 }
 
 function compactTimelineRecall(t){
-  if(!t.events?.length)return{status:t.status,reason:t.reason,awaited:t.awaited,omitted:t.omittedEvents||0};
-  return {
-    status: t.status, awaited: t.awaited, completionVerified: false,
-    naturalMessages: "unresolved", trust: "untrusted-session-history",
-    ...(t.source ? { source: t.source } : { sources: t.sources }),
-    prefixes: t.prefixes,
-    fields: t.fields, rows: t.events,
-    omitted: t.omittedEvents || 0
-  };
+  if(!t.events?.length)return{status:t.status,reason:t.reason,awaited:t.awaited,
+    reads:t.sourceReads,omitted:t.omittedEvents||0};
+  return{status:t.status,awaited:t.awaited,reads:t.sourceReads,completionVerified:false,
+    naturalMessages:"unresolved",trust:"untrusted-session-history",
+    ...(t.source?{source:t.source}:{sources:t.sources}),prefixes:t.prefixes,
+    fields:t.fields,rows:t.events,omitted:t.omittedEvents||0}
 }
 
 export function preAnswerRecallCapsule(detailed) {
