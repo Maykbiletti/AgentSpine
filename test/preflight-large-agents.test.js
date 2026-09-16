@@ -86,6 +86,27 @@ test("a 17,590-byte AGENTS.md remains byte-exact and cannot block its own cleanu
   assert.deepEqual(await readFile(path), source);
 });
 
+test("completed King source resolution stays non-blocking after its time budget", async (t) => {
+  const item = await setup(t);
+  const path = join(item.root, "AGENTS.md");
+  const source = Buffer.from(exactRules(EXACT_RULE_BYTES));
+  await writeFile(path, source);
+  const env = { ...item.env, HOME: item.root, USERPROFILE: item.root };
+  const actualNow = Date.now;
+  let clockReads = 0;
+  try {
+    Date.now = () => clockReads++ === 0 ? 1_000 : 3_001;
+    const resolved = await resolveHostSourceCatalog({ host: "codex", cwd: item.root, env });
+    assert.equal(resolved.diagnostics.status, "loaded");
+    assert.equal(resolved.diagnostics.incomplete, false);
+  } finally {
+    Date.now = actualNow;
+  }
+  assert.deepEqual(await readFile(path), source);
+  const output = await installedHook({ ...item, env, eventId: "elapsed-source-budget" });
+  assert.equal(output.decision, undefined, JSON.stringify(output));
+});
+
 test("the installed King envelope accepts the same cleanup turn without rewriting AGENTS.md", async (t) => {
   const item = await setup(t);
   const path = join(item.root, "AGENTS.md");
@@ -193,6 +214,25 @@ test("King resource limits stay non-blocking and explicitly unverified", async (
   assert.deepEqual(await readFile(path), oversized);
 });
 
+test("King reports every oversized rule as unverified without blocking the turn", async (t) => {
+  const item = await setup(t);
+  const sources = [join(item.hostHome, "AGENTS.md"), join(item.root, "AGENTS.md")]
+    .map((path, index) => [path, Buffer.from(exactRules(4 * 1024 * 1024 + 1, index ? "p" : "u"))]);
+  for (const [path, source] of sources) await writeFile(path, source);
+  const before = sources.map(([path, source]) => [path, digest(source)]);
+  const limited = await resolveHostSourceCatalog({ host: "codex", cwd: item.root, env: item.env });
+  assert.deepEqual(limited.unverified.map((entry) => entry.id),
+    ["codex:user/AGENTS.md", "codex:project/AGENTS.md"]);
+  for (const [suffix, prompt] of [["ordinary", "Continue the current task."],
+    ["cleanup", "Please clean up AGENTS.md without deleting any instructions."]]) {
+    const output = await installedHook({ ...item, eventId: `multiple-oversized-${suffix}`, prompt });
+    assert.equal(output.decision, undefined, JSON.stringify(output));
+    assert.match(output.hookSpecificOutput.message, /codex:user\/AGENTS\.md/);
+    assert.match(output.hookSpecificOutput.message, /codex:project\/AGENTS\.md/);
+  }
+  for (const [path, expected] of before) assert.equal(digest(await readFile(path)), expected);
+});
+
 test("King cumulative resource overflow stays non-blocking and preserves every source", async (t) => {
   const item = await setup(t);
   const nested = join(item.root, "nested");
@@ -212,6 +252,9 @@ test("King cumulative resource overflow stays non-blocking and preserves every s
       eventId: `cumulative-${suffix}`, prompt });
     assert.equal(output.decision, undefined, JSON.stringify(output));
     assert.match(output.hookSpecificOutput.message, /total reader budget/);
+    assert.match(output.hookSpecificOutput.additionalContext, /^AgentSpine ready: 2 sources indexed\./);
+    assert.match(output.hookSpecificOutput.message, /did not load or verify/);
+    assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /Warning: .*did not load or verify/);
   }
   const protectedWrite = await installedHook({ ...item, root: nested, eventId: "write-cumulative", hookInput: {
     ...input(nested, "write-cumulative"), hook_event_name: "PreToolUse", tool_name: "Write",
@@ -219,6 +262,35 @@ test("King cumulative resource overflow stays non-blocking and preserves every s
   } });
   assert.equal(protectedWrite.decision, "block");
   for (const [path, source] of sources) assert.deepEqual(await readFile(path), source);
+});
+
+test("King reports every source omitted by the cumulative reader budget", async (t) => {
+  const item = await setup(t);
+  const nested = join(item.root, "nested");
+  const deep = join(nested, "deep");
+  await mkdir(deep, { recursive: true });
+  const sources = [join(item.hostHome, "AGENTS.md"), join(item.root, "AGENTS.md"),
+    join(nested, "AGENTS.md"), join(deep, "AGENTS.md")]
+    .map((path, index) => [path, Buffer.from(exactRules(3 * 1024 * 1024, String(index)))]);
+  for (const [path, source] of sources) await writeFile(path, source);
+  const limited = await resolveHostSourceCatalog({ host: "codex", cwd: deep, env: item.env });
+  assert.deepEqual(limited.unverified.map((item) => item.id),
+    ["codex:project/nested/AGENTS.md", "codex:project/nested/deep/AGENTS.md"]);
+  const output = await installedHook({ ...item, root: deep,
+    eventId: "multiple-cumulative-overflow", prompt: "Continue the current task." });
+  assert.equal(output.decision, undefined, JSON.stringify(output));
+  assert.match(output.hookSpecificOutput.message, /2 King rules/);
+  assert.doesNotMatch(output.hookSpecificOutput.message, /^King rule /);
+  assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /2 King rules/);
+  assert.match(output.hookSpecificOutput.message, /codex:project\/nested\/AGENTS\.md/);
+  assert.match(output.hookSpecificOutput.message, /codex:project\/nested\/deep\/AGENTS\.md/);
+  assert.equal(Buffer.byteLength(output.hookSpecificOutput.message) <= 900, true);
+  assert.equal(Buffer.byteLength(output.hookSpecificOutput.additionalContext) <= 1200, true);
+  for (const [path, source] of sources) {
+    const preserved = await readFile(path);
+    assert.deepEqual(preserved, source);
+    assert.equal(digest(preserved), digest(source));
+  }
 });
 
 test("fresh and upgraded package copies preserve the King size contract", async (t) => {

@@ -34,7 +34,7 @@ export { blunRuntimeContext, blunRuntimeMessage } from "./lib/hook-output.js";
 const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
 const KNOWN_EVENTS = new Set([...CONTEXT_EVENTS, "InstructionsLoaded", "PreToolUse", "PostToolUse", "Stop", "SubagentStop"]);
 async function writeContextOutput(output, host) {
-  const field = Object.hasOwn(output.hookSpecificOutput, "message") ? "message" : "additionalContext", content = output.hookSpecificOutput[field];
+  const field = Object.hasOwn(output.hookSpecificOutput, "additionalContext") ? "additionalContext" : "message", content = output.hookSpecificOutput[field];
   await new Promise((resolveWrite, rejectWrite) => process.stdout.write(`${JSON.stringify(output)}\n`, (error) => error ? rejectWrite(error) : resolveWrite()));
   return { schema: "agentspine.host-context-handoff/v1", host, field, bytes: Buffer.byteLength(content), digest: createHash("sha256").update(content).digest("hex") };
 }
@@ -95,15 +95,15 @@ async function runHookCore(input, payload, options) {
   }
   const root = resolvedSources.projectRoot;
   const catalog = resolvedSources.catalog;
-  const catalogPath = await saveCatalog(catalog), sourceWarning = resolvedSources.diagnostics.warning || null;
-  if (CONTEXT_EVENTS.has(event) && resolvedSources.unverified.length) {
+  const diagnostics=resolvedSources.diagnostics,catalogPath=await saveCatalog(catalog),sourceWarning=[...new Set([diagnostics.warning,...resolvedSources.unverified.map((item)=>item.message),...(diagnostics.warnings||[]).map((item)=>item.message)].filter(Boolean))].join("\nAgentSpine source warning: ")||null;
+  if (CONTEXT_EVENTS.has(event) && resolvedSources.unverified.length && !catalog.summary.total) {
     if (payload) return { blocked: false, sourceUnverified: true, sourceWarning };
     process.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: event, message: sourceWarning } })}\n`); return;
   }
   let scope = null, selfstarter = null, channelEvent = null, learningDelivery = null;
   let deliveryVerification = null, artifactGuard = null, premortem = null, lessonRecall = null;
-  if (event === "PreToolUse" && isScanFailOpenTool(input.tool_name) && resolvedSources.diagnostics.skipped?.length) {
-    await auditSkippedScans(input, "source-resolution", resolvedSources.diagnostics.skipped);
+  if (event === "PreToolUse" && isScanFailOpenTool(input.tool_name) && diagnostics.skipped?.length) {
+    await auditSkippedScans(input, "source-resolution", diagnostics.skipped);
   }
   if (event === "PreToolUse" && isMutationTool(input.tool_name)) {
     const { graph } = await loadGraph(root, catalog);
@@ -166,7 +166,7 @@ async function runHookCore(input, payload, options) {
       });
     }
   }
-  if (event === "PreToolUse" && !selfstarterRootSkipped(resolvedSources.diagnostics)) {
+  if (event === "PreToolUse" && !selfstarterRootSkipped(diagnostics)) {
     try {
       scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
       const exact = await selfstarterScope(input, scope, root, "effect");
@@ -237,7 +237,7 @@ async function runHookCore(input, payload, options) {
         }
       }
     } else {
-      const activeJob = selfstarterRootSkipped(resolvedSources.diagnostics)
+      const activeJob = selfstarterRootSkipped(diagnostics)
         ? null : await selfstarterScope(input, scope, root, "resume");
       const pauseRequested = Boolean(activeJob && selfstarterInput(input)?.status !== "completed");
       let contracts = await verifyHookStopContracts({
@@ -281,7 +281,7 @@ async function runHookCore(input, payload, options) {
     scope = await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     attentionEvent = await captureAttentionLifecycle(input, event, root, scope, catalog);
   }
-  if (event === "PostToolUse" && !selfstarterRootSkipped(resolvedSources.diagnostics)) {
+  if (event === "PostToolUse" && !selfstarterRootSkipped(diagnostics)) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
     const exact = await selfstarterScope(input, scope, root, "effect");
     if (exact) {
@@ -293,7 +293,7 @@ async function runHookCore(input, payload, options) {
   }
   if (["Stop", "SubagentStop"].includes(event)) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
-    const exact = selfstarterRootSkipped(resolvedSources.diagnostics)
+    const exact = selfstarterRootSkipped(diagnostics)
       ? null : await selfstarterScope(input, scope, root, "resume");
     if (exact && !scope.currentTaskId) scope.currentTaskId = exact.taskId;
     try {
@@ -323,12 +323,12 @@ async function runHookCore(input, payload, options) {
       await syncPersonaRosterFromEnvironment({ root, env: process.env, now: input.timestamp || new Date(), catalog });
       scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
       if (event !== "UserPromptSubmit") {
-        try { resolvedSources.diagnostics.timeline = await captureSessionTimelineLifecycle({ root, event, input, scope,
+        try { diagnostics.timeline = await captureSessionTimelineLifecycle({ root, event, input, scope,
           hostHome: resolvedSources.hostHome, catalog }); }
-        catch (error) { resolvedSources.diagnostics.timeline = { status: "degraded", reason: error.message, authority: "context-only" }; }
+        catch (error) { diagnostics.timeline = { status: "degraded", reason: error.message, authority: "context-only" }; }
       }
       channelEvent = await startChannelEvent(input, event, root, scope, catalog);
-      selfstarter = await startSelfstarter(input, event, root, scope, resolvedSources.diagnostics);
+      selfstarter = await startSelfstarter(input, event, root, scope, diagnostics);
       if (selfstarter?.job && !scope.currentTaskId) scope.currentTaskId = selfstarter.job.taskId;
       if (event === "UserPromptSubmit") {
         const prompt = promptFromInput(input);
@@ -368,14 +368,14 @@ async function runHookCore(input, payload, options) {
         focusActive: true, includeSourceContent: event === "UserPromptSubmit" ? false : !scope.groupId,
         maxBytes: event === "UserPromptSubmit" ? 4096 : scope.config.maxBriefingBytes,
         now: input.timestamp || new Date(),
-        catalog, userStateRoot: resolvedSources.userStateRoot, sourceDiagnostics: event === "UserPromptSubmit" ? null : resolvedSources.diagnostics,
+        catalog, userStateRoot: resolvedSources.userStateRoot, sourceDiagnostics: event === "UserPromptSubmit" ? null : diagnostics,
         prompt: event === "UserPromptSubmit" ? promptFromInput(input) : null, preAnswer: event === "UserPromptSubmit"
       });
       if (event === "PostCompact") {
         try { lessonRecall = await actionLessonRecall({ catalog, event, input, scope }); }
         catch (error) { lessonRecall = { status: "degraded", items: [], reason: error.message, authority: "context-only" }; }
       }
-      let context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, resolvedSources.diagnostics, preflight, lessonRecall);
+      let context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent, diagnostics, preflight, lessonRecall);
       if (event === "UserPromptSubmit" && Buffer.byteLength(context) > hostContextLimit(preflight)) {
         throw new Error("mandatory preflight context exceeds the host hook injection limit");
       }
@@ -384,7 +384,7 @@ async function runHookCore(input, payload, options) {
           prompt: promptFromInput(input), now: input.timestamp || new Date() });
         if (!finalized.preflightConsumed) throw new Error("preflight receipt could not be consumed atomically for this exact turn");
         briefingOrigin = finalized.briefingOrigin;
-        resolvedSources.diagnostics.timeline = finalized.timeline;
+        diagnostics.timeline = finalized.timeline;
       }
       if (event === "UserPromptSubmit") {
         const activeCanaries = briefing.learning.filter((item) => ["active", "revalidating"].includes(item.outcomeStatus));
@@ -416,21 +416,21 @@ async function runHookCore(input, payload, options) {
             status: "degraded", receipts: [], reason: error.message, authority: "context-only"
           };
         }
-        const fitted = fitTimelineRecallToHostContext({ timeline: resolvedSources.diagnostics.timeline,
+        const fitted = fitTimelineRecallToHostContext({ timeline: diagnostics.timeline,
           maximumBytes: hostContextLimit(preflight), render: (timeline) => renderContext(event, catalog, briefing,
-            signal, attentionEvent, selfstarter, channelEvent, { ...resolvedSources.diagnostics, timeline },
+            signal, attentionEvent, selfstarter, channelEvent, { ...diagnostics, timeline },
             preflight, lessonRecall) });
-        resolvedSources.diagnostics.timeline = fitted.timeline;
+        diagnostics.timeline = fitted.timeline;
         const enriched = fitted.context;
         if (Buffer.byteLength(enriched) <= hostContextLimit(preflight)) context = enriched;
         else if (preflight.learningApplications.status === "degraded") {
           preflight.learningApplications = null;
           context = renderContext(event, catalog, briefing, signal, attentionEvent, selfstarter, channelEvent,
-            resolvedSources.diagnostics, preflight, lessonRecall);
+            diagnostics, preflight, lessonRecall);
         }
       }
       if (payload) return { blocked: false, context, briefing, preflight, signal, attentionEvent, channelEvent, lessonRecall, catalogPath };
-      const output = hookOutput(event, context);
+      const output = hookOutput(event, context, process.env, sourceWarning);
       const handoff = await writeContextOutput(output, process.env.BLUN_PLUGIN_ROOT ? "king"
         : process.env.PLUGIN_ROOT ? "codex" : process.env.CLAUDE_PLUGIN_ROOT ? "claude" : scope.host);
       if (event === "UserPromptSubmit" && briefingOrigin) {
@@ -452,7 +452,7 @@ async function runHookCore(input, payload, options) {
       const context = JSON.stringify({
         schema: "agentspine.hook-context/v1", event, loaded: false, failedClosed: true,
         indexedSources: catalog.summary.total,
-        sourceResolution: resolvedSources.diagnostics,
+        sourceResolution: diagnostics,
         error: error.message,
         instruction: "Do not claim AgentSpine recall succeeded. Continue with the current request under native host rules and run agentspine audit before using remembered context.",
         authority: "context-only"

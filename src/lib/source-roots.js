@@ -392,7 +392,6 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     hostDetails = { memoryRoot: result.memoryRoot, memoryProvenance: result.memoryProvenance,
       memoryDiagnostics: result.memoryDiagnostics };
   } else {
-    // Generic hosts get project sources, never another provider's profile.
     hostHome = await canonicalPath(homedir());
     if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
     else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, [".git"]));
@@ -425,10 +424,6 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
   }
   sources = [...new Map(sources.map((item) => [item.path, item])).values()];
   if (sources.length > MAX_SOURCES) throw new Error(`host-native source set exceeds ${MAX_SOURCES} files`);
-  const projectScanIncomplete = skipped.some((item) => item.code === SOURCE_SCAN_INCOMPLETE);
-  if (Date.now() > deadline && !projectScanIncomplete) {
-    throw new Error(`host-native source resolution exceeded ${SOURCE_RESOLUTION_MS} ms`);
-  }
   let documents;
   try {
     documents = await indexExplicitDocuments(sources);
@@ -436,26 +431,25 @@ export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), inpu
     if (typeof error?.code === "string" && (error.path || error.syscall)) throw sourceScanError(error);
     throw error;
   }
-  if (Date.now() > deadline && !projectScanIncomplete) {
-    throw new Error(`host-native source resolution exceeded ${SOURCE_RESOLUTION_MS} ms`);
-  }
   const totalBytes = documents.reduce((sum, document) => sum + document.bytes, 0);
   if (totalBytes > MAX_TOTAL_SOURCE_BYTES) throw new Error("host-native source set exceeds 8 MiB");
   const activeUserState = activeBinding(registry, host, hostHome, projectRoot, "state-user");
   const orderedSkipped = skipped.sort((a, b) => a.path.localeCompare(b.path) || a.operation.localeCompare(b.operation));
   const warnings = orderedSkipped.filter((item) => item.code === SOURCE_SCAN_INCOMPLETE);
+  const unverifiedWarning = unverified.length > 1
+    ? `${unverified.length} King rules exceed AgentSpine reader budgets; none were loaded or verified. Native rules apply. Continue; no retry.`
+    : unverified[0]?.message;
   const diagnostics = {
     schema: SOURCE_REGISTRY_SCHEMA, host, status: unverified.length ? "incomplete" : documents.length ? "loaded" : "empty", projectRoot,
     hostHomeDigest: digest(hostHome).slice(0, 16), checked: ["host-profile", "project-chain", ...(host === "claude" ? ["project-memory"] : [])],
     scopes: Object.fromEntries(["user", "project", "project-memory"].map((scope) => [scope, documents.filter((item) => item.sourceScope === scope).length])),
-    reason: unverified.length ? unverified[0].message
-      : documents.length ? null : "No regular, non-symlink host-native Markdown source exists in the checked scope.",
+    reason: unverifiedWarning || (documents.length ? null : "No regular, non-symlink host-native Markdown source exists in the checked scope."),
     personalContinuityLoaded: documents.some((item) => item.sourceScope === "user") || Boolean(activeUserState),
     broadHomeScan: false, projectTreeScan: skippedFallbackHomeTree ? "skipped-unmarked-home"
       : skippedHomeTree ? "skipped-home-root" : skippedProfileTree ? "skipped-profile-root"
         : warnings.length ? "bounded-truncated" : "bounded",
     incomplete: Boolean(unverified.length || warnings.length),
-    warning: unverified[0]?.message || warnings[0]?.message || null,
+    warning: unverifiedWarning || warnings[0]?.message || null,
     warnings,
     skipped: orderedSkipped,
     rootResolution, registryRevision: registry.revision,

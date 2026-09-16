@@ -12,82 +12,82 @@ export const ATTENTION_WRITE_EVENTS = new Set(["UserPromptSubmit", "PostToolUse"
 const SELFSTART_EVENTS = new Set(["SessionStart", "PostCompact"]);
 
 export function boundedId(value, field) {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value !== "string" || !ID_RE.test(value)) throw new Error(`${field} is invalid`);
-  return value;
+if (value === null || value === undefined || value === "") return null;
+if (typeof value !== "string" || !ID_RE.test(value)) throw new Error(`${field} is invalid`);
+return value;
 }
 
 function positiveInteger(value, field) {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = typeof value === "number"
-    ? value
-    : (typeof value === "string" && /^[1-9][0-9]*$/.test(value) ? Number(value) : Number.NaN);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`${field} is invalid`);
-  return parsed;
+if (value === null || value === undefined || value === "") return null;
+const parsed = typeof value === "number"
+? value
+: (typeof value === "string" && /^[1-9][0-9]*$/.test(value) ? Number(value) : Number.NaN);
+if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`${field} is invalid`);
+return parsed;
 }
 
 export function promptFromInput(input) {
-  for (const key of ["prompt", "user_prompt", "message", "input"]) {
-    const value = input[key];
-    if (typeof value === "string") return value;
-    if (Array.isArray(value)) {
-      const text = value
-        .filter((part) => part && typeof part === "object" && part.type === "text" && typeof part.text === "string")
-        .map((part) => part.text)
-        .join("\n")
-        .trim();
-      if (text) return text;
-    }
-  }
-  return null;
+for (const key of ["prompt", "user_prompt", "message", "input"]) {
+const value = input[key];
+if (typeof value === "string") return value;
+if (Array.isArray(value)) {
+const text = value
+.filter((part) => part && typeof part === "object" && part.type === "text" && typeof part.text === "string")
+.map((part) => part.text)
+.join("\n")
+.trim();
+if (text) return text;
+}
+}
+return null;
 }
 
 export function hostContextLimit(preflight) {
-  if (preflight?.receipt?.instructionHost === "codex") return 32768 + Buffer.byteLength(JSON.stringify(preflight.briefing || {}));
-  const mode = preflight?.receipt?.instructionBudget?.mode;
-  if (mode === "claude-required-overflow") return MAX_CLAUDE_OVERFLOW_CONTEXT_BYTES;
-  return STANDARD_HOST_CONTEXT_BYTES;
+if (preflight?.receipt?.instructionHost === "codex") return 32768 + Buffer.byteLength(JSON.stringify(preflight.briefing || {}));
+const mode = preflight?.receipt?.instructionBudget?.mode;
+if (mode === "claude-required-overflow") return MAX_CLAUDE_OVERFLOW_CONTEXT_BYTES;
+return STANDARD_HOST_CONTEXT_BYTES;
 }
 
 export function hostFromInput(input) {
-  const explicit = input.host || input.provider || process.env.AGENTSPINE_HOST;
-  if (["claude", "codex", "generic"].includes(explicit)) return explicit;
-  if ((typeof input.model === "string" && input.model.trim()) || process.env.PLUGIN_ROOT || process.env.CODEX_HOME
-    || process.env.BLUN_PLUGIN_ROOT || process.env.BLUN_HOME) return "codex";
-  return "claude";
+const explicit = input.host || input.provider || process.env.AGENTSPINE_HOST;
+if (["claude", "codex", "generic"].includes(explicit)) return explicit;
+if ((typeof input.model === "string" && input.model.trim()) || process.env.PLUGIN_ROOT || process.env.CODEX_HOME
+|| process.env.BLUN_PLUGIN_ROOT || process.env.BLUN_HOME) return "codex";
+return "claude";
 }
 
 export function gatewayEnvironmentContext(env = process.env) {
-  if (env.AGENTSPINE_GATEWAY_CONTEXT !== "agentspine.gateway-start/v1") return null;
-  const portalRef = boundedId(env.AGENTSPINE_PORTAL_REF, "AGENTSPINE_PORTAL_REF");
-  const threadRef = boundedId(env.AGENTSPINE_THREAD_REF, "AGENTSPINE_THREAD_REF");
-  if (Boolean(portalRef) !== Boolean(threadRef)) throw new Error("gateway portal and thread references must be paired");
-  return {
-    host: boundedId(env.AGENTSPINE_HOST, "AGENTSPINE_HOST"),
-    entityId: boundedId(env.AGENTSPINE_ENTITY_ID, "AGENTSPINE_ENTITY_ID"),
-    groupId: boundedId(env.AGENTSPINE_GROUP_ID, "AGENTSPINE_GROUP_ID"),
-    projectId: boundedId(env.AGENTSPINE_PROJECT_ID, "AGENTSPINE_PROJECT_ID"),
-    taskId: boundedId(env.AGENTSPINE_TASK_ID, "AGENTSPINE_TASK_ID"),
-    queueId: boundedId(env.AGENTSPINE_GATEWAY_QUEUE_ID, "AGENTSPINE_GATEWAY_QUEUE_ID"),
-    goalId: boundedId(env.AGENTSPINE_GOAL_ID, "AGENTSPINE_GOAL_ID"),
-    goalStepId: boundedId(env.AGENTSPINE_GOAL_STEP_ID, "AGENTSPINE_GOAL_STEP_ID"),
-    planDefinitionsDigest: boundedId(env.AGENTSPINE_PLAN_DEFINITIONS_DIGEST,
-      "AGENTSPINE_PLAN_DEFINITIONS_DIGEST"),
-    gatewayAttempt: positiveInteger(env.AGENTSPINE_GATEWAY_ATTEMPT, "AGENTSPINE_GATEWAY_ATTEMPT"),
-    eventId: boundedId(env.AGENTSPINE_CHANNEL_EVENT_ID, "AGENTSPINE_CHANNEL_EVENT_ID"),
-    provider: boundedId(env.AGENTSPINE_CHANNEL_PROVIDER, "AGENTSPINE_CHANNEL_PROVIDER"),
-    portalRef, threadRef
-  };
+if (env.AGENTSPINE_GATEWAY_CONTEXT !== "agentspine.gateway-start/v1") return null;
+const portalRef = boundedId(env.AGENTSPINE_PORTAL_REF, "AGENTSPINE_PORTAL_REF");
+const threadRef = boundedId(env.AGENTSPINE_THREAD_REF, "AGENTSPINE_THREAD_REF");
+if (Boolean(portalRef) !== Boolean(threadRef)) throw new Error("gateway portal and thread references must be paired");
+return {
+host: boundedId(env.AGENTSPINE_HOST, "AGENTSPINE_HOST"),
+entityId: boundedId(env.AGENTSPINE_ENTITY_ID, "AGENTSPINE_ENTITY_ID"),
+groupId: boundedId(env.AGENTSPINE_GROUP_ID, "AGENTSPINE_GROUP_ID"),
+projectId: boundedId(env.AGENTSPINE_PROJECT_ID, "AGENTSPINE_PROJECT_ID"),
+taskId: boundedId(env.AGENTSPINE_TASK_ID, "AGENTSPINE_TASK_ID"),
+queueId: boundedId(env.AGENTSPINE_GATEWAY_QUEUE_ID, "AGENTSPINE_GATEWAY_QUEUE_ID"),
+goalId: boundedId(env.AGENTSPINE_GOAL_ID, "AGENTSPINE_GOAL_ID"),
+goalStepId: boundedId(env.AGENTSPINE_GOAL_STEP_ID, "AGENTSPINE_GOAL_STEP_ID"),
+planDefinitionsDigest: boundedId(env.AGENTSPINE_PLAN_DEFINITIONS_DIGEST,
+"AGENTSPINE_PLAN_DEFINITIONS_DIGEST"),
+gatewayAttempt: positiveInteger(env.AGENTSPINE_GATEWAY_ATTEMPT, "AGENTSPINE_GATEWAY_ATTEMPT"),
+eventId: boundedId(env.AGENTSPINE_CHANNEL_EVENT_ID, "AGENTSPINE_CHANNEL_EVENT_ID"),
+provider: boundedId(env.AGENTSPINE_CHANNEL_PROVIDER, "AGENTSPINE_CHANNEL_PROVIDER"),
+portalRef, threadRef
+};
 }
 
 function gatewayBound(gateway, key, suppliedValue, field, allowAbsent = false) {
-  if (!gateway) return suppliedValue;
-  const gatewayValue = gateway[key];
-  if (gatewayValue === null || gatewayValue === undefined || gatewayValue === "") {
-    if (allowAbsent) return suppliedValue;
-    if (suppliedValue !== undefined && suppliedValue !== null && suppliedValue !== "") {
-      throw new Error(`${field} does not match the authenticated gateway binding`);
-    }
+if (!gateway) return suppliedValue;
+const gatewayValue = gateway[key];
+if (gatewayValue === null || gatewayValue === undefined || gatewayValue === "") {
+if (allowAbsent) return suppliedValue;
+if (suppliedValue !== undefined && suppliedValue !== null && suppliedValue !== "") {
+throw new Error(`${field} does not match the authenticated gateway binding`);
+}
     return null;
   }
   if (suppliedValue !== undefined && suppliedValue !== null
@@ -159,13 +159,16 @@ export async function runtimeScope(input, root, userStateRoot = null, catalog) {
 }
 
 export function renderContext(event, catalog, briefing, signal = null, attentionEvent = null, selfstarter = null, channelEvent = null, sourceDiagnostics = null, preflight = null, lessonRecall = null) {
-  const loaded = sourceDiagnostics?.status === "loaded";
+  const partial = sourceDiagnostics?.status === "incomplete" && catalog.summary.total > 0;
+  const loaded = sourceDiagnostics?.status === "loaded" || partial;
   const packet = {
     schema: "agentspine.hook-context/v1",
     event,
     priority: ["current-user-request", "explicit-stops", "current-task", "host-rules", "accepted-context", "style-and-relationships"],
     loaded,
-    instruction: loaded
+    instruction: partial
+      ? "Apply only listed sources; others are unverified. Inspect sourceResolution; do not retry."
+      : loaded
       ? "Use this already-loaded briefing now. Do not call an MCP tool to obtain it. The current user request and explicit stops override all remembered style, relationships, and older context."
       : "No host-native source context was loaded. Do not claim personal continuity or recall succeeded. Continue under current native host rules and inspect sourceResolution.",
     signal: signal ? {
