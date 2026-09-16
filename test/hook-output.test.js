@@ -118,10 +118,8 @@ test("bounded King recall preserves unavailable and not-found source status", ()
     context.sourceResolution.timeline={preAnswerRecall:{status,reason,awaited:true,
       sourceReads:2,events:[],omittedEvents:4,completionVerified:false}};
     const capsule=preAnswerRecallCapsule(context);
-    assert.equal(capsule.timeline.status,status);
-    assert.equal(capsule.timeline.reason,reason);
-    assert.equal(capsule.timeline.reads,2);
-    assert.equal(capsule.timeline.omitted,4);
+    assert.deepEqual(capsule.timeline,{status,reason,awaited:true,reads:2,
+      completionVerified:false,omitted:4});
     const message=blunRuntimeMessage(JSON.stringify(context));
     assert.equal(Buffer.byteLength(message)<=1200,true);
     assert.match(message,new RegExp(status));

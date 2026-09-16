@@ -75,20 +75,20 @@ function compactFeedbackCandidates(packet) {
 
 function compactTimelineRecall(t){
   if(!t.events?.length)return{status:t.status,reason:t.reason,awaited:t.awaited,
-    reads:t.sourceReads,omitted:t.omittedEvents||0};
+    reads:t.sourceReads,completionVerified:false,omitted:t.omittedEvents||0};
   return{status:t.status,awaited:t.awaited,reads:t.sourceReads,completionVerified:false,
     naturalMessages:"unresolved",trust:"untrusted-session-history",
     ...(t.source?{source:t.source}:{sources:t.sources}),prefixes:t.prefixes,
     fields:t.fields,rows:t.events,omitted:t.omittedEvents||0}
 }
 
-export function preAnswerRecallCapsule(detailed) {
-  if (detailed?.event !== "UserPromptSubmit" || !detailed.loaded) return null;
-  const briefing = detailed.briefing;
-  const preflight = detailed.preflight?.briefing;
-  if (!briefing || !preflight) return null;
-  if (briefing.scope?.groupId !== null && briefing.scope?.groupId !== undefined) return null;
-  const omitted = [];
+export function preAnswerRecallCapsule(detailed){
+  if(detailed?.event!=="UserPromptSubmit"||!detailed.loaded)return null;
+  const briefing=detailed.briefing;
+  const preflight=detailed.preflight?.briefing;
+  if(!briefing||!preflight)return null;
+  if(briefing.scope?.groupId!==null&&briefing.scope?.groupId!==undefined)return null;
+  const omitted=[];
   const packet = briefing.preAnswerRecall ? { ...briefing.preAnswerRecall } : {
     schema: "agentspine.pre-answer-recall/v1",
     order: "review-before-claims-and-actions",
