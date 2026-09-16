@@ -6,8 +6,8 @@ import {timelineTransportDigest} from "./session-timeline-transport.js";
 
 const SCHEMA="agentspine.pre-answer-timeline-recall/v1", AUTHORITY="context-only";
 const hash=value=>createHash("sha256").update(value).digest("hex");
-const unavailable=(reason,sourceReads=0)=>({schema:SCHEMA,status:"unavailable",reason,awaited:true,
-  sourceReads,events:[],omittedEvents:0,completionVerified:false,authority:AUTHORITY});
+const unavailable=(reason,s=0,o=0)=>({schema:SCHEMA,status:"unavailable",reason,awaited:true,
+  sourceReads:s,events:[],omittedEvents:o,completionVerified:false,authority:AUTHORITY});
 
 function exactScope(binding,visibility){
   const {host,sessionId,taskId,...continuity}=binding;
@@ -82,8 +82,8 @@ export async function automaticPreAnswerTimelineRecall({ root, host, sessionId, 
   } catch { return unavailable("timeline-search-unavailable", sourceReads); }
 }
 
-const removeLast = (recall) => ({ ...recall, events: recall.events.slice(0, -1),
-  omittedEvents: (recall.omittedEvents || 0) + 1 });
+const removeLast=r=>r.events.length>1?{...r,events:r.events.slice(0,-1),omittedEvents:r.omittedEvents+1}
+  :unavailable("host-context-budget",r.sourceReads,r.omittedEvents+1);
 export const timelineRecallNotFound = () => ({ ...unavailable(null), status: "not-found" });
 
 export function fitTimelineRecallToHostContext({ timeline, render, maximumBytes }) {

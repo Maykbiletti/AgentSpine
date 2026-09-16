@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { runHook } from "../src/hook.js";
 import { hookOutput } from "../src/lib/hook-output.js";
+import { fitTimelineRecallToHostContext } from "../src/lib/pre-answer-timeline-recall.js";
 import { startMcpServer } from "../src/mcp.js";
 import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
 
@@ -239,7 +240,7 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
     assert.equal(recall.awaited, true);
     assert.equal(recall.completionVerified, false);
     assert.equal(recall.sourceReads, 2);
-    assert.ok(recall.omittedEvents > 0, "bounded recall must disclose matching events it did not hand off");
+    assert.ok(recall.omittedEvents > 0);
     assert.equal(recall.fields.includes("value"), true);
     const events = JSON.stringify(recall.events);
     assert.match(events, /Nein, erst die Prüfsumme prüfen/);
@@ -249,8 +250,15 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
     assert.equal(recall.events.filter((event) => event[kind] === "user").length, 3);
   }
   const directRecall = JSON.parse(direct.context).sourceResolution.timeline.preAnswerRecall;
-  assert.equal(directRecall.omittedEvents, 9,
-    "bounded result and feedback candidates stay disclosed");
+  assert.equal(directRecall.omittedEvents, 9);
+  const timeline=JSON.parse(direct.context).sourceResolution.timeline;
+  const empty={...directRecall,events:[],omittedEvents:directRecall.omittedEvents+directRecall.events.length};
+  const maximumBytes=Buffer.byteLength(JSON.stringify({...timeline,preAnswerRecall:empty}));
+  const budgeted=fitTimelineRecallToHostContext({timeline,render:JSON.stringify,maximumBytes}).timeline.preAnswerRecall;
+  assert.equal(budgeted.status,"unavailable");
+  assert.equal(budgeted.reason,"host-context-budget");
+  assert.deepEqual(budgeted.events,[]);
+  assert.equal(budgeted.omittedEvents,empty.omittedEvents);
   const directEvents = JSON.stringify(directRecall.events);
   assert.match(directEvents, /Measured CSS archive Suite 0 in result\.txt; result: FAIL 0\/15\./);
   assert.doesNotMatch(directEvents, /other\.log/);
