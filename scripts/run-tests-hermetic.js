@@ -4,14 +4,14 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { githubErrorCommand } from "./github-actions.js";
-import { configuredTestTimeout, runBoundedProcess } from "./hermetic-process.js";
+import { configuredTestTimeout, runBoundedProcess, selectTestShard } from "./hermetic-process.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const base = await mkdtemp(join(tmpdir(), "agentspine-hermetic-tests-"));
-const testFiles = (await readdir(join(root, "test"))).filter((name) => name.endsWith(".test.js")).sort();
-// Limit Windows process/I/O contention without relaxing child deadlines.
-const concurrencyCeiling = process.platform === "win32" ? 3 : 4;
-const concurrency = Math.max(1, Math.min(concurrencyCeiling, cpus().length));
+const testFiles = selectTestShard((await readdir(join(root, "test")))
+  .filter((name) => name.endsWith(".test.js")).sort(), process.env.AGENTSPINE_TEST_SHARD);
+const win=process.platform==="win32";
+const concurrency = Math.max(1, Math.min(win ? 3 : 4, cpus().length));
 const testTimeoutMs = configuredTestTimeout();
 const slowTestTimeouts = new Map([
   ["indexed-memory.test.js", 300_000]
@@ -53,10 +53,6 @@ async function runOne(file, mode, index) {
 async function runMode(mode) {
   const indexed = testFiles.map((file, index) => ({ file, index }));
   const results = [];
-  // Installation copies complete bundles, while the MCP and route-lifecycle tests
-  // start real children with fixed deadlines and host-origin enrollment attests a
-  // live source plus signed state. Keep those probes off the shared Windows I/O pool.
-  // Both profiles still run them once, with unchanged assertions and limits.
   const isolatedNames = new Set([
     "assignment-continuation-boundaries.test.js",
     "assignment-continuation.test.js",
@@ -78,8 +74,8 @@ async function runMode(mode) {
     "session-timeline-invocation.test.js",
     "timeline-natural-feedback.test.js"
   ]);
-  if (process.platform === "win32" && process.versions.node.startsWith("20.")) {
-    isolatedNames.add("timeline-world-capture.test.js");
+  if (win) for (const { file } of indexed) {
+    if (file.includes("timeline") || file === "preflight-large-agents.test.js") isolatedNames.add(file);
   }
   const isolated = indexed.filter(item => isolatedNames.has(item.file));
   const queue = indexed.filter(item => !isolatedNames.has(item.file));
