@@ -193,6 +193,25 @@ test("King resource limits stay non-blocking and explicitly unverified", async (
   assert.deepEqual(await readFile(path), oversized);
 });
 
+test("King reports every oversized rule as unverified without blocking the turn", async (t) => {
+  const item = await setup(t);
+  const sources = [join(item.hostHome, "AGENTS.md"), join(item.root, "AGENTS.md")]
+    .map((path, index) => [path, Buffer.from(exactRules(4 * 1024 * 1024 + 1, index ? "p" : "u"))]);
+  for (const [path, source] of sources) await writeFile(path, source);
+  const before = sources.map(([path, source]) => [path, digest(source)]);
+  const limited = await resolveHostSourceCatalog({ host: "codex", cwd: item.root, env: item.env });
+  assert.deepEqual(limited.unverified.map((entry) => entry.id),
+    ["codex:user/AGENTS.md", "codex:project/AGENTS.md"]);
+  for (const [suffix, prompt] of [["ordinary", "Continue the current task."],
+    ["cleanup", "Please clean up AGENTS.md without deleting any instructions."]]) {
+    const output = await installedHook({ ...item, eventId: `multiple-oversized-${suffix}`, prompt });
+    assert.equal(output.decision, undefined, JSON.stringify(output));
+    assert.match(output.hookSpecificOutput.message, /codex:user\/AGENTS\.md/);
+    assert.match(output.hookSpecificOutput.message, /codex:project\/AGENTS\.md/);
+  }
+  for (const [path, expected] of before) assert.equal(digest(await readFile(path)), expected);
+});
+
 test("King cumulative resource overflow stays non-blocking and preserves every source", async (t) => {
   const item = await setup(t);
   const nested = join(item.root, "nested");
