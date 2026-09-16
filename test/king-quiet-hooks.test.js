@@ -27,6 +27,21 @@ test("King lifecycle receipts remain model-only without hiding actual denials", 
   }
 });
 
+test("King lifecycle warnings stay visible while successful context stays hidden", () => {
+  const digest = "a".repeat(64);
+  const warning = "Source context is incomplete; one rule was not verified.";
+  const output = lifecycleOutput("PostToolUse", null, { writeDigest: digest }, {
+    status: "test-failed", reason: "The synthetic verification failed."
+  }, env, warning);
+  assert.deepEqual(Object.keys(output.hookSpecificOutput).sort(),
+    ["additionalContext", "hookEventName", "message"]);
+  assert.match(output.hookSpecificOutput.additionalContext, new RegExp(digest));
+  assert.doesNotMatch(output.hookSpecificOutput.additionalContext, /incomplete|failed/);
+  assert.match(output.hookSpecificOutput.message, /source warning: .*incomplete/i);
+  assert.match(output.hookSpecificOutput.message, /synthetic verification failed/i);
+  assert.doesNotMatch(output.hookSpecificOutput.message, new RegExp(digest));
+});
+
 test("Codex instruction contexts account for JSON escaping, including standard-size files", () => {
   for (const bytes of [8192, 32768, 44000]) {
     const preflight = { receipt: { instructionHost: "codex", instructionBudget: {

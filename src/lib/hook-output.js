@@ -254,15 +254,12 @@ export function blockStop(event, reason) {
   process.stdout.write(`${JSON.stringify(blockedHookOutput(event, reason))}\n`);
 }
 
-export function lifecycleOutput(event, artifactGuard, premortem, deliveryVerification = null, env = process.env,
+export function lifecycleOutput(event, artifactGuard, premortem, delivery = null, env = process.env,
   sourceWarning = null, lessonRecall = null) {
-  const messages = sourceWarning ? [`AgentSpine source warning: ${sourceWarning}`] : [];
-  if (artifactGuard?.reason) messages.push(artifactGuard.reason);
-  if (deliveryVerification?.status === "test-failed" && deliveryVerification.reason) {
-    messages.push(deliveryVerification.reason);
-  }
+  const w=[sourceWarning&&`AgentSpine source warning: ${sourceWarning}`,artifactGuard?.reason,
+    delivery?.status==="test-failed"&&delivery.reason].filter(Boolean),c=[];
   if (/^[a-f0-9]{64}$/.test(premortem?.writeDigest || "")) {
-    messages.push([
+    c.push([
       premortem.writeIntent
         ? "AgentSpine recorded the allowed mutation intent for the delivery premortem."
         : "AgentSpine recorded the direct write for the delivery premortem.",
@@ -270,7 +267,7 @@ export function lifecycleOutput(event, artifactGuard, premortem, deliveryVerific
     ].join("\n"));
   }
   if (lessonRecall?.status === "recalled") {
-    messages.push(JSON.stringify({
+    c.push(JSON.stringify({
       schema: lessonRecall.schema, receiptDigest: lessonRecall.receiptDigest,
       instruction: lessonRecall.instruction, items: lessonRecall.items,
       learning: lessonRecall.learning || [], learningDiagnostics: lessonRecall.learningDiagnostics || null,
@@ -278,6 +275,8 @@ export function lifecycleOutput(event, artifactGuard, premortem, deliveryVerific
       authority: "context-only"
     }));
   }
-  if (!messages.length) return {};
-  return { hookSpecificOutput: { hookEventName: event, additionalContext: messages.join("\n") } };
+  const o={hookEventName:event},f=env.BLUN_PLUGIN_ROOT?"message":"additionalContext";
+  if(w.length)o[f]=w.join("\n");
+  if(c.length)o.additionalContext=[o.additionalContext,...c].filter(Boolean).join("\n");
+  return Object.keys(o).length>1?{hookSpecificOutput:o}:{};
 }
