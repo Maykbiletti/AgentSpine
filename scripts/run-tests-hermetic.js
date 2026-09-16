@@ -74,7 +74,9 @@ async function runMode(mode) {
     "session-timeline-invocation.test.js",
     "timeline-natural-feedback.test.js"
   ]);
-  if(win)for (const name of "preflight-large-agents,timeline-natural-feedback-multisession,timeline-next-step-correction,timeline-world-capture".split(",")) isolatedNames.add(name+".test.js");
+  if (win) for (const { file } of indexed) {
+    if (file.includes("timeline") || file === "preflight-large-agents.test.js") isolatedNames.add(file);
+  }
   const isolated = indexed.filter(item => isolatedNames.has(item.file));
   const queue = indexed.filter(item => !isolatedNames.has(item.file));
   for (const item of isolated) results.push(await runOne(item.file, mode, item.index));
