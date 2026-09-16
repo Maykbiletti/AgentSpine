@@ -65,15 +65,15 @@ export async function automaticPreAnswerTimelineRecall({root,host,sessionId,scop
     const recallId=turnId||eventId||"turn",terms=timelineTerms(prompt).slice(0,8);
     sourceReads++;
     const objective = await lane({ root, enrollment, hostHome, transport, turnId: recallId,
-      name: "objective", query: ["objective result", ...terms].join(" "), environment });
-    if (!objective || objective.blocked) return unavailable("timeline-search-unavailable", sourceReads);
+      name: "objective", query: ["objective result", ...terms].join(" ").slice(0,512), environment });
+    if(!objective||objective.blocked)return unavailable("timeline-search-unavailable",sourceReads);
     const selected = rankTimelineEvents((objective.events || []).map((item) =>
       ({ ...item, terms: timelineTerms(item.excerpt) })), terms)[0];
     if(!selected)return timelineRecallNotFound(sourceReads);
     sourceReads++;
     const natural = await lane({ root, enrollment, hostHome, transport, turnId: recallId,
       name: "natural-feedback", query: "user message", ref: selected?.sessionRef, at:selected?.at, environment });
-    if (!natural || natural.blocked) return unavailable("timeline-search-unavailable", sourceReads);
+    if(!natural||natural.blocked)return unavailable("timeline-search-unavailable",sourceReads);
     const events = [...selected ? [selected] : [], ...(natural.events || []).slice(0, 3)];
     const unique = [...new Map(events.map((item) => [`${item.sourceDigest}\0${item.id}`, item])).values()];
     return { schema: SCHEMA, status: unique.length ? "recalled" : "not-found", awaited: true,

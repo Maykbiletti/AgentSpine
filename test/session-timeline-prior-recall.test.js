@@ -335,6 +335,27 @@ test("automatic recall does not return unanchored prior messages without an obje
   assert.equal(sha256(await readFile(item.transcriptA)),before);
 });
 
+test("automatic recall bounds generated queries when the prompt contains an oversized term", async (t) => {
+  const item=await fixture(t);
+  const before=sha256(await readFile(item.transcriptA));
+  await enroll(item,SESSION_A,item.transcriptA);
+  const guard=await runHook(toolInput(item,SESSION_A,"tool:prior:oversized-query",
+    {maxBytes:16*1024*1024}));
+  assert.equal((await client()("session_timeline_index",guard.updatedInput)).status,"indexed");
+  process.env.AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID=SESSION_B;
+  await enroll(item,SESSION_B,item.transcriptB);
+  const result=await runHook({hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.project,
+    session_id:SESSION_B,transcript_path:item.transcriptB,event_id:"event:prior:oversized-query",
+    prompt:`Continue ${"x".repeat(600)} result.txt`,...hookScope()});
+  assert.equal(result.blocked,false,result.reason);
+  const recall=JSON.parse(result.context).sourceResolution.timeline.preAnswerRecall;
+  assert.equal(recall.status,"recalled");
+  assert.equal(recall.sourceReads,2);
+  assert.match(JSON.stringify(recall.events),/result\.txt/);
+  assert.doesNotMatch(JSON.stringify(recall.events),/other\.log/);
+  assert.equal(sha256(await readFile(item.transcriptA)),before);
+});
+
 test("a direct prompt selects the relevant result across multiple prior sessions", async (t) => {
   const item = await fixture(t);
   const beforeA = sha256(await readFile(item.transcriptA));
