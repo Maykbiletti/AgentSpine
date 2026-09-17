@@ -40,7 +40,8 @@ function validateHooks(root, hooks, { required, commandRoot, matcher = TIMELINE_
     const command = registrations[0].hooks[0];
     assert(command.type === "command", `${event} must use a command hook`);
     const expected = `node "\${${commandRoot}}/src/hook.js"${event === "PostToolUse"
-      ? " --silent-oversize-post-tool-use" : ""}`;
+      ? " --silent-oversize-post-tool-use" : ["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"].includes(event)
+        ? ` --context-event=${event}` : ""}`;
     assert(command.command === expected, `${event} must use the bundled lifecycle adapter`);
     assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} timeout is unsafe`);
     if (event === "PreToolUse") assert(registrations[0].matcher === matcher,
@@ -65,7 +66,8 @@ function validateBlunHooks(root, hooks) {
     assert(registrations.length === 1, `${event} must have exactly one BLUN registration`);
     const command = registrations[0];
     const expected = `node "./src/hook.js"${event === "PostToolUse"
-      ? " --silent-oversize-post-tool-use" : ""}`;
+      ? " --silent-oversize-post-tool-use" : ["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"].includes(event)
+        ? ` --context-event=${event}` : ""}`;
     assert(command.command === expected, `${event} must use the bundled BLUN lifecycle adapter`);
     assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} BLUN timeout is unsafe`);
     if (event === "PreToolUse") assert(command.matcher === BLUN_TIMELINE_PRE_TOOL_MATCHER,
