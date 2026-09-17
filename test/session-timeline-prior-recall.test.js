@@ -8,6 +8,7 @@ import { PassThrough } from "node:stream";
 import { runHook } from "../src/hook.js";
 import { hookOutput } from "../src/lib/hook-output.js";
 import { fitTimelineRecallToHostContext } from "../src/lib/pre-answer-timeline-recall.js";
+import { recordWorldAssertion } from "../src/lib/world-model.js";
 import { startMcpServer } from "../src/mcp.js";
 import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
 
@@ -253,7 +254,8 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
   assert.equal(directRecall.omittedEvents, 9);
   const timeline=JSON.parse(direct.context).sourceResolution.timeline;
   const empty={...directRecall,events:[],omittedEvents:directRecall.omittedEvents+directRecall.events.length};
-  const maximumBytes=Buffer.byteLength(JSON.stringify({...timeline,preAnswerRecall:empty}));
+  const maximumBytes=Buffer.byteLength(JSON.stringify({schema:timeline.schema,status:timeline.status,
+    preAnswerRecall:empty,authority:timeline.authority}));
   const budgeted=fitTimelineRecallToHostContext({timeline,render:JSON.stringify,maximumBytes}).timeline.preAnswerRecall;
   assert.equal(budgeted.status,"unavailable");
   assert.equal(budgeted.reason,"host-context-budget");
@@ -372,6 +374,18 @@ test("a direct prompt selects the relevant result across multiple prior sessions
     { maxBytes: 16 * 1024 * 1024 }));
   await client()("session_timeline_index", newerGuard.updatedInput);
 
+  await recordWorldAssertion({ root: item.project, id: "assertion:prior-recall-task",
+    subjectId: scope().currentTaskId, predicate: "task.continuation",
+    value: { schema: "agentspine.task-continuation/v1", taskId: scope().currentTaskId,
+      status: "active", objective: "CSS archive Suite 0 using result.txt",
+      lastVerifiedStep: null, openQuestions: [],
+      nextStep: { id: "step:measure-result", summary: "Measure result.txt" } },
+    evidenceKind: "objective-measurement", evidenceId: "evidence:prior-recall-task",
+    evidenceDigest: "d".repeat(64), observedAt: "2026-09-04T12:30:00.000Z",
+    projectId: scope().projectId, groupId: null, privacy: "private", knowledgeKind: "task-state",
+    sessionRef: `session-ref:${"e".repeat(32)}`, messageRef: "message:prior-recall-task",
+    portalRef: scope().portalRef, threadRef: scope().threadRef, now: "2026-09-04T12:31:00.000Z" });
+
   process.env.AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID = SESSION_B;
   await enroll(item, SESSION_B, item.transcriptB);
   const result = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude",
@@ -396,8 +410,8 @@ test("a direct prompt selects the relevant result across multiple prior sessions
   assert.doesNotMatch(handoff, /Schriftgröße/);
   const continuationRecall = JSON.parse(continuation.context).sourceResolution.timeline.preAnswerRecall;
   assert.equal(continuationRecall.status, "recalled");
-  assert.match(JSON.stringify(continuationRecall.events), /other\.log/);
-  assert.match(JSON.stringify(continuationRecall.events), /Schriftgröße/);
+  assert.match(JSON.stringify(continuationRecall.events), /result\.txt/);
+  assert.doesNotMatch(JSON.stringify(continuationRecall.events), /other\.log|Schriftgröße/);
   assert.equal(continuationRecall.sources, undefined);
   assert.equal(sha256(await readFile(item.transcriptA)), beforeA);
   assert.equal(sha256(await readFile(item.transcriptD)), beforeD);
