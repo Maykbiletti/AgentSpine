@@ -101,6 +101,7 @@ export async function invokeInstalledHook(pluginRoot, projectRoot, stateRoot, ho
           decision: protocol.decision || null,
           reason: protocol.reason || null,
           message: protocol.hookSpecificOutput?.message || null,
+          additionalContext: protocol.hookSpecificOutput?.additionalContext || null,
           ...protocolShape(protocol)
         });
       } catch (error) {
@@ -122,7 +123,7 @@ export async function invokeInstalledBlunPostWriteDigest(pluginRoot, projectRoot
   };
   const prompted = await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, "blun", shared,
     { requireBriefing: false });
-  const requirementId = prompted.message?.match(
+  const requirementId = prompted.additionalContext?.match(
     /Requirement: (premortem-requirement:[a-f0-9]{64}:[a-f0-9]{64})/
   )?.[1];
   if (!requirementId) throw new Error("installed BLUN prompt did not expose its premortem requirement");
@@ -163,12 +164,12 @@ export async function invokeInstalledBlunPostWriteDigest(pluginRoot, projectRoot
   const post = await invokeInstalledHook(pluginRoot, projectRoot, stateRoot, "blun", {
     ...shared, ...tool, hook_event_name: "PostToolUse", success: true, tool_response: { ok: true }
   }, { requireBriefing: false });
-  const digest = post.message?.match(/Premortem latest write sha256 ([a-f0-9]{64})/)?.[1];
+  const digest = post.additionalContext?.match(/Premortem latest write sha256 ([a-f0-9]{64})/)?.[1];
   if (!digest || !exactKeys(post.protocolKeys, ["hookSpecificOutput"])
-    || !exactKeys(post.hookSpecificKeys, ["hookEventName", "message"])) {
-    throw new Error("installed BLUN PostToolUse did not return its latest-write digest through message");
+    || !exactKeys(post.hookSpecificKeys, ["additionalContext", "hookEventName"])) {
+    throw new Error("installed BLUN PostToolUse did not return its latest-write digest through model context");
   }
-  return { contextField: "message", latestWriteDigest: digest };
+  return { contextField: "additionalContext", latestWriteDigest: digest };
 }
 
 function exactKeys(value, expected) {

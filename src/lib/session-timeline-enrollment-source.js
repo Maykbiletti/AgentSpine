@@ -7,9 +7,6 @@ export const PRIVATE_TIMELINE_PREFIX_BYTES = 4096;
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 
-// A receipt and enrollment never read a complete host transcript.  A small
-// stable prefix makes later replacement detectable while append verification
-// establishes the bounded full commitment separately.
 export async function privateTimelinePrefixDigest(source, bytes = Math.min(source?.size, PRIVATE_TIMELINE_PREFIX_BYTES)) {
   if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > PRIVATE_TIMELINE_PREFIX_BYTES) return null;
   let handle;

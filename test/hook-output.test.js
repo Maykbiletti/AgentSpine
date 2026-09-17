@@ -1,55 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PREMORTEM_REQUIREMENT_TEXT, premortemRequirementText } from "../src/lib/delivery-premortem.js";
-import {
-  blockedHookOutput, blunRuntimeMessage, hookOutput, lifecycleOutput, preAnswerRecallCapsule
-} from "../src/lib/hook-output.js";
+import { blockedHookOutput, blunRuntimeMessage, hookOutput, lifecycleOutput,
+  preAnswerRecallCapsule } from "../src/lib/hook-output.js";
+
+const TASK = "task:synthetic", FEEDBACK = "Nein, erst die Prüfsumme prüfen";
+const CHECK = "Check configured access before claiming it is unavailable.";
 
 function recallContext(groupId = null) {
-  return {
-    event: "UserPromptSubmit", loaded: true, indexedSources: 7,
-    sourceResolution: { status: "loaded" },
-    briefing: {
-      focus: { currentTaskId: "task:synthetic" }, scope: { groupId },
-      preAnswerRecall: {
+  const at = "2026-09-07T01:00:00.000Z", step = { summary: "Created result.txt", result: "passed" };
+  const task = { taskId: TASK, status: "active", objective: "Prepare result.txt",
+    lastVerifiedStep: step, nextStep: { summary: "Migrate result.txt" } };
+  return { event: "UserPromptSubmit", loaded: true, indexedSources: 7,
+    sourceResolution: { status: "loaded" }, briefing: {
+      focus: { currentTaskId: TASK }, scope: { groupId }, preAnswerRecall: {
         schema: "agentspine.pre-answer-recall/v1", order: "review-before-claims-and-actions",
-        authority: "context-only",
-        task: {
-          taskId: "task:synthetic", status: "active", objective: "Prepare result.txt",
-          lastVerifiedStep: { summary: "Created result.txt", result: "passed" },
-          nextStep: { summary: "Migrate result.txt" }
-        },
-        feedback: { text: "Nein, erst die Prüfsumme prüfen", status: "unresolved",
-          completionVerified: false,
-          provider: "claude", digest: "b".repeat(64), session: "session-ref:old",
-          message: "message:correction", at: "2026-09-07T02:00:00.000Z" },
-        interpretationInput: {
-          feedbackAssertionId: "assertion:user-feedback", targetAssertionId: "assertion:task"
-        }
-      },
-      world: { knowledge: {
-        continuation: { tasks: [{
-          assertionId: "assertion:task", taskId: "task:synthetic", status: "active",
-          objective: "Prepare result.txt",
-          lastVerifiedStep: { summary: "Created result.txt", result: "passed",
-            evidenceDigest: "a".repeat(64), observedAt: "2026-09-07T01:00:00.000Z" },
-          nextStep: { summary: "Migrate result.txt" }, observedAt: "2026-09-07T01:00:00.000Z"
-        }], terminal: [] },
-        taskContext: { items: [{
-          id: "assertion:user-feedback",
-          value: { targetAssertionId: "assertion:task", sourceText: "Nein, erst die Prüfsumme prüfen",
-            interpretationStatus: "unresolved", completionVerified: false,
-            sourceProvider: "claude", sourceDigest: "b".repeat(64) },
-          source: { kind: "uninterpreted-user-message", sessionRef: "session-ref:old",
-            messageRef: "message:correction" }, observedAt: "2026-09-07T02:00:00.000Z"
-        }] }
-      } }
-    },
-    preflight: { briefing: {
-      mustRemember: [{ id: "remember:access-check", claim: "Check configured access before claiming it is unavailable.",
-        checksum: "c".repeat(64) }], retrieval: []
-    } }
-  };
+        authority: "context-only", task, feedback: { text: FEEDBACK, status: "unresolved",
+          completionVerified: false, provider: "claude", digest: "b".repeat(64),
+          session: "session-ref:old", message: "message:correction", at: at.replace("01:00", "02:00") },
+        interpretationInput: { feedbackAssertionId: "assertion:user-feedback",
+          targetAssertionId: "assertion:task" } }, world: { knowledge: {
+        continuation: { tasks: [{ ...task, assertionId: "assertion:task",
+          lastVerifiedStep: { ...step, evidenceDigest: "a".repeat(64), observedAt: at }, observedAt: at }],
+        terminal: [] }, taskContext: { items: [{ id: "assertion:user-feedback", value: {
+          targetAssertionId: "assertion:task", sourceText: FEEDBACK, interpretationStatus: "unresolved",
+          completionVerified: false, sourceProvider: "claude", sourceDigest: "b".repeat(64) },
+        source: { kind: "uninterpreted-user-message", sessionRef: "session-ref:old",
+          messageRef: "message:correction" }, observedAt: at.replace("01:00", "02:00") }] } } } },
+    preflight: { briefing: { mustRemember: [{ id: "remember:access-check", claim: CHECK,
+      checksum: "c".repeat(64) }], retrieval: [] } } };
 }
 
 function multipleFeedbackContext() {
@@ -58,16 +37,14 @@ function multipleFeedbackContext() {
   delete context.briefing.preAnswerRecall.feedback;
   delete context.briefing.preAnswerRecall.interpretationInput;
   context.briefing.preAnswerRecall.feedbackCandidates = [first, { ...first,
-    text: "Nimm dafür die andere Datei", digest: "d".repeat(64),
-    message: "message:ambiguous", at: "2026-09-07T02:01:00.000Z" }]
-    .map(({ text, provider, digest, session, message, at }, index) =>
-      ({ id: `assertion:feedback-${index + 1}`, text, provider, digest, session, message, at }));
+    text: "Nimm dafür die andere Datei", digest: "d".repeat(64), message: "message:ambiguous",
+    at: "2026-09-07T02:01:00.000Z" }].map(({ text, provider, digest, session, message, at }, index) =>
+    ({ id: `assertion:feedback-${index + 1}`, text, provider, digest, session, message, at }));
   delete context.briefing.preAnswerRecall.task.assertionId;
   delete context.briefing.preAnswerRecall.task.lastVerifiedStep.evidenceDigest;
   delete context.briefing.preAnswerRecall.task.lastVerifiedStep.observedAt;
-  context.briefing.preAnswerRecall.feedbackReview = {
-    status: "multiple-unresolved", completionVerified: false
-  };
+  context.briefing.preAnswerRecall.feedbackReview = { status: "multiple-unresolved",
+    completionVerified: false };
   return context;
 }
 
@@ -84,15 +61,16 @@ test("pre-answer recall carries actionable source bindings in every host output"
     }
   }
   const blun = hookOutput("UserPromptSubmit", context, { BLUN_PLUGIN_ROOT: "/synthetic/blun" });
-  assert.equal(Buffer.byteLength(blun.hookSpecificOutput.message) <= 1200, true);
-  assert.match(blun.hookSpecificOutput.message, /review-before-claims-and-actions/);
-  assert.match(blun.hookSpecificOutput.message, /result\.txt/);
-  assert.match(blun.hookSpecificOutput.message, /Nein, erst die Prüfsumme prüfen/);
-  assert.match(blun.hookSpecificOutput.message, /Check configured access/);
+  assert.equal(Object.hasOwn(blun.hookSpecificOutput, "message"), false);
+  assert.equal(Buffer.byteLength(blun.hookSpecificOutput.additionalContext) <= 1200, true);
+  assert.match(blun.hookSpecificOutput.additionalContext, /review-before-claims-and-actions/);
+  assert.match(blun.hookSpecificOutput.additionalContext, /result\.txt/);
+  assert.match(blun.hookSpecificOutput.additionalContext, /Nein, erst die Prüfsumme prüfen/);
+  assert.match(blun.hookSpecificOutput.additionalContext, /Check configured access/);
   for (const id of ["assertion:user-feedback", "assertion:task"]) {
-    assert.match(blun.hookSpecificOutput.message, new RegExp(id));
+    assert.match(blun.hookSpecificOutput.additionalContext, new RegExp(id));
   }
-  assert.doesNotMatch(blun.hookSpecificOutput.message, /only on demand/);
+  assert.doesNotMatch(blun.hookSpecificOutput.additionalContext, /only on demand/);
 });
 
 test("bounded recall preserves uncertainty and suppresses private group projection", () => {
@@ -109,6 +87,65 @@ test("bounded recall preserves uncertainty and suppresses private group projecti
   assert.equal(preAnswerRecallCapsule(recallContext("group:foreign")), null);
   assert.doesNotMatch(blunRuntimeMessage(JSON.stringify(recallContext("group:foreign"))),
     /result\.txt|Prüfsumme|configured access/);
+});
+
+test("bounded King recall preserves unavailable and not-found source status", () => {
+  for (const [status,reason] of [["unavailable","host-context-budget"],["not-found",null]]) {
+    const context=recallContext();
+    context.sourceResolution.timeline={preAnswerRecall:{status,reason,awaited:true,
+      sourceReads:2,events:[],omittedEvents:4,completionVerified:false}};
+    const capsule=preAnswerRecallCapsule(context);
+    assert.deepEqual(capsule.timeline,{status,reason,awaited:true,reads:2,
+      completionVerified:false,omitted:4});
+    const message=blunRuntimeMessage(JSON.stringify(context));
+    assert.equal(Buffer.byteLength(message)<=1200,true);
+    assert.match(message,new RegExp(status));
+    if(reason)assert.match(message,new RegExp(reason));
+  }
+});
+
+test("bounded King recall keeps status when valid maximum fields displace content", () => {
+  const context=recallContext();
+  context.briefing.preAnswerRecall.task={taskId:TASK,status:"active",objective:"o".repeat(500),
+    lastVerifiedStep:{summary:"s".repeat(500),result:"passed"},
+    nextStep:{summary:"n".repeat(500)}};
+  context.briefing.preAnswerRecall.feedback.text="f".repeat(2048);
+  context.preflight.briefing.mustRemember=[];
+  context.sourceResolution.timeline={preAnswerRecall:{status:"unavailable",
+    reason:"host-context-budget",awaited:true,sourceReads:2,events:[],omittedEvents:4,
+    completionVerified:false}};
+  const capsule=preAnswerRecallCapsule(context);
+  const message=blunRuntimeMessage(JSON.stringify(context));
+  assert.deepEqual(capsule.timeline,{status:"unavailable",reason:"host-context-budget",
+    awaited:true,reads:2,completionVerified:false,omitted:4});
+  assert.deepEqual(capsule.omitted,["task","feedback","interpretationInput"]);
+  assert.equal(Buffer.byteLength(message)<=1200,true);
+  assert.match(message,/host-context-budget/);
+  assert.match(message,/"reads":2/);
+  assert.match(message,/"completionVerified":false/);
+  assert.doesNotMatch(message,/Recall unavailable\./);
+});
+
+test("bounded King recall does not claim an empty evicted timeline was recalled", () => {
+  const source = { status: "recalled", awaited: true, sourceReads: 2,
+    source: { digest: "d".repeat(64), provider: "claude", session: "s".repeat(40) },
+    prefixes: ["", ""], fields: ["message", "at", "kind", "value"],
+    events: [["message:result", "2026-09-07T01:00:00.000Z", "result", "x".repeat(400)]],
+    omittedEvents: 0, completionVerified: false };
+  const context = { event: "UserPromptSubmit", loaded: true, briefing: { scope: { groupId: null },
+    preAnswerRecall: { schema: "agentspine.pre-answer-recall/v1",
+      order: "review-before-claims-and-actions", authority: "context-only",
+      task: { taskId: TASK, objective: "x".repeat(100) } } },
+    preflight: { briefing: { mustRemember: [], retrieval: [] } },
+    sourceResolution: { timeline: { preAnswerRecall: source } } };
+  const capsule = preAnswerRecallCapsule(context);
+  assert.deepEqual(capsule.timeline, { status: "unavailable", reason: "host-context-budget",
+    awaited: true, reads: 2, completionVerified: false, omitted: 1 });
+  assert.equal(source.events.length, 1, "projection must not mutate the retrieved source packet");
+  const message = blunRuntimeMessage(JSON.stringify(context));
+  assert.equal(Buffer.byteLength(message) <= 1200, true);
+  assert.match(message, /host-context-budget/);
+  assert.doesNotMatch(message, /"status":"recalled"[\s\S]*"rows":\[\]/);
 });
 
 test("multiple source messages remain visible so hosts cannot hide ambiguity", () => {
@@ -133,6 +170,20 @@ test("multiple source messages remain visible so hosts cannot hide ambiguity", (
     assert.match(value, /multiple-unresolved/);
     if (env.BLUN_PLUGIN_ROOT) assert.equal(Buffer.byteLength(value) <= 1200, true);
   }
+});
+
+test("bounded King recall projection does not mutate its source briefing", () => {
+  const context = multipleFeedbackContext();
+  context.briefing.preAnswerRecall.feedbackReview.modelClarification = {
+    question: "Welche Datei?", completionVerified: false,
+    provider: "claude", replaces: "assertion:feedback-1"
+  };
+  const source = structuredClone(context.briefing.preAnswerRecall);
+  const first = preAnswerRecallCapsule(context);
+  const second = preAnswerRecallCapsule(context);
+  assert.deepEqual(context.briefing.preAnswerRecall, source);
+  assert.deepEqual(second, first);
+  assert.equal(first.feedbackReview.question, "Welche Datei?");
 });
 
 test("bounded King recall keeps three ordinary candidates instead of dropping the task", () => {
@@ -255,8 +306,8 @@ test("PostToolUse lifecycle receipts preserve each host's context field", () => 
   const blun = lifecycleOutput("PostToolUse", null, {
     writeDigest: digest, writeIntent: false
   }, null, { BLUN_PLUGIN_ROOT: "/synthetic/blun" });
-  assert.deepEqual(Object.keys(blun.hookSpecificOutput).sort(), ["hookEventName", "message"]);
-  assert.match(blun.hookSpecificOutput.message, new RegExp(`Premortem latest write sha256 ${digest}`));
+  assert.deepEqual(Object.keys(blun.hookSpecificOutput).sort(), ["additionalContext", "hookEventName"]);
+  assert.match(blun.hookSpecificOutput.additionalContext, new RegExp(`Premortem latest write sha256 ${digest}`));
 
   const claude = lifecycleOutput("PostToolUse", null, {
     writeDigest: digest, writeIntent: false

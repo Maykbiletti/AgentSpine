@@ -51,9 +51,6 @@ export function timelineInterpretationRequest(value) {
   return structuredClone(value);
 }
 
-// Hosts qualify MCP tools differently. These prefixes must stay exact: a
-// foreign MCP server can expose an identically named tool but must never
-// receive a timeline invocation permit.
 export const AGENTSPINE_TIMELINE_TOOL_PREFIX = "mcp__plugin_agent-spine_agent-spine__";
 export const BLUN_TIMELINE_TOOL_PREFIX = "mcp__agent-spine__";
 
@@ -138,10 +135,6 @@ function resolvedClaims(args) {
   return result;
 }
 
-// Direct stdio callers can bypass the MCP schema. Merge the flat and nested
-// representations only when every present claim agrees. In particular, a
-// nested group claim stays visible when a top-level argument tries to clear
-// it with null, so no existing private permit crosses into a group turn.
 export function timelineInvocationInput(args = {}) {
   return resolvedClaims(args);
 }

@@ -152,14 +152,14 @@ test("installed BLUN hook keeps the full briefing out of the runtime message", a
     blunHome,
     input: { hook_event_name: "UserPromptSubmit", cwd: root, session_id: "session:blun", prompt: [{ type: "text", text: "Hallo" }] }
   });
-  assert.match(output.hookSpecificOutput.message,
+  assert.match(output.hookSpecificOutput.additionalContext,
     /^AgentSpine ready: 145 sources indexed\. Load detailed continuity only on demand through session_briefing\./);
-  assert.match(output.hookSpecificOutput.message, /advisory; does not block coding or replies|Advisory preparation; never blocks authorized coding or replies/);
-  assert.match(output.hookSpecificOutput.message, /Premortem closure sha256 <64hex>/);
-  assert.equal(output.hookSpecificOutput.message.startsWith("{"), false);
-  assert.equal(output.hookSpecificOutput.message.includes("agentspine.blun-runtime-context"), false);
-  assert.equal("additionalContext" in output.hookSpecificOutput, false);
-  const messageBytes = Buffer.byteLength(output.hookSpecificOutput.message);
+  assert.match(output.hookSpecificOutput.additionalContext, /advisory; does not block coding or replies|Advisory preparation; never blocks authorized coding or replies/);
+  assert.match(output.hookSpecificOutput.additionalContext, /Premortem closure sha256 <64hex>/);
+  assert.equal(output.hookSpecificOutput.additionalContext.startsWith("{"), false);
+  assert.equal(output.hookSpecificOutput.additionalContext.includes("agentspine.blun-runtime-context"), false);
+  assert.equal("message" in output.hookSpecificOutput, false);
+  const messageBytes = Buffer.byteLength(output.hookSpecificOutput.additionalContext);
   assert.equal(messageBytes <= 1200, true, `BLUN runtime message was ${messageBytes} bytes`);
 
   const compatibleOutput = await runInstalledHook({
@@ -197,7 +197,8 @@ test("installed Claude hook carries one bounded required-instruction overflow", 
       session_id: "session:claude-overflow", event_id: "turn:claude-overflow",
       prompt: [{ type: "text", text: "Hallo" }] }
   });
-  assert.match(output.hookSpecificOutput.message, /^AgentSpine ready:/);
+  assert.equal("message" in output.hookSpecificOutput, false);
+  assert.match(output.hookSpecificOutput.additionalContext, /^AgentSpine ready:/);
 
   await writeFile(join(root, "CLAUDE.md"), `# Oversized Claude rules\n${"x".repeat(17000)}\n`, "utf8");
   const blocked = await runInstalledHook({

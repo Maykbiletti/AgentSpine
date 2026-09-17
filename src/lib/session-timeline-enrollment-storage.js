@@ -55,10 +55,6 @@ export async function readPrivateEnrollmentState({
   if (typeof assertOwned !== "function" || !recoverableForwardCommit(state, head)) {
     throw new Error("private timeline enrollment state replay was rejected");
   }
-  // A state replacement can survive a crash before its paired head replacement.
-  // Repair is allowed only while holding the owned lock and only for the exact
-  // authenticated one-generation successor of the retained head.  Re-read both
-  // records after writing so a path swap cannot produce usable content.
   const freshState = await readAuthenticatedTimelineState(path, maximumBytes, assertStable);
   const checkedState = await verifySessionTimelineState(validate(JSON.parse(freshState), root.value));
   const checkedHead = await readHead(headPath, root, assertStable, headSchema, headAuthority, maximumBytes);

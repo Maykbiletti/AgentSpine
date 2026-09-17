@@ -1,99 +1,119 @@
-const BLUN_MESSAGE_MAX_BYTES = 1200;
-const BLUN_BOUND_MARKER = "\n[optional runtime detail omitted: 1200-byte bound]";
+const MAX_BYTES=1200;
+const BOUND="\n[optional runtime detail omitted: 1200-byte bound]";
+const bytes=value=>Buffer.byteLength(JSON.stringify(value));
 
-function byteSize(value) {
-  return Buffer.byteLength(JSON.stringify(value));
-}
-
-function addRecallField(packet, key, value, maximum = 1020) {
-  if (value === undefined || value === null) return;
-  packet[key] = value;
-  if (byteSize(packet) <= maximum) return true;
+function addRecallField(packet,key,value,maximum=1020){
+  if(value===undefined||value===null)return;
+  packet[key]=value;
+  if(bytes(packet)<=maximum)return true;
   delete packet[key];
   return false;
 }
 
-function sharedPrefix(values) {
-  let prefix = values[0] || "";
-  for (const value of values.slice(1)) {
-    while (prefix && !value.startsWith(prefix)) prefix = prefix.slice(0, -1);
+function sharedPrefix(values){
+  let prefix=values[0]||"";
+  for(const value of values.slice(1)){
+    while(prefix&&!value.startsWith(prefix))prefix=prefix.slice(0,-1);
   }
-  return prefix.length >= 4 ? prefix : "";
+  return prefix.length>=4?prefix:"";
 }
 
-function compactCandidateRows(packet, candidates) {
-  if (candidates.rows.length < 2) return;
-  if (!candidates.prefixes) {
-    const digest = candidates.fields.indexOf("digest");
-    if (digest >= 0 && candidates.rows.every((row) => row[digest] === candidates.rows[0][digest])) {
-      candidates.common = { ...(candidates.common || {}), digest: candidates.rows[0][digest] };
-      candidates.fields.splice(digest, 1);
-      for (const row of candidates.rows) row.splice(digest, 1);
+function compactRows(packet,candidates){
+  if(candidates.rows.length<2)return;
+  if(!candidates.prefixes){
+    const digest=candidates.fields.indexOf("digest");
+    if(digest>=0&&candidates.rows.every(row=>row[digest]===candidates.rows[0][digest])){
+      candidates.common={...(candidates.common||{}),digest:candidates.rows[0][digest]};
+      candidates.fields.splice(digest,1);
+      for(const row of candidates.rows)row.splice(digest,1);
     }
-    candidates.prefixes = candidates.fields.map((field, index) => {
-      const values = candidates.rows.map((row) => row[index]);
-      const prefix = ["id", "message", "session"].includes(field) ? sharedPrefix(values)
-        : field === "at" && values.every((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:/.test(value))
-          ? values[0].slice(0, 14) : "";
-      if (!prefix || !values.every((value) => value.startsWith(prefix))) return "";
-      for (const row of candidates.rows) row[index] = row[index].slice(prefix.length);
+    candidates.prefixes=candidates.fields.map((field,index)=>{
+      const values=candidates.rows.map(row=>row[index]);
+      const prefix=["id","message","session"].includes(field)?sharedPrefix(values)
+        :field==="at"&&values.every(value=>/^\d{4}-\d{2}-\d{2}T\d{2}:/.test(value))
+          ?values[0].slice(0,14):"";
+      if(!prefix||!values.every(value=>value.startsWith(prefix)))return"";
+      for(const row of candidates.rows)row[index]=row[index].slice(prefix.length);
       return prefix;
     });
   }
-  if (packet.task) {
+  if(packet.task){
     delete packet.task.status;
-    if (packet.task.lastVerifiedStep) delete packet.task.lastVerifiedStep.result;
+    if(packet.task.lastVerifiedStep)delete packet.task.lastVerifiedStep.result;
   }
-  const review = packet.feedbackReview;
-  if (review?.modelClarification) packet.feedbackReview = {
-    status: review.status, completionVerified: false, target: review.targetAssertionId,
-    question: review.modelClarification.question, model: true
+  const review=packet.feedbackReview;
+  if(review?.modelClarification)packet.feedbackReview={
+    status:review.status,completionVerified:false,target:review.targetAssertionId,
+    question:review.modelClarification.question,model:true
   };
 }
 
-function compactFeedbackCandidates(packet) {
-  const candidates = packet.feedbackCandidates;
-  const proposal = packet.feedbackReview?.modelClarification;
-  if (proposal) for (const key of ["completionVerified", "provider", "replaces"]) delete proposal[key];
-  if (candidates && !Array.isArray(candidates)
-    && Array.isArray(candidates.fields) && Array.isArray(candidates.rows)) {
-    compactCandidateRows(packet, candidates);
+function compactFeedback(packet){
+  const candidates=packet.feedbackCandidates;
+  const proposal=packet.feedbackReview?.modelClarification;
+  if(proposal)for(const key of ["completionVerified","provider","replaces"])delete proposal[key];
+  if(candidates&&!Array.isArray(candidates)
+    &&Array.isArray(candidates.fields)&&Array.isArray(candidates.rows)){
+    compactRows(packet,candidates);
     return true;
   }
-  if (!Array.isArray(candidates) || candidates.length < 2) return false;
-  const origins = ["provider", "session"];
-  const sharedKeys = origins.filter((key) =>
-    candidates.every((item) => item?.[key] === candidates[0]?.[key]));
-  const fields = ["id", "text", "digest", "message", "at",
-    ...origins.filter((key) => !sharedKeys.includes(key))];
-  packet.feedbackCandidates = {
+  if(!Array.isArray(candidates)||candidates.length<2)return false;
+  const origins=["provider","session"];
+  const sharedKeys=origins.filter(key=>candidates.every(item=>item?.[key]===candidates[0]?.[key]));
+  const fields=["id","text","digest","message","at",
+    ...origins.filter(key=>!sharedKeys.includes(key))];
+  packet.feedbackCandidates={
     fields,
-    ...(sharedKeys.length ? { common: Object.fromEntries(sharedKeys.map((key) =>
-      [key, candidates[0][key]])) } : {}),
-    rows: candidates.map((item) => fields.map((key) => item[key]))
+    ...(sharedKeys.length?{common:Object.fromEntries(sharedKeys.map(key=>
+      [key,candidates[0][key]]))}:{}),
+    rows:candidates.map(item=>fields.map(key=>item[key]))
   };
-  compactCandidateRows(packet, packet.feedbackCandidates);
+  compactRows(packet,packet.feedbackCandidates);
   return true;
 }
 
-export function preAnswerRecallCapsule(detailed) {
-  if (detailed?.event !== "UserPromptSubmit" || !detailed.loaded) return null;
-  const briefing = detailed.briefing;
-  const preflight = detailed.preflight?.briefing;
-  if (!briefing || !preflight) return null;
-  if (briefing.scope?.groupId !== null && briefing.scope?.groupId !== undefined) return null;
-  const omitted = [];
-  const packet = briefing.preAnswerRecall ? { ...briefing.preAnswerRecall } : {
-    schema: "agentspine.pre-answer-recall/v1",
-    order: "review-before-claims-and-actions",
-    authority: "context-only"
+function timelineRecall(t){
+  if(!t.events?.length)return{status:t.status,reason:t.reason,awaited:t.awaited,
+    reads:t.sourceReads,completionVerified:false,omitted:t.omittedEvents||0};
+  return{status:t.status,awaited:t.awaited,reads:t.sourceReads,completionVerified:false,
+    naturalMessages:"unresolved",trust:"untrusted-session-history",
+    ...(t.source?{source:t.source}:{sources:t.sources}),prefixes:t.prefixes,
+    fields:t.fields,rows:t.events.map(row=>[...row]),omitted:t.omittedEvents||0}
+}
+
+export function preAnswerRecallCapsule(detailed){
+  if(detailed?.event!=="UserPromptSubmit"||!detailed.loaded)return null;
+  const briefing=detailed.briefing;
+  const preflight=detailed.preflight?.briefing;
+  if(!briefing||!preflight)return null;
+  if(briefing.scope?.groupId!==null&&briefing.scope?.groupId!==undefined)return null;
+  const omitted=[];
+  const packet=briefing.preAnswerRecall?structuredClone(briefing.preAnswerRecall):{
+    schema:"agentspine.pre-answer-recall/v1",
+    order:"review-before-claims-and-actions",
+    authority:"context-only"
   };
+  const timeline=detailed.sourceResolution?.timeline?.preAnswerRecall;
+  if(timeline?.awaited){
+    let candidate=timelineRecall(timeline);
+    while(!addRecallField(packet,"timeline",candidate)&&candidate.rows?.length){
+      candidate.rows.pop();
+      candidate.omitted += 1;
+      if(!candidate.rows.length)candidate={status:"unavailable",reason:"host-context-budget",
+        awaited:candidate.awaited,reads:candidate.reads,completionVerified:false,omitted:candidate.omitted};
+    }
+    if(!packet.timeline&&bytes(packet)>MAX_BYTES){
+      const keys=Object.keys(packet).filter(key=>!/^schema$|^order$|^authority$/.test(key));
+      for(const key of keys)delete packet[key];
+      packet.timeline=candidate;packet.omitted=keys;
+    }else if(!packet.timeline)packet.timelineOmitted=true;
+  }
   const mustRemember = (preflight.mustRemember || []).map((item) => ({
     id: item.id, claim: item.claim, checksum: item.checksum
   }));
   if (mustRemember.length && !addRecallField(packet, "mustRemember", mustRemember)) {
-    if (!compactFeedbackCandidates(packet)
-      || !addRecallField(packet, "mustRemember", mustRemember, BLUN_MESSAGE_MAX_BYTES)) {
+    if (!compactFeedback(packet)
+      || !addRecallField(packet, "mustRemember", mustRemember, MAX_BYTES)) {
       omitted.push("mustRemember");
     }
   }
@@ -101,13 +121,13 @@ export function preAnswerRecallCapsule(detailed) {
     (provider.items || []).map((item) => ({ providerId: provider.providerId,
       id: item.id, revision: item.revision, claim: item.claim, source: item.source }))).slice(0, 3);
   if (retrieval.length && !addRecallField(packet, "retrieval", retrieval)) {
-    if (!compactFeedbackCandidates(packet)
-      || !addRecallField(packet, "retrieval", retrieval, BLUN_MESSAGE_MAX_BYTES)) {
+    if (!compactFeedback(packet)
+      || !addRecallField(packet, "retrieval", retrieval, MAX_BYTES)) {
       omitted.push("retrieval");
     }
   }
-  compactFeedbackCandidates(packet);
-  if (omitted.length && byteSize({ ...packet, omitted }) <= BLUN_MESSAGE_MAX_BYTES) packet.omitted = omitted;
+  compactFeedback(packet);
+  if(omitted.length&&bytes({...packet,omitted})<=MAX_BYTES)packet.omitted=omitted;
   return Object.keys(packet).length > 3 ? packet : null;
 }
 
@@ -166,11 +186,10 @@ export function blunRuntimeContext(context) {
 
 export function blunRuntimeMessage(context) {
   const runtime = JSON.parse(blunRuntimeContext(context));
-  const warning = runtime.sourceResolution?.incomplete ? ` Warning: ${runtime.sourceResolution.warning}` : "";
   const base = runtime.loaded
     ? runtime.preAnswerRecall
-      ? `AgentSpine ready: ${runtime.indexedSources} sources indexed.${warning}`
-      : `AgentSpine ready: ${runtime.indexedSources} sources indexed. Load detailed continuity only on demand through session_briefing.${warning}`
+      ? `AgentSpine ready: ${runtime.indexedSources} sources indexed.`
+      : `AgentSpine ready: ${runtime.indexedSources} sources indexed. Load detailed continuity only on demand through session_briefing.`
     : `AgentSpine unavailable${runtime.sourceResolution?.reason ? `: ${runtime.sourceResolution.reason}` : ""}. ${runtime.instruction}`;
   const active = {};
   if (runtime.signal && (runtime.signal.captured || runtime.signal.accepted
@@ -195,22 +214,25 @@ export function blunRuntimeMessage(context) {
     : runtime.premortem?.instruction;
   const premortem = instruction ? `\n${instruction}` : "";
   const message = `${base}${recall}${details}${premortem}`;
-  if (Buffer.byteLength(message) <= BLUN_MESSAGE_MAX_BYTES) return message;
-  const compact = `${base}${recall}${BLUN_BOUND_MARKER}\n${compactPremortemRegistration(runtime.premortem)}`;
-  if (Buffer.byteLength(compact) <= BLUN_MESSAGE_MAX_BYTES) return compact;
+  if (Buffer.byteLength(message) <= MAX_BYTES) return message;
+  const compact = `${base}${recall}${BOUND}\n${compactPremortemRegistration(runtime.premortem)}`;
+  if (Buffer.byteLength(compact) <= MAX_BYTES) return compact;
   if (!runtime.preAnswerRecall) {
-    return `${base}${BLUN_BOUND_MARKER}\n${compactPremortemRegistration(runtime.premortem, false)}`;
+    return `${base}${BOUND}\n${compactPremortemRegistration(runtime.premortem, false)}`;
   }
-  const recallOnly = `${base}${recall}${BLUN_BOUND_MARKER}`;
-  if (Buffer.byteLength(recallOnly) <= BLUN_MESSAGE_MAX_BYTES) return recallOnly;
-  return Buffer.byteLength(recall)<=BLUN_MESSAGE_MAX_BYTES+1?recall.slice(1):`${base}\nRecall unavailable.`;
+  const recallOnly = `${base}${recall}${BOUND}`;
+  if (Buffer.byteLength(recallOnly) <= MAX_BYTES) return recallOnly;
+  return Buffer.byteLength(recall)<=MAX_BYTES+1?recall.slice(1):`${base}\nRecall unavailable.`;
 }
 
-export function hookOutput(event, context, env = process.env) {
+export function hookOutput(event, context, env = process.env, sourceWarning = null) {
   if (env.BLUN_PLUGIN_ROOT) {
-    return { hookSpecificOutput: { hookEventName: event, message: blunRuntimeMessage(context) } };
+    const source=JSON.parse(context).sourceResolution,w=sourceWarning||(source?.incomplete&&source.warning);
+    return {hookSpecificOutput:{hookEventName:event,additionalContext:blunRuntimeMessage(context),
+      ...(w?{message:`AgentSpine source warning: ${w}`}:{})}};
   }
-  return { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
+  return { hookSpecificOutput: { hookEventName: event, additionalContext: context,
+    ...(sourceWarning ? { message: sourceWarning } : {}) } };
 }
 
 export function blockedHookOutput(event, reason, env = process.env) {
@@ -234,15 +256,12 @@ export function blockStop(event, reason) {
   process.stdout.write(`${JSON.stringify(blockedHookOutput(event, reason))}\n`);
 }
 
-export function lifecycleOutput(event, artifactGuard, premortem, deliveryVerification = null, env = process.env,
+export function lifecycleOutput(event, artifactGuard, premortem, delivery = null, env = process.env,
   sourceWarning = null, lessonRecall = null) {
-  const messages = sourceWarning ? [`AgentSpine source warning: ${sourceWarning}`] : [];
-  if (artifactGuard?.reason) messages.push(artifactGuard.reason);
-  if (deliveryVerification?.status === "test-failed" && deliveryVerification.reason) {
-    messages.push(deliveryVerification.reason);
-  }
+  const w=[sourceWarning&&`AgentSpine source warning: ${sourceWarning}`,artifactGuard?.reason,
+    delivery?.status==="test-failed"&&delivery.reason].filter(Boolean),c=[];
   if (/^[a-f0-9]{64}$/.test(premortem?.writeDigest || "")) {
-    messages.push([
+    c.push([
       premortem.writeIntent
         ? "AgentSpine recorded the allowed mutation intent for the delivery premortem."
         : "AgentSpine recorded the direct write for the delivery premortem.",
@@ -250,7 +269,7 @@ export function lifecycleOutput(event, artifactGuard, premortem, deliveryVerific
     ].join("\n"));
   }
   if (lessonRecall?.status === "recalled") {
-    messages.push(JSON.stringify({
+    c.push(JSON.stringify({
       schema: lessonRecall.schema, receiptDigest: lessonRecall.receiptDigest,
       instruction: lessonRecall.instruction, items: lessonRecall.items,
       learning: lessonRecall.learning || [], learningDiagnostics: lessonRecall.learningDiagnostics || null,
@@ -258,7 +277,8 @@ export function lifecycleOutput(event, artifactGuard, premortem, deliveryVerific
       authority: "context-only"
     }));
   }
-  if (!messages.length) return {};
-  const field = env.BLUN_PLUGIN_ROOT ? "message" : "additionalContext";
-  return { hookSpecificOutput: { hookEventName: event, [field]: messages.join("\n") } };
+  const o={hookEventName:event},f=env.BLUN_PLUGIN_ROOT?"message":"additionalContext";
+  if(w.length)o[f]=w.join("\n");
+  if(c.length)o.additionalContext=[o.additionalContext,...c].filter(Boolean).join("\n");
+  return Object.keys(o).length>1?{hookSpecificOutput:o}:{};
 }
