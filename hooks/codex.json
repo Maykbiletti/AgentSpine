@@ -4,12 +4,12 @@
     "SessionStart": [
       {
         "matcher": "startup|resume|clear|compact",
-        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/hook.js\"", "timeout": 15 }]
+        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/hook.js\" --context-event=SessionStart", "timeout": 15 }]
       }
     ],
     "UserPromptSubmit": [
       {
-        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/hook.js\"", "timeout": 15 }]
+        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/hook.js\" --context-event=UserPromptSubmit", "timeout": 15 }]
       }
     ],
     "PreToolUse": [
@@ -25,12 +25,12 @@
     ],
     "PreCompact": [
       {
-        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/hook.js\"", "timeout": 15 }]
+        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/hook.js\" --context-event=PreCompact", "timeout": 15 }]
       }
     ],
     "PostCompact": [
       {
-        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/hook.js\"", "timeout": 15 }]
+        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/src/hook.js\" --context-event=PostCompact", "timeout": 15 }]
       }
     ],
     "Stop": [

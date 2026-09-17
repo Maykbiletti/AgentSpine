@@ -70,17 +70,20 @@ async function install(tarball, prefix) {
   return join(prefix, "node_modules", "agent-spine");
 }
 
-async function runInstalledHook(packageRoot, project, env, eventId, prompt) {
+async function runInstalledHook(packageRoot, project, env, eventId, prompt, extra = {}) {
+  const manifest = JSON.parse(await readFile(join(packageRoot, "blun.plugin.json"), "utf8"));
+  const command = manifest.hooks.find((hook) => hook.event === "UserPromptSubmit").command;
+  const args = command.slice(command.lastIndexOf('"') + 1).trim().split(/\s+/).filter(Boolean);
   const input = JSON.stringify({
       hook_event_name: "UserPromptSubmit",
       host: "codex",
       cwd: project,
       session_id: `session:${eventId}`,
       event_id: `turn:${eventId}`,
-      prompt
+      prompt, ...extra
   });
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [join(packageRoot, "src", "hook.js")], {
+    const child = spawn(process.execPath, [join(packageRoot, "src", "hook.js"), ...args], {
       cwd: project, env, windowsHide: true, stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "", stderr = "";
@@ -135,7 +138,19 @@ async function verifyPackedSizeContract(packageRoot, workspace, lane) {
     assert.equal(sha256(await readFile(projectRules)), before[0]);
     if (item.user) assert.equal(sha256(await readFile(userRules)), before[1]);
   }
-  return { cases: cases.length, promptsPerCase: 2, sourceBytesPreserved: true };
+  const beforeOverflow = sha256(await readFile(projectRules));
+  for (const kind of ["text", "image"]) {
+    const output = await runInstalledHook(packageRoot, project, env, `${lane}-input-${kind}`,
+      kind === "text" ? "ü".repeat(70 * 1024) : "Read the synthetic image.",
+      kind === "image" ? { images: [{ data: "A".repeat(2 * 1024 * 1024) }] } : {});
+    assert.equal(output.decision, undefined);
+    const context = JSON.parse(output.hookSpecificOutput.additionalContext);
+    assert.equal(context.loaded, false);
+    assert.equal(context.sourceResolution.reason, "hook-input-budget");
+    assert.match(output.hookSpecificOutput.message, /input budget exceeded/);
+    assert.equal(sha256(await readFile(projectRules)), beforeOverflow);
+  }
+  return { cases: cases.length, promptsPerCase: 2, inputOverflowCases: 2, sourceBytesPreserved: true };
 }
 
 async function verifyInstalled(packageRoot, workspace, lane, expectedVersion) {
