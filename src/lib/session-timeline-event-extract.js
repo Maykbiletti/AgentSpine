@@ -115,6 +115,15 @@ function objectiveExcerpt(body) {
   return (selected || "").replace(/\s+/g, " ").slice(0, 320);
 }
 
+function boundedText(body, limit) {
+  const bytes = Buffer.from(body);
+  let end = Math.min(bytes.byteLength, limit);
+  for (;;) {
+    try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, end)), bytes: bytes.byteLength }; }
+    catch { end -= 1; }
+  }
+}
+
 function candidateFromToolResult(value) {
   if (!isToolResult(value) || unsafeObject(value)) return null;
   const body = objectiveText(value);
@@ -150,7 +159,7 @@ function claudeTimelineUserMessage(parsed) {
   return { role: "user", content: message.content.map((part) => part.text).join("\n") };
 }
 
-function timelineEventFromLine(line, offset, authority, includeExcerpt, host) {
+function timelineEventFromLine(line, offset, authority, detail, host) {
   const source = Buffer.from(line);
   if (source.byteLength > MAX_LINE_BYTES) return null;
   let parsed;
@@ -173,7 +182,15 @@ function timelineEventFromLine(line, offset, authority, includeExcerpt, host) {
     sha256: digest(source), ...candidate, authority };
   const nativeMessageId = tool?.nativeMessageId || user?.nativeMessageId;
   if (nativeMessageId) event.nativeMessageId = nativeMessageId;
-  if (includeExcerpt && candidate.kind === "objective-result") event.excerpt = objectiveExcerpt(objectiveText(tool || parsed));
+  if (detail && candidate.kind === "objective-result") {
+    const body = objectiveText(tool || parsed);
+    event.excerpt = objectiveExcerpt(body);
+    if (detail === "source") {
+      const bounded = boundedText(body.replace(/\s+/gu, " ").trim(), 4096);
+      event.sourceDetail = { text: bounded.text, complete: false, reason: "bounded-extraction",
+        extractedBytes: bounded.bytes, sourceLineBytes: event.bytes };
+    }
+  }
   return event;
 }
 
@@ -181,6 +198,7 @@ export function eventFromTimelineLine(line, offset, authority = "context-only", 
   return timelineEventFromLine(line, offset, authority, false, host);
 }
 
-export function verifiedTimelineEventFromLine(line, offset, authority = "context-only", host = "claude") {
-  return timelineEventFromLine(line, offset, authority, true, host);
+export function verifiedTimelineEventFromLine(line, offset, authority = "context-only", host = "claude",
+  withDetail = false) {
+  return timelineEventFromLine(line, offset, authority, withDetail ? "source" : "excerpt", host);
 }

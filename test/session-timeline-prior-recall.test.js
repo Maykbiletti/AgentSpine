@@ -68,7 +68,7 @@ function priorTranscript() {
     message: { role: "tool", content: `Measured old archive ${kind} lesson; result: FAIL 0/1.` }
   }));
   const target = { timestamp: "2026-09-04T12:40:11.000Z", message: { role: "tool",
-    content: "Measured CSS archive Suite 0 in result.txt; result: FAIL 0/15." } };
+    content: "Measured CSS archive Suite 0 in result.txt; result: FAIL 0/15. Synthetic checksum detail: abc123." } };
   const newerUnrelated = { timestamp: "2026-09-04T12:40:19.000Z", message: { role: "tool",
     content: "Measured unrelated typography audit in other.log; result: PASS 1/1." } };
   const feedback = [
@@ -208,6 +208,28 @@ test("a restarted task recalls one indexed prior-session result with stable sour
   assert.equal(found.events[0].excerpt, "Measured CSS archive Suite 0 in result.txt; result: FAIL 0/15.");
   assert.equal(found.events[0].trust, "untrusted-session-history");
   assert.equal(found.events[0].authority, "context-only");
+
+  const detailFields = { query: "objective result", includePriorSessions: true,
+    detailEventId: found.events[0].id, sourceDigest: found.sourceDigest,
+    sessionRef: found.events[0].sessionRef };
+  const detailGuard = await runHook(toolInput(item, SESSION_B, "tool:prior:detail", detailFields));
+  assert.equal(detailGuard.blocked, false, detailGuard.reason);
+  assert.equal(detailGuard.updatedInput.detailEventId, detailFields.detailEventId);
+  const detail = await client()("session_timeline_search", detailGuard.updatedInput);
+  assert.equal(detail.status, "found", JSON.stringify(detail));
+  assert.equal(detail.events.length, 1);
+  assert.match(detail.events[0].sourceDetail.text, /Synthetic checksum detail: abc123/);
+  assert.equal(detail.events[0].sourceDetail.complete, false);
+  assert.equal(detail.events[0].sourceDetail.reason, "bounded-extraction");
+  assert.match(detail.events[0].messageDigest, /^[a-f0-9]{64}$/);
+  assert.equal(found.events[0].sourceDetail, undefined, "short first-stage hits omit detail");
+
+  const wrongDigest = await runHook(toolInput(item, SESSION_B, "tool:prior:wrong-digest",
+    { ...detailFields, sourceDigest: "0".repeat(64) }));
+  if (!wrongDigest.blocked) {
+    const rejected = await client()("session_timeline_search", wrongDigest.updatedInput);
+    assert.equal(rejected.blocked, true);
+  }
 
   const replay = await client()("session_timeline_search", priorGuard.updatedInput);
   assert.equal(replay.blocked, true);

@@ -154,6 +154,10 @@ export function timelineToolKind(name) {
 export function timelineInvocationRequest(tool, args, root) {
   const input = resolvedClaims(args);
   if (!input.valid || input.groupClaim || !input.request.sessionId) return null;
+  if (tool === "search" && (args.detailEventId !== undefined || args.sourceDigest !== undefined
+    || args.sessionRef !== undefined) && (!/^timeline-event:[a-f0-9]{32}$/.test(args.detailEventId || "")
+    || !/^[a-f0-9]{64}$/.test(args.sourceDigest || "")
+    || !/^session-ref:[a-f0-9]{32}$/.test(args.sessionRef || ""))) return null;
   const scope = input.scope;
   const request = { root, tool, sessionId: input.request.sessionId, entityId: scope.entityId, userId: scope.userId,
     tenantId: scope.tenantId, projectId: scope.projectId, groupId: scope.groupId, taskId: scope.currentTaskId,
@@ -162,7 +166,8 @@ export function timelineInvocationRequest(tool, args, root) {
     enrollmentDigest: input.request.enrollmentDigest };
   if (tool === "index") return { ...request, maxBytes: args.maxBytes ?? 4 * 1024 * 1024 };
   return { ...request, ...(tool === "capture" ? { eventId: args.eventId ?? null,
-    interpretation: args.interpretation ?? null } : {}),
+    interpretation: args.interpretation ?? null } : { detailEventId: args.detailEventId ?? null,
+    sourceDigest: args.sourceDigest ?? null, ref: args.sessionRef ?? null }),
     at: args.at ?? null, query: args.query ?? null,
     windowSeconds: args.windowSeconds === undefined ? 0 : args.windowSeconds,
     includePriorSessions: args.includePriorSessions === true,
@@ -176,65 +181,43 @@ const scopeProperties = {
   portalRef: optionalId, threadRef: optionalId
 };
 
+const timelineProperties = { root: { type: "string", minLength: 1 }, sessionId: stableId, ...scopeProperties,
+  enrollmentDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+  timelineVisibility: { const: "private-verified" }, groupId: optionalId };
+const searchProperties = { ...timelineProperties, at: { type: "string", format: "date-time" },
+  query: { type: "string", minLength: 3, maxLength: 512 },
+  windowSeconds: { type: "integer", minimum: 0, maximum: 900 },
+  includePriorSessions: { type: "boolean" }, includePriorProviders: { type: "boolean" } };
+const searched = { anyOf: [{ required: ["at"] }, { required: ["query"] }] };
+
 export const sessionTimelineTools = [
-  {
-    name: "session_timeline_index",
-    description: "Index bounded evidence from one explicitly enrolled immutable provider transcript snapshot. Claude, Codex and King use separate format adapters; changed sources require a renewed host receipt and this tool never copies a transcript or grants authority.",
-    inputSchema: {
-      type: "object", additionalProperties: false,
-      required: [],
-      properties: { root: { type: "string", minLength: 1 }, sessionId: stableId, ...scopeProperties,
-        enrollmentDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
-        timelineVisibility: { const: "private-verified" }, groupId: { anyOf: [stableId, { type: "null" }] },
-        maxBytes: { type: "integer", minimum: 65536, maximum: 16777216 } }
-    }
-  },
-  {
-    name: "session_timeline_search",
-    description: "Search one enrolled immutable same-task source for objective evidence or strict user corrections. Query 'user message' explicitly selects bounded native user-message candidates without interpreting them; add exact UTC time to narrow. No source text is indexed. Cross-provider recall requires opt-in; one source is opened and no authority is granted.",
-    inputSchema: {
-      type: "object", additionalProperties: false,
-      required: [],
-      anyOf: [{ required: ["at"] }, { required: ["query"] }],
-      properties: { root: { type: "string", minLength: 1 }, sessionId: stableId, ...scopeProperties,
-        enrollmentDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
-        timelineVisibility: { const: "private-verified" }, groupId: { anyOf: [stableId, { type: "null" }] },
-        at: { type: "string", format: "date-time" }, query: { type: "string", minLength: 3, maxLength: 512 },
-        windowSeconds: { type: "integer", minimum: 0, maximum: 900 },
-        includePriorSessions: { type: "boolean" }, includePriorProviders: { type: "boolean" } }
-    }
-  },
-  {
-    name: "session_timeline_capture",
-    description: "Reopen one source-bound event. Objective fields become descriptive task state; strict prefixed corrections may replace the same-thread next step. Natural user messages remain uninterpreted beside their exact checkpoint. A second source-bound call may preserve one model interpretation as an unconfirmed proposal; it never changes continuation, proves completion or grants authority.",
-    inputSchema: {
-      type: "object", additionalProperties: false,
-      required: ["eventId"],
-      anyOf: [{ required: ["at"] }, { required: ["query"] }],
-      properties: { root: { type: "string", minLength: 1 }, sessionId: stableId, ...scopeProperties,
-        enrollmentDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
-        timelineVisibility: { const: "private-verified" }, groupId: { anyOf: [stableId, { type: "null" }] },
-        eventId: { type: "string", pattern: "^timeline-event:[a-f0-9]{32}$" },
-        interpretation: { oneOf: [{
-          type: "object", additionalProperties: false,
+  { name: "session_timeline_index",
+    description: "Index one enrolled immutable transcript as bounded evidence; grants no authority.",
+    inputSchema: { type: "object", additionalProperties: false, required: [], properties: {
+      ...timelineProperties, maxBytes: { type: "integer", minimum: 65536, maximum: 16777216 } } } },
+  { name: "session_timeline_search",
+    description: "Search one enrolled same-task source. Use detailEventId, sourceDigest and sessionRef for bounded detail; grants no authority.",
+    inputSchema: { type: "object", additionalProperties: false, required: [], ...searched, properties: {
+      ...searchProperties, detailEventId: { type: "string", pattern: "^timeline-event:[a-f0-9]{32}$" },
+      sourceDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+      sessionRef: { type: "string", pattern: "^session-ref:[a-f0-9]{32}$" } } } },
+  { name: "session_timeline_capture",
+    description: "Reopen a source-bound event as context; never proves completion or grants authority.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["eventId"], ...searched, properties: {
+      ...searchProperties, eventId: { type: "string", pattern: "^timeline-event:[a-f0-9]{32}$" },
+      interpretation: { oneOf: [
+        { type: "object", additionalProperties: false,
           required: ["schema", "feedbackAssertionId", "targetAssertionId", "kind",
             "proposedNextStepSummary", "clarificationQuestion"],
           properties: { schema: { const: TIMELINE_INTERPRETATION_SCHEMA },
             feedbackAssertionId: assertionId, targetAssertionId: assertionId,
             kind: { enum: [...INTERPRETATION_KINDS] },
             proposedNextStepSummary: { anyOf: [{ type: "string", minLength: 1, maxLength: 500 }, { type: "null" }] },
-            clarificationQuestion: { anyOf: [{ type: "string", minLength: 1, maxLength: 300 }, { type: "null" }] } }
-        }, {
-          type: "object", additionalProperties: false,
+            clarificationQuestion: { anyOf: [{ type: "string", minLength: 1, maxLength: 300 }, { type: "null" }] } } },
+        { type: "object", additionalProperties: false,
           required: ["schema", "feedbackAssertionIds", "targetAssertionId", "clarificationQuestion"],
           properties: { schema: { const: TIMELINE_CLARIFICATION_SCHEMA },
             feedbackAssertionIds: { type: "array", minItems: 2, maxItems: 3, uniqueItems: true,
               items: assertionId }, targetAssertionId: assertionId,
-            clarificationQuestion: { type: "string", minLength: 1, maxLength: 300 } }
-        }] },
-        at: { type: "string", format: "date-time" }, query: { type: "string", minLength: 3, maxLength: 512 },
-        windowSeconds: { type: "integer", minimum: 0, maximum: 900 },
-        includePriorSessions: { type: "boolean" }, includePriorProviders: { type: "boolean" } }
-    }
-  }
+            clarificationQuestion: { type: "string", minLength: 1, maxLength: 300 } } }] } } } }
 ];

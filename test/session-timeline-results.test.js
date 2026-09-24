@@ -19,6 +19,37 @@ function publicCard(event) {
     authority: "context-only" }).events[0];
 }
 
+test("staged objective detail is bounded UTF-8 evidence and never appears in the preview", () => {
+  const line = toolLine(`Measured synthetic benchmark PASS 1/1. ${"ü".repeat(2500)}`);
+  const preview = publicCard(verifiedTimelineEventFromLine(line, 0));
+  const detail = publicCard(verifiedTimelineEventFromLine(line, 0, "context-only", "claude", true));
+  assert.equal(preview.sourceDetail, undefined);
+  assert.ok(Buffer.byteLength(detail.sourceDetail.text) <= 4096);
+  assert.doesNotMatch(detail.sourceDetail.text, /\ufffd/u);
+  assert.equal(detail.sourceDetail.complete, false);
+  assert.equal(detail.sourceDetail.sourceLineBytes, Buffer.byteLength(line));
+  assert.equal(detail.sourceDigest, preview.sourceDigest);
+  assert.equal(detail.authority, "context-only");
+});
+
+test("Claude, Codex and King extract the same bounded objective detail from native records", () => {
+  const content = "Measured synthetic acceptance: PASS 15/15. File result.txt was verified.";
+  const at = "2026-09-04T12:41:12.000Z";
+  const lines = [
+    ["claude", toolLine(content)],
+    ["codex", JSON.stringify({ type: "response_item", timestamp: at,
+      payload: { type: "function_call_output", call_id: "call:synthetic", output: content } })],
+    ["king", JSON.stringify({ type: "context.append_loop_event", time: Date.parse(at),
+      event: { type: "tool.result", toolCallId: "call:synthetic", result: { output: content } } })]
+  ];
+  for (const [host, line] of lines) {
+    const event = verifiedTimelineEventFromLine(line, 0, "context-only", host, true);
+    assert.equal(event.kind, "objective-result", host);
+    assert.match(publicCard(event).sourceDetail.text, /result\.txt was verified/);
+    assert.equal(event.sha256, digest(Buffer.from(line)));
+  }
+});
+
 test("timeline public cards persist and return only allowlisted objective fields", async () => {
   const leftLine = toolLine("Measured oracle Suite 0; result: PASS 1/1. Benign alpha narrative is not evidence.");
   const rightLine = toolLine("Measured oracle Suite 0; result: PASS 1/1. A much longer benign beta narrative is not evidence.");
