@@ -405,9 +405,8 @@ test("a direct prompt selects the relevant result across multiple prior sessions
     cwd: item.project, session_id: SESSION_B, transcript_path: item.transcriptB,
     event_id: "event:prior:multi-relevant",
     prompt: "What was the CSS archive Suite 0 result in result.txt?", ...hookScope() });
-  const continuation = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude",
-    cwd: item.project, session_id: SESSION_B, transcript_path: item.transcriptB,
-    event_id: "event:prior:multi-continuation", prompt: "Continue the existing task.", ...hookScope() });
+  const terse=await runHook({hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.project,session_id:SESSION_B,transcript_path:item.transcriptB,event_id:"event:prior:multi-terse",prompt:"typography?",...hookScope()}); const ambiguous=await runHook({hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.project,session_id:SESSION_B,transcript_path:item.transcriptB,event_id:"event:prior:multi-ambiguous",prompt:"result?",...hookScope()});
+  const continuation=await runHook({hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.project,session_id:SESSION_B,transcript_path:item.transcriptB,event_id:"event:prior:multi-continuation",prompt:"Continue the existing task.",...hookScope()});
   assert.equal(result.blocked, false, result.reason);
   const recall = JSON.parse(result.context).sourceResolution.timeline.preAnswerRecall;
   assert.equal(recall.status, "recalled");
@@ -420,6 +419,7 @@ test("a direct prompt selects the relevant result across multiple prior sessions
   assert.doesNotMatch(handoff, /other\.log/);
   assert.match(handoff, /Nein, erst die Prüfsumme prüfen/);
   assert.doesNotMatch(handoff, /Schriftgröße/);
+  const terseRecall=JSON.parse(terse.context).sourceResolution.timeline.preAnswerRecall; assert.match(JSON.stringify(terseRecall.events),/other\.log/); assert.doesNotMatch(JSON.stringify(terseRecall.events),/result\.txt/); const ambiguousRecall=JSON.parse(ambiguous.context).sourceResolution.timeline.preAnswerRecall; assert.match(JSON.stringify(ambiguousRecall.events),/result\.txt/); assert.doesNotMatch(JSON.stringify(ambiguousRecall.events),/other\.log/);
   const continuationRecall = JSON.parse(continuation.context).sourceResolution.timeline.preAnswerRecall;
   assert.equal(continuationRecall.status, "recalled"); assert.match(JSON.stringify(continuationRecall.events), /result\.txt/);
   assert.doesNotMatch(JSON.stringify(continuationRecall.events), /other\.log|Schriftgröße/);
