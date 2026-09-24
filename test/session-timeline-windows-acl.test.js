@@ -264,7 +264,7 @@ test("Windows state ACL tampering yields no timeline status or evidence cards", 
   assert.equal((await enrollTimelineWithHostReceipt({ root: project, sessionId: "session:windows", scope,
     transcriptPath: transcript, hostHome: profile })).status, "enrolled");
   const opened = await sessionTimelineStatus({ root: project, host: "claude", sessionId: "session:windows", scope, hostHome: profile });
-  assert.equal(opened.status, "partial");
+  assert.equal(opened.status, "indexed");
   assert.equal("accessProof" in opened, false);
   const indexPermit = await boundTimelineInvocation({ root: project, sessionId: "session:windows", hostHome: profile,
     tool: "index", fields: { maxBytes: 65_536 }, toolUseId: "tool:windows:index" });
