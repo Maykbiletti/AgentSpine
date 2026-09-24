@@ -4,7 +4,7 @@ import { runHook } from "../src/hook.js";
 import { authorizeSessionTimelineInvocation, bootstrapSessionTimelineEnrollment } from "../src/lib/session-timeline.js";
 import {
   currentHostTranscriptReceipt, enrollPrivateSessionTimeline, LOCAL_TIMELINE_ENROLLMENT_CONFIRMATION,
-  resolvePrivateSessionTimelineEnrollment
+  resolvePrivateSessionTimelineContract
 } from "../src/lib/session-timeline-enrollment.js";
 import { timelineInvocationRequest } from "../src/lib/mcp-timeline-tools.js";
 import { timelineTransportDigest } from "../src/lib/session-timeline-transport.js";
@@ -104,7 +104,7 @@ export async function enrollTimelineWithHostReceipt({
 export async function boundTimelineInvocation({
   root, host = "claude", sessionId, hostHome, tool, fields, toolUseId, environment = process.env
 }) {
-  const enrollment = await resolvePrivateSessionTimelineEnrollment({ root, host, sessionId, hostHome });
+  const enrollment = await resolvePrivateSessionTimelineContract({ root, host, sessionId, hostHome });
   if (enrollment.status !== "enrolled") return null;
   const transportDigest = timelineTransportDigest({ root, binding: enrollment.binding, environment });
   if (!transportDigest) return null;

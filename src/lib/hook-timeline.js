@@ -1,4 +1,4 @@
-import { sessionTimelineLifecycleHint } from "./session-timeline.js";
+import { captureSessionTimelineTail, sessionTimelineLifecycleHint } from "./session-timeline.js";
 import { issueHostTranscriptReceipt } from "./session-timeline-enrollment.js";
 import { consumeTimelineHostOrigin } from "./session-timeline-host-origin.js";
 import {
@@ -67,12 +67,16 @@ export async function captureSessionTimelineLifecycle({
   const host = timelineHostForRuntime(scope.host, process.env);
   if (!host || (host === "king" && !timelineProtocolFromRuntime(host))) return unavailable("host-not-supported");
   const session = input.session_id ?? input.sessionId;
+  const timelineHome = timelineHostHome(host) ?? hostHome;
+  if (["UserPromptSubmit", "Stop"].includes(event)) {
+    try { await captureSessionTimelineTail({ root, host, sessionId: session, scope, hostHome: timelineHome }); } catch {}
+  }
   const lifecycle = await sessionTimelineLifecycleHint({ root, host,
     sessionId: session, scope, environment: process.env });
   if (event !== "UserPromptSubmit" || !hostOrigin) return result(lifecycle);
   const preAnswerRecall = lifecycle.priorSessions?.available
     ? await automaticPreAnswerTimelineRecall({
-      root, host, sessionId: session, scope, hostHome, eventId: input.event_id ?? input.hook_event_id,
+      root, host, sessionId: session, scope, hostHome: timelineHome, eventId: input.event_id ?? input.hook_event_id,
       turnId, prompt,
       environment: process.env
     }) : timelineRecallNotFound();

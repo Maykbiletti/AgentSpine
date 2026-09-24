@@ -460,19 +460,18 @@ export async function enrollPrivateSessionTimeline(options = {}) {
   }
 }
 
-export async function resolvePrivateSessionTimelineEnrollment({
-  root, host, sessionId, transcriptPath, hostHome, clock = null, expectedTransportDigest = null
-}) {
-  const inspected = await inspectPrivateSessionTimelineEnrollment({
-    root, host, sessionId, transcriptPath, hostHome, clock, expectedTransportDigest
-  });
+async function resolvedEnrollment(options,append){
+  const inspected=await inspectPrivateSessionTimelineEnrollment(options);
   if (inspected.status !== "loaded") return unavailable(inspected.reason);
   const { record, active } = inspected;
-  if (!sameSourceSnapshot(record.source, active)) {
+  if (!append&&!sameSourceSnapshot(record.source, active)) {
     return unavailable("transcript-snapshot-renewal-required");
   }
-  if (await privateTimelinePrefixDigest(active, record.source.prefixBytes) !== record.source.prefixDigest) {
+  if (append&&active.size<record.source.size
+    ||await privateTimelinePrefixDigest(active,record.source.prefixBytes)!==record.source.prefixDigest) {
     return unavailable("transcript-replaced");
   }
   return activeResult(record, active);
 }
+export const resolvePrivateSessionTimelineEnrollment=options=>resolvedEnrollment(options,false);
+export const resolvePrivateSessionTimelineContract=options=>resolvedEnrollment(options,true);

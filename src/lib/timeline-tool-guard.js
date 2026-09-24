@@ -7,7 +7,7 @@ import {
 import { gatewayEnvironmentContext, hookDeliveryId, hostFromInput, sessionId } from "./hook-context.js";
 import { blockedHookOutput } from "./hook-output.js";
 import { sessionTimelineBinding } from "./session-timeline-contract.js";
-import { resolvePrivateSessionTimelineEnrollment } from "./session-timeline-enrollment.js";
+import { resolvePrivateSessionTimelineContract } from "./session-timeline-enrollment.js";
 import { timelineTransportDigest } from "./session-timeline-transport.js";
 import {
   crossProviderTimelineEnabled, runtimeHostForTimeline, timelineHostForRuntime, timelineHostHome
@@ -186,7 +186,7 @@ export async function runTimelineToolGuard(input) {
     if (!transportDigest) {
       return denied("AgentSpine session timeline requires a locally configured per-session transport capability.");
     }
-    const enrollment = await resolvePrivateSessionTimelineEnrollment({ root, host, sessionId: hostSession,
+    const enrollment = await resolvePrivateSessionTimelineContract({ root, host, sessionId: hostSession,
       transcriptPath: input.transcript_path ?? input.transcriptPath, hostHome: historyHome,
       expectedTransportDigest: transportDigest });
     if (enrollment.status !== "enrolled") {

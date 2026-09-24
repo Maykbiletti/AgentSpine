@@ -279,7 +279,7 @@ async function runHookCore(input, payload, options) {
   let attentionEvent = null;
   if (ATTENTION_WRITE_EVENTS.has(event) && !CONTEXT_EVENTS.has(event)) {
     scope = await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
-    attentionEvent = await captureAttentionLifecycle(input, event, root, scope, catalog);
+    attentionEvent = await captureAttentionLifecycle(input, event, root, scope, catalog); if(event==="Stop")await captureSessionTimelineLifecycle({root,event,input,scope,hostHome:resolvedSources.hostHome}).catch(()=>{});
   }
   if (event === "PostToolUse" && !selfstarterRootSkipped(diagnostics)) {
     scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);

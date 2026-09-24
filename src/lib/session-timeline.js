@@ -13,6 +13,7 @@ import { consumeSessionTimelineInvocation, issueSessionTimelineInvocation } from
 import {
 loadPrivateSessionTimelineEnrollment, resolvePrivateSessionTimelineEnrollment
 } from "./session-timeline-enrollment.js";
+import { privateTimelinePrefixDigest } from "./session-timeline-enrollment-source.js";
 import { timelineTransportEnrollmentMatches } from "./session-timeline-enrollment-transport.js";
 import { sameTimelineTransportDigest, timelineTransportDigest } from "./session-timeline-transport.js";
 import {
@@ -22,8 +23,8 @@ import { timelineContinuationCapsule, timelineSearchResult } from "./session-tim
 import { seekTimelineEvidence, verifyTimelineEvent } from "./session-timeline-search.js";
 import { eventFromTimelineLine, extractTimelineTimestamp } from "./session-timeline-event-extract.js";
 import { verifiedTimelineEventFromLine } from "./session-timeline-event-extract.js";
-import { pathMatchesSource } from "./session-timeline-source.js";
-import { readRange, unchangedHandle, validatedHandle } from "./session-timeline-source-open.js";
+import { pathMatchesSource, sameSessionTimelineSourceLocation } from "./session-timeline-source.js";
+import {captureTimelineAppend,MAX_BACKGROUND_CAPTURE_BYTES,readRange,sourceSnapshotDigest,unchangedHandle,validatedHandle} from "./session-timeline-source-open.js";
 import { readTimelineState, saveTimelineState } from "./session-timeline-state.js";
 import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 import { priorTimelineHint, selectPriorTimelineSource, timelineSessionReference } from "./session-timeline-prior.js";
@@ -87,6 +88,7 @@ return item && validTimelineBinding(item.binding) && typeof item.path === "strin
 && item.indexedBytes <= item.size && Array.isArray(item.events) && item.events.length <= MAX_EVENTS
 && item.events.every((event) => validEvent(event) && event.bytes <= MAX_LINE_BYTES && event.offset + event.bytes <= item.size)
 && (item.lessonDigest === null || /^[a-f0-9]{64}$/.test(item.lessonDigest || ""))
+&& (item.snapshotDigest === undefined || item.snapshotDigest === null || /^[a-f0-9]{64}$/.test(item.snapshotDigest))
 && date(item.updatedAt) && item.authority === AUTHORITY;
 }
 function validate(value, root) {
@@ -118,6 +120,14 @@ return Boolean(left && right) && ["path", "profileRoot", "projectsRoot", "pathDi
 .every((key) => left[key] === right[key]);
 }
 async function confirmedSourceEnrollment({ root, scoped, source, hostHome }) {
+if (source.snapshotDigest) {
+const loaded=await loadPrivateSessionTimelineEnrollment({root,host:scoped.host,sessionId:scoped.sessionId,
+scope:{...scoped,currentTaskId:scoped.taskId,timelineVisibility:"private-verified"}});
+if(loaded.status!=="loaded"||!sameTimelineBinding(loaded.record.binding,scoped)
+||!sameSessionTimelineSourceLocation(loaded.record.source,source)||!await pathMatchesSource(source,hostHome)
+||await privateTimelinePrefixDigest(source,loaded.record.source.prefixBytes)!==loaded.record.source.prefixDigest) return false;
+return await sourceSnapshotDigest(source,hostHome)===source.snapshotDigest;
+}
 const enrollment = await resolvePrivateSessionTimelineEnrollment({ root, host: scoped.host, sessionId: scoped.sessionId,
 transcriptPath: source.path, hostHome });
 if (enrollment.status !== "enrolled" || !sameTimelineBinding(enrollment.binding, scoped)
@@ -139,6 +149,7 @@ return {
 binding: record.binding, path: source.path, profileRoot: source.profileRoot, projectsRoot: source.projectsRoot,
 pathDigest: source.pathDigest, identity: source.identity, size: source.size, mtimeNs: source.mtimeNs,
 ctimeNs: source.ctimeNs, lessonDigest: unchanged ? previous.lessonDigest : null,
+snapshotDigest: unchanged ? previous.snapshotDigest ?? null : null,
 indexedBytes: unchanged ? previous.indexedBytes : 0, events: unchanged ? previous.events : [],
 updatedAt: asDate(now).toISOString(), authority: AUTHORITY
 };
@@ -160,8 +171,9 @@ if(previous&&sameSourceSnapshot(previous,record.source))return;
 state.sources=state.sources.filter(item=>!sameTimelineBinding(item.binding,record.binding));
 const s=enrolledSource(record,previous,now);
 state.sources.unshift(s);state.sources=state.sources.slice(0,MAX_SOURCES);
-if(s.size<262145)try{const r=await indexRange(s,0,s.size,s.profileRoot);
-if(r.status==="indexed"){s.indexedBytes=r.next;s.events=mergeEvents(s.events,r.events);}}catch{}
+if(s.size<=MAX_BACKGROUND_CAPTURE_BYTES)try{const r=await indexRange(s,0,s.size,s.profileRoot);
+if(r.status==="indexed"){s.indexedBytes=r.next;s.events=mergeEvents(s.events,r.events);
+s.snapshotDigest=await sourceSnapshotDigest(s,s.profileRoot);}}catch{}
 await saveState(state,names.path,assertOwned,rootPath,names.assertStable);
 },{assertPath:names.assertStable});
 return status({status:"registered"});
@@ -256,8 +268,10 @@ const source = sourceFor(state, scoped);
 if (!source) return unavailable("timeline-not-registered");
 const result = await task(source);
 if (result.status === "indexed") {
+if(result.source)Object.assign(source,result.source);
 source.size = result.size;
 if (!result.preserveCursor) source.indexedBytes = Math.max(source.indexedBytes, result.next);
+if(result.snapshotDigest)source.snapshotDigest=result.snapshotDigest;
 source.events = mergeEvents(source.events, result.events); source.updatedAt = new Date().toISOString();
 await saveState(state, names.path, assertOwned, root, names.assertStable);
 }
@@ -291,6 +305,16 @@ return indexRange(source, source.indexedBytes, maxBytes, hostHome);
 }
 export async function refreshSessionTimelineTail() {
 return unavailable("timeline-mcp-index-required");
+}
+export async function captureSessionTimelineTail({root,host,sessionId,scope,hostHome,maxBytes=MAX_BACKGROUND_CAPTURE_BYTES}){
+const scoped=sessionTimelineBinding({host,sessionId,scope});
+if(!hasExactPrivateTimelineScope(scope))return status({status:"group-suppressed"});
+if(!completeTimelineBinding(scoped))return unavailable("timeline-scope-unverified");
+if(!Number.isInteger(maxBytes)||maxBytes<1||maxBytes>MAX_BACKGROUND_CAPTURE_BYTES)throw new Error("background capture byte budget is invalid");
+return mutateSource(root,scoped,async(source)=>{
+return captureTimelineAppend({source,hostHome,maxBytes,parse:(bytes,start)=>parsedEvents(bytes,start,false,
+source.binding.host,Boolean(source.binding.portalRef&&source.binding.threadRef))});
+});
 }
 export async function sessionTimelineStatus({ root, host, sessionId, scope, environment = process.env }) {
 if (!hasExactPrivateTimelineScope(scope)) return status({ status: "group-suppressed" });

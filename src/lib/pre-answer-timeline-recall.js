@@ -1,6 +1,6 @@
 import {createHash} from "node:crypto";
 import {authorizeSessionTimelineInvocation,searchSessionTimeline} from "./session-timeline.js";
-import {resolvePrivateSessionTimelineEnrollment} from "./session-timeline-enrollment.js";
+import {resolvePrivateSessionTimelineContract} from "./session-timeline-enrollment.js";
 import {rankTimelineEvents,timelineTerms} from "./session-timeline-query.js";
 import {timelineTransportDigest} from "./session-timeline-transport.js";
 
@@ -58,7 +58,7 @@ export async function automaticPreAnswerTimelineRecall({root,host,sessionId,scop
   if(!scope||scope.groupId!==null||!scope.currentTaskId)return unavailable("private-task-scope-unavailable");
   let sourceReads=0;
   try {
-    const enrollment=await resolvePrivateSessionTimelineEnrollment({root,host,sessionId,hostHome});
+    const enrollment=await resolvePrivateSessionTimelineContract({root,host,sessionId,hostHome});
     if(enrollment.status!=="enrolled")return unavailable("private-enrollment-unavailable");
     const transport=timelineTransportDigest({root,binding:enrollment.binding,environment});
     if(!transport)return unavailable("timeline-transport-unavailable");
