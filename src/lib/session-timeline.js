@@ -146,24 +146,26 @@ updatedAt: asDate(now).toISOString(), authority: AUTHORITY
 export async function bootstrapSessionTimelineEnrollment({
 root, enrollmentDigest, environment = process.env, now = new Date()
 }) {
-const loaded = await bootstrapEnrollment(root, enrollmentDigest, environment);
-if (!loaded) return unavailable("private-enrollment-unavailable");
-const { rootPath, record } = loaded;
-try { await ensureSessionTimelineTrust({ create: true }); }
-catch { return unavailable("timeline-state-unavailable"); }
-try {
-const names = await paths(rootPath);
-await withOwnedFileLock(names.lock, async ({ assertOwned }) => {
-const state = await readState(names.path, rootPath, names.assertStable);
-const previous = sourceFor(state, record.binding);
-if (previous && sameSourceSnapshot(previous, record.source)) return;
-state.sources = state.sources.filter((item) => !sameTimelineBinding(item.binding, record.binding));
-state.sources.unshift(enrolledSource(record, previous, now));
-state.sources = state.sources.slice(0, MAX_SOURCES);
-await saveState(state, names.path, assertOwned, rootPath, names.assertStable);
-}, { assertPath: names.assertStable });
-} catch { return unavailable("timeline-state-unavailable"); }
-return status({ status: "registered", bootstrap: "signed-enrollment-metadata" });
+const loaded=await bootstrapEnrollment(root,enrollmentDigest,environment);
+if(!loaded)return unavailable("private-enrollment-unavailable");
+const {rootPath,record}=loaded;
+try{await ensureSessionTimelineTrust({create:true});}
+catch{return unavailable("timeline-state-unavailable");}
+try{
+const names=await paths(rootPath);
+await withOwnedFileLock(names.lock,async({assertOwned})=>{
+const state=await readState(names.path,rootPath,names.assertStable);
+const previous=sourceFor(state,record.binding);
+if(previous&&sameSourceSnapshot(previous,record.source))return;
+state.sources=state.sources.filter(item=>!sameTimelineBinding(item.binding,record.binding));
+const s=enrolledSource(record,previous,now);
+state.sources.unshift(s);state.sources=state.sources.slice(0,MAX_SOURCES);
+if(s.size<262145)try{const r=await indexRange(s,0,s.size,s.profileRoot);
+if(r.status==="indexed"){s.indexedBytes=r.next;s.events=mergeEvents(s.events,r.events);}}catch{}
+await saveState(state,names.path,assertOwned,rootPath,names.assertStable);
+},{assertPath:names.assertStable});
+return status({status:"registered"});
+}catch{return unavailable("timeline-state-unavailable");}
 }
 export async function sessionTimelineLifecycleHint({
 root, host, sessionId, scope, environment = process.env

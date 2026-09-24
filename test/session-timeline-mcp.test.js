@@ -132,7 +132,7 @@ async function directIndex(item, scoped, toolUseId = "tool:direct:index") {
   });
 }
 
-test("compaction creates bounded redacted evidence that a host-bound MCP permit can retrieve", async (t) => {
+test("enrollment creates bounded evidence for permitted retrieval", async (t) => {
   const item = await fixture(t);
   await enrollAndRegister(item);
   const before = hash(await readFile(item.session));
@@ -141,20 +141,23 @@ test("compaction creates bounded redacted evidence that a host-bound MCP permit 
     root: item.project, sessionId: "session:timeline", ...mcpScope(),
     at: "2026-09-04T12:40:00.000Z", query: "Suite PASS"
   }));
-  assert.equal(raw.blocked, true, "a direct MCP query has no host invocation permit");
+  assert.equal(raw.blocked, true);
 
   const preCompact = await runHook({ hook_event_name: "PreCompact", host: "claude", cwd: item.project,
     transcript_path: item.session, session_id: "session:timeline", ...scope() });
   assert.equal(preCompact.failedClosed, undefined, preCompact.error || preCompact.reason);
   const compacted = JSON.parse(preCompact.context).sourceResolution.timeline;
-  assert.equal(compacted.status, "partial");
+  assert.equal(compacted.status, "indexed");
+  assert.equal(compacted.events, 2);
   assert.equal(compacted.freshness, "source-not-read");
   assert.equal(compacted.continuation.goalStepId, "step:measure");
-  assert.equal(compacted.continuation.outcomeStatus, "awaiting-objective-outcome");
+  assert.equal(compacted.continuation.outcomeStatus, "objective-result-recorded");
   assert.equal("accessProof" in compacted, false);
 
   const indexArgs = await guardedArgs(item, "session_timeline_index", { root: item.project, maxBytes: 65_536 }, "tool:mcp:index");
-  assert.equal(result(await call("session_timeline_index", indexArgs)).status, "indexed");
+  const repeatedIndex = result(await call("session_timeline_index", indexArgs));
+  assert.equal(repeatedIndex.status, "indexed");
+  assert.equal(repeatedIndex.added, 0);
   const searchArgs = await guardedArgs(item, "session_timeline_search", {
     root: item.project, at: "2026-09-04T12:40:11.000Z", query: "Suite PASS", windowSeconds: 0
   }, "tool:mcp:search");
@@ -180,26 +183,8 @@ test("compaction creates bounded redacted evidence that a host-bound MCP permit 
   assert.equal((await sessionTimelineStatus({ root: item.project, host: "claude", sessionId: "session:timeline", scope: scope() })).status, "indexed");
   const sidecar = await readFile((await sessionTimelineStatePaths(item.project)).path, "utf8");
   assert.doesNotMatch(sidecar, /synthetic-secret|sk-proj-|xoxb-|I claim Suite/);
-  assert.equal(hash(await readFile(item.session)), before, "all capture and recall paths preserve transcript bytes");
+  assert.equal(hash(await readFile(item.session)), before);
   assert.equal(await readFile(join(item.project, "AGENTS.md"), "utf8"), "# Synthetic project\n");
-});
-
-test("receipt-backed bootstrap lets MCP index without a lifecycle registration read", async (t) => {
-  const item = await fixture(t);
-  const before = hash(await readFile(item.session));
-  await enrollAndRegister(item);
-  const statePath = (await sessionTimelineStatePaths(item.project)).path;
-  const beforeIndex = JSON.parse(await readFile(statePath, "utf8"));
-  assert.equal(beforeIndex.sources[0].indexedBytes, 0);
-  assert.deepEqual(beforeIndex.sources[0].events, []);
-  assert.doesNotMatch(JSON.stringify(beforeIndex), /Suite 0; result: PASS/);
-
-  const call = client();
-  const args = await guardedArgs(item, "session_timeline_index", { root: item.project, maxBytes: 65_536 }, "tool:bootstrap:index");
-  const indexed = result(await call("session_timeline_index", args));
-  assert.equal(indexed.status, "indexed");
-  assert.equal(indexed.added, 2);
-  assert.equal(hash(await readFile(item.session)), before, "bootstrap and index preserve host source bytes");
 });
 
 test("timestamp-only recall is exact unless the caller explicitly requests a bounded window", async (t) => {
