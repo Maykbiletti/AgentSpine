@@ -129,6 +129,34 @@ test("an opted-in Codex session recalls one Claude result with provider provenan
   await f.preserve();
 });
 
+test("automatic pre-answer recall crosses providers only after exact private opt-in", async t => {
+  const f = await setup(t);
+  const beforeClaude = digest(await readFile(f.claudePath));
+  const beforeCodex = digest(await readFile(f.codexPath));
+  await prepare(f);
+  const prompt = eventId => runHook({ hook_event_name: "UserPromptSubmit", host: "codex",
+    cwd: f.root, session_id: CODEX_SESSION, transcript_path: f.codexPath, event_id: eventId,
+    prompt: "What was the provider handoff Suite 0 result?", ...hookScope() });
+
+  const isolated = await prompt("event:provider-handoff:isolated");
+  assert.equal(isolated.blocked, false, isolated.reason);
+  const isolatedRecall = JSON.parse(isolated.context).sourceResolution.timeline.preAnswerRecall;
+  assert.equal(isolatedRecall.status, "not-found");
+  assert.doesNotMatch(isolated.context, /FAIL 0\/15/);
+
+  process.env[TIMELINE_CROSS_PROVIDER_ENV] = "1";
+  const optedIn = await prompt("event:provider-handoff:opted-in");
+  assert.equal(optedIn.blocked, false, optedIn.reason);
+  const recall = JSON.parse(optedIn.context).sourceResolution.timeline.preAnswerRecall;
+  assert.equal(recall.status, "recalled", JSON.stringify(recall));
+  assert.equal(recall.awaited, true);
+  assert.match(JSON.stringify(recall.events), /FAIL 0\/15/);
+  assert.equal(recall.source.provider, "claude");
+  assert.equal(digest(await readFile(f.claudePath)), beforeClaude);
+  assert.equal(digest(await readFile(f.codexPath)), beforeCodex);
+  await f.preserve();
+});
+
 test("cross-provider selection rejects missing coupling, foreign scope, groups and changed sources", async t => {
   const f = await setup(t);
   await prepare(f);

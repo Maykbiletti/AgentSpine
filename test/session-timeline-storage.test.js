@@ -122,7 +122,7 @@ test("post-compaction continues with the sealed enrollment profile, never ambien
   process.env.HOME = home;
   delete process.env.CLAUDE_CONFIG_DIR;
   const continued = await sessionTimelineStatus({ root, host: "claude", sessionId: "session:profile", scope: bound });
-  assert.equal(continued.status, "partial");
+  assert.equal(continued.status, "indexed");
   const searched = await searchSessionTimeline({ root, host: "claude", sessionId: "session:profile", scope: bound,
     at: "2026-09-04T12:40:11.000Z", query: "profile Suite", windowSeconds: 0 });
   assert.equal(searched.blocked, true);

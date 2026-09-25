@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -132,7 +132,7 @@ async function directIndex(item, scoped, toolUseId = "tool:direct:index") {
   });
 }
 
-test("compaction creates bounded redacted evidence that a host-bound MCP permit can retrieve", async (t) => {
+test("enrollment creates bounded evidence for permitted retrieval", async (t) => {
   const item = await fixture(t);
   await enrollAndRegister(item);
   const before = hash(await readFile(item.session));
@@ -141,20 +141,23 @@ test("compaction creates bounded redacted evidence that a host-bound MCP permit 
     root: item.project, sessionId: "session:timeline", ...mcpScope(),
     at: "2026-09-04T12:40:00.000Z", query: "Suite PASS"
   }));
-  assert.equal(raw.blocked, true, "a direct MCP query has no host invocation permit");
+  assert.equal(raw.blocked, true);
 
   const preCompact = await runHook({ hook_event_name: "PreCompact", host: "claude", cwd: item.project,
     transcript_path: item.session, session_id: "session:timeline", ...scope() });
   assert.equal(preCompact.failedClosed, undefined, preCompact.error || preCompact.reason);
   const compacted = JSON.parse(preCompact.context).sourceResolution.timeline;
-  assert.equal(compacted.status, "partial");
+  assert.equal(compacted.status, "indexed");
+  assert.equal(compacted.events, 2);
   assert.equal(compacted.freshness, "source-not-read");
   assert.equal(compacted.continuation.goalStepId, "step:measure");
-  assert.equal(compacted.continuation.outcomeStatus, "awaiting-objective-outcome");
+  assert.equal(compacted.continuation.outcomeStatus, "objective-result-recorded");
   assert.equal("accessProof" in compacted, false);
 
   const indexArgs = await guardedArgs(item, "session_timeline_index", { root: item.project, maxBytes: 65_536 }, "tool:mcp:index");
-  assert.equal(result(await call("session_timeline_index", indexArgs)).status, "indexed");
+  const repeatedIndex = result(await call("session_timeline_index", indexArgs));
+  assert.equal(repeatedIndex.status, "indexed");
+  assert.equal(repeatedIndex.added, 0);
   const searchArgs = await guardedArgs(item, "session_timeline_search", {
     root: item.project, at: "2026-09-04T12:40:11.000Z", query: "Suite PASS", windowSeconds: 0
   }, "tool:mcp:search");
@@ -180,26 +183,8 @@ test("compaction creates bounded redacted evidence that a host-bound MCP permit 
   assert.equal((await sessionTimelineStatus({ root: item.project, host: "claude", sessionId: "session:timeline", scope: scope() })).status, "indexed");
   const sidecar = await readFile((await sessionTimelineStatePaths(item.project)).path, "utf8");
   assert.doesNotMatch(sidecar, /synthetic-secret|sk-proj-|xoxb-|I claim Suite/);
-  assert.equal(hash(await readFile(item.session)), before, "all capture and recall paths preserve transcript bytes");
+  assert.equal(hash(await readFile(item.session)), before);
   assert.equal(await readFile(join(item.project, "AGENTS.md"), "utf8"), "# Synthetic project\n");
-});
-
-test("receipt-backed bootstrap lets MCP index without a lifecycle registration read", async (t) => {
-  const item = await fixture(t);
-  const before = hash(await readFile(item.session));
-  await enrollAndRegister(item);
-  const statePath = (await sessionTimelineStatePaths(item.project)).path;
-  const beforeIndex = JSON.parse(await readFile(statePath, "utf8"));
-  assert.equal(beforeIndex.sources[0].indexedBytes, 0);
-  assert.deepEqual(beforeIndex.sources[0].events, []);
-  assert.doesNotMatch(JSON.stringify(beforeIndex), /Suite 0; result: PASS/);
-
-  const call = client();
-  const args = await guardedArgs(item, "session_timeline_index", { root: item.project, maxBytes: 65_536 }, "tool:bootstrap:index");
-  const indexed = result(await call("session_timeline_index", args));
-  assert.equal(indexed.status, "indexed");
-  assert.equal(indexed.added, 2);
-  assert.equal(hash(await readFile(item.session)), before, "bootstrap and index preserve host source bytes");
 });
 
 test("timestamp-only recall is exact unless the caller explicitly requests a bounded window", async (t) => {
@@ -313,6 +298,54 @@ test("raw API and MCP claims cannot bypass enrollment, scope binding, group isol
     enrollmentDigest: renewed.enrollmentDigest
   });
   assert.equal(found.status, "found");
+});
+
+test("verified lifecycle capture indexes only an append-only bounded tail and remains idempotent", async (t) => {
+  const item = await fixture(t);
+  await enrollAndRegister(item);
+  const names = await sessionTimelineStatePaths(item.project, { create: false });
+  const before = JSON.parse(await readFile(names.path, "utf8")).sources[0];
+  const appended = `${JSON.stringify({ timestamp: "2026-09-04T12:43:00.000Z", message: { role: "tool",
+    content: "Measured background capture Suite 1; result: PASS 1/1." } })}\n`;
+  await appendFile(item.session, appended);
+  const sourceDigest = hash(await readFile(item.session));
+  const prompt = (eventId, overrides = {}) => runHook({ hook_event_name: "UserPromptSubmit", host: "claude",
+    cwd: item.project, transcript_path: item.session, session_id: "session:timeline", event_id: eventId,
+    prompt: "Continue the synthetic timeline task.", ...scope(), ...overrides });
+  const captured = await prompt("event:background-capture:one");
+  assert.equal(captured.blocked, false, captured.reason || captured.error);
+  let source = JSON.parse(await readFile(names.path, "utf8")).sources[0];
+  const timeline = JSON.parse(captured.context).sourceResolution.timeline;
+  assert.equal(source.indexedBytes, Buffer.byteLength(await readFile(item.session)), JSON.stringify(timeline));
+  assert.equal(source.events.length, before.events.length + 1);
+  assert.match(source.snapshotDigest, /^[a-f0-9]{64}$/);
+  assert.equal(hash(await readFile(item.session)), sourceDigest, "capture keeps the native source byte-identical");
+
+  await appendFile(item.session, `${JSON.stringify({ timestamp: "2026-09-04T12:43:30.000Z", message: { role: "tool",
+    content: "Measured stop capture Suite 2; result: PASS 1/1." } })}\n`);
+  const stopDigest = hash(await readFile(item.session));
+  const stopped = await runHook({ hook_event_name: "Stop", host: "claude", cwd: item.project,
+    transcript_path: item.session, session_id: "session:timeline", event_id: "event:background-capture:stop", ...scope() });
+  assert.equal(stopped.blocked, false, stopped.reason);
+  source = JSON.parse(await readFile(names.path, "utf8")).sources[0];
+  assert.equal(source.events.length, before.events.length + 2);
+  assert.equal(hash(await readFile(item.session)), stopDigest);
+
+  const repeated = await prompt("event:background-capture:repeat");
+  assert.equal(repeated.blocked, false);
+  assert.deepEqual(JSON.parse(await readFile(names.path, "utf8")).sources[0].events, source.events,
+    "repeated delivery adds no second observation");
+
+  const changed = (await readFile(item.session, "utf8")).replace("PASS 15/15", "FAIL 15/15");
+  await writeFile(item.session, `${changed}${JSON.stringify({ timestamp: "2026-09-04T12:44:00.000Z",
+    message: { role: "tool", content: "Measured altered capture Suite 2; result: PASS 1/1." } })}\n`);
+  const degraded = await prompt("event:background-capture:changed");
+  assert.equal(degraded.blocked, false, "optional capture failure must not block the user prompt");
+  assert.deepEqual(JSON.parse(await readFile(names.path, "utf8")).sources[0].events, source.events,
+    "changed historical bytes cannot enter the observation index");
+  const foreign = await prompt("event:background-capture:foreign", { userId: "person:foreign" });
+  assert.equal(foreign.blocked, false);
+  assert.deepEqual(JSON.parse(await readFile(names.path, "utf8")).sources[0].events, source.events);
 });
 
 test("timeline core requires an explicit private group binding before every entrypoint", async (t) => {

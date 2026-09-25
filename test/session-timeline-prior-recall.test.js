@@ -8,9 +8,9 @@ import { PassThrough } from "node:stream";
 import { runHook } from "../src/hook.js";
 import { hookOutput } from "../src/lib/hook-output.js";
 import { fitTimelineRecallToHostContext } from "../src/lib/pre-answer-timeline-recall.js";
+import { recordWorldAssertion } from "../src/lib/world-model.js";
 import { startMcpServer } from "../src/mcp.js";
 import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
-
 const SESSION_A = "session:prior-recall-a";
 const SESSION_B = "session:prior-recall-b";
 const SESSION_C = "session:prior-recall-c";
@@ -68,7 +68,7 @@ function priorTranscript() {
     message: { role: "tool", content: `Measured old archive ${kind} lesson; result: FAIL 0/1.` }
   }));
   const target = { timestamp: "2026-09-04T12:40:11.000Z", message: { role: "tool",
-    content: "Measured CSS archive Suite 0 in result.txt; result: FAIL 0/15." } };
+    content: "Measured CSS archive Suite 0 in result.txt; result: FAIL 0/15. Synthetic checksum detail: abc123." } };
   const newerUnrelated = { timestamp: "2026-09-04T12:40:19.000Z", message: { role: "tool",
     content: "Measured unrelated typography audit in other.log; result: PASS 1/1." } };
   const feedback = [
@@ -209,6 +209,28 @@ test("a restarted task recalls one indexed prior-session result with stable sour
   assert.equal(found.events[0].trust, "untrusted-session-history");
   assert.equal(found.events[0].authority, "context-only");
 
+  const detailFields = { query: "objective result", includePriorSessions: true,
+    detailEventId: found.events[0].id, sourceDigest: found.sourceDigest,
+    sessionRef: found.events[0].sessionRef };
+  const detailGuard = await runHook(toolInput(item, SESSION_B, "tool:prior:detail", detailFields));
+  assert.equal(detailGuard.blocked, false, detailGuard.reason);
+  assert.equal(detailGuard.updatedInput.detailEventId, detailFields.detailEventId);
+  const detail = await client()("session_timeline_search", detailGuard.updatedInput);
+  assert.equal(detail.status, "found", JSON.stringify(detail));
+  assert.equal(detail.events.length, 1);
+  assert.match(detail.events[0].sourceDetail.text, /Synthetic checksum detail: abc123/);
+  assert.equal(detail.events[0].sourceDetail.complete, false);
+  assert.equal(detail.events[0].sourceDetail.reason, "bounded-extraction");
+  assert.match(detail.events[0].messageDigest, /^[a-f0-9]{64}$/);
+  assert.equal(found.events[0].sourceDetail, undefined, "short first-stage hits omit detail");
+
+  const wrongDigest = await runHook(toolInput(item, SESSION_B, "tool:prior:wrong-digest",
+    { ...detailFields, sourceDigest: "0".repeat(64) }));
+  if (!wrongDigest.blocked) {
+    const rejected = await client()("session_timeline_search", wrongDigest.updatedInput);
+    assert.equal(rejected.blocked, true);
+  }
+
   const replay = await client()("session_timeline_search", priorGuard.updatedInput);
   assert.equal(replay.blocked, true);
   const compacted = await runHook({ hook_event_name: "PostCompact", ...lifecycleInput, transcript_path: undefined });
@@ -253,7 +275,8 @@ test("every private pre-answer turn awaits bounded prior evidence without a sear
   assert.equal(directRecall.omittedEvents, 9);
   const timeline=JSON.parse(direct.context).sourceResolution.timeline;
   const empty={...directRecall,events:[],omittedEvents:directRecall.omittedEvents+directRecall.events.length};
-  const maximumBytes=Buffer.byteLength(JSON.stringify({...timeline,preAnswerRecall:empty}));
+  const maximumBytes=Buffer.byteLength(JSON.stringify({schema:timeline.schema,status:timeline.status,
+    preAnswerRecall:empty,authority:timeline.authority}));
   const budgeted=fitTimelineRecallToHostContext({timeline,render:JSON.stringify,maximumBytes}).timeline.preAnswerRecall;
   assert.equal(budgeted.status,"unavailable");
   assert.equal(budgeted.reason,"host-context-budget");
@@ -372,33 +395,35 @@ test("a direct prompt selects the relevant result across multiple prior sessions
     { maxBytes: 16 * 1024 * 1024 }));
   await client()("session_timeline_index", newerGuard.updatedInput);
 
+  await recordWorldAssertion({root:item.project,id:"assertion:prior-recall-task",subjectId:scope().currentTaskId,
+    predicate:"task.continuation",value:{schema:"agentspine.task-continuation/v1",taskId:scope().currentTaskId,status:"active",objective:"CSS archive Suite 0 using result.txt",lastVerifiedStep:null,openQuestions:[],nextStep:{id:"step:measure-result",summary:"Measure result.txt"}},evidenceKind:"objective-measurement",evidenceId:"evidence:prior-recall-task",evidenceDigest:"d".repeat(64),observedAt:"2026-09-04T12:30:00.000Z",projectId:scope().projectId,groupId:null,privacy:"private",knowledgeKind:"task-state",sessionRef:`session-ref:${"e".repeat(32)}`,messageRef:"message:prior-recall-task",portalRef:scope().portalRef,threadRef:scope().threadRef,now:"2026-09-04T12:31:00.000Z"});
+
   process.env.AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID = SESSION_B;
   await enroll(item, SESSION_B, item.transcriptB);
   const result = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude",
     cwd: item.project, session_id: SESSION_B, transcript_path: item.transcriptB,
     event_id: "event:prior:multi-relevant",
     prompt: "What was the CSS archive Suite 0 result in result.txt?", ...hookScope() });
-  const continuation = await runHook({ hook_event_name: "UserPromptSubmit", host: "claude",
-    cwd: item.project, session_id: SESSION_B, transcript_path: item.transcriptB,
-    event_id: "event:prior:multi-continuation", prompt: "Continue the existing task.", ...hookScope() });
+  const terse=await runHook({hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.project,session_id:SESSION_B,transcript_path:item.transcriptB,event_id:"event:prior:multi-terse",prompt:"typography?",...hookScope()}); const ambiguous=await runHook({hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.project,session_id:SESSION_B,transcript_path:item.transcriptB,event_id:"event:prior:multi-ambiguous",prompt:"result?",...hookScope()});
+  const continuation=await runHook({hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.project,session_id:SESSION_B,transcript_path:item.transcriptB,event_id:"event:prior:multi-continuation",prompt:"Continue the existing task.",...hookScope()});
   assert.equal(result.blocked, false, result.reason);
   const recall = JSON.parse(result.context).sourceResolution.timeline.preAnswerRecall;
   assert.equal(recall.status, "recalled");
   assert.equal(recall.sourceReads, 2);
   assert.equal(recall.sources, undefined, "result and feedback must share one verified source");
-  assert.match(JSON.stringify(recall.events), /result\.txt/);
-  assert.doesNotMatch(JSON.stringify(recall.events), /other\.log/);
+  assert.match(JSON.stringify(recall.events), /result\.txt/); assert.doesNotMatch(JSON.stringify(recall.events), /other\.log/);
   const handoff = hookOutput("UserPromptSubmit", result.context,
     { BLUN_PLUGIN_ROOT: "/synthetic/king" }).hookSpecificOutput.additionalContext;
   assert.match(handoff, /result\.txt/);
   assert.doesNotMatch(handoff, /other\.log/);
   assert.match(handoff, /Nein, erst die Prüfsumme prüfen/);
   assert.doesNotMatch(handoff, /Schriftgröße/);
+  const terseRecall=JSON.parse(terse.context).sourceResolution.timeline.preAnswerRecall; assert.equal(terseRecall.sourceReads,1); assert.match(JSON.stringify(terseRecall.events),/other\.log/); assert.doesNotMatch(JSON.stringify(terseRecall.events),/result\.txt|Prüfsumme|andere Datei|erledigt|Schriftgröße/); const ambiguousRecall=JSON.parse(ambiguous.context).sourceResolution.timeline.preAnswerRecall; assert.match(JSON.stringify(ambiguousRecall.events),/result\.txt/); assert.doesNotMatch(JSON.stringify(ambiguousRecall.events),/other\.log/);
   const continuationRecall = JSON.parse(continuation.context).sourceResolution.timeline.preAnswerRecall;
-  assert.equal(continuationRecall.status, "recalled");
-  assert.match(JSON.stringify(continuationRecall.events), /other\.log/);
-  assert.match(JSON.stringify(continuationRecall.events), /Schriftgröße/);
+  assert.equal(continuationRecall.status, "recalled"); assert.match(JSON.stringify(continuationRecall.events), /result\.txt/);
+  assert.doesNotMatch(JSON.stringify(continuationRecall.events), /other\.log|Schriftgröße/);
   assert.equal(continuationRecall.sources, undefined);
+  const doneGuard=await runHook(toolInput(item,SESSION_B,"tool:prior:done-evidence",{at:"2026-09-04T12:40:19.000Z",windowSeconds:0,includePriorSessions:true})),doneFound=await client()("session_timeline_search",doneGuard.updatedInput),evidence=doneFound.events.find(event=>event.outcome==="pass"&&/other\.log/.test(event.excerpt)); assert.ok(evidence,JSON.stringify(doneFound)); const detailGuard=await runHook(toolInput(item,SESSION_B,"tool:prior:done-detail",{query:"objective result",includePriorSessions:true,detailEventId:evidence.id,sourceDigest:doneFound.sourceDigest,sessionRef:evidence.sessionRef})),detail=await client()("session_timeline_search",detailGuard.updatedInput); assert.ok(detail.events?.[0],JSON.stringify(detail)); const verifiedEvidence=detail.events[0]; await recordWorldAssertion({root:item.project,id:"assertion:prior-recall-done",subjectId:scope().currentTaskId,predicate:"task.continuation",value:{schema:"agentspine.task-continuation/v1",taskId:scope().currentTaskId,status:"completed",objective:"typography audit in other.log",lastVerifiedStep:{id:"step:typography",summary:"Verify typography audit in other.log",result:"passed",evidenceId:verifiedEvidence.id,evidenceDigest:verifiedEvidence.messageDigest,observedAt:verifiedEvidence.at,sessionRef:verifiedEvidence.sessionRef,messageRef:verifiedEvidence.messageRef},openQuestions:[],nextStep:null},evidenceKind:"objective-measurement",evidenceId:verifiedEvidence.id,evidenceDigest:verifiedEvidence.messageDigest,observedAt:verifiedEvidence.at,projectId:scope().projectId,groupId:null,privacy:"private",knowledgeKind:"task-state",sessionRef:verifiedEvidence.sessionRef,messageRef:verifiedEvidence.messageRef,portalRef:scope().portalRef,threadRef:scope().threadRef,now:"2026-09-04T13:30:00.000Z",supersedes:["assertion:prior-recall-task"]}); const done=await runHook({hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.project,session_id:SESSION_B,transcript_path:item.transcriptB,event_id:"event:prior:done",prompt:"Das hatten wir schon erledigt",...hookScope()}),doneRecall=JSON.parse(done.context).sourceResolution.timeline.preAnswerRecall; assert.equal(doneRecall.completionVerified,true,JSON.stringify(doneRecall)); const doneHandoff=hookOutput("UserPromptSubmit",done.context,{BLUN_PLUGIN_ROOT:"/synthetic/king"}).hookSpecificOutput.additionalContext; assert.match(doneHandoff,/completionVerified(?:\\?"|&quot;):true/); assert.match(doneHandoff,/objective-measurement/);
   assert.equal(sha256(await readFile(item.transcriptA)), beforeA);
   assert.equal(sha256(await readFile(item.transcriptD)), beforeD);
 });

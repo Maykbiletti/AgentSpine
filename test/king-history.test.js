@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { fixture, processCall } from "./mcp-bounded-fixture.js";
 import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
 import { runHook } from "../src/hook.js";
+import { sessionTimelineStatePaths } from "../src/lib/session-timeline-auth.js";
 import { KING_TIMELINE_SOURCE_ENV, KING_WIRE_PROTOCOL_ENV } from "../src/lib/session-timeline-provider.js";
 import { TIMELINE_TRANSPORT_CAPABILITY_ENV, TIMELINE_TRANSPORT_SESSION_ENV } from "../src/lib/session-timeline-transport.js";
 
@@ -87,9 +88,20 @@ test("King session B recalls only A's objective wire result after restart and co
   const f = await setup(t);
   const a = await wire(f, "session_king-a", [
     { type: "context.append_message", time: AT_MS, message: { role: "assistant",
-      content: "Suite 0 PASS 15/15 claimed by a model." } }, measured]);
+      content: "Suite 0 PASS 15/15 claimed by a model." } }]);
   const enrolledA = await enroll(f, "session_king-a", a);
   assert.equal(enrolledA.status, "enrolled", JSON.stringify(enrolledA));
+  const appended = Buffer.from(line(measured));
+  await appendFile(a.path, appended);
+  const observed = await runHook({ hook_event_name: "UserPromptSubmit", host: "codex", cwd: f.root,
+    session_id: "session_king-a", event_id: "event:king-append", prompt: "Continue the synthetic King task.",
+    entity_id: SCOPE.entityId, user_id: SCOPE.userId,
+    tenant_id: SCOPE.tenantId, project_id: SCOPE.projectId, task_id: SCOPE.currentTaskId,
+    group_id: null });
+  assert.equal(observed.blocked, false);
+  const state = JSON.parse(await readFile((await sessionTimelineStatePaths(f.root, { create: false })).path, "utf8"));
+  assert.equal(state.sources.find(item => item.binding.sessionId === "session_king-a")?.indexedBytes,
+    (await readFile(a.path)).byteLength, JSON.stringify(state.sources));
   assert.equal((await lookup(f, "session_king-a", "index")).status, "indexed");
   const b = await wire(f, "session_king-b");
   assert.equal((await enroll(f, "session_king-b", b)).status, "enrolled");
@@ -115,7 +127,7 @@ test("King session B recalls only A's objective wire result after restart and co
   assert.equal(captured.status, "captured");
   assert.equal(captured.captured.value.sourceProvider, "king");
   assert.equal(captured.captured.source.id, found.events[0].id);
-  assert.deepEqual(await readFile(a.path), a.bytes);
+  assert.deepEqual(await readFile(a.path), Buffer.concat([a.bytes, appended]));
   assert.deepEqual(await readFile(b.path), b.bytes);
   await f.preserve();
 });

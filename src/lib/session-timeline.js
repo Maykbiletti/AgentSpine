@@ -2,28 +2,20 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { withOwnedFileLock } from "./owned-file-lock.js";
-import {
-completeTimelineBinding, hasVerifiedTimelinePrivateScope, sameTimelineBinding, sessionTimelineBinding,
-TIMELINE_ID_RE, validTimelineBinding
-} from "./session-timeline-contract.js";
-import {
-ensureSessionTimelineTrust, sessionTimelineStatePaths
-} from "./session-timeline-auth.js";
+import {completeTimelineBinding,hasVerifiedTimelinePrivateScope,sameTimelineBinding,sessionTimelineBinding,TIMELINE_ID_RE,validTimelineBinding} from "./session-timeline-contract.js";
+import {ensureSessionTimelineTrust,sessionTimelineStatePaths} from "./session-timeline-auth.js";
 import { consumeSessionTimelineInvocation, issueSessionTimelineInvocation } from "./session-timeline-invocation.js";
-import {
-loadPrivateSessionTimelineEnrollment, resolvePrivateSessionTimelineEnrollment
-} from "./session-timeline-enrollment.js";
+import {loadPrivateSessionTimelineEnrollment,resolvePrivateSessionTimelineEnrollment} from "./session-timeline-enrollment.js";
+import { privateTimelinePrefixDigest } from "./session-timeline-enrollment-source.js";
 import { timelineTransportEnrollmentMatches } from "./session-timeline-enrollment-transport.js";
 import { sameTimelineTransportDigest, timelineTransportDigest } from "./session-timeline-transport.js";
-import {
-matchesTimelineEvent, rankTimelineEvents, timelineQuery
-} from "./session-timeline-query.js";
+import {matchesTimelineEvent,rankTimelineEvents,timelineQuery} from "./session-timeline-query.js";
 import { timelineContinuationCapsule, timelineSearchResult } from "./session-timeline-results.js";
 import { seekTimelineEvidence, verifyTimelineEvent } from "./session-timeline-search.js";
 import { eventFromTimelineLine, extractTimelineTimestamp } from "./session-timeline-event-extract.js";
 import { verifiedTimelineEventFromLine } from "./session-timeline-event-extract.js";
-import { pathMatchesSource } from "./session-timeline-source.js";
-import { readRange, unchangedHandle, validatedHandle } from "./session-timeline-source-open.js";
+import { pathMatchesSource, sameSessionTimelineSourceLocation } from "./session-timeline-source.js";
+import {captureTimelineAppend,MAX_BACKGROUND_CAPTURE_BYTES,readRange,sourceSnapshotDigest,unchangedHandle,validatedHandle} from "./session-timeline-source-open.js";
 import { readTimelineState, saveTimelineState } from "./session-timeline-state.js";
 import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 import { priorTimelineHint, selectPriorTimelineSource, timelineSessionReference } from "./session-timeline-prior.js";
@@ -41,19 +33,12 @@ const EVENT_OUTCOMES = new Set(["pass", "fail", "blocked", "timeout", "error", "
 const EVENT_LABEL_RE = /^(?:suite-(?:0|[1-9]\d{0,3})|acceptance|audit|npm-check|ci|test)$/;
 const EVENT_KEYS = new Set(["nativeMessageId", "id", "at", "offset", "bytes", "sha256", "kind", "outcome", "count", "testLabel", "nextStepSummary", "terms", "authority"]);
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
-function asDate(value) {
-const date = value instanceof Date ? value : new Date(value);
-if (!Number.isFinite(date.getTime())) throw new Error("session timeline timestamp is invalid");
-return date;
-}
+function asDate(value) {const date=value instanceof Date?value:new Date(value);if(!Number.isFinite(date.getTime()))throw new Error("session timeline timestamp is invalid");return date;}
 function date(value) { return Number.isFinite(new Date(value).getTime()); }
-function empty(root) { return { schema: STATE_SCHEMA, rootDigest: sessionTimelineRootDigest(root), sources: [], authority: AUTHORITY }; }
+function empty(root) { return { schema: STATE_SCHEMA, rootDigest: sessionTimelineRootDigest(root), sources: [], observers: [], authority: AUTHORITY }; }
 function hasOnlyKeys(item, allowed) { return Object.keys(item).every((key) => allowed.has(key)); }
-function validCount(item) {
-return item === null || Boolean(item && typeof item === "object" && Object.keys(item).length === 2
-&& Number.isSafeInteger(item.value) && item.value >= 0 && Number.isSafeInteger(item.total)
-&& item.total > 0 && item.value <= item.total);
-}
+function validCount(item) {return item===null||Boolean(item&&typeof item==="object"&&Object.keys(item).length===2
+&&Number.isSafeInteger(item.value)&&item.value>=0&&Number.isSafeInteger(item.total)&&item.total>0&&item.value<=item.total);}
 function validEvent(item) {
 const common = item && typeof item === "object" && hasOnlyKeys(item, EVENT_KEYS)
 && typeof item.id === "string" && TIMELINE_ID_RE.test(item.id) && date(item.at)
@@ -87,35 +72,62 @@ return item && validTimelineBinding(item.binding) && typeof item.path === "strin
 && item.indexedBytes <= item.size && Array.isArray(item.events) && item.events.length <= MAX_EVENTS
 && item.events.every((event) => validEvent(event) && event.bytes <= MAX_LINE_BYTES && event.offset + event.bytes <= item.size)
 && (item.lessonDigest === null || /^[a-f0-9]{64}$/.test(item.lessonDigest || ""))
+&& (item.snapshotDigest === undefined || item.snapshotDigest === null || /^[a-f0-9]{64}$/.test(item.snapshotDigest))
 && date(item.updatedAt) && item.authority === AUTHORITY;
 }
+function validObserver(item){return item&&/^[a-f0-9]{64}$/.test(item.bindingDigest||"")
+&&/^[A-Za-z0-9._:-]{1,256}$/.test(item.model||"")&&date(item.updatedAt)
+&&Array.isArray(item.prompts)&&item.prompts.length<=32
+&&item.prompts.every(value=>/^[a-f0-9]{64}$/.test(value))&&item.authority===AUTHORITY;}
 function validate(value, root) {
 if (!value || value.schema !== STATE_SCHEMA || value.rootDigest !== sessionTimelineRootDigest(root) || value.authority !== AUTHORITY
-|| !Array.isArray(value.sources) || value.sources.length > MAX_SOURCES || value.sources.some((item) => !validSource(item))) {
+|| !Array.isArray(value.sources) || value.sources.length > MAX_SOURCES || value.sources.some((item) => !validSource(item))
+||value.observers!==undefined&&(!Array.isArray(value.observers)||value.observers.length>MAX_SOURCES||value.observers.some(item=>!validObserver(item)))) {
 throw new Error("session timeline state is invalid");
 }
 return value;
 }
-function paths(root) { return sessionTimelineStatePaths(root); }
-function readState(path, root, assertStable) {
-return readTimelineState({ path, root, maximumBytes: MAX_STATE_BYTES, empty, validate, assertStable });
-}
-function saveState(state, path, assertOwned, root, assertStable) {
-return saveTimelineState({ state, path, root, maximumBytes: MAX_STATE_BYTES, assertOwned, assertStable });
-}
+function paths(root) {return sessionTimelineStatePaths(root);}
+function readState(path,root,assertStable) {return readTimelineState({path,root,maximumBytes:MAX_STATE_BYTES,empty,validate,assertStable});}
+function saveState(state,path,assertOwned,root,assertStable) {return saveTimelineState({state,path,root,maximumBytes:MAX_STATE_BYTES,assertOwned,assertStable});}
 function status(value, extra = {}) { return { schema: SESSION_TIMELINE_SCHEMA, ...value, ...extra, authority: AUTHORITY }; }
+function unavailable(reason) { return status({ status: "unavailable", reason }); }
+function blocked(reason) { return { blocked: true, reason, authority: AUTHORITY }; }
 function hasExactPrivateTimelineScope(scope) { return scope?.groupId === null; }
 function sourceFor(state, scope) { return state.sources.find((item) => sameTimelineBinding(item.binding, scope)) || null; }
-function sourceMetadata(source) {
-const sourceDigest = digest(`${source.pathDigest}\0${source.identity}\0${source.size}\0${source.mtimeNs}\0${source.ctimeNs}`);
+function observerBindingDigest(host,sessionId,scope){const binding=sessionTimelineBinding({host,sessionId,scope});
+return ["claude","codex"].includes(host)&&completeTimelineBinding(binding)?digest(JSON.stringify(binding)):null;}
+async function mutateObserver(root,bindingDigest,task){try{await ensureSessionTimelineTrust({create:true});const names=await paths(root);
+return await withOwnedFileLock(names.lock,async({assertOwned})=>{const state=await readState(names.path,root,names.assertStable);
+state.observers||=[];const result=task(state.observers.find(item=>item.bindingDigest===bindingDigest)||null,state);
+if(result.save)await saveState(state,names.path,assertOwned,root,names.assertStable);return result;},{assertPath:names.assertStable});
+}catch{return {status:"unavailable"};}}
+export async function recordClaudeObserverModel({root,sessionId,scope,model,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),at=asDate(now).toISOString();
+if(!bindingDigest||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
+return mutateObserver(root,bindingDigest,(current,state)=>{if(current){current.model=model;current.updatedAt=at;}
+else{state.observers.unshift({bindingDigest,model,updatedAt:at,prompts:[],authority:AUTHORITY});state.observers=state.observers.slice(0,MAX_SOURCES);}
+return {status:"recorded",save:true};});}
+export async function claimClaudeObserverPrompt({root,sessionId,scope,promptId,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),prompt=digest(promptId||"");if(!bindingDigest||typeof promptId!=="string"||promptId.length>256)return {status:"unavailable"};
+return mutateObserver(root,bindingDigest,(current)=>{if(!current)return {status:"unavailable"};if(current.prompts.includes(prompt))return {status:"duplicate"};current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);
+current.updatedAt=asDate(now).toISOString();return {status:"claimed",model:current.model,save:true};});}
+export async function claimCodexObserverTurn({root,sessionId,scope,turnId,model,now=new Date()}){const bindingDigest=observerBindingDigest("codex",sessionId,scope),prompt=digest(turnId||"");if(!bindingDigest||typeof turnId!=="string"||turnId.length>256||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
+return mutateObserver(root,bindingDigest,(current,state)=>{if(!current){current={bindingDigest,model,prompts:[],authority:AUTHORITY};state.observers=[current,...state.observers].slice(0,MAX_SOURCES);}if(current.prompts.includes(prompt))return {status:"duplicate"};current.model=model;current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);current.updatedAt=asDate(now).toISOString();return {status:"claimed",model,save:true};});}
+function sourceMetadata(source) {const sourceDigest = digest(`${source.pathDigest}\0${source.identity}\0${source.size}\0${source.mtimeNs}\0${source.ctimeNs}`);
 return { sourceDigest, indexedBytes: source.indexedBytes, size: source.size, events: source.events.length,
-rooms: Math.ceil(source.size / ROOM_BYTES), continuation: timelineContinuationCapsule({ source, sourceDigest, roomBytes: ROOM_BYTES, authority: AUTHORITY }) };
-}
+rooms: Math.ceil(source.size / ROOM_BYTES), continuation: timelineContinuationCapsule({ source, sourceDigest, roomBytes: ROOM_BYTES, authority: AUTHORITY }) };}
 function sameSourceSnapshot(left, right) {
 return Boolean(left && right) && ["path", "profileRoot", "projectsRoot", "pathDigest", "identity", "size", "mtimeNs", "ctimeNs"]
 .every((key) => left[key] === right[key]);
 }
 async function confirmedSourceEnrollment({ root, scoped, source, hostHome }) {
+if (source.snapshotDigest) {
+const loaded=await loadPrivateSessionTimelineEnrollment({root,host:scoped.host,sessionId:scoped.sessionId,
+scope:{...scoped,currentTaskId:scoped.taskId,timelineVisibility:"private-verified"}});
+if(loaded.status!=="loaded"||!sameTimelineBinding(loaded.record.binding,scoped)
+||!sameSessionTimelineSourceLocation(loaded.record.source,source)||!await pathMatchesSource(source,hostHome)
+||await privateTimelinePrefixDigest(source,loaded.record.source.prefixBytes)!==loaded.record.source.prefixDigest) return false;
+return await sourceSnapshotDigest(source,hostHome)===source.snapshotDigest;
+}
 const enrollment = await resolvePrivateSessionTimelineEnrollment({ root, host: scoped.host, sessionId: scoped.sessionId,
 transcriptPath: source.path, hostHome });
 if (enrollment.status !== "enrolled" || !sameTimelineBinding(enrollment.binding, scoped)
@@ -137,6 +149,7 @@ return {
 binding: record.binding, path: source.path, profileRoot: source.profileRoot, projectsRoot: source.projectsRoot,
 pathDigest: source.pathDigest, identity: source.identity, size: source.size, mtimeNs: source.mtimeNs,
 ctimeNs: source.ctimeNs, lessonDigest: unchanged ? previous.lessonDigest : null,
+snapshotDigest: unchanged ? previous.snapshotDigest ?? null : null,
 indexedBytes: unchanged ? previous.indexedBytes : 0, events: unchanged ? previous.events : [],
 updatedAt: asDate(now).toISOString(), authority: AUTHORITY
 };
@@ -144,55 +157,56 @@ updatedAt: asDate(now).toISOString(), authority: AUTHORITY
 export async function bootstrapSessionTimelineEnrollment({
 root, enrollmentDigest, environment = process.env, now = new Date()
 }) {
-const loaded = await bootstrapEnrollment(root, enrollmentDigest, environment);
-if (!loaded) return status({ status: "unavailable", reason: "private-enrollment-unavailable" });
-const { rootPath, record } = loaded;
-try { await ensureSessionTimelineTrust({ create: true }); }
-catch { return status({ status: "unavailable", reason: "timeline-state-unavailable" }); }
-try {
-const names = await paths(rootPath);
-await withOwnedFileLock(names.lock, async ({ assertOwned }) => {
-const state = await readState(names.path, rootPath, names.assertStable);
-const previous = sourceFor(state, record.binding);
-if (previous && sameSourceSnapshot(previous, record.source)) return;
-state.sources = state.sources.filter((item) => !sameTimelineBinding(item.binding, record.binding));
-state.sources.unshift(enrolledSource(record, previous, now));
-state.sources = state.sources.slice(0, MAX_SOURCES);
-await saveState(state, names.path, assertOwned, rootPath, names.assertStable);
-}, { assertPath: names.assertStable });
-} catch { return status({ status: "unavailable", reason: "timeline-state-unavailable" }); }
-return status({ status: "registered", bootstrap: "signed-enrollment-metadata" });
+const loaded=await bootstrapEnrollment(root,enrollmentDigest,environment);
+if(!loaded)return unavailable("private-enrollment-unavailable");
+const {rootPath,record}=loaded;
+try{await ensureSessionTimelineTrust({create:true});}
+catch{return unavailable("timeline-state-unavailable");}
+try{
+const names=await paths(rootPath);
+await withOwnedFileLock(names.lock,async({assertOwned})=>{
+const state=await readState(names.path,rootPath,names.assertStable);
+const previous=sourceFor(state,record.binding);
+if(previous&&sameSourceSnapshot(previous,record.source))return;
+state.sources=state.sources.filter(item=>!sameTimelineBinding(item.binding,record.binding));
+const s=enrolledSource(record,previous,now);
+state.sources.unshift(s);state.sources=state.sources.slice(0,MAX_SOURCES);
+if(s.size<=MAX_BACKGROUND_CAPTURE_BYTES)try{const r=await indexRange(s,0,s.size,s.profileRoot);
+if(r.status==="indexed"){s.indexedBytes=r.next;s.events=mergeEvents(s.events,r.events);
+s.snapshotDigest=await sourceSnapshotDigest(s,s.profileRoot);}}catch{}
+await saveState(state,names.path,assertOwned,rootPath,names.assertStable);
+},{assertPath:names.assertStable});
+return status({status:"registered"});
+}catch{return unavailable("timeline-state-unavailable");}
 }
 export async function sessionTimelineLifecycleHint({
 root, host, sessionId, scope, environment = process.env
 }) {
 const scoped = sessionTimelineBinding({ host, sessionId, scope });
 if (!hasExactPrivateTimelineScope(scope)) return status({ status: "group-suppressed" });
-if (!completeTimelineBinding(scoped)) {
-return status({ status: "unavailable", reason: "timeline-scope-unverified" });
-}
+if (!completeTimelineBinding(scoped)) return unavailable("timeline-scope-unverified");
 const loaded = await loadPrivateSessionTimelineEnrollment({ root, host, sessionId, scope });
-if (loaded.status !== "loaded") return status({ status: "unavailable", reason: "private-enrollment-unavailable" });
+if (loaded.status !== "loaded") return unavailable("private-enrollment-unavailable");
 const transportDigest = timelineTransportDigest({ root: loaded.rootPath, binding: loaded.record.binding, environment });
 if (!transportDigest || !sameTimelineTransportDigest(loaded.record.transportDigest, transportDigest)) {
-return status({ status: "unavailable", reason: "private-enrollment-unavailable" });
+return unavailable("private-enrollment-unavailable");
 }
 try {
 await ensureSessionTimelineTrust();
 const names = await paths(loaded.rootPath);
 const state = await readState(names.path, loaded.rootPath, names.assertStable);
 const source = sourceFor(state, scoped);
-if (!source) return status({ status: "unavailable", reason: "timeline-not-registered" });
+if (!source) return unavailable("timeline-not-registered");
 return status({ status: source.indexedBytes >= source.size ? "indexed" : "partial", ...sourceMetadata(source),
 priorSessions: priorTimelineHint(state, scoped, (item) => sourceMetadata(item).sourceDigest,
 { includePriorProviders: crossProviderTimelineEnabled(environment) }),
 freshness: "source-not-read", instruction: "Use session_timeline_index before search when this snapshot is partial." });
 } catch {
-return status({ status: "unavailable", reason: "timeline-state-unavailable" });
+return unavailable("timeline-state-unavailable");
 }
 }
 export async function registerSessionTimelineSource() {
-return status({ status: "unavailable", reason: "timeline-enrollment-bootstrap-required" });
+return unavailable("timeline-enrollment-bootstrap-required");
 }
 function mergeEvents(existing, additions) {
 const byId = new Map(existing.map((item) => [item.id, item]));
@@ -242,20 +256,22 @@ Boolean(source.binding.portalRef && source.binding.threadRef)), size: opened.siz
 }
 async function mutateSource(root, scoped, task) {
 try { await ensureSessionTimelineTrust(); }
-catch { return status({ status: "unavailable", reason: "timeline-state-unavailable" }); }
+catch { return unavailable("timeline-state-unavailable"); }
 let names;
 try { names = await paths(root); }
-catch { return status({ status: "unavailable", reason: "timeline-state-unavailable" }); }
+catch { return unavailable("timeline-state-unavailable"); }
 return withOwnedFileLock(names.lock, async ({ assertOwned }) => {
 let state;
 try { state = await readState(names.path, root, names.assertStable); }
-catch { return status({ status: "unavailable", reason: "timeline-state-unavailable" }); }
+catch { return unavailable("timeline-state-unavailable"); }
 const source = sourceFor(state, scoped);
-if (!source) return status({ status: "unavailable", reason: "timeline-not-registered" });
+if (!source) return unavailable("timeline-not-registered");
 const result = await task(source);
 if (result.status === "indexed") {
+if(result.source)Object.assign(source,result.source);
 source.size = result.size;
 if (!result.preserveCursor) source.indexedBytes = Math.max(source.indexedBytes, result.next);
+if(result.snapshotDigest)source.snapshotDigest=result.snapshotDigest;
 source.events = mergeEvents(source.events, result.events); source.updatedAt = new Date().toISOString();
 await saveState(state, names.path, assertOwned, root, names.assertStable);
 }
@@ -263,7 +279,7 @@ return result.status === "indexed" ? status({ status: source.indexedBytes >= sou
 : result.preserveCursor ? "fresh-tail" : "partial", ...sourceMetadata(source), added: result.events.length })
 : status(result);
 }, { assertPath: names.assertStable }).catch(() =>
-status({ status: "unavailable", reason: "timeline-state-unavailable" }));
+unavailable("timeline-state-unavailable"));
 }
 export async function indexSessionTimeline({
 root, host, sessionId, scope, maxBytes = 4 * 1024 * 1024,
@@ -271,8 +287,8 @@ invocationRequest = null, transportDigest = null, enrollmentDigest = null, hostH
 }) {
 const scoped = sessionTimelineBinding({ host, sessionId, scope });
 if (!hasExactPrivateTimelineScope(scope)) return status({ status: "group-suppressed" });
-if (!hasVerifiedTimelinePrivateScope(scope)) return status({ status: "unavailable", reason: "timeline-scope-unverified" });
-if (!completeTimelineBinding(scoped)) return status({ status: "unavailable", reason: "missing-session-scope" });
+if (!hasVerifiedTimelinePrivateScope(scope)) return unavailable("timeline-scope-unverified");
+if (!completeTimelineBinding(scoped)) return unavailable("missing-session-scope");
 if (!Number.isInteger(maxBytes) || maxBytes < 64 * 1024 || maxBytes > MAX_INDEX_BYTES) throw new Error("timeline index byte budget is invalid");
 return mutateSource(root, scoped, async (source) => {
 if (!await confirmedSourceEnrollment({ root, scoped, source, hostHome })) {
@@ -288,11 +304,21 @@ return indexRange(source, source.indexedBytes, maxBytes, hostHome);
 });
 }
 export async function refreshSessionTimelineTail() {
-return status({ status: "unavailable", reason: "timeline-mcp-index-required" });
+return unavailable("timeline-mcp-index-required");
+}
+export async function captureSessionTimelineTail({root,host,sessionId,scope,hostHome,maxBytes=MAX_BACKGROUND_CAPTURE_BYTES}){
+const scoped=sessionTimelineBinding({host,sessionId,scope});
+if(!hasExactPrivateTimelineScope(scope))return status({status:"group-suppressed"});
+if(!completeTimelineBinding(scoped))return unavailable("timeline-scope-unverified");
+if(!Number.isInteger(maxBytes)||maxBytes<1||maxBytes>MAX_BACKGROUND_CAPTURE_BYTES)throw new Error("background capture byte budget is invalid");
+return mutateSource(root,scoped,async(source)=>{
+return captureTimelineAppend({source,hostHome,maxBytes,parse:(bytes,start)=>parsedEvents(bytes,start,false,
+source.binding.host,Boolean(source.binding.portalRef&&source.binding.threadRef))});
+});
 }
 export async function sessionTimelineStatus({ root, host, sessionId, scope, environment = process.env }) {
 if (!hasExactPrivateTimelineScope(scope)) return status({ status: "group-suppressed" });
-if (!hasVerifiedTimelinePrivateScope(scope)) return status({ status: "unavailable", reason: "timeline-scope-unverified" });
+if (!hasVerifiedTimelinePrivateScope(scope)) return unavailable("timeline-scope-unverified");
 return sessionTimelineLifecycleHint({ root, host, sessionId, scope, environment });
 }
 export async function authorizeSessionTimelineInvocation({
@@ -379,7 +405,7 @@ invocationRequest = null, invocationTool = "search", transportDigest = null, enr
 }) {
 const scoped = sessionTimelineBinding({ host, sessionId, scope });
 if (!hasExactPrivateTimelineScope(scope) || !hasVerifiedTimelinePrivateScope(scope) || !completeTimelineBinding(scoped)) {
-return { blocked: true, reason: "session timeline scope is unavailable", authority: AUTHORITY };
+return blocked("session timeline scope is unavailable");
 }
 const { target, wanted } = timelineQuery({ at, query });
 const boundedWindowSeconds = windowSeconds === undefined ? 0 : windowSeconds;
@@ -389,20 +415,20 @@ throw new Error("timeline window is invalid");
 if (typeof includePriorSessions !== "boolean") throw new Error("prior session selection is invalid");
 if (typeof includePriorProviders !== "boolean") throw new Error("prior provider selection is invalid");
 if (includePriorProviders && (!includePriorSessions || !crossProviderTimelineEnabled(environment))) {
-return { blocked: true, reason: "cross-provider timeline recall is unavailable", authority: AUTHORITY };
+return blocked("cross-provider timeline recall is unavailable");
 }
 try { await ensureSessionTimelineTrust(); }
-catch { return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY }; }
+catch { return blocked("session timeline is unavailable"); }
 let names; let state;
 try {
 names = await paths(root);
 state = await readState(names.path, root, names.assertStable);
 }
-catch { return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY }; }
+catch { return blocked("session timeline is unavailable"); }
 const currentSource = sourceFor(state, scoped);
-if (!currentSource) return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY };
+if (!currentSource) return blocked("session timeline is unavailable");
 if (!await confirmedSourceEnrollment({ root, scoped, source: currentSource, hostHome })) {
-return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY };
+return blocked("session timeline is unavailable");
 }
 const source=includePriorSessions
 ?selectPriorTimelineSource(state,scoped,{target,wanted,windowMs:boundedWindowSeconds*1000,
@@ -411,37 +437,48 @@ includePriorProviders,sessionRef:invocationRequest?.ref})
 const sourceHome=source?.binding.host===scoped.host?hostHome:source?.profileRoot;
 if(!source||!await pathMatchesSource(source,sourceHome)
 ||!await confirmedSourceEnrollment({root,scoped:source.binding,source,hostHome:sourceHome})) {
-return { blocked: true, reason: "session timeline is unavailable", authority: AUTHORITY };
+return blocked("session timeline is unavailable");
 }
 const sourceDigest=sourceMetadata(source).sourceDigest;
+const detailEventId=invocationRequest?.detailEventId;
+if (detailEventId && (invocationTool!=="search" || invocationRequest.sourceDigest!==sourceDigest
+|| invocationRequest.ref!==timelineSessionReference(source.binding)
+|| !/^timeline-event:[a-f0-9]{32}$/.test(detailEventId))) {
+return blocked("timeline detail source is unavailable");
+}
 if(!/^(search|capture)$/.test(invocationTool)||!invocationRequest
 ||!await timelineTransportEnrollmentMatches({root,binding:scoped,enrollmentDigest,transportDigest,hostHome})
 ||!await consumeSessionTimelineInvocation({root,tool:invocationTool,binding:scoped,sourceDigest,
 request:invocationRequest,transportDigest})) {
-return { blocked: true, reason: "session timeline invocation is unavailable", authority: AUTHORITY };
+return blocked("session timeline invocation is unavailable");
 }
 const matchAt=invocationRequest?.ref&&target&&query==="user message"?null:target;
 const indexed=rankTimelineEvents(source.events
-.filter(event=>matchesTimelineEvent(event,wanted,matchAt,boundedWindowSeconds*1000)),wanted,target).slice(0,8);
+.filter(event=>(!detailEventId||event.id===detailEventId)
+&&matchesTimelineEvent(event,wanted,matchAt,boundedWindowSeconds*1000)),wanted,target).slice(0,8);
+if (detailEventId && (!indexed.length || indexed[0].kind!=="objective-result")) {
+return blocked("timeline detail event is unavailable");
+}
 if (includePriorSessions && !indexed.length) {
 return searchResult(source, target, wanted, "prior-index", [], { priorSession: true,
 priorProvider: source.binding.host !== scoped.host }, invocationTool === "capture");
 }
 const opened = await validatedHandle(source, sourceHome);
-if (opened.status !== "open") return { blocked: true, reason: opened.reason, authority: AUTHORITY };
+if (opened.status !== "open") return blocked(opened.reason);
 try {
 const verified = [];
 for (const event of indexed) {
 const current = await verifyTimelineEvent({ handle: opened.handle, event, readRange, digest,
-eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY, source.binding.host) });
-if(!current||!matchesTimelineEvent(current,wanted,matchAt,boundedWindowSeconds*1000)) return { blocked: true, reason: "timeline evidence changed", authority: AUTHORITY };
+eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUTHORITY,
+source.binding.host, Boolean(detailEventId)) });
+if(!current||!matchesTimelineEvent(current,wanted,matchAt,boundedWindowSeconds*1000)) return blocked("timeline evidence changed");
 verified.push(current);
 }
 if (verified.length) {
-if (!await unchangedHandle(opened.handle, source, sourceHome)) return { blocked: true, reason: "transcript-changed", authority: AUTHORITY };
+if (!await unchangedHandle(opened.handle, source, sourceHome)) return blocked("transcript-changed");
 return searchResult(source, target, wanted, includePriorSessions ? "prior-verified-index" : "verified-index", verified,
 includePriorSessions ? { priorSession: true, priorProvider: source.binding.host !== scoped.host } : {},
-invocationTool === "capture");
+invocationTool === "capture" || Boolean(detailEventId));
 }
 if (!target) return searchResult(source, target, wanted, "verified-index", [], {}, invocationTool === "capture");
 const sought = await seekTimelineEvidence({ handle: opened.handle, size: opened.size, target, wanted,
@@ -450,13 +487,13 @@ eventFromLine: (line, offset) => verifiedTimelineEventFromLine(line, offset, AUT
 extractTimestamp: extractTimelineTimestamp,
 matches: matchesTimelineEvent, rank: rankTimelineEvents });
 if (sought.status === "searched") {
-if (!await unchangedHandle(opened.handle, source, sourceHome)) return { blocked: true, reason: "transcript-changed", authority: AUTHORITY };
+if (!await unchangedHandle(opened.handle, source, sourceHome)) return blocked("transcript-changed");
 return searchResult(source, target, wanted, "timestamp-seek", sought.events,
 { budgetExhausted: sought.budgetExhausted }, invocationTool === "capture");
 }
 if (sought.status === "out-of-range") {
 return searchResult(source, target, wanted, "timestamp-seek", [], {}, invocationTool === "capture");
 }
-return { blocked: true, reason: sought.reason, authority: AUTHORITY };
+return blocked(sought.reason);
 } finally { await opened.handle.close(); }
 }

@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { fixture, processCall } from "./mcp-bounded-fixture.js";
 import { enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
 import { runHook } from "../src/hook.js";
+import { sessionTimelineStatePaths } from "../src/lib/session-timeline-auth.js";
 import { TIMELINE_TRANSPORT_CAPABILITY_ENV, TIMELINE_TRANSPORT_SESSION_ENV } from "../src/lib/session-timeline-transport.js";
 
 const SCOPE = { entityId: "agent:codex-history", userId: "person:synthetic", tenantId: "tenant:synthetic",
@@ -77,8 +78,19 @@ test("Codex session B finds only A's registered tool evidence after a native hoo
   const f = await setup(t);
   const a = await transcript(f, "session:codex-a", [
     { timestamp: AT, type: "response_item", payload: { type: "message", role: "assistant",
-      content: [{ type: "output_text", text: "Suite 0 PASS 15/15 claimed without a test." }] } }, measured]);
+      content: [{ type: "output_text", text: "Suite 0 PASS 15/15 claimed without a test." }] } }]);
   assert.equal((await enroll(f, "session:codex-a", a)).status, "enrolled");
+  const appended = Buffer.from(line(measured));
+  await appendFile(a.path, appended);
+  const observed = await runHook({ hook_event_name: "UserPromptSubmit", host: "codex", cwd: f.root,
+    session_id: "session:codex-a", transcript_path: a.path, event_id: "event:codex-append",
+    prompt: "Continue the synthetic Codex task.", entity_id: SCOPE.entityId,
+    user_id: SCOPE.userId, tenant_id: SCOPE.tenantId, project_id: SCOPE.projectId,
+    task_id: SCOPE.currentTaskId, group_id: null });
+  assert.equal(observed.blocked, false);
+  const state = JSON.parse(await readFile((await sessionTimelineStatePaths(f.root, { create: false })).path, "utf8"));
+  assert.equal(state.sources.find(item => item.binding.sessionId === "session:codex-a")?.indexedBytes,
+    (await readFile(a.path)).byteLength, JSON.stringify(state.sources));
   assert.equal((await lookup(f, "session:codex-a", "index")).status, "indexed");
   const b = await transcript(f, "session:codex-b");
   assert.equal((await enroll(f, "session:codex-b", b)).status, "enrolled");
@@ -103,7 +115,7 @@ test("Codex session B finds only A's registered tool evidence after a native hoo
   assert.equal(captured.status, "captured");
   assert.equal(captured.captured.value.sourceProvider, "codex");
   assert.equal(captured.captured.source.id, found.events[0].id);
-  assert.deepEqual(await readFile(a.path), a.bytes);
+  assert.deepEqual(await readFile(a.path), Buffer.concat([a.bytes, appended]));
   assert.deepEqual(await readFile(b.path), b.bytes);
   await f.preserve();
 });

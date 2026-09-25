@@ -15,6 +15,7 @@ function publicEvent(event, sourceDigest, sessionRef, sourceProvider, binding, r
   }
   if (event.nativeMessageId) result.nativeMessageId = event.nativeMessageId;
   if (event.excerpt) result.excerpt = event.excerpt;
+  if (event.sourceDetail) result.sourceDetail = event.sourceDetail;
   if (includeMessageDigest) result.messageDigest = event.sha256;
   if (binding.portalRef && binding.threadRef) {
     result.portalRef = binding.portalRef;

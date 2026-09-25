@@ -7,7 +7,7 @@ import {
 import { gatewayEnvironmentContext, hookDeliveryId, hostFromInput, sessionId } from "./hook-context.js";
 import { blockedHookOutput } from "./hook-output.js";
 import { sessionTimelineBinding } from "./session-timeline-contract.js";
-import { resolvePrivateSessionTimelineEnrollment } from "./session-timeline-enrollment.js";
+import { resolvePrivateSessionTimelineContract } from "./session-timeline-enrollment.js";
 import { timelineTransportDigest } from "./session-timeline-transport.js";
 import {
   crossProviderTimelineEnabled, runtimeHostForTimeline, timelineHostForRuntime, timelineHostHome
@@ -130,8 +130,15 @@ function requestInput(tool, args) {
   const interpretation = tool === "capture" && args.interpretation !== undefined
     ? timelineInterpretationRequest(args.interpretation) : null;
   if (tool === "capture" && args.interpretation !== undefined && !interpretation) return null;
+  const detail = tool === "search" && ["detailEventId", "sourceDigest", "sessionRef"]
+    .some((key) => args[key] !== undefined);
+  if (detail && (!/^timeline-event:[a-f0-9]{32}$/.test(args.detailEventId || "")
+    || !/^[a-f0-9]{64}$/.test(args.sourceDigest || "")
+    || !/^session-ref:[a-f0-9]{32}$/.test(args.sessionRef || ""))) return null;
   return { ...(tool === "capture" ? { eventId: args.eventId,
     ...(interpretation ? { interpretation } : {}) } : {}),
+    ...(detail ? { detailEventId: args.detailEventId, sourceDigest: args.sourceDigest,
+      sessionRef: args.sessionRef } : {}),
     ...(args.at === undefined ? {} : { at: args.at }), ...(args.query === undefined ? {} : { query: args.query }),
     ...(args.windowSeconds === undefined ? {} : { windowSeconds: args.windowSeconds }),
     ...(args.includePriorSessions === undefined ? {} : { includePriorSessions: args.includePriorSessions }),
@@ -179,7 +186,7 @@ export async function runTimelineToolGuard(input) {
     if (!transportDigest) {
       return denied("AgentSpine session timeline requires a locally configured per-session transport capability.");
     }
-    const enrollment = await resolvePrivateSessionTimelineEnrollment({ root, host, sessionId: hostSession,
+    const enrollment = await resolvePrivateSessionTimelineContract({ root, host, sessionId: hostSession,
       transcriptPath: input.transcript_path ?? input.transcriptPath, hostHome: historyHome,
       expectedTransportDigest: transportDigest });
     if (enrollment.status !== "enrolled") {

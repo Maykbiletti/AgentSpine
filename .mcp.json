@@ -1,8 +1,1 @@
-{
-  "mcpServers": {
-    "agent-spine": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/src/mcp.js"]
-    }
-  }
-}
+{"mcpServers":{"agent-spine":{"command":"node","args":["${CLAUDE_PLUGIN_ROOT}/src/mcp.js"]}}}

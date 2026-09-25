@@ -110,7 +110,7 @@ test("timeline CLI accepts only an opaque host receipt and local owner confirmat
   assert.equal(JSON.parse(inaccessible.stdout).receipt, null);
 });
 
-test("timeline receipt and enrollment keep source bytes immutable and bootstrap metadata without indexing", async (t) => {
+test("timeline enrollment captures compact evidence without changing source bytes", async (t) => {
   const item = await fixture(t);
   const before = digest(await readFile(item.transcript));
   await issueReceipt(item);
@@ -139,7 +139,8 @@ test("timeline receipt and enrollment keep source bytes immutable and bootstrap 
   assert.doesNotMatch(result.stdout, /astc_/);
   const paths = await sessionTimelineStatePaths(item.root, { create: false });
   const sidecar = JSON.parse(await readFile(paths.path, "utf8"));
-  assert.equal(sidecar.sources[0].indexedBytes, 0, "bootstrap stores metadata, not extracted evidence");
+  assert.equal(sidecar.sources[0].indexedBytes, Buffer.byteLength(await readFile(item.transcript)));
+  assert.equal(sidecar.sources[0].events.length, 1);
   assert.doesNotMatch(JSON.stringify(sidecar), /Synthetic Suite 0|synthetic-secret-value/);
   assert.equal(digest(await readFile(item.transcript)), before);
 
