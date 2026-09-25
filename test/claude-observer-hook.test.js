@@ -36,6 +36,13 @@ assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:group",group_
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:failure"}),{modelCall:call}),null);assert.equal(calls,1);
 });
 
+test("observer rejects model output outside its schema without changing private source",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript));
+for(const [index,value] of [{...proposal,next:"x".repeat(501)},{...proposal,extra:"untrusted"},{status:"proposal",kind:"ambiguous",next:null,question:"x".repeat(301)}].entries()){
+assert.equal(await runClaudeObserver(input(item,{prompt_id:`prompt:invalid:${index}`}),{modelCall:async()=>({stdout:JSON.stringify({structured_output:value})})}),null);
+}
+assert.equal(digest(await readFile(item.transcript)),before);
+});
+
 test("PostModelSwitch updates the exact session model used by the next observer",async t=>{const item=await fixture(t),base=input(item),switched=await runHook({...base,hook_event_name:"PostModelSwitch",from_model:"claude-sonnet-5",to_model:"claude-opus-5",source:"command"});
 assert.equal(switched.observerModel,"recorded");let model=null;await runClaudeObserver(input(item,{prompt_id:"prompt:switched"}),{modelCall:async request=>{model=request.model;return {stdout:JSON.stringify({structured_output:{status:"none",kind:"not-current-instruction",next:null,question:null}})};}});assert.equal(model,"claude-opus-5");
 });
