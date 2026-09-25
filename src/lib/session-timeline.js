@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { withOwnedFileLock } from "./owned-file-lock.js";
 import {completeTimelineBinding,hasVerifiedTimelinePrivateScope,sameTimelineBinding,sessionTimelineBinding,TIMELINE_ID_RE,validTimelineBinding} from "./session-timeline-contract.js";
+export {sessionTimelineBinding};
 import {ensureSessionTimelineTrust,sessionTimelineStatePaths} from "./session-timeline-auth.js";
 import { consumeSessionTimelineInvocation, issueSessionTimelineInvocation } from "./session-timeline-invocation.js";
 import {loadPrivateSessionTimelineEnrollment,resolvePrivateSessionTimelineEnrollment} from "./session-timeline-enrollment.js";
