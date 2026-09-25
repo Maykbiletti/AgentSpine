@@ -36,22 +36,20 @@ export async function readHookInput({ silentOversizePostToolUse = false, context
   if (contextEvent !== null && !CONTEXT_EVENTS.has(contextEvent)) throw new Error("invalid context hook binding");
   const chunks = [];
   let bytes = 0;
-  let oversized = false;
   for await (const chunk of stream) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     const remaining = Math.max(0, MAX_STDIN_BYTES - bytes);
     if (remaining) chunks.push(Buffer.from(buffer.subarray(0, remaining)));
     bytes += buffer.length;
     if (bytes > MAX_STDIN_BYTES) {
-      oversized = true;
+      // The host may still be streaming a much larger payload. Stop reading as
+      // soon as the budget is exceeded; no prefix is parsed or retained.
       chunks.length = 0;
+      if (silentOversizePostToolUse) return SILENT_OVERSIZE_POST_TOOL_USE;
+      // Only a host-bound command option selects this lane, never a JSON prefix.
+      if (contextEvent) return OVERSIZE_CONTEXT_INPUT;
+      throw new Error("hook input exceeds the 64 KiB limit");
     }
-  }
-  if (oversized) {
-    if (silentOversizePostToolUse) return SILENT_OVERSIZE_POST_TOOL_USE;
-    // Only a host-bound command option selects this lane, never a JSON prefix.
-    if (contextEvent) return OVERSIZE_CONTEXT_INPUT;
-    throw new Error("hook input exceeds the 64 KiB limit");
   }
   const value = Buffer.concat(chunks, bytes).toString("utf8");
   const parsed = value.trim() ? JSON.parse(value) : {};

@@ -93,3 +93,22 @@ test("64 KiB boundary counts UTF-8 bytes and preserves complete small payloads",
     assert.deepEqual(parsed, JSON.parse(original));
   }
 });
+
+test("oversized context input returns without waiting for the rest of stdin", async () => {
+  const { readHookInput, OVERSIZE_CONTEXT_INPUT } = await import("../src/lib/hook-input.js");
+  const { Readable } = await import("node:stream");
+  let sent = false;
+  const stream = new Readable({ read() {
+    if (!sent) { sent = true; this.push(Buffer.alloc(65537)); }
+    // Deliberately never send EOF: the host can still be writing a large payload.
+  } });
+  try {
+    const result = await Promise.race([
+      readHookInput({ stream, contextEvent: "UserPromptSubmit" }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("waited for stdin EOF")), 500))
+    ]);
+    assert.equal(result, OVERSIZE_CONTEXT_INPUT);
+  } finally {
+    stream.destroy();
+  }
+});
