@@ -4,7 +4,7 @@ import {createHash} from "node:crypto";
 import {mkdir,mkdtemp,readFile,rm,writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {claudeObserverArguments,claudeObserverEnvironment,runClaudeObserver} from "../src/claude-observer-hook.js";
+import {callObserverCommand,claudeObserverArguments,claudeObserverEnvironment,runClaudeObserver} from "../src/claude-observer-hook.js";
 import {runHook} from "../src/hook.js";
 import {recordClaudeObserverModel} from "../src/lib/session-timeline.js";
 import {enrollTimelineWithHostReceipt} from "./session-timeline-invocation-support.js";
@@ -45,4 +45,10 @@ for(const pair of [["--model","claude-opus-5"],["--tools",""],["--disallowedTool
 for(const flag of ["--bare","--restricted","--no-session-persistence"])assert.ok(args.includes(flag));
 const env=claudeObserverEnvironment({PATH:"safe",CLAUDECODE:"1",CLAUDE_CODE_ENTRYPOINT:"hook",CLAUDE_CODE_OAUTH_TOKEN:"host-login",ANTHROPIC_API_KEY:"foreign",Anthropic_Api_Key:"foreign",CLAUDE_CODE_USE_BEDROCK:"1",AWS_REGION:"eu-north-1",Aws_Secret_Access_Key:"foreign",CLAUDE_CODE_USE_VERTEX:"1",GOOGLE_APPLICATION_CREDENTIALS:"foreign.json",CLAUDE_CODE_USE_FOUNDRY:"1",AZURE_CLIENT_SECRET:"foreign"});
 assert.deepEqual(env,{PATH:"safe",CLAUDE_CODE_OAUTH_TOKEN:"host-login"});
+});
+
+test("a stalled observer child is terminated at its deadline",async()=>{
+const started=Date.now();
+await assert.rejects(callObserverCommand(process.execPath,["-e","setInterval(()=>{},1000)"],process.cwd(),process.env,150));
+assert.ok(Date.now()-started<5000);
 });
