@@ -23,9 +23,9 @@ function input(item,patch={}){const s=item.privateScope;return {hook_event_name:
 const proposal={status:"proposal",kind:"next-step-correction",next:"Erst die Prüfsumme prüfen.",question:null};
 
 test("Claude observer uses one scoped host model proposal and preserves source bytes",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript));let calls=0,seen;
-const output=await runClaudeObserver(input(item),{modelCall:async request=>{calls++;seen=request;return {stdout:JSON.stringify({structured_output:proposal})};}});
+const output=await runClaudeObserver(input(item,{timestamp:"2026-09-25T12:00:00.000Z"}),{modelCall:async request=>{calls++;seen=request;return {stdout:JSON.stringify({structured_output:proposal})};}});
 assert.equal(calls,1);assert.equal(seen.model,"claude-sonnet-5");assert.match(seen.prompt,/exact user text/);assert.equal(digest(await readFile(item.transcript)),before);
-const context=JSON.parse(output.hookSpecificOutput.additionalContext);assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.proposal.kind,"next-step-correction");assert.equal(context.sourceDigest,digest("Nein, erst die Prüfsumme prüfen."));
+const context=JSON.parse(output.hookSpecificOutput.additionalContext);assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.proposal.kind,"next-step-correction");assert.equal(context.sourceDigest,digest("Nein, erst die Prüfsumme prüfen."));assert.deepEqual(context.source.binding,{host:"claude",sessionId:"session:observer",entityId:item.privateScope.entityId,userId:item.privateScope.userId,tenantId:item.privateScope.tenantId,projectId:item.privateScope.projectId,groupId:null,taskId:item.privateScope.currentTaskId,goalId:item.privateScope.goalId,goalStepId:item.privateScope.goalStepId});assert.equal(context.source.event,input(item).prompt_id);assert.equal(context.source.at,"2026-09-25T12:00:00.000Z");
 assert.equal(await runClaudeObserver(input(item),{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
 });
 
