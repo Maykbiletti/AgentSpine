@@ -36,4 +36,4 @@ return {hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:J
 }catch{return null;}}
 export const runClaudeObserver=(input,options)=>runObserver("claude",input,options);
 export const runCodexObserver=(input,options)=>runObserver("codex",input,options);
-if(isMainModule(import.meta.url)){let text="";for await(const chunk of process.stdin){text+=chunk;if(Buffer.byteLength(text)>64*1024){text="";break;}}const input=text?JSON.parse(text):{},run=process.env.PLUGIN_ROOT?runCodexObserver:runClaudeObserver;run(input).then(value=>{if(value)process.stdout.write(`${JSON.stringify(value)}\n`);}).catch(()=>{});}
+if(isMainModule(import.meta.url)){let text="";for await(const chunk of process.stdin){text+=chunk;if(Buffer.byteLength(text)>64*1024){text="";break;}}let input={};try{if(text)input=JSON.parse(text);}catch{}const run=process.env.PLUGIN_ROOT?runCodexObserver:runClaudeObserver;run(input).then(value=>{if(value)process.stdout.write(`${JSON.stringify(value)}\n`);}).catch(()=>{});}
