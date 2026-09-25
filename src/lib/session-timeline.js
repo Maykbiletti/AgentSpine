@@ -95,7 +95,7 @@ function unavailable(reason) { return status({ status: "unavailable", reason });
 function blocked(reason) { return { blocked: true, reason, authority: AUTHORITY }; }
 function hasExactPrivateTimelineScope(scope) { return scope?.groupId === null; }
 function sourceFor(state, scope) { return state.sources.find((item) => sameTimelineBinding(item.binding, scope)) || null; }
-function observerBindingDigest(host,sessionId,scope){if(host!=="claude"||scope?.groupId!==null)return null;
+function observerBindingDigest(host,sessionId,scope){if(!["claude","codex"].includes(host)||scope?.groupId!==null)return null;
 const values=[sessionId,scope?.entityId,scope?.userId,scope?.tenantId,scope?.projectId,scope?.portalRef||"",scope?.threadRef||""];
 return values.slice(0,5).every(value=>typeof value==="string"&&value)?digest(values.join("\0")):null;}
 async function mutateObserver(root,bindingDigest,task){try{await ensureSessionTimelineTrust({create:true});const names=await paths(root);
@@ -108,11 +108,11 @@ if(!bindingDigest||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"u
 return mutateObserver(root,bindingDigest,(current,state)=>{if(current){current.model=model;current.updatedAt=at;}
 else{state.observers.unshift({bindingDigest,model,updatedAt:at,prompts:[],authority:AUTHORITY});state.observers=state.observers.slice(0,MAX_SOURCES);}
 return {status:"recorded",save:true};});}
-export async function claimClaudeObserverPrompt({root,sessionId,scope,promptId,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),prompt=digest(promptId||"");
-if(!bindingDigest||typeof promptId!=="string"||promptId.length>256)return {status:"unavailable"};
-return mutateObserver(root,bindingDigest,(current)=>{if(!current)return {status:"unavailable"};
-if(current.prompts.includes(prompt))return {status:"duplicate"};current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);
+export async function claimClaudeObserverPrompt({root,sessionId,scope,promptId,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),prompt=digest(promptId||"");if(!bindingDigest||typeof promptId!=="string"||promptId.length>256)return {status:"unavailable"};
+return mutateObserver(root,bindingDigest,(current)=>{if(!current)return {status:"unavailable"};if(current.prompts.includes(prompt))return {status:"duplicate"};current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);
 current.updatedAt=asDate(now).toISOString();return {status:"claimed",model:current.model,save:true};});}
+export async function claimCodexObserverTurn({root,sessionId,scope,turnId,model,now=new Date()}){const bindingDigest=observerBindingDigest("codex",sessionId,scope),prompt=digest(turnId||"");if(!bindingDigest||typeof turnId!=="string"||turnId.length>256||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
+return mutateObserver(root,bindingDigest,(current,state)=>{if(!current){current={bindingDigest,model,prompts:[],authority:AUTHORITY};state.observers=[current,...state.observers].slice(0,MAX_SOURCES);}if(current.prompts.includes(prompt))return {status:"duplicate"};current.model=model;current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);current.updatedAt=asDate(now).toISOString();return {status:"claimed",model,save:true};});}
 function sourceMetadata(source) {const sourceDigest = digest(`${source.pathDigest}\0${source.identity}\0${source.size}\0${source.mtimeNs}\0${source.ctimeNs}`);
 return { sourceDigest, indexedBytes: source.indexedBytes, size: source.size, events: source.events.length,
 rooms: Math.ceil(source.size / ROOM_BYTES), continuation: timelineContinuationCapsule({ source, sourceDigest, roomBytes: ROOM_BYTES, authority: AUTHORITY }) };}

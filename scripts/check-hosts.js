@@ -162,7 +162,7 @@ const claudeHookInventory = validateHooks(root, claudeHooks, {
 required: [...commonEvents, "InstructionsLoaded", "PostModelSwitch"], commandRoot: "CLAUDE_PLUGIN_ROOT", asyncObserver: true
 });
 const codexHookInventory = validateHooks(root, codexHooks, { required: commonEvents, commandRoot: "PLUGIN_ROOT",
-matcher: "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__(?:plugin_agent-spine_agent-spine|agent-spine)__session_timeline_(?:index|search|capture))$" });
+matcher: "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__(?:plugin_agent-spine_agent-spine|agent-spine)__session_timeline_(?:index|search|capture))$",asyncObserver:true });
 const blunHookInventory = validateBlunHooks(root, blunManifest.hooks);
 const registrations = await Promise.all([
 initializeServer({ label: "blun", root, variable: "BLUN_PLUGIN_ROOT", server: blunManifest.mcpServers["agent-spine"], version: pkg.version }),
