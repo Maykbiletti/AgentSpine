@@ -1,106 +1,122 @@
 {
-  "description": "Resolves host-native user, project, and memory roots before injecting scoped context, persisting attention and checkpoints, rechecking rights, and protecting sources.",
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|resume|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "InstructionsLoaded": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search|capture))$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\" --silent-oversize-post-tool-use",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "PostCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ]
-  }
+"description": "Resolves host-native user, project, and memory roots before injecting scoped context, persisting attention and checkpoints, rechecking rights, and protecting sources.",
+"hooks": {
+"SessionStart": [
+{
+"matcher": "startup|resume|clear|compact",
+"hooks": [
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
+"timeout": 15
+}
+]
+}
+],
+"UserPromptSubmit": [
+{
+"hooks": [
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
+"timeout": 15
+},
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/claude-observer-hook.js\"",
+"async": true
+}
+]
+}
+],
+"InstructionsLoaded": [
+{
+"hooks": [
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
+"timeout": 15
+}
+]
+}
+],
+"PreToolUse": [
+{
+"matcher": "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search|capture))$",
+"hooks": [
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
+"timeout": 15
+}
+]
+}
+],
+"PostToolUse": [
+{
+"hooks": [
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\" --silent-oversize-post-tool-use",
+"timeout": 15
+}
+]
+}
+],
+"PreCompact": [
+{
+"hooks": [
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
+"timeout": 15
+}
+]
+}
+],
+"PostCompact": [
+{
+"hooks": [
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
+"timeout": 15
+}
+]
+}
+],
+"PostModelSwitch": [
+{
+"hooks": [
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
+"timeout": 15
+}
+]
+}
+],
+"Stop": [
+{
+"hooks": [
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
+"timeout": 15
+}
+]
+}
+],
+"SubagentStop": [
+{
+"hooks": [
+{
+"type": "command",
+"command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook.js\"",
+"timeout": 15
+}
+]
+}
+]
+}
 }

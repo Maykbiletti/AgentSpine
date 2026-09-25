@@ -10,9 +10,8 @@ import { hookMemoryQuery, loadLessonRecallSelection, rememberLessonRecallSelecti
 import { catalogScanPolicy } from "./catalog.js";
 import { isKingHost, KING_SOURCE_BYTES } from "./host-instruction-budget.js";
 import {
-  SOURCE_SCAN_INCOMPLETE, boundedMarkdownTree, existingDirectory, existingRegular, sourceScanError
+SOURCE_SCAN_INCOMPLETE, boundedMarkdownTree, existingDirectory, existingRegular, sourceScanError
 } from "./source-tree-scan.js";
-
 export const SOURCE_REGISTRY_SCHEMA = "agentspine.source-roots/v1";
 const MAX_REGISTRY_BYTES = 1024 * 1024;
 const MAX_SOURCES = 256;
@@ -23,453 +22,430 @@ const MAX_DIRECTORY_ENTRIES = 4096;
 const MAX_PROJECT_DIRECTORY_ENTRIES = 8192;
 const SOURCE_RESOLUTION_MS = 2000;
 const SAFE_NAME = /^[A-Za-z0-9._-]{1,128}$/;
-
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 async function partitionSources(sources, env) {
-  if (!isKingHost(env)) return { sources, unverified: [] };
-  const loaded = [], unverified = []; let used = 0;
-  for (const source of sources) {
-    if (!source.id.startsWith("codex:")) { loaded.push(source); continue; }
-    const bytes = (await lstat(source.path)).size, limit = source.maxBytes || KING_SOURCE_BYTES;
-    const total = bytes <= limit && used + bytes > MAX_TOTAL_SOURCE_BYTES;
-    if (bytes <= limit && !total) { loaded.push(source); used += bytes; continue; }
-    const ceiling = total ? MAX_TOTAL_SOURCE_BYTES : limit;
-    const message = `King rule ${source.id} (${bytes} bytes) exceeds AgentSpine's ${ceiling}-byte ${total ? "total " : ""}reader budget; AgentSpine did not load or verify it. Native rules apply. Continue; no retry.`;
-    unverified.push({ id: source.id, path: source.path, bytes, message });
-  }
-  return { sources: loaded, unverified };
+if (!isKingHost(env)) return { sources, unverified: [] };
+const loaded = [], unverified = []; let used = 0;
+for (const source of sources) {
+if (!source.id.startsWith("codex:")) { loaded.push(source); continue; }
+const bytes = (await lstat(source.path)).size, limit = source.maxBytes || KING_SOURCE_BYTES;
+const total = bytes <= limit && used + bytes > MAX_TOTAL_SOURCE_BYTES;
+if (bytes <= limit && !total) { loaded.push(source); used += bytes; continue; }
+const ceiling = total ? MAX_TOTAL_SOURCE_BYTES : limit;
+const message = `King rule ${source.id} (${bytes} bytes) exceeds AgentSpine's ${ceiling}-byte ${total ? "total " : ""}reader budget; AgentSpine did not load or verify it. Native rules apply. Continue; no retry.`;
+unverified.push({ id: source.id, path: source.path, bytes, message });
+}
+return { sources: loaded, unverified };
 }
 function registryPath(env = process.env) { return join(stateRoot(env), "source-roots.json"); }
 function emptyRegistry() { return { schema: SOURCE_REGISTRY_SCHEMA, revision: 0, bindings: [], history: [] }; }
-
 function normalizeRegistry(value) {
-  if (!value || value.schema !== SOURCE_REGISTRY_SCHEMA || !Number.isInteger(value.revision)
-    || !Array.isArray(value.bindings) || !Array.isArray(value.history)) {
-    throw new Error("source-root registry is corrupt; host-native recall is disabled until repaired");
-  }
-  for (const binding of value.bindings) {
-    if (!binding || typeof binding.id !== "string" || !["all", "claude", "codex"].includes(binding.host)
-      || !["project-memory", "state-user"].includes(binding.scope) || typeof binding.profileKey !== "string"
-      || typeof binding.projectRoot !== "string" || typeof binding.sourceRoot !== "string"
-      || typeof binding.provenance !== "string" || typeof binding.active !== "boolean"
-      || binding.authority !== "context-only") throw new Error("source-root registry contains an unsafe binding");
-  }
-  if (value.history.some((item) => !item || item.authority !== "context-only")) {
-    throw new Error("source-root registry history contains an authority violation");
-  }
-  return value;
+if (!value || value.schema !== SOURCE_REGISTRY_SCHEMA || !Number.isInteger(value.revision)
+|| !Array.isArray(value.bindings) || !Array.isArray(value.history)) {
+throw new Error("source-root registry is corrupt; host-native recall is disabled until repaired");
 }
-
+for (const binding of value.bindings) {
+if (!binding || typeof binding.id !== "string" || !["all", "claude", "codex"].includes(binding.host)
+|| !["project-memory", "state-user"].includes(binding.scope) || typeof binding.profileKey !== "string"
+|| typeof binding.projectRoot !== "string" || typeof binding.sourceRoot !== "string"
+|| typeof binding.provenance !== "string" || typeof binding.active !== "boolean"
+|| binding.authority !== "context-only") throw new Error("source-root registry contains an unsafe binding");
+}
+if (value.history.some((item) => !item || item.authority !== "context-only")) {
+throw new Error("source-root registry history contains an authority violation");
+}
+return value;
+}
 async function readRegistry(env = process.env) {
-  const path = registryPath(env);
-  try {
-    const metadata = await stat(path);
-    if (metadata.size > MAX_REGISTRY_BYTES) throw new Error("source-root registry exceeds 1 MiB");
-    return { registry: normalizeRegistry(JSON.parse(await readFile(path, "utf8"))), path };
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    return { registry: emptyRegistry(), path };
-  }
+const path = registryPath(env);
+try {
+const metadata = await stat(path);
+if (metadata.size > MAX_REGISTRY_BYTES) throw new Error("source-root registry exceeds 1 MiB");
+return { registry: normalizeRegistry(JSON.parse(await readFile(path, "utf8"))), path };
+} catch (error) {
+if (error.code !== "ENOENT") throw error;
+return { registry: emptyRegistry(), path };
 }
-
+}
 async function mutateRegistry(task, env = process.env) {
-  const path = registryPath(env);
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const lock = `${path}.lock`;
-  let handle;
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    try { handle = await open(lock, "wx", 0o600); break; } catch (error) {
-      if (!isFileLockContention(error)) throw error;
-      await new Promise((done) => setTimeout(done, 25));
-    }
-  }
-  if (!handle) throw new Error("source-root registry is busy; retry shortly");
-  try {
-    const { registry } = await readRegistry(env);
-    const result = await task(registry);
-    registry.revision += 1;
-    const content = `${JSON.stringify(registry, null, 2)}\n`;
-    if (Buffer.byteLength(content) > MAX_REGISTRY_BYTES) throw new Error("source-root registry exceeds 1 MiB");
-    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(temporary, content, { mode: 0o600 });
-    await replaceFileWithRetry(temporary, path);
-    return { ...result, registryPath: path, revision: registry.revision };
-  } finally {
-    await handle.close();
-    await unlink(lock).catch((error) => { if (error.code !== "ENOENT") throw error; });
-  }
+const path = registryPath(env);
+await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+const lock = `${path}.lock`;
+let handle;
+for (let attempt = 0; attempt < 80; attempt += 1) {
+try { handle = await open(lock, "wx", 0o600); break; } catch (error) {
+if (!isFileLockContention(error)) throw error;
+await new Promise((done) => setTimeout(done, 25));
 }
-
+}
+if (!handle) throw new Error("source-root registry is busy; retry shortly");
+try {
+const { registry } = await readRegistry(env);
+const result = await task(registry);
+registry.revision += 1;
+const content = `${JSON.stringify(registry, null, 2)}\n`;
+if (Buffer.byteLength(content) > MAX_REGISTRY_BYTES) throw new Error("source-root registry exceeds 1 MiB");
+const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+await writeFile(temporary, content, { mode: 0o600 });
+await replaceFileWithRetry(temporary, path);
+return { ...result, registryPath: path, revision: registry.revision };
+} finally {
+await handle.close();
+await unlink(lock).catch((error) => { if (error.code !== "ENOENT") throw error; });
+}
+}
 function expandHome(value, home) {
-  if (value === "~") return home;
-  if (value.startsWith("~/") || value.startsWith("~\\")) return join(home, value.slice(2));
-  return value;
+if (value === "~") return home;
+if (value.startsWith("~/") || value.startsWith("~\\")) return join(home, value.slice(2));
+return value;
 }
-
 function samePath(left, right) {
-  const normalize = (value) => resolve(value).replace(/[\\/]+$/, "");
-  const a = normalize(left);
-  const b = normalize(right);
-  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+const normalize = (value) => resolve(value).replace(/[\\/]+$/, "");
+const a = normalize(left);
+const b = normalize(right);
+return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
-
 async function homeRoots(env) {
-  const candidates = [homedir(), env.HOME, env.USERPROFILE,
-    env.HOMEDRIVE && env.HOMEPATH ? `${env.HOMEDRIVE}${env.HOMEPATH}` : null]
-    .filter((value) => typeof value === "string" && value && isAbsolute(value));
-  return [...new Set(await Promise.all(candidates.map(async (value) =>
-    await existingDirectory(value) || resolve(value))))];
+const candidates = [homedir(), env.HOME, env.USERPROFILE,
+env.HOMEDRIVE && env.HOMEPATH ? `${env.HOMEDRIVE}${env.HOMEPATH}` : null]
+.filter((value) => typeof value === "string" && value && isAbsolute(value));
+return [...new Set(await Promise.all(candidates.map(async (value) =>
+await existingDirectory(value) || resolve(value))))];
 }
-
 async function readJsonObject(path) {
-  const file = await existingRegular(path);
-  if (!file) return null;
-  const metadata = await stat(file);
-  if (metadata.size > 1024 * 1024) throw new Error(`host settings exceed 1 MiB: ${basename(path)}`);
-  const value = JSON.parse(await readFile(file, "utf8"));
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`host settings are not an object: ${basename(path)}`);
-  return value;
+const file = await existingRegular(path);
+if (!file) return null;
+const metadata = await stat(file);
+if (metadata.size > 1024 * 1024) throw new Error(`host settings exceed 1 MiB: ${basename(path)}`);
+const value = JSON.parse(await readFile(file, "utf8"));
+if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`host settings are not an object: ${basename(path)}`);
+return value;
 }
-
 function parseTomlArray(text, key) {
-  const match = text.match(new RegExp(`^\\s*${key}\\s*=\\s*\\[([^\\]]*)\\]`, "m"));
-  if (!match) return null;
-  const values = [];
-  for (const item of match[1].matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g)) {
-    const value = item[1] === undefined ? item[2] : JSON.parse(`"${item[1]}"`);
-    if (!SAFE_NAME.test(value) || value.includes("/") || value.includes("\\")) throw new Error(`unsafe ${key} entry`);
-    values.push(value);
-  }
-  return values;
+const match = text.match(new RegExp(`^\\s*${key}\\s*=\\s*\\[([^\\]]*)\\]`, "m"));
+if (!match) return null;
+const values = [];
+for (const item of match[1].matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g)) {
+const value = item[1] === undefined ? item[2] : JSON.parse(`"${item[1]}"`);
+if (!SAFE_NAME.test(value) || value.includes("/") || value.includes("\\")) throw new Error(`unsafe ${key} entry`);
+values.push(value);
 }
-
+return values;
+}
 async function codexConfig(home) {
-  const path = join(home, "config.toml");
-  const file = await existingRegular(path);
-  if (!file) return { fallbackNames: [], rootMarkers: [".git"], maxBytes: 32768 };
-  const metadata = await stat(file);
-  if (metadata.size > 1024 * 1024) throw new Error("Codex config exceeds 1 MiB");
-  const text = await readFile(file, "utf8");
-  const bytes = Number(text.match(/^\s*project_doc_max_bytes\s*=\s*(\d+)/m)?.[1] || 32768);
-  return {
-    fallbackNames: parseTomlArray(text, "project_doc_fallback_filenames") || [],
-    rootMarkers: parseTomlArray(text, "project_root_markers") || [".git"],
-    maxBytes: Number.isInteger(bytes) && bytes >= 1024 && bytes <= 4 * 1024 * 1024 ? bytes : 32768
-  };
+const path = join(home, "config.toml");
+const file = await existingRegular(path);
+if (!file) return { fallbackNames: [], rootMarkers: [".git"], maxBytes: 32768 };
+const metadata = await stat(file);
+if (metadata.size > 1024 * 1024) throw new Error("Codex config exceeds 1 MiB");
+const text = await readFile(file, "utf8");
+const bytes = Number(text.match(/^\s*project_doc_max_bytes\s*=\s*(\d+)/m)?.[1] || 32768);
+return {
+fallbackNames: parseTomlArray(text, "project_doc_fallback_filenames") || [],
+rootMarkers: parseTomlArray(text, "project_root_markers") || [".git"],
+maxBytes: Number.isInteger(bytes) && bytes >= 1024 && bytes <= 4 * 1024 * 1024 ? bytes : 32768
+};
 }
-
 async function findRoot(cwd, markers) {
-  let cursor = cwd;
-  while (true) {
-    for (const marker of markers) {
-      try { await lstat(join(cursor, marker)); return { root: cursor, resolution: "project-marker" }; } catch (error) {
-        if (error.code !== "ENOENT") throw sourceScanError(error);
-      }
-    }
-    const parent = dirname(cursor);
-    if (parent === cursor) return { root: cwd, resolution: "cwd-fallback" };
-    cursor = parent;
-  }
+let cursor = cwd;
+while (true) {
+for (const marker of markers) {
+try { await lstat(join(cursor, marker)); return { root: cursor, resolution: "project-marker" }; } catch (error) {
+if (error.code !== "ENOENT") throw sourceScanError(error);
 }
-
+}
+const parent = dirname(cursor);
+if (parent === cursor) return { root: cwd, resolution: "cwd-fallback" };
+cursor = parent;
+}
+}
 async function addFile(output, path, metadata) {
-  const file = await existingRegular(path);
-  if (file) output.push({ path: file, ...metadata });
+const file = await existingRegular(path);
+if (file) output.push({ path: file, ...metadata });
 }
-
 function profileKey(host, hostHome) { return `${host}:${digest(hostHome).slice(0, 24)}`; }
-
 function activeBinding(registry, host, hostHome, projectRoot, scope) {
-  const targetRoot = scope === "state-user" ? "*" : projectRoot;
-  return registry.bindings.find((item) => item.active && (item.host === host || item.host === "all")
-    && (item.host === "all" || item.profileKey === profileKey(host, hostHome))
-    && item.projectRoot === targetRoot && item.scope === scope) || null;
+const targetRoot = scope === "state-user" ? "*" : projectRoot;
+return registry.bindings.find((item) => item.active && (item.host === host || item.host === "all")
+&& (item.host === "all" || item.profileKey === profileKey(host, hostHome))
+&& item.projectRoot === targetRoot && item.scope === scope) || null;
 }
-
 async function rememberRuntimeBinding({ host, hostHome, projectRoot, sourceRoot, scope, provenance, env }) {
-  const canonicalSource = await canonicalPath(sourceRoot);
-  return mutateRegistry((registry) => {
-    const key = host === "all" ? "all:local-user" : profileKey(host, hostHome);
-    const targetRoot = scope === "state-user" ? "*" : projectRoot;
-    const current = registry.bindings.find((item) => item.active && item.host === host
-      && item.profileKey === key && item.projectRoot === targetRoot && item.scope === scope);
-    if (current?.sourceRoot === canonicalSource) return { binding: current, unchanged: true };
-    if (current && current.sourceRoot !== canonicalSource) throw new Error(`conflicting ${host} ${scope} source binding; inspect or roll back the registry`);
-    const binding = {
-      id: `binding:${randomUUID()}`, host, profileKey: key, projectRoot: targetRoot, sourceRoot: canonicalSource,
-      scope, provenance, active: true, createdAt: new Date().toISOString(), authority: "context-only"
-    };
-    registry.bindings.push(binding);
-    registry.history.push({ kind: "bound", bindingId: binding.id, at: binding.createdAt, provenance, authority: "context-only" });
-    return { binding, unchanged: false };
-  }, env);
+const canonicalSource = await canonicalPath(sourceRoot);
+return mutateRegistry((registry) => {
+const key = host === "all" ? "all:local-user" : profileKey(host, hostHome);
+const targetRoot = scope === "state-user" ? "*" : projectRoot;
+const current = registry.bindings.find((item) => item.active && item.host === host
+&& item.profileKey === key && item.projectRoot === targetRoot && item.scope === scope);
+if (current?.sourceRoot === canonicalSource) return { binding: current, unchanged: true };
+if (current && current.sourceRoot !== canonicalSource) throw new Error(`conflicting ${host} ${scope} source binding; inspect or roll back the registry`);
+const binding = {
+id: `binding:${randomUUID()}`, host, profileKey: key, projectRoot: targetRoot, sourceRoot: canonicalSource,
+scope, provenance, active: true, createdAt: new Date().toISOString(), authority: "context-only"
+};
+registry.bindings.push(binding);
+registry.history.push({ kind: "bound", bindingId: binding.id, at: binding.createdAt, provenance, authority: "context-only" });
+return { binding, unchanged: false };
+}, env);
 }
-
 export async function bindSourceRoot({ host, hostHome, projectRoot, sourceRoot, scope = "state-user", confirmation, env = process.env }) {
-  if (confirmation !== "local-user-confirmed") throw new Error("source binding requires explicit local user confirmation");
-  if (!["claude", "codex", "all"].includes(host) || !["project-memory", "state-user"].includes(scope)
-    || (host === "all" && scope !== "state-user")) throw new Error("invalid source binding scope");
-  return rememberRuntimeBinding({ host, hostHome: host === "all" ? "local-user" : await canonicalPath(hostHome), projectRoot: await canonicalPath(projectRoot),
-    sourceRoot, scope, provenance: "local-user-confirmed", env });
+if (confirmation !== "local-user-confirmed") throw new Error("source binding requires explicit local user confirmation");
+if (!["claude", "codex", "all"].includes(host) || !["project-memory", "state-user"].includes(scope)
+|| (host === "all" && scope !== "state-user")) throw new Error("invalid source binding scope");
+return rememberRuntimeBinding({ host, hostHome: host === "all" ? "local-user" : await canonicalPath(hostHome), projectRoot: await canonicalPath(projectRoot),
+sourceRoot, scope, provenance: "local-user-confirmed", env });
 }
-
 export async function rollbackSourceBinding({ id, confirmation, env = process.env }) {
-  if (confirmation !== "local-user-confirmed") throw new Error("source binding rollback requires explicit local user confirmation");
-  const result = await mutateRegistry((registry) => {
-    const binding = registry.bindings.find((item) => item.id === id && item.active);
-    if (!binding) throw new Error(`active source binding not found: ${id}`);
-    binding.active = false;
-    binding.rolledBackAt = new Date().toISOString();
-    registry.history.push({ kind: "rolled-back", bindingId: id, at: binding.rolledBackAt, authority: "context-only" });
-    return { binding };
-  }, env);
-  if (result.binding.scope === "project-memory") await purgeIndexedMemoryCache(result.binding.sourceRoot, env);
-  return result;
+if (confirmation !== "local-user-confirmed") throw new Error("source binding rollback requires explicit local user confirmation");
+const result = await mutateRegistry((registry) => {
+const binding = registry.bindings.find((item) => item.id === id && item.active);
+if (!binding) throw new Error(`active source binding not found: ${id}`);
+binding.active = false;
+binding.rolledBackAt = new Date().toISOString();
+registry.history.push({ kind: "rolled-back", bindingId: id, at: binding.rolledBackAt, authority: "context-only" });
+return { binding };
+}, env);
+if (result.binding.scope === "project-memory") await purgeIndexedMemoryCache(result.binding.sourceRoot, env);
+return result;
 }
-
 export async function purgeSourceBinding({ id, confirmation, env = process.env }) {
-  if (confirmation !== "local-user-confirmed") throw new Error("source binding purge requires explicit local user confirmation");
-  const result = await mutateRegistry((registry) => {
-    const removed = registry.bindings.find((item) => item.id === id);
-    const before = registry.bindings.length;
-    registry.bindings = registry.bindings.filter((item) => item.id !== id);
-    if (registry.bindings.length === before) throw new Error(`source binding not found: ${id}`);
-    registry.history.push({ kind: "purged", bindingDigest: digest(id), at: new Date().toISOString(), authority: "context-only" });
-    return { purged: true, removed };
-  }, env);
-  if (result.removed?.scope === "project-memory") await purgeIndexedMemoryCache(result.removed.sourceRoot, env);
-  return { ...result, removed: undefined };
+if (confirmation !== "local-user-confirmed") throw new Error("source binding purge requires explicit local user confirmation");
+const result = await mutateRegistry((registry) => {
+const removed = registry.bindings.find((item) => item.id === id);
+const before = registry.bindings.length;
+registry.bindings = registry.bindings.filter((item) => item.id !== id);
+if (registry.bindings.length === before) throw new Error(`source binding not found: ${id}`);
+registry.history.push({ kind: "purged", bindingDigest: digest(id), at: new Date().toISOString(), authority: "context-only" });
+return { purged: true, removed };
+}, env);
+if (result.removed?.scope === "project-memory") await purgeIndexedMemoryCache(result.removed.sourceRoot, env);
+return { ...result, removed: undefined };
 }
-
 export async function inspectSourceRegistry(env = process.env) {
-  const { registry, path } = await readRegistry(env);
-  return { registry, registryPath: path };
+const { registry, path } = await readRegistry(env);
+return { registry, registryPath: path };
 }
-
 async function claudeSources({ cwd, projectRoot, configDir, input, env, registry, deadline, memoryHooks }) {
-  const sources = [];
-  const skipped = [];
-  await addFile(sources, join(configDir, "CLAUDE.md"), { id: "claude:user/CLAUDE.md", host: "claude", scope: "user", binding: "CLAUDE_CONFIG_DIR", precedence: 100 });
-  sources.push(...await boundedMarkdownTree(join(configDir, "rules"), "claude:user/rules", "claude", "user", 110, deadline,
-    { maxFiles: MAX_RULE_FILES, maxDirectoryEntries: MAX_DIRECTORY_ENTRIES, skipped, timeoutMs: SOURCE_RESOLUTION_MS }));
-  let precedence = 1000;
-  for (const directory of ancestorsBetween(projectRoot, cwd)) {
-    for (const name of ["CLAUDE.md", "CLAUDE.local.md"]) {
-      await addFile(sources, join(directory, name), { id: `claude:project/${relative(projectRoot, join(directory, name)).replaceAll("\\", "/")}`,
-        host: "claude", scope: "project", binding: "native-project-chain", precedence: precedence++ });
-    }
-    await addFile(sources, join(directory, ".claude", "CLAUDE.md"), { id: `claude:project/${relative(projectRoot, join(directory, ".claude", "CLAUDE.md")).replaceAll("\\", "/")}`,
-      host: "claude", scope: "project", binding: "native-project-chain", precedence: precedence++ });
-  }
-  sources.push(...await boundedMarkdownTree(join(projectRoot, ".claude", "rules"), "claude:project/.claude/rules", "claude", "project", precedence, deadline,
-    { maxFiles: MAX_RULE_FILES, maxDirectoryEntries: MAX_DIRECTORY_ENTRIES, skipped, timeoutMs: SOURCE_RESOLUTION_MS }));
-
-  let memoryRoot = null;
-  let memoryProvenance = null;
-  for (const path of [join(configDir, "settings.json"), join(projectRoot, ".claude", "settings.json"), join(projectRoot, ".claude", "settings.local.json")]) {
-    const value = await readJsonObject(path);
-    if (typeof value?.autoMemoryDirectory === "string") {
-      const expanded = expandHome(value.autoMemoryDirectory, homedir());
-      if (!isAbsolute(expanded)) throw new Error("Claude autoMemoryDirectory must be absolute or home-relative");
-      memoryRoot = await existingDirectory(expanded);
-      memoryProvenance = "autoMemoryDirectory";
-    }
-  }
-  if (!memoryRoot && typeof env.CLAUDE_CODE_PROJECT_DIR_NAME === "string" && SAFE_NAME.test(env.CLAUDE_CODE_PROJECT_DIR_NAME)) {
-    memoryRoot = await existingDirectory(join(configDir, "projects", env.CLAUDE_CODE_PROJECT_DIR_NAME, "memory"));
-    memoryProvenance = "CLAUDE_CODE_PROJECT_DIR_NAME";
-  }
-  const transcript = input.transcript_path || input.transcriptPath;
-  if (!memoryRoot && typeof transcript === "string" && isAbsolute(transcript)) {
-    const transcriptFile = await existingRegular(transcript);
-    const projectsRoot = await existingDirectory(join(configDir, "projects"));
-    if (transcriptFile && projectsRoot && isInside(projectsRoot, transcriptFile)) {
-      memoryRoot = await existingDirectory(join(dirname(transcriptFile), "memory"));
-      memoryProvenance = "host-hook-transcript";
-    }
-  }
-  if (memoryRoot) {
-    await rememberRuntimeBinding({ host: "claude", hostHome: configDir, projectRoot, sourceRoot: memoryRoot,
-      scope: "project-memory", provenance: memoryProvenance, env });
-  } else {
-    memoryRoot = activeBinding(registry, "claude", configDir, projectRoot, "project-memory")?.sourceRoot || null;
-    memoryProvenance = memoryRoot ? "source-root-registry" : null;
-  }
-  let memoryDiagnostics = null;
-  if (memoryRoot) {
-    const supplied = input.agent_spine_scope && typeof input.agent_spine_scope === "object"
-      ? input.agent_spine_scope : input;
-    let recall = { status: "empty", paths: [], authority: "context-only" };
-    try {
-      recall = await loadLessonRecallSelection({ root: projectRoot, input, now: input.timestamp || new Date() });
-    } catch (error) {
-      recall = { status: "degraded", paths: [], reason: error.message, authority: "context-only" };
-    }
-    const resolved = await resolveIndexedMemory({
-      root: memoryRoot, env, hooks: memoryHooks, deadline,
-      scope: {
-        entityId: supplied.entity_id ?? supplied.entityId ?? null,
-        groupId: supplied.group_id ?? supplied.groupId ?? null,
-        projectId: supplied.project_id ?? supplied.projectId ?? null,
-        currentTaskId: supplied.task_id ?? supplied.currentTaskId ?? null,
-        prompt: hookMemoryQuery(input),
-        pinnedPaths: recall.paths
-      }
-    });
-    let recorded = { status: "not-recorded", paths: [], authority: "context-only" };
-    try {
-      recorded = await rememberLessonRecallSelection({ root: projectRoot, input,
-        sources: resolved.sources, now: input.timestamp || new Date() });
-    } catch (error) {
-      recorded = { status: "degraded", paths: [], reason: error.message, authority: "context-only" };
-    }
-    memoryDiagnostics = { ...resolved.diagnostics, recall: {
-      restored: recall.paths.length, loadStatus: recall.status, recordStatus: recorded.status,
-      recorded: recorded.paths.length, authority: "context-only"
-    } };
-    for (const item of resolved.sources) {
-      sources.push({
-        path: item.path, id: `claude:memory/${item.relativePath}`, host: "claude", scope: "project-memory",
-        binding: "host-native-memory-index", precedence: 2000 + sources.length,
-        snapshot: item.snapshot, relevance: item.relevance
-      });
-    }
-  }
-  return { sources, memoryRoot, memoryProvenance, memoryDiagnostics, skipped };
+const sources = [];
+const skipped = [];
+await addFile(sources, join(configDir, "CLAUDE.md"), { id: "claude:user/CLAUDE.md", host: "claude", scope: "user", binding: "CLAUDE_CONFIG_DIR", precedence: 100 });
+sources.push(...await boundedMarkdownTree(join(configDir, "rules"), "claude:user/rules", "claude", "user", 110, deadline,
+{ maxFiles: MAX_RULE_FILES, maxDirectoryEntries: MAX_DIRECTORY_ENTRIES, skipped, timeoutMs: SOURCE_RESOLUTION_MS }));
+let precedence = 1000;
+for (const directory of ancestorsBetween(projectRoot, cwd)) {
+for (const name of ["CLAUDE.md", "CLAUDE.local.md"]) {
+await addFile(sources, join(directory, name), { id: `claude:project/${relative(projectRoot, join(directory, name)).replaceAll("\\", "/")}`,
+host: "claude", scope: "project", binding: "native-project-chain", precedence: precedence++ });
 }
-
+await addFile(sources, join(directory, ".claude", "CLAUDE.md"), { id: `claude:project/${relative(projectRoot, join(directory, ".claude", "CLAUDE.md")).replaceAll("\\", "/")}`,
+host: "claude", scope: "project", binding: "native-project-chain", precedence: precedence++ });
+}
+sources.push(...await boundedMarkdownTree(join(projectRoot, ".claude", "rules"), "claude:project/.claude/rules", "claude", "project", precedence, deadline,
+{ maxFiles: MAX_RULE_FILES, maxDirectoryEntries: MAX_DIRECTORY_ENTRIES, skipped, timeoutMs: SOURCE_RESOLUTION_MS }));
+let memoryRoot = null;
+let memoryProvenance = null;
+for (const path of [join(configDir, "settings.json"), join(projectRoot, ".claude", "settings.json"), join(projectRoot, ".claude", "settings.local.json")]) {
+const value = await readJsonObject(path);
+if (typeof value?.autoMemoryDirectory === "string") {
+const expanded = expandHome(value.autoMemoryDirectory, homedir());
+if (!isAbsolute(expanded)) throw new Error("Claude autoMemoryDirectory must be absolute or home-relative");
+memoryRoot = await existingDirectory(expanded);
+memoryProvenance = "autoMemoryDirectory";
+}
+}
+if (!memoryRoot && typeof env.CLAUDE_CODE_PROJECT_DIR_NAME === "string" && SAFE_NAME.test(env.CLAUDE_CODE_PROJECT_DIR_NAME)) {
+memoryRoot = await existingDirectory(join(configDir, "projects", env.CLAUDE_CODE_PROJECT_DIR_NAME, "memory"));
+memoryProvenance = "CLAUDE_CODE_PROJECT_DIR_NAME";
+}
+const transcript = input.transcript_path || input.transcriptPath;
+if (!memoryRoot && typeof transcript === "string" && isAbsolute(transcript)) {
+const transcriptFile = await existingRegular(transcript);
+const projectsRoot = await existingDirectory(join(configDir, "projects"));
+if (transcriptFile && projectsRoot && isInside(projectsRoot, transcriptFile)) {
+memoryRoot = await existingDirectory(join(dirname(transcriptFile), "memory"));
+memoryProvenance = "host-hook-transcript";
+}
+}
+if (memoryRoot) {
+await rememberRuntimeBinding({ host: "claude", hostHome: configDir, projectRoot, sourceRoot: memoryRoot,
+scope: "project-memory", provenance: memoryProvenance, env });
+} else {
+memoryRoot = activeBinding(registry, "claude", configDir, projectRoot, "project-memory")?.sourceRoot || null;
+memoryProvenance = memoryRoot ? "source-root-registry" : null;
+}
+let memoryDiagnostics = null;
+if (memoryRoot) {
+const supplied = input.agent_spine_scope && typeof input.agent_spine_scope === "object"
+? input.agent_spine_scope : input;
+let recall = { status: "empty", paths: [], authority: "context-only" };
+try {
+recall = await loadLessonRecallSelection({ root: projectRoot, input, now: input.timestamp || new Date() });
+} catch (error) {
+recall = { status: "degraded", paths: [], reason: error.message, authority: "context-only" };
+}
+const resolved = await resolveIndexedMemory({
+root: memoryRoot, env, hooks: memoryHooks, deadline,
+scope: {
+entityId: supplied.entity_id ?? supplied.entityId ?? null,
+groupId: supplied.group_id ?? supplied.groupId ?? null,
+projectId: supplied.project_id ?? supplied.projectId ?? null,
+currentTaskId: supplied.task_id ?? supplied.currentTaskId ?? null,
+prompt: hookMemoryQuery(input),
+pinnedPaths: recall.paths
+}
+});
+let recorded = { status: "not-recorded", paths: [], authority: "context-only" };
+try {
+recorded = await rememberLessonRecallSelection({ root: projectRoot, input,
+sources: resolved.sources, now: input.timestamp || new Date() });
+} catch (error) {
+recorded = { status: "degraded", paths: [], reason: error.message, authority: "context-only" };
+}
+memoryDiagnostics = { ...resolved.diagnostics, recall: {
+restored: recall.paths.length, loadStatus: recall.status, recordStatus: recorded.status,
+recorded: recorded.paths.length, authority: "context-only"
+} };
+for (const item of resolved.sources) {
+sources.push({
+path: item.path, id: `claude:memory/${item.relativePath}`, host: "claude", scope: "project-memory",
+binding: "host-native-memory-index", precedence: 2000 + sources.length,
+snapshot: item.snapshot, relevance: item.relevance
+});
+}
+}
+return { sources, memoryRoot, memoryProvenance, memoryDiagnostics, skipped };
+}
 async function codexSources({ cwd, projectRoot, codexHome, config }) {
-  const sources = [];
-  for (const name of ["AGENTS.override.md", "AGENTS.md"]) {
-    const file = await existingRegular(join(codexHome, name));
-    if (file && (await stat(file)).size > 0) {
-      sources.push({ path: file, id: `codex:user/${name}`, host: "codex", scope: "user", binding: "CODEX_HOME", precedence: 100, maxBytes: config.maxBytes });
-      break;
-    }
-  }
-  let precedence = 1000;
-  for (const directory of ancestorsBetween(projectRoot, cwd)) {
-    for (const name of ["AGENTS.override.md", "AGENTS.md", ...config.fallbackNames]) {
-      const file = await existingRegular(join(directory, name));
-      if (file && (await stat(file)).size > 0) {
-        sources.push({ path: file, id: `codex:project/${relative(projectRoot, file).replaceAll("\\", "/")}`,
-          host: "codex", scope: "project", binding: "native-project-chain", precedence: precedence++, maxBytes: config.maxBytes });
-        break;
-      }
-    }
-  }
-  return sources;
+const sources = [];
+for (const name of ["AGENTS.override.md", "AGENTS.md"]) {
+const file = await existingRegular(join(codexHome, name));
+if (file && (await stat(file)).size > 0) {
+sources.push({ path: file, id: `codex:user/${name}`, host: "codex", scope: "user", binding: "CODEX_HOME", precedence: 100, maxBytes: config.maxBytes });
+break;
 }
-
+}
+let precedence = 1000;
+for (const directory of ancestorsBetween(projectRoot, cwd)) {
+for (const name of ["AGENTS.override.md", "AGENTS.md", ...config.fallbackNames]) {
+const file = await existingRegular(join(directory, name));
+if (file && (await stat(file)).size > 0) {
+sources.push({ path: file, id: `codex:project/${relative(projectRoot, file).replaceAll("\\", "/")}`,
+host: "codex", scope: "project", binding: "native-project-chain", precedence: precedence++, maxBytes: config.maxBytes });
+break;
+}
+}
+}
+return sources;
+}
 export async function resolveHostSourceCatalog({ host, cwd = process.cwd(), input = {}, env = process.env, memoryHooks = {} } = {}) {
-  if (!["claude", "codex", "generic"].includes(host)) throw new Error(`unsupported source host: ${host}`);
-  const canonicalCwd = await canonicalPath(cwd);
-  const deadline = Date.now() + SOURCE_RESOLUTION_MS;
-  const { registry } = await readRegistry(env);
-  let hostHome;
-  let projectRoot;
-  let sources, unverified;
-  let skipped = [];
-  let hostDetails = {};
-  let rootResolution = "explicit-root";
-  if (host === "codex") {
-    const codexHome = isKingHost(env) ? env.BLUN_HOME : env.CODEX_HOME || env.BLUN_HOME || join(homedir(), ".codex");
-    hostHome = await existingDirectory(resolve(codexHome)) || resolve(codexHome);
-    const config = await codexConfig(hostHome);
-    if (isKingHost(env)) config.maxBytes = KING_SOURCE_BYTES;
-    if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
-    else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, config.rootMarkers));
-    sources = await codexSources({ cwd: canonicalCwd, projectRoot, codexHome: hostHome, config });
-    hostDetails = { rootMarkers: config.rootMarkers, fallbackNames: config.fallbackNames };
-  } else if (host === "claude") {
-    hostHome = await existingDirectory(resolve(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")))
-      || resolve(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
-    if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
-    else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, [".git"]));
-    const result = await claudeSources({ cwd: canonicalCwd, projectRoot, configDir: hostHome, input, env, registry, deadline, memoryHooks });
-    sources = result.sources;
-    skipped = result.skipped;
-    hostDetails = { memoryRoot: result.memoryRoot, memoryProvenance: result.memoryProvenance,
-      memoryDiagnostics: result.memoryDiagnostics };
-  } else {
-    hostHome = await canonicalPath(homedir());
-    if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
-    else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, [".git"]));
-    sources = [];
-    for (const directory of ancestorsBetween(projectRoot, canonicalCwd)) {
-      for (const name of ["AGENTS.md", "SOUL.md", "MEMORY.md"]) {
-        await addFile(sources, join(directory, name), {
-          id: `generic:project/${relative(projectRoot, join(directory, name)).replaceAll("\\", "/")}`,
-          host, scope: "project", binding: "native-project-chain", precedence: 1000 + sources.length
-        });
-      }
-    }
-  }
-  sources = [...new Map(sources.map((item) => [item.path, item])).values()];
-  if (sources.length > MAX_SOURCES) throw new Error(`host-native required source set exceeds ${MAX_SOURCES} files`);
-  ({ sources, unverified } = await partitionSources(sources, env));
-  const nativeNames = new Set(host === "codex"
-    ? ["AGENTS.override.md", "AGENTS.md", ...(hostDetails.fallbackNames || [])]
-    : host === "claude" ? ["CLAUDE.md", "CLAUDE.local.md"] : ["AGENTS.md", "SOUL.md", "MEMORY.md"]);
-  const knownHomeRoots = await homeRoots(env);
-  const skippedHomeTree = knownHomeRoots.some((root) => samePath(root, projectRoot));
-  const skippedProfileTree = samePath(hostHome, projectRoot);
-  const skippedFallbackHomeTree = skippedHomeTree && rootResolution === "cwd-fallback";
-  if (!skippedHomeTree && !skippedProfileTree) {
-    const optionalBudget = Math.min(MAX_PROJECT_FILES, MAX_SOURCES - sources.length);
-    sources.push(...await boundedMarkdownTree(projectRoot, "agentspine:project", host, "project", 3000, deadline,
-      { projectBoundary: true, maxFiles: optionalBudget, maxDirectoryEntries: MAX_PROJECT_DIRECTORY_ENTRIES,
-        skipped, truncateOnLimit: true, excludedNames: nativeNames, label: "project Markdown",
-        timeoutMs: SOURCE_RESOLUTION_MS }));
-  }
-  sources = [...new Map(sources.map((item) => [item.path, item])).values()];
-  if (sources.length > MAX_SOURCES) throw new Error(`host-native source set exceeds ${MAX_SOURCES} files`);
-  let documents;
-  try {
-    documents = await indexExplicitDocuments(sources);
-  } catch (error) {
-    if (typeof error?.code === "string" && (error.path || error.syscall)) throw sourceScanError(error);
-    throw error;
-  }
-  const totalBytes = documents.reduce((sum, document) => sum + document.bytes, 0);
-  if (totalBytes > MAX_TOTAL_SOURCE_BYTES) throw new Error("host-native source set exceeds 8 MiB");
-  const activeUserState = activeBinding(registry, host, hostHome, projectRoot, "state-user");
-  const orderedSkipped = skipped.sort((a, b) => a.path.localeCompare(b.path) || a.operation.localeCompare(b.operation));
-  const warnings = orderedSkipped.filter((item) => item.code === SOURCE_SCAN_INCOMPLETE);
-  const unverifiedWarning = unverified.length > 1
-    ? `${unverified.length} King rules exceed AgentSpine reader budgets; none were loaded or verified. Native rules apply. Continue; no retry.`
-    : unverified[0]?.message;
-  const diagnostics = {
-    schema: SOURCE_REGISTRY_SCHEMA, host, status: unverified.length ? "incomplete" : documents.length ? "loaded" : "empty", projectRoot,
-    hostHomeDigest: digest(hostHome).slice(0, 16), checked: ["host-profile", "project-chain", ...(host === "claude" ? ["project-memory"] : [])],
-    scopes: Object.fromEntries(["user", "project", "project-memory"].map((scope) => [scope, documents.filter((item) => item.sourceScope === scope).length])),
-    reason: unverifiedWarning || (documents.length ? null : "No regular, non-symlink host-native Markdown source exists in the checked scope."),
-    personalContinuityLoaded: documents.some((item) => item.sourceScope === "user") || Boolean(activeUserState),
-    broadHomeScan: false, projectTreeScan: skippedFallbackHomeTree ? "skipped-unmarked-home"
-      : skippedHomeTree ? "skipped-home-root" : skippedProfileTree ? "skipped-profile-root"
-        : warnings.length ? "bounded-truncated" : "bounded",
-    incomplete: Boolean(unverified.length || warnings.length),
-    warning: unverifiedWarning || warnings[0]?.message || null,
-    warnings,
-    skipped: orderedSkipped,
-    rootResolution, registryRevision: registry.revision,
-    ...(host === "claude" ? {
-      memoryBound: Boolean(hostDetails.memoryRoot),
-      memoryRootDigest: hostDetails.memoryRoot ? digest(hostDetails.memoryRoot).slice(0, 16) : null,
-      memoryProvenance: hostDetails.memoryProvenance,
-      memory: hostDetails.memoryDiagnostics || {
-        indexed: 0, relevant: 0, selected: 0, omittedRelevant: 0, loaded: 0, cacheHits: 0, cacheMisses: 0, missing: 0,
-        rejected: { scope: 0, path: 0, symlink: 0, race: 0, size: 0 }, directoryEnumeration: 0
-      }
-    } : hostDetails)
-  };
-  const catalog = {
-    schema: "agentspine.catalog/v1", generatedAt: new Date().toISOString(), root: projectRoot,
-    scanPolicy: catalogScanPolicy(projectRoot, env),
-    preservation: "source-files-are-read-only", documents, conflicts: [], sourceRegistry: diagnostics,
-    summary: { total: documents.length, protected: documents.filter((item) => item.protected).length, conflicts: 0,
-      byLayer: Object.fromEntries([...new Set(documents.map((item) => item.layer))].sort().map((layer) => [layer, documents.filter((item) => item.layer === layer).length])) }
-  };
-  return { host, hostHome, projectRoot, cwd: canonicalCwd, catalog, diagnostics, unverified,
-    userStateRoot: activeUserState?.sourceRoot || null, memoryRoot: hostDetails.memoryRoot || null };
+if (!["claude", "codex", "generic"].includes(host)) throw new Error(`unsupported source host: ${host}`);
+const canonicalCwd = await canonicalPath(cwd);
+const deadline = Date.now() + SOURCE_RESOLUTION_MS;
+const { registry } = await readRegistry(env);
+let hostHome;
+let projectRoot;
+let sources, unverified;
+let skipped = [];
+let hostDetails = {};
+let rootResolution = "explicit-root";
+if (host === "codex") {
+const codexHome = isKingHost(env) ? env.BLUN_HOME : env.CODEX_HOME || env.BLUN_HOME || join(homedir(), ".codex");
+hostHome = await existingDirectory(resolve(codexHome)) || resolve(codexHome);
+const config = await codexConfig(hostHome);
+if (isKingHost(env)) config.maxBytes = KING_SOURCE_BYTES;
+if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
+else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, config.rootMarkers));
+sources = await codexSources({ cwd: canonicalCwd, projectRoot, codexHome: hostHome, config });
+hostDetails = { rootMarkers: config.rootMarkers, fallbackNames: config.fallbackNames };
+} else if (host === "claude") {
+hostHome = await existingDirectory(resolve(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")))
+|| resolve(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
+if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
+else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, [".git"]));
+const result = await claudeSources({ cwd: canonicalCwd, projectRoot, configDir: hostHome, input, env, registry, deadline, memoryHooks });
+sources = result.sources;
+skipped = result.skipped;
+hostDetails = { memoryRoot: result.memoryRoot, memoryProvenance: result.memoryProvenance,
+memoryDiagnostics: result.memoryDiagnostics };
+} else {
+hostHome = await canonicalPath(homedir());
+if (env.AGENTSPINE_ROOT) projectRoot = await canonicalPath(env.AGENTSPINE_ROOT);
+else ({ root: projectRoot, resolution: rootResolution } = await findRoot(canonicalCwd, [".git"]));
+sources = [];
+for (const directory of ancestorsBetween(projectRoot, canonicalCwd)) {
+for (const name of ["AGENTS.md", "SOUL.md", "MEMORY.md"]) {
+await addFile(sources, join(directory, name), {
+id: `generic:project/${relative(projectRoot, join(directory, name)).replaceAll("\\", "/")}`,
+host, scope: "project", binding: "native-project-chain", precedence: 1000 + sources.length
+});
+}
+}
+}
+sources = [...new Map(sources.map((item) => [item.path, item])).values()];
+if (sources.length > MAX_SOURCES) throw new Error(`host-native required source set exceeds ${MAX_SOURCES} files`);
+({ sources, unverified } = await partitionSources(sources, env));
+const nativeNames = new Set(host === "codex"
+? ["AGENTS.override.md", "AGENTS.md", ...(hostDetails.fallbackNames || [])]
+: host === "claude" ? ["CLAUDE.md", "CLAUDE.local.md"] : ["AGENTS.md", "SOUL.md", "MEMORY.md"]);
+const knownHomeRoots = await homeRoots(env);
+const skippedHomeTree = knownHomeRoots.some((root) => samePath(root, projectRoot));
+const skippedProfileTree = samePath(hostHome, projectRoot);
+const skippedFallbackHomeTree = skippedHomeTree && rootResolution === "cwd-fallback";
+if (!skippedHomeTree && !skippedProfileTree) {
+const optionalBudget = Math.min(MAX_PROJECT_FILES, MAX_SOURCES - sources.length);
+sources.push(...await boundedMarkdownTree(projectRoot, "agentspine:project", host, "project", 3000, deadline,
+{ projectBoundary: true, maxFiles: optionalBudget, maxDirectoryEntries: MAX_PROJECT_DIRECTORY_ENTRIES,
+skipped, truncateOnLimit: true, excludedNames: nativeNames, label: "project Markdown",
+timeoutMs: SOURCE_RESOLUTION_MS }));
+}
+sources = [...new Map(sources.map((item) => [item.path, item])).values()];
+if (sources.length > MAX_SOURCES) throw new Error(`host-native source set exceeds ${MAX_SOURCES} files`);
+let documents;
+try {
+documents = await indexExplicitDocuments(sources);
+} catch (error) {
+if (typeof error?.code === "string" && (error.path || error.syscall)) throw sourceScanError(error);
+throw error;
+}
+const totalBytes = documents.reduce((sum, document) => sum + document.bytes, 0);
+if (totalBytes > MAX_TOTAL_SOURCE_BYTES) throw new Error("host-native source set exceeds 8 MiB");
+const activeUserState = activeBinding(registry, host, hostHome, projectRoot, "state-user");
+const orderedSkipped = skipped.sort((a, b) => a.path.localeCompare(b.path) || a.operation.localeCompare(b.operation));
+const warnings = orderedSkipped.filter((item) => item.code === SOURCE_SCAN_INCOMPLETE);
+const unverifiedWarning = unverified.length > 1
+? `${unverified.length} King rules exceed AgentSpine reader budgets; none were loaded or verified. Native rules apply. Continue; no retry.`
+: unverified[0]?.message;
+const diagnostics = {
+schema: SOURCE_REGISTRY_SCHEMA, host, status: unverified.length ? "incomplete" : documents.length ? "loaded" : "empty", projectRoot,
+hostHomeDigest: digest(hostHome).slice(0, 16), checked: ["host-profile", "project-chain", ...(host === "claude" ? ["project-memory"] : [])],
+scopes: Object.fromEntries(["user", "project", "project-memory"].map((scope) => [scope, documents.filter((item) => item.sourceScope === scope).length])),
+reason: unverifiedWarning || (documents.length ? null : "No regular, non-symlink host-native Markdown source exists in the checked scope."),
+personalContinuityLoaded: documents.some((item) => item.sourceScope === "user") || Boolean(activeUserState),
+broadHomeScan: false, projectTreeScan: skippedFallbackHomeTree ? "skipped-unmarked-home"
+: skippedHomeTree ? "skipped-home-root" : skippedProfileTree ? "skipped-profile-root"
+: warnings.length ? "bounded-truncated" : "bounded",
+incomplete: Boolean(unverified.length || warnings.length),
+warning: unverifiedWarning || warnings[0]?.message || null,
+warnings,
+skipped: orderedSkipped,
+rootResolution, registryRevision: registry.revision,
+...(host === "claude" ? {
+memoryBound: Boolean(hostDetails.memoryRoot),
+memoryRootDigest: hostDetails.memoryRoot ? digest(hostDetails.memoryRoot).slice(0, 16) : null,
+memoryProvenance: hostDetails.memoryProvenance,
+memory: hostDetails.memoryDiagnostics || {
+indexed: 0, relevant: 0, selected: 0, omittedRelevant: 0, loaded: 0, cacheHits: 0, cacheMisses: 0, missing: 0,
+rejected: { scope: 0, path: 0, symlink: 0, race: 0, size: 0 }, directoryEnumeration: 0
+}
+} : hostDetails)
+};
+const catalog = {
+schema: "agentspine.catalog/v1", generatedAt: new Date().toISOString(), root: projectRoot,
+scanPolicy: catalogScanPolicy(projectRoot, env),
+preservation: "source-files-are-read-only", documents, conflicts: [], sourceRegistry: diagnostics,
+summary: { total: documents.length, protected: documents.filter((item) => item.protected).length, conflicts: 0,
+byLayer: Object.fromEntries([...new Set(documents.map((item) => item.layer))].sort().map((layer) => [layer, documents.filter((item) => item.layer === layer).length])) }
+};
+return { host, hostHome, projectRoot, cwd: canonicalCwd, catalog, diagnostics, unverified,
+userStateRoot: activeUserState?.sourceRoot || null, memoryRoot: hostDetails.memoryRoot || null };
 }
