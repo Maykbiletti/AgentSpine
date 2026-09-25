@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { installedHostEnvironment } from "./check-install-hook.js";
+import {spawn} from "node:child_process";
+import {readFile,stat} from "node:fs/promises";
+import {isAbsolute,relative,resolve} from "node:path";
+import {fileURLToPath} from "node:url";
+import {installedHostEnvironment} from "./check-install-hook.js";
 const TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search|capture))$";
 const BLUN_TIMELINE_PRE_TOOL_MATCHER = "^(?:Edit|Write|apply_patch|Bash|PowerShell|exec_command|mcp__agent-spine__session_timeline_(?:index|search|capture))$";
 function assert(condition, message) {
@@ -38,9 +38,9 @@ const expected = `node "\${${commandRoot}}/src/hook.js"${event === "PostToolUse"
 ? " --silent-oversize-post-tool-use" : ""}`;
 assert(command.command === expected, `${event} must use the bundled lifecycle adapter`);
 assert(Number.isInteger(command.timeout) && command.timeout > 0 && command.timeout <= 15, `${event} timeout is unsafe`);
-if(expectedCount===2){const observer=registrations[0].hooks[1];
-assert(observer.type==="command"&&observer.command===`node "\${${commandRoot}}/src/claude-observer-hook.js"`
-&&observer.async===true&&Object.keys(observer).length===3,"UserPromptSubmit observer must be one bundled async command");}
+if(expectedCount===2){const observer=registrations[0].hooks[1],host=commandRoot[0]==="P"?"codex":"claude";
+assert(observer.type==="command"&&observer.command===`node "\${${commandRoot}}/src/claude-observer-hook.js" --host=${host}`
+&&observer.async===true&&Object.keys(observer).length===3,"observer host binding is unsafe");}
 if (event === "PreToolUse") assert(registrations[0].matcher === matcher,
 "PreToolUse must route only exact mutations and timeline MCP calls through one guard");
 }
