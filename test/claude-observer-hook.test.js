@@ -43,6 +43,6 @@ assert.equal(switched.observerModel,"recorded");let model=null;await runClaudeOb
 test("observer CLI disables tools, persistence, nested hooks and external API overrides",()=>{const args=claudeObserverArguments("claude-opus-5","source");
 for(const pair of [["--model","claude-opus-5"],["--tools",""],["--disallowedTools","mcp__*"],["--permission-prompts","none"],["--max-turns","1"]]){const index=args.indexOf(pair[0]);assert.equal(args[index+1],pair[1]);}
 for(const flag of ["--bare","--no-session-persistence"])assert.ok(args.includes(flag));
-const env=claudeObserverEnvironment({PATH:"safe",CLAUDECODE:"1",CLAUDE_CODE_ENTRYPOINT:"hook",CLAUDE_CODE_OAUTH_TOKEN:"host-login",ANTHROPIC_API_KEY:"foreign",ANTHROPIC_BASE_URL:"https://foreign",AWS_REGION:"eu-north-1"});
-assert.deepEqual(env,{PATH:"safe",CLAUDE_CODE_OAUTH_TOKEN:"host-login",AWS_REGION:"eu-north-1"});
+const env=claudeObserverEnvironment({PATH:"safe",CLAUDECODE:"1",CLAUDE_CODE_ENTRYPOINT:"hook",CLAUDE_CODE_OAUTH_TOKEN:"host-login",ANTHROPIC_API_KEY:"foreign",CLAUDE_CODE_USE_BEDROCK:"1",AWS_REGION:"eu-north-1",CLAUDE_CODE_USE_VERTEX:"1",GOOGLE_APPLICATION_CREDENTIALS:"foreign.json",CLAUDE_CODE_USE_FOUNDRY:"1",AZURE_CLIENT_SECRET:"foreign"});
+assert.deepEqual(env,{PATH:"safe",CLAUDE_CODE_OAUTH_TOKEN:"host-login"});
 });
