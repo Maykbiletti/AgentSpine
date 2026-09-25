@@ -95,9 +95,8 @@ function unavailable(reason) { return status({ status: "unavailable", reason });
 function blocked(reason) { return { blocked: true, reason, authority: AUTHORITY }; }
 function hasExactPrivateTimelineScope(scope) { return scope?.groupId === null; }
 function sourceFor(state, scope) { return state.sources.find((item) => sameTimelineBinding(item.binding, scope)) || null; }
-function observerBindingDigest(host,sessionId,scope){if(!["claude","codex"].includes(host)||scope?.groupId!==null)return null;
-const values=[host,sessionId,scope.entityId,scope.userId,scope.tenantId,scope.projectId,scope.portalRef||"",scope.threadRef||""];
-return values.slice(0,6).every(value=>typeof value==="string"&&value)?digest(values.join("\0")):null;}
+function observerBindingDigest(host,sessionId,scope){const binding=sessionTimelineBinding({host,sessionId,scope});
+return ["claude","codex"].includes(host)&&completeTimelineBinding(binding)?digest(JSON.stringify(binding)):null;}
 async function mutateObserver(root,bindingDigest,task){try{await ensureSessionTimelineTrust({create:true});const names=await paths(root);
 return await withOwnedFileLock(names.lock,async({assertOwned})=>{const state=await readState(names.path,root,names.assertStable);
 state.observers||=[];const result=task(state.observers.find(item=>item.bindingDigest===bindingDigest)||null,state);
