@@ -82,6 +82,7 @@ async function runInstalledHook(packageRoot, project, env, eventId, prompt, extr
       event_id: `turn:${eventId}`,
       prompt, ...extra
   });
+  const oversizedInput = Buffer.byteLength(input) > 64 * 1024;
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [join(packageRoot, "src", "hook.js"), ...args], {
       cwd: project, env, windowsHide: true, stdio: ["pipe", "pipe", "pipe"]
@@ -91,6 +92,12 @@ async function runInstalledHook(packageRoot, project, env, eventId, prompt, extr
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.stdin.on("error", (error) => {
+      // An oversized hook deliberately stops reading before the writer reaches
+      // EOF. Its bounded output and exit status are still checked below.
+      if (oversizedInput && ["EPIPE", "EOF"].includes(error.code)) return;
+      reject(error);
+    });
     const timer = setTimeout(() => child.kill(), 20_000);
     child.once("error", (error) => { clearTimeout(timer); reject(error); });
     child.once("close", (code) => {
