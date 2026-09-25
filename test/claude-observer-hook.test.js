@@ -22,7 +22,7 @@ return {root,transcript,privateScope};}
 function input(item,patch={}){const s=item.privateScope;return {hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.root,session_id:"session:observer",prompt_id:"550e8400-e29b-41d4-a716-446655440000",transcript_path:item.transcript,prompt:"Nein, erst die Prüfsumme prüfen.",entity_id:s.entityId,user_id:s.userId,tenant_id:s.tenantId,project_id:s.projectId,task_id:s.currentTaskId,goal_id:s.goalId,goal_step_id:s.goalStepId,group_id:null,...patch};}
 const proposal={status:"proposal",kind:"next-step-correction",next:"Erst die Prüfsumme prüfen.",question:null};
 
-test("Claude observer uses one scoped host model proposal and preserves source bytes",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript));let calls=0,seen;
+test("Claude observer uses one scoped host model proposal and preserves source bytes",async t=>{const item=await fixture(t);await writeFile(item.transcript,`${JSON.stringify({message:{role:"user",content:"current prompt"}})}\n`,{flag:"a"});const before=digest(await readFile(item.transcript));let calls=0,seen;
 const output=await runClaudeObserver(input(item),{modelCall:async request=>{calls++;seen=request;return {stdout:JSON.stringify({structured_output:proposal})};}});
 assert.equal(calls,1);assert.equal(seen.model,"claude-sonnet-5");assert.match(seen.prompt,/exact user text/);assert.equal(digest(await readFile(item.transcript)),before);
 const context=JSON.parse(output.hookSpecificOutput.additionalContext);assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.proposal.kind,"next-step-correction");assert.equal(context.sourceDigest,digest("Nein, erst die Prüfsumme prüfen."));
@@ -34,6 +34,10 @@ assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:large",prompt
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:image",prompt:"<image source>"}),{modelCall:call}),null);
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:group",group_id:"group:foreign"}),{modelCall:call}),null);
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:failure"}),{modelCall:call}),null);assert.equal(calls,1);
+});
+
+test("observer rejects a replaced enrolled transcript and preserves replacement bytes",async t=>{const item=await fixture(t),replacement=`${JSON.stringify({message:{role:"user",content:"replacement"}})}\n`;await rm(item.transcript);await writeFile(item.transcript,replacement);let calls=0;
+assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:replaced"}),{modelCall:async()=>{calls++;return {stdout:JSON.stringify({structured_output:proposal})};}}),null);assert.equal(calls,0);assert.equal(await readFile(item.transcript,"utf8"),replacement);
 });
 
 test("PostModelSwitch updates the exact session model used by the next observer",async t=>{const item=await fixture(t),base=input(item),switched=await runHook({...base,hook_event_name:"PostModelSwitch",from_model:"claude-sonnet-5",to_model:"claude-opus-5",source:"command"});
