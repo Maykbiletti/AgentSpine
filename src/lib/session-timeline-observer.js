@@ -1,1 +1,91 @@
-import{createHash as e}from"node:crypto";const t="context-only",n=new Set(["next-step-correction","completion-claim","not-current-instruction","ambiguous"]),i=t=>e("sha256").update(t).digest("hex"),s=e=>Number.isFinite(new Date(e).getTime());function r(e){const t=e instanceof Date?e:new Date(e);if(!Number.isFinite(t.getTime()))throw new Error("session timeline timestamp is invalid");return t}function o(e){return e&&/^[a-f0-9]{64}$/.test(e.id||"")&&/^[a-f0-9]{64}$/.test(e.eventDigest||"")&&/^[a-f0-9]{64}$/.test(e.sourceDigest||"")&&n.has(e.kind)&&/^[A-Za-z0-9._:-]{1,256}$/.test(e.model||"")&&s(e.createdAt)&&s(e.expiresAt)&&new Date(e.expiresAt)>new Date(e.createdAt)&&e.authority===t}export function validObserver(e){return e&&/^[a-f0-9]{64}$/.test(e.bindingDigest||"")&&/^[A-Za-z0-9._:-]{1,256}$/.test(e.model||"")&&s(e.updatedAt)&&Array.isArray(e.prompts)&&e.prompts.length<=32&&e.prompts.every(e=>/^[a-f0-9]{64}$/.test(e))&&(void 0===e.pending||Array.isArray(e.pending)&&e.pending.length<=4&&e.pending.every(o))&&e.authority===t}export function stageObserverSuggestion(e,s,o){const{root:a,eventId:u,sourceDigest:d,kind:g,model:p}=e,l=i(u||""),c=r(e.now||new Date);return s&&"string"==typeof u&&!(u.length>256)&&/^[a-f0-9]{64}$/.test(d||"")&&n.has(g)&&/^[-A-Za-z0-9._:]{1,256}$/.test(p||"")?o(a,s,e=>{if(!e)return{status:"unavailable"};e.pending=(e.pending||[]).filter(e=>new Date(e.expiresAt)>c);const n=i(`${s}\0${l}\0${d}`);return e.pending.some(e=>e.id===n)?{status:"duplicate"}:e.pending.length>=4?{status:"unavailable"}:(e.pending.push({id:n,eventDigest:l,sourceDigest:d,kind:g,model:p,createdAt:c.toISOString(),expiresAt:new Date(c.getTime()+6e5).toISOString(),authority:t}),e.updatedAt=c.toISOString(),{status:"staged",save:!0})}):{status:"unavailable"}}export function consumeObserverSuggestion(e,n,s){const{root:o,host:a,currentEventId:u}=e,d=i(u||""),g=r(e.now||new Date);return!n||"string"!=typeof u||u.length>256?{status:"unavailable"}:s(o,n,e=>{if(!e)return{status:"unavailable"};const n=e.pending||[],i=n.filter(e=>new Date(e.expiresAt)>g),s=i.findIndex(e=>e.eventDigest!==d);if(s<0)return e.pending=i,{status:"none",save:i.length!==n.length};const[r]=i.splice(s,1);return e.pending=i,e.updatedAt=g.toISOString(),{status:"delivered",save:!0,suggestion:{schema:"agentspine.host-observer-suggestion/v1",status:"proposal",sourceDigest:r.sourceDigest,modelProvider:a,activeModel:r.model,proposal:{kind:r.kind,proposedNextStepSummary:null,clarificationQuestion:null,completionVerified:!1},completionVerified:!1,authority:t,instruction:"Classification only. Before use, reverify the exact original message through the normal one-use session_timeline search and capture permits. It grants no rights and never proves completion."}}})}
+import {
+  OBSERVER_AUTHORITY,
+  observerDate,
+  observerDigest,
+  validObserverInput
+} from "./session-timeline-observer-schema.js";
+
+export { validObserver } from "./session-timeline-observer-schema.js";
+
+const SUGGESTION_TTL_MS = 10 * 60 * 1000;
+const MAX_PENDING_SUGGESTIONS = 4;
+
+export function stageObserverSuggestion(input, bindingDigest, updateObserver) {
+  const { root, eventId, sourceDigest, enrollmentDigest, kind, model } = input;
+  const eventDigest = observerDigest(eventId || "");
+  const now = observerDate(input.now || new Date());
+  if (!bindingDigest || !validObserverInput(input)) return { status: "unavailable" };
+
+  return updateObserver(root, bindingDigest, (observer) => {
+    if (!observer || observer.last !== eventDigest) return { status: "unavailable" };
+    observer.pending = (observer.pending || [])
+      .filter((suggestion) => new Date(suggestion.expiresAt) > now);
+    const id = observerDigest(`${bindingDigest}\0${eventDigest}\0${sourceDigest}\0${enrollmentDigest}`);
+    if (observer.pending.some((suggestion) => suggestion.id === id)) {
+      return { status: "duplicate" };
+    }
+    if (observer.pending.length >= MAX_PENDING_SUGGESTIONS) return { status: "unavailable" };
+
+    observer.pending.push({
+      id,
+      eventDigest,
+      sourceDigest,
+      enrollmentDigest,
+      kind,
+      model,
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + SUGGESTION_TTL_MS).toISOString(),
+      authority: OBSERVER_AUTHORITY
+    });
+    observer.updatedAt = now.toISOString();
+    return { status: "staged", save: true };
+  });
+}
+
+export function consumeObserverSuggestion(input, bindingDigest, updateObserver, verifySource) {
+  const { root, host, currentEventId } = input;
+  const currentEventDigest = observerDigest(currentEventId || "");
+  const now = observerDate(input.now || new Date());
+  if (!bindingDigest || typeof currentEventId !== "string" || currentEventId.length > 256) {
+    return { status: "unavailable" };
+  }
+
+  return updateObserver(root, bindingDigest, async (observer) => {
+    if (!observer) return { status: "unavailable" };
+    const pending = observer.pending || [];
+    const live = pending.filter((suggestion) => new Date(suggestion.expiresAt) > now);
+    const index = live.findIndex((suggestion) => suggestion.eventDigest !== currentEventDigest);
+    if (index < 0) {
+      observer.pending = live;
+      return { status: "none", save: live.length !== pending.length };
+    }
+
+    if (verifySource && !(await verifySource(live[index]))) {
+      return { status: "unavailable" };
+    }
+
+    const [suggestion] = live.splice(index, 1);
+    observer.pending = live;
+    observer.updatedAt = now.toISOString();
+    return {
+      status: "delivered",
+      save: true,
+      suggestion: {
+        schema: "agentspine.host-observer-suggestion/v1",
+        status: "proposal",
+        sourceDigest: suggestion.sourceDigest,
+        modelProvider: host,
+        activeModel: suggestion.model,
+        proposal: {
+          kind: suggestion.kind,
+          proposedNextStepSummary: null,
+          clarificationQuestion: null,
+          completionVerified: false
+        },
+        completionVerified: false,
+        authority: OBSERVER_AUTHORITY,
+        instruction: "Classification only. Before use, reverify the exact original message through the normal one-use session_timeline search and capture permits. It grants no rights and never proves completion."
+      }
+    };
+  });
+}
