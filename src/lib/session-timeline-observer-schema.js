@@ -22,11 +22,12 @@ export function observerDate(value) {
   return date;
 }
 
-export function validObserverInput({ eventId, sourceDigest, enrollmentDigest, kind, model }) {
+export function validObserverInput({ eventId, sourceDigest, enrollmentDigest, status, kind, model }) {
   return typeof eventId === "string"
     && eventId.length <= 256
     && DIGEST_PATTERN.test(sourceDigest || "")
     && DIGEST_PATTERN.test(enrollmentDigest || "")
+    && ["none", "proposal"].includes(status)
     && OBSERVER_KINDS.has(kind)
     && MODEL_PATTERN.test(model || "");
 }
@@ -38,6 +39,8 @@ function validPendingSuggestion(suggestion) {
     && DIGEST_PATTERN.test(suggestion.sourceDigest || "")
     && (suggestion.enrollmentDigest === undefined
       || DIGEST_PATTERN.test(suggestion.enrollmentDigest || ""))
+    && (suggestion.status === undefined
+      || ["none", "proposal"].includes(suggestion.status))
     && OBSERVER_KINDS.has(suggestion.kind)
     && MODEL_PATTERN.test(suggestion.model || "")
     && Number.isFinite(new Date(suggestion.createdAt).getTime())

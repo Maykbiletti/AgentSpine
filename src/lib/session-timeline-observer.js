@@ -11,7 +11,7 @@ const SUGGESTION_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_SUGGESTIONS = 4;
 
 export function stageObserverSuggestion(input, bindingDigest, updateObserver) {
-  const { root, eventId, sourceDigest, enrollmentDigest, kind, model } = input;
+  const { root, eventId, sourceDigest, enrollmentDigest, status, kind, model } = input;
   const eventDigest = observerDigest(eventId || "");
   const now = observerDate(input.now || new Date());
   if (!bindingDigest || !validObserverInput(input)) return { status: "unavailable" };
@@ -31,6 +31,7 @@ export function stageObserverSuggestion(input, bindingDigest, updateObserver) {
       eventDigest,
       sourceDigest,
       enrollmentDigest,
+      status,
       kind,
       model,
       createdAt: now.toISOString(),
@@ -67,25 +68,34 @@ export function consumeObserverSuggestion(input, bindingDigest, updateObserver, 
     const [suggestion] = live.splice(index, 1);
     observer.pending = live;
     observer.updatedAt = now.toISOString();
+    const common = {
+      sourceDigest: suggestion.sourceDigest,
+      modelProvider: host,
+      activeModel: suggestion.model,
+      completionVerified: false,
+      authority: OBSERVER_AUTHORITY
+    };
+    const handoff = suggestion.status === "none" ? {
+      schema: "agentspine.host-observer-ack/v1",
+      status: "none",
+      ...common,
+      instruction: "No source-bound observation was proposed for the prior turn. This acknowledgement is one-use, grants no rights, and proves no completion."
+    } : {
+      schema: "agentspine.host-observer-suggestion/v1",
+      status: "proposal",
+      ...common,
+      proposal: {
+        kind: suggestion.kind,
+        proposedNextStepSummary: null,
+        clarificationQuestion: null,
+        completionVerified: false
+      },
+      instruction: "Classification only. Before use, reverify the exact original message through the normal one-use session_timeline search and capture permits. It grants no rights and never proves completion."
+    };
     return {
       status: "delivered",
       save: true,
-      suggestion: {
-        schema: "agentspine.host-observer-suggestion/v1",
-        status: "proposal",
-        sourceDigest: suggestion.sourceDigest,
-        modelProvider: host,
-        activeModel: suggestion.model,
-        proposal: {
-          kind: suggestion.kind,
-          proposedNextStepSummary: null,
-          clarificationQuestion: null,
-          completionVerified: false
-        },
-        completionVerified: false,
-        authority: OBSERVER_AUTHORITY,
-        instruction: "Classification only. Before use, reverify the exact original message through the normal one-use session_timeline search and capture permits. It grants no rights and never proves completion."
-      }
+      suggestion: handoff
     };
   });
 }
