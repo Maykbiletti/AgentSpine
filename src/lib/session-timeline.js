@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { withOwnedFileLock } from "./owned-file-lock.js";
-import {completeTimelineBinding,hasVerifiedTimelinePrivateScope,sameTimelineBinding,sessionTimelineBinding,TIMELINE_ID_RE,validTimelineBinding} from "./session-timeline-contract.js";
+import {completeTimelineBinding,hasVerifiedTimelinePrivateScope,safeTimelineId,sameTimelineBinding,sessionTimelineBinding,TIMELINE_ID_RE,validTimelineBinding} from "./session-timeline-contract.js";
 import {ensureSessionTimelineTrust,sessionTimelineStatePaths} from "./session-timeline-auth.js";
 import { consumeSessionTimelineInvocation, issueSessionTimelineInvocation } from "./session-timeline-invocation.js";
 import {loadPrivateSessionTimelineEnrollment,resolvePrivateSessionTimelineEnrollment} from "./session-timeline-enrollment.js";
@@ -107,10 +107,10 @@ if(!bindingDigest||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"u
 return mutateObserver(root,bindingDigest,(current,state)=>{if(current){current.model=model;current.updatedAt=at;}
 else{state.observers.unshift({bindingDigest,model,updatedAt:at,prompts:[],authority:AUTHORITY});state.observers=state.observers.slice(0,MAX_SOURCES);}
 return {status:"recorded",save:true};});}
-export async function claimClaudeObserverPrompt({root,sessionId,scope,promptId,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),prompt=digest(promptId||"");if(!bindingDigest||typeof promptId!=="string"||promptId.length>256)return {status:"unavailable"};
+export async function claimClaudeObserverPrompt({root,sessionId,scope,promptId,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope);if(!bindingDigest||!safeTimelineId(promptId))return {status:"unavailable"};const prompt=digest(promptId);
 return mutateObserver(root,bindingDigest,(current)=>{if(!current)return {status:"unavailable"};if(current.prompts.includes(prompt))return {status:"duplicate"};current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);
 current.updatedAt=asDate(now).toISOString();return {status:"claimed",model:current.model,save:true};});}
-export async function claimCodexObserverTurn({root,sessionId,scope,turnId,model,now=new Date()}){const bindingDigest=observerBindingDigest("codex",sessionId,scope),prompt=digest(turnId||"");if(!bindingDigest||typeof turnId!=="string"||turnId.length>256||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
+export async function claimCodexObserverTurn({root,sessionId,scope,turnId,model,now=new Date()}){const bindingDigest=observerBindingDigest("codex",sessionId,scope);if(!bindingDigest||!safeTimelineId(turnId)||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};const prompt=digest(turnId);
 return mutateObserver(root,bindingDigest,(current,state)=>{if(!current){current={bindingDigest,model,prompts:[],authority:AUTHORITY};state.observers=[current,...state.observers].slice(0,MAX_SOURCES);}if(current.prompts.includes(prompt))return {status:"duplicate"};current.model=model;current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);current.updatedAt=asDate(now).toISOString();return {status:"claimed",model,save:true};});}
 function sourceMetadata(source) {const sourceDigest = digest(`${source.pathDigest}\0${source.identity}\0${source.size}\0${source.mtimeNs}\0${source.ctimeNs}`);
 return { sourceDigest, indexedBytes: source.indexedBytes, size: source.size, events: source.events.length,
