@@ -33,7 +33,10 @@ assert.equal((await claimCodexObserverTurn({root:item.root,sessionId:"session:ob
 assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope,promptId:id})).status,"duplicate");
 assert.equal((await claimCodexObserverTurn({root:item.root,sessionId:"session:observer",scope,turnId:id,model:"gpt-6-sol"})).status,"duplicate");});
 
-test("observer deduplication stays bound to the exact private task and goal",async t=>{const item=await fixture(t),id="turn:same-task-local-id",task={...scope,currentTaskId:"task:other"},goal={...scope,goalId:"goal:other",goalStepId:"step:other"};
-for(const current of [scope,task,goal])assert.equal((await recordClaudeObserverModel({root:item.root,sessionId:"session:observer",scope:current,model:"claude-sonnet-5"})).status,"recorded");
-for(const current of [scope,task,goal])assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope:current,promptId:id})).status,"claimed");
-for(const current of [scope,task,goal])assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope:current,promptId:id})).status,"duplicate");});
+test("Claude model state follows one session while claims stay bound to the exact task and goal",async t=>{const item=await fixture(t),before=hash(await readFile(item.transcript)),id="turn:same-task-local-id",task={...scope,currentTaskId:"task:other"},goal={...scope,goalId:"goal:other",goalStepId:"step:other"},scopes=[scope,task,goal];
+assert.equal((await recordClaudeObserverModel({root:item.root,sessionId:"session:observer",scope,model:"claude-sonnet-5"})).status,"recorded");
+for(const current of scopes){const claimed=await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope:current,promptId:id});assert.equal(claimed.status,"claimed");assert.equal(claimed.model,"claude-sonnet-5");}
+for(const current of scopes)assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope:current,promptId:id})).status,"duplicate");
+assert.equal((await recordClaudeObserverModel({root:item.root,sessionId:"session:observer",scope:goal,model:"claude-opus-5"})).status,"recorded");
+for(const [index,current] of scopes.entries()){const claimed=await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope:current,promptId:`turn:after-switch:${index}`});assert.equal(claimed.status,"claimed");assert.equal(claimed.model,"claude-opus-5");}
+assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:foreign",scope,promptId:"turn:foreign-session"})).status,"unavailable");assert.equal(hash(await readFile(item.transcript)),before);});
