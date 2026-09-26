@@ -1,72 +1,65 @@
-import { createHash } from "node:crypto";
-import { mkdir } from "node:fs/promises";
-import { isAbsolute } from "node:path";
-import { withOwnedFileLock } from "./owned-file-lock.js";
+import {createHash} from "node:crypto";
+import {mkdir} from "node:fs/promises";
+import {isAbsolute} from "node:path";
+import {withOwnedFileLock} from "./owned-file-lock.js";
 import {completeTimelineBinding,hasVerifiedTimelinePrivateScope,sameTimelineBinding,sessionTimelineBinding,TIMELINE_ID_RE,validTimelineBinding} from "./session-timeline-contract.js";
 import {ensureSessionTimelineTrust,sessionTimelineStatePaths} from "./session-timeline-auth.js";
-import { consumeSessionTimelineInvocation, issueSessionTimelineInvocation } from "./session-timeline-invocation.js";
+import {consumeSessionTimelineInvocation,issueSessionTimelineInvocation} from "./session-timeline-invocation.js";
 import {loadPrivateSessionTimelineEnrollment,resolvePrivateSessionTimelineEnrollment} from "./session-timeline-enrollment.js";
-import { privateTimelinePrefixDigest } from "./session-timeline-enrollment-source.js";
-import { timelineTransportEnrollmentMatches } from "./session-timeline-enrollment-transport.js";
-import { sameTimelineTransportDigest, timelineTransportDigest } from "./session-timeline-transport.js";
+import {privateTimelinePrefixDigest} from "./session-timeline-enrollment-source.js";
+import {timelineTransportEnrollmentMatches} from "./session-timeline-enrollment-transport.js";
+import {sameTimelineTransportDigest,timelineTransportDigest} from "./session-timeline-transport.js";
 import {matchesTimelineEvent,rankTimelineEvents,timelineQuery} from "./session-timeline-query.js";
-import { timelineContinuationCapsule, timelineSearchResult } from "./session-timeline-results.js";
-import { seekTimelineEvidence, verifyTimelineEvent } from "./session-timeline-search.js";
-import { eventFromTimelineLine, extractTimelineTimestamp } from "./session-timeline-event-extract.js";
-import { verifiedTimelineEventFromLine } from "./session-timeline-event-extract.js";
-import { pathMatchesSource, sameSessionTimelineSourceLocation } from "./session-timeline-source.js";
+import {timelineContinuationCapsule,timelineSearchResult} from "./session-timeline-results.js";
+import {seekTimelineEvidence,verifyTimelineEvent} from "./session-timeline-search.js";
+import {eventFromTimelineLine,extractTimelineTimestamp} from "./session-timeline-event-extract.js";
+import {verifiedTimelineEventFromLine} from "./session-timeline-event-extract.js";
+import {pathMatchesSource,sameSessionTimelineSourceLocation} from "./session-timeline-source.js";
 import {captureTimelineAppend,MAX_BACKGROUND_CAPTURE_BYTES,readRange,sourceSnapshotDigest,unchangedHandle,validatedHandle} from "./session-timeline-source-open.js";
-import { readTimelineState, saveTimelineState } from "./session-timeline-state.js";
-import { sessionTimelineRootDigest } from "./session-timeline-root.js";
-import { priorTimelineHint, selectPriorTimelineSource, timelineSessionReference } from "./session-timeline-prior.js";
-import { crossProviderTimelineEnabled } from "./session-timeline-provider.js";
-export const SESSION_TIMELINE_SCHEMA = "agentspine.session-timeline/v1";
-const STATE_SCHEMA = "agentspine.session-timeline-state/v1";
-const AUTHORITY = "context-only";
-const MAX_STATE_BYTES = 16 * 1024 * 1024;
-const MAX_SOURCES = 64;
-const MAX_EVENTS = 4096;
-const MAX_LINE_BYTES = 1024 * 1024;
-const MAX_INDEX_BYTES = 16 * 1024 * 1024;
-const ROOM_BYTES = 1024 * 1024;
-const EVENT_OUTCOMES = new Set(["pass", "fail", "blocked", "timeout", "error", "skipped"]);
-const EVENT_LABEL_RE = /^(?:suite-(?:0|[1-9]\d{0,3})|acceptance|audit|npm-check|ci|test)$/;
-const EVENT_KEYS = new Set(["nativeMessageId", "id", "at", "offset", "bytes", "sha256", "kind", "outcome", "count", "testLabel", "nextStepSummary", "terms", "authority"]);
-function digest(value) { return createHash("sha256").update(value).digest("hex"); }
-function asDate(value) {const date=value instanceof Date?value:new Date(value);if(!Number.isFinite(date.getTime()))throw new Error("session timeline timestamp is invalid");return date;}
-function date(value) { return Number.isFinite(new Date(value).getTime()); }
-function empty(root) { return { schema: STATE_SCHEMA, rootDigest: sessionTimelineRootDigest(root), sources: [], observers: [], authority: AUTHORITY }; }
-function hasOnlyKeys(item, allowed) { return Object.keys(item).every((key) => allowed.has(key)); }
-function validCount(item) {return item===null||Boolean(item&&typeof item==="object"&&Object.keys(item).length===2
+import {readTimelineState,saveTimelineState} from "./session-timeline-state.js";
+import {sessionTimelineRootDigest} from "./session-timeline-root.js";
+import {priorTimelineHint,selectPriorTimelineSource,timelineSessionReference} from "./session-timeline-prior.js";
+import {crossProviderTimelineEnabled} from "./session-timeline-provider.js";
+export const SESSION_TIMELINE_SCHEMA="agentspine.session-timeline/v1";
+const STATE_SCHEMA="agentspine.session-timeline-state/v1",AUTHORITY="context-only",MAX_STATE_BYTES=16*1024*1024,MAX_SOURCES=64,MAX_EVENTS=4096,MAX_LINE_BYTES=1024*1024,MAX_INDEX_BYTES=16*1024*1024,ROOM_BYTES=1024*1024;
+const EVENT_OUTCOMES=new Set(["pass","fail","blocked","timeout","error","skipped"]);
+const EVENT_LABEL_RE=/^(?:suite-(?:0|[1-9]\d{0,3})|acceptance|audit|npm-check|ci|test)$/;
+const EVENT_KEYS=new Set(["nativeMessageId","id","at","offset","bytes","sha256","kind","outcome","count","testLabel","nextStepSummary","terms","authority"]);
+function digest(value){return createHash("sha256").update(value).digest("hex");}
+function asDate(value){const date=value instanceof Date?value:new Date(value);if(!Number.isFinite(date.getTime()))throw new Error("session timeline timestamp is invalid");return date;}
+function date(value){return Number.isFinite(new Date(value).getTime());}
+function empty(root){return{schema:STATE_SCHEMA,rootDigest:sessionTimelineRootDigest(root),sources:[],observers:[],authority:AUTHORITY};}
+function hasOnlyKeys(item,allowed){return Object.keys(item).every(key=>allowed.has(key));}
+function validCount(item){return item===null||Boolean(item&&typeof item==="object"&&Object.keys(item).length===2
 &&Number.isSafeInteger(item.value)&&item.value>=0&&Number.isSafeInteger(item.total)&&item.total>0&&item.value<=item.total);}
-function validEvent(item) {
-const common = item && typeof item === "object" && hasOnlyKeys(item, EVENT_KEYS)
-&& typeof item.id === "string" && TIMELINE_ID_RE.test(item.id) && date(item.at)
-&& Number.isSafeInteger(item.offset) && item.offset >= 0 && Number.isSafeInteger(item.bytes) && item.bytes > 0
-&& /^[a-f0-9]{64}$/.test(item.sha256 || "")
-&& Array.isArray(item.terms) && item.terms.length <= 24 && item.terms.every((term) => /^[\p{L}\p{N}]{3,}$/u.test(term))
-&& (item.nativeMessageId === undefined || typeof item.nativeMessageId === "string" && TIMELINE_ID_RE.test(item.nativeMessageId))
-&& item.authority === AUTHORITY;
-if (!common) return false;
-if (item.kind === "user-message-candidate") return item.outcome === undefined
-&& item.count === undefined && item.testLabel === undefined && item.nextStepSummary === undefined
-&& item.terms.join(" ") === "user message";
-if (item.kind === "objective-result") {
-return EVENT_OUTCOMES.has(item.outcome) && validCount(item.count)
-&& (item.testLabel === null || typeof item.testLabel === "string" && EVENT_LABEL_RE.test(item.testLabel))
-&& item.nextStepSummary === undefined;
+function validEvent(item){
+const common=item&&typeof item==="object"&&hasOnlyKeys(item,EVENT_KEYS)
+&&typeof item.id==="string"&&TIMELINE_ID_RE.test(item.id)&&date(item.at)
+&&Number.isSafeInteger(item.offset)&&item.offset>=0&&Number.isSafeInteger(item.bytes)&&item.bytes>0
+&&/^[a-f0-9]{64}$/.test(item.sha256||"")
+&&Array.isArray(item.terms)&&item.terms.length<=24&&item.terms.every(term=>/^[\p{L}\p{N}]{3,}$/u.test(term))
+&&(item.nativeMessageId===undefined||typeof item.nativeMessageId==="string"&&TIMELINE_ID_RE.test(item.nativeMessageId))
+&&item.authority===AUTHORITY;
+if(!common)return false;
+if(item.kind==="user-message-candidate")return item.outcome===undefined
+&&item.count===undefined&&item.testLabel===undefined&&item.nextStepSummary===undefined
+&&item.terms.join(" ")==="user message";
+if(item.kind==="objective-result"){
+return EVENT_OUTCOMES.has(item.outcome)&&validCount(item.count)
+&&(item.testLabel===null||typeof item.testLabel==="string"&&EVENT_LABEL_RE.test(item.testLabel))
+&&item.nextStepSummary===undefined;
 }
-return item.kind === "explicit-next-step-correction" && item.outcome === undefined
-&& item.count === undefined && item.testLabel === undefined
-&& (item.nextStepSummary === undefined || typeof item.nextStepSummary === "string"
-&& Boolean(item.nextStepSummary.trim()) && item.nextStepSummary.length <= 500);
+return item.kind==="explicit-next-step-correction"&&item.outcome===undefined
+&&item.count===undefined&&item.testLabel===undefined
+&&(item.nextStepSummary===undefined||typeof item.nextStepSummary==="string"
+&&Boolean(item.nextStepSummary.trim())&&item.nextStepSummary.length<=500);
 }
-function validSource(item) {
-return item && validTimelineBinding(item.binding) && typeof item.path === "string" && isAbsolute(item.path)
-&& item.path.length > 0 && item.path.length <= 4096 && typeof item.profileRoot === "string" && isAbsolute(item.profileRoot)
-&& item.profileRoot.length > 0 && item.profileRoot.length <= 4096 && typeof item.projectsRoot === "string" && isAbsolute(item.projectsRoot)
-&& item.projectsRoot.length > 0 && item.projectsRoot.length <= 4096 && item.pathDigest === digest(item.path)
-&& typeof item.identity === "string" && item.identity.length <= 256
+function validSource(item){
+return item&&validTimelineBinding(item.binding)&&typeof item.path==="string"&&isAbsolute(item.path)
+&&item.path.length>0&&item.path.length<=4096&&typeof item.profileRoot==="string"&&isAbsolute(item.profileRoot)
+&&item.profileRoot.length>0&&item.profileRoot.length<=4096&&typeof item.projectsRoot==="string"&&isAbsolute(item.projectsRoot)
+&&item.projectsRoot.length>0&&item.projectsRoot.length<=4096&&item.pathDigest===digest(item.path)
+&&typeof item.identity==="string"&&item.identity.length<=256
 && /^[0-9]+$/.test(item.mtimeNs || "") && /^[0-9]+$/.test(item.ctimeNs || "")
 && Number.isInteger(item.indexedBytes) && item.indexedBytes >= 0 && Number.isInteger(item.size) && item.size >= 0
 && item.indexedBytes <= item.size && Array.isArray(item.events) && item.events.length <= MAX_EVENTS
@@ -79,7 +72,7 @@ function validObserver(item){return item&&/^[a-f0-9]{64}$/.test(item.bindingDige
 &&/^[A-Za-z0-9._:-]{1,256}$/.test(item.model||"")&&date(item.updatedAt)
 &&Array.isArray(item.prompts)&&item.prompts.length<=32
 &&item.prompts.every(value=>/^[a-f0-9]{64}$/.test(value))&&item.authority===AUTHORITY;}
-function validate(value, root) {
+function validate(value,root){
 if (!value || value.schema !== STATE_SCHEMA || value.rootDigest !== sessionTimelineRootDigest(root) || value.authority !== AUTHORITY
 || !Array.isArray(value.sources) || value.sources.length > MAX_SOURCES || value.sources.some((item) => !validSource(item))
 ||value.observers!==undefined&&(!Array.isArray(value.observers)||value.observers.length>MAX_SOURCES||value.observers.some(item=>!validObserver(item)))) {
@@ -87,29 +80,30 @@ throw new Error("session timeline state is invalid");
 }
 return value;
 }
-function paths(root) {return sessionTimelineStatePaths(root);}
+function paths(root){return sessionTimelineStatePaths(root);}
 function readState(path,root,assertStable) {return readTimelineState({path,root,maximumBytes:MAX_STATE_BYTES,empty,validate,assertStable});}
 function saveState(state,path,assertOwned,root,assertStable) {return saveTimelineState({state,path,root,maximumBytes:MAX_STATE_BYTES,assertOwned,assertStable});}
-function status(value, extra = {}) { return { schema: SESSION_TIMELINE_SCHEMA, ...value, ...extra, authority: AUTHORITY }; }
-function unavailable(reason) { return status({ status: "unavailable", reason }); }
-function blocked(reason) { return { blocked: true, reason, authority: AUTHORITY }; }
-function hasExactPrivateTimelineScope(scope) { return scope?.groupId === null; }
-function sourceFor(state, scope) { return state.sources.find((item) => sameTimelineBinding(item.binding, scope)) || null; }
+function status(value,extra={}){return{schema:SESSION_TIMELINE_SCHEMA,...value,...extra,authority:AUTHORITY};}
+function unavailable(reason){return status({status:"unavailable",reason});}
+function blocked(reason){return{blocked:true,reason,authority:AUTHORITY};}
+function hasExactPrivateTimelineScope(scope){return scope?.groupId===null;}
+function sourceFor(state,scope){return state.sources.find(item=>sameTimelineBinding(item.binding,scope))||null;}
 function observerBindingDigest(host,sessionId,scope){const binding=sessionTimelineBinding({host,sessionId,scope});
 return ["claude","codex"].includes(host)&&completeTimelineBinding(binding)?digest(JSON.stringify(binding)):null;}
+function observerSession(host,sessionId){return ["claude","codex"].includes(host)&&TIMELINE_ID_RE.test(sessionId||"")?digest(JSON.stringify({host,sessionId})):null;}
 async function mutateObserver(root,bindingDigest,task){try{await ensureSessionTimelineTrust({create:true});const names=await paths(root);
 return await withOwnedFileLock(names.lock,async({assertOwned})=>{const state=await readState(names.path,root,names.assertStable);
 state.observers||=[];const result=task(state.observers.find(item=>item.bindingDigest===bindingDigest)||null,state);
 if(result.save)await saveState(state,names.path,assertOwned,root,names.assertStable);return result;},{assertPath:names.assertStable});
 }catch{return {status:"unavailable"};}}
-export async function recordClaudeObserverModel({root,sessionId,scope,model,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),at=asDate(now).toISOString();
-if(!bindingDigest||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
-return mutateObserver(root,bindingDigest,(current,state)=>{if(current){current.model=model;current.updatedAt=at;}
-else{state.observers.unshift({bindingDigest,model,updatedAt:at,prompts:[],authority:AUTHORITY});state.observers=state.observers.slice(0,MAX_SOURCES);}
+export async function recordClaudeObserverModel({root,sessionId,scope,model,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),session=observerSession("claude",sessionId),at=asDate(now).toISOString();
+if(!bindingDigest||!session||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
+return mutateObserver(root,session,(current,state)=>{if(current){current.model=model;current.updatedAt=at;}
+else{state.observers.unshift({bindingDigest:session,model,updatedAt:at,prompts:[],authority:AUTHORITY});state.observers=state.observers.slice(0,MAX_SOURCES);}
 return {status:"recorded",save:true};});}
-export async function claimClaudeObserverPrompt({root,sessionId,scope,promptId,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),prompt=digest(promptId||"");if(!bindingDigest||typeof promptId!=="string"||promptId.length>256)return {status:"unavailable"};
-return mutateObserver(root,bindingDigest,(current)=>{if(!current)return {status:"unavailable"};if(current.prompts.includes(prompt))return {status:"duplicate"};current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);
-current.updatedAt=asDate(now).toISOString();return {status:"claimed",model:current.model,save:true};});}
+export async function claimClaudeObserverPrompt({root,sessionId,scope,promptId,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),session=observerSession("claude",sessionId),prompt=digest(promptId||"");if(!bindingDigest||!session||typeof promptId!=="string"||promptId.length>256)return {status:"unavailable"};
+return mutateObserver(root,bindingDigest,(current,state)=>{const active=state.observers.find(item=>item.bindingDigest===session);if(!active)return {status:"unavailable"};if(!current){current={bindingDigest,model:active.model,prompts:[],authority:AUTHORITY};state.observers=[current,...state.observers].slice(0,MAX_SOURCES);}if(current.prompts.includes(prompt))return {status:"duplicate"};current.model=active.model;current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);
+current.updatedAt=asDate(now).toISOString();return {status:"claimed",model:active.model,save:true};});}
 export async function claimCodexObserverTurn({root,sessionId,scope,turnId,model,now=new Date()}){const bindingDigest=observerBindingDigest("codex",sessionId,scope),prompt=digest(turnId||"");if(!bindingDigest||typeof turnId!=="string"||turnId.length>256||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
 return mutateObserver(root,bindingDigest,(current,state)=>{if(!current){current={bindingDigest,model,prompts:[],authority:AUTHORITY};state.observers=[current,...state.observers].slice(0,MAX_SOURCES);}if(current.prompts.includes(prompt))return {status:"duplicate"};current.model=model;current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);current.updatedAt=asDate(now).toISOString();return {status:"claimed",model,save:true};});}
 function sourceMetadata(source) {const sourceDigest = digest(`${source.pathDigest}\0${source.identity}\0${source.size}\0${source.mtimeNs}\0${source.ctimeNs}`);
