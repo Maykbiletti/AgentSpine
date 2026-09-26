@@ -40,9 +40,12 @@ assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:group",group_
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:failure"}),{modelCall:call}),null);assert.equal(calls,1);
 });
 
-test("observer discards a proposal when its enrolled source changes during the model call",async t=>{const item=await fixture(t),before=await readFile(item.transcript);let calls=0;
-const output=await runClaudeObserver(input(item,{prompt_id:"prompt:source-race"}),{modelCall:async()=>{calls++;await appendFile(item.transcript,"changed during observation\n");return {stdout:JSON.stringify({structured_output:proposal})};}});
-assert.equal(output,null);assert.equal(calls,1);const changed=await readFile(item.transcript);assert.deepEqual(changed,Buffer.concat([before,Buffer.from("changed during observation\n")]));
+test("observer accepts host transcript appends without changing enrolled bytes",async t=>{const item=await fixture(t),before=await readFile(item.transcript);let calls=0;
+const output=await runClaudeObserver(input(item,{prompt_id:"prompt:source-append"}),{modelCall:async()=>{calls++;await appendFile(item.transcript,"host append during observation\n");return {stdout:JSON.stringify({structured_output:proposal})};}});
+assert.equal(output,null);assert.equal(calls,1);const appended=await readFile(item.transcript);assert.deepEqual(appended,Buffer.concat([before,Buffer.from("host append during observation\n")]));
+const next=await runHook(input(item,{prompt_id:"prompt:append-next",event_id:"event:observer:append-next",prompt:"Bitte weiter.",timestamp:"2026-09-25T04:00:03.000Z"}));assert.equal(JSON.parse(next.context).sourceResolution.observer.status,"proposal");
+const changed=Buffer.from(appended);changed[0]^=1;let changedCalls=0;assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:prefix-race"}),{modelCall:async()=>{changedCalls++;await writeFile(item.transcript,changed);return {stdout:JSON.stringify({structured_output:proposal})};}}),null);assert.equal(changedCalls,1);assert.deepEqual(await readFile(item.transcript),changed);
+assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:after-prefix-race",now:"2026-09-25T04:00:04.000Z"})).status,"none");
 });
 
 test("PostModelSwitch updates the exact session model used by the next observer",async t=>{const item=await fixture(t),base=input(item),switched=await runHook({...base,hook_event_name:"PostModelSwitch",from_model:"claude-sonnet-5",to_model:"claude-opus-5",source:"command"});

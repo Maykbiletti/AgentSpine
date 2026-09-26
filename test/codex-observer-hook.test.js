@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {appendFile,mkdir,mkdtemp,readFile,rm,writeFile} from "node:fs/promises";
+import {mkdir,mkdtemp,readFile,rm,writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {codexObserverArguments,codexObserverEnvironment,runCodexObserver} from "../src/claude-observer-hook.js";
@@ -29,7 +29,11 @@ assert.equal(await runCodexObserver(input(item,{turn_id:"turn:failure"}),{modelC
 
 test("Codex child is ephemeral, tool-less and cannot inherit an API key",()=>{const args=codexObserverArguments("gpt-6-sol","source");for(const flag of ["--ephemeral","--ignore-user-config","--ignore-rules"])assert.ok(args.includes(flag));for(const value of ["features.apps=false","features.hooks=false","features.multi_agent=false","features.plugins=false","features.shell_tool=false","features.unified_exec=false","project_doc_max_bytes=0","tools.view_image=false","tools.web_search=false"])assert.ok(args.includes(value),value);assert.equal(args[args.indexOf("--sandbox")+1],"read-only");assert.equal(args[args.indexOf("--model")+1],"gpt-6-sol");assert.deepEqual(codexObserverEnvironment({PATH:"safe",CODEX_HOME:"host-login",OPENAI_API_KEY:"foreign",OpenAI_Api_Key:"foreign",OPENAI_BASE_URL:"foreign",AZURE_OPENAI_API_KEY:"foreign",aZuRe_OpEnAi_ApI_KeY:"foreign",CODEX_API_KEY:"foreign"}),{PATH:"safe",CODEX_HOME:"host-login"});});
 
-test("Codex observer rejects an enrolled source changed before invocation",async t=>{const item=await fixture(t),before=await readFile(item.transcript);await appendFile(item.transcript,"changed before observation\n");const changed=await readFile(item.transcript);let calls=0;
+test("Codex observer stays bound to the exact enrolled task scope",async t=>{const item=await fixture(t);let calls=0;
+assert.equal(await runCodexObserver(input(item,{turn_id:"turn:foreign-task",task_id:"task:other"}),{modelCall:async()=>{calls++;return {stdout:JSON.stringify({status:"proposal",kind:"next-step-correction",next:"Wrong scope.",question:null})};}}),null);assert.equal(calls,0);
+});
+
+test("Codex observer rejects enrolled prefix mutation before invocation",async t=>{const item=await fixture(t),before=await readFile(item.transcript),changed=Buffer.from(before);changed[0]^=1;await writeFile(item.transcript,changed);let calls=0;
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:changed-source"}),{modelCall:async()=>{calls++;throw new Error("changed source invoked");}}),null);assert.equal(calls,0);assert.deepEqual(await readFile(item.transcript),changed);assert.notDeepEqual(changed,before);
 });
 
