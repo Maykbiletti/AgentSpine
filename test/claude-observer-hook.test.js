@@ -6,7 +6,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {claudeObserverArguments,claudeObserverEnvironment,runClaudeObserver} from "../src/claude-observer-hook.js";
 import {runHook} from "../src/hook.js";
-import {recordClaudeObserverModel} from "../src/lib/session-timeline.js";
+import {consumeHostObserverSuggestion,recordClaudeObserverModel} from "../src/lib/session-timeline.js";
 import {enrollTimelineWithHostReceipt} from "./session-timeline-invocation-support.js";
 
 const digest=value=>createHash("sha256").update(value).digest("hex");
@@ -19,13 +19,17 @@ t.after(async()=>{for(const key of keys)prior[key]===undefined?delete process.en
 const privateScope=scope(),enrolled=await enrollTimelineWithHostReceipt({root,sessionId:"session:observer",scope:privateScope,transcriptPath:transcript,hostHome:profile});assert.equal(enrolled.status,"enrolled");
 assert.equal((await recordClaudeObserverModel({root,sessionId:"session:observer",scope:privateScope,model:"claude-sonnet-5"})).status,"recorded");
 return {root,transcript,privateScope};}
-function input(item,patch={}){const s=item.privateScope;return {hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.root,session_id:"session:observer",prompt_id:"550e8400-e29b-41d4-a716-446655440000",transcript_path:item.transcript,prompt:"Nein, erst die Prüfsumme prüfen.",entity_id:s.entityId,user_id:s.userId,tenant_id:s.tenantId,project_id:s.projectId,task_id:s.currentTaskId,goal_id:s.goalId,goal_step_id:s.goalStepId,group_id:null,...patch};}
+function input(item,patch={}){const s=item.privateScope;return {hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.root,session_id:"session:observer",prompt_id:"550e8400-e29b-41d4-a716-446655440000",transcript_path:item.transcript,prompt:"Nein, erst die Prüfsumme prüfen.",timestamp:"2026-09-25T04:00:01.000Z",entity_id:s.entityId,user_id:s.userId,tenant_id:s.tenantId,project_id:s.projectId,task_id:s.currentTaskId,goal_id:s.goalId,goal_step_id:s.goalStepId,group_id:null,...patch};}
 const proposal={status:"proposal",kind:"next-step-correction",next:"Erst die Prüfsumme prüfen.",question:null};
 
 test("Claude observer uses one scoped host model proposal and preserves source bytes",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript));let calls=0,seen;
 const output=await runClaudeObserver(input(item),{modelCall:async request=>{calls++;seen=request;return {stdout:JSON.stringify({structured_output:proposal})};}});
 assert.equal(calls,1);assert.equal(seen.model,"claude-sonnet-5");assert.match(seen.prompt,/exact user text/);assert.equal(digest(await readFile(item.transcript)),before);
-const context=JSON.parse(output.hookSpecificOutput.additionalContext);assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.proposal.kind,"next-step-correction");assert.equal(context.sourceDigest,digest("Nein, erst die Prüfsumme prüfen."));
+assert.equal(output,null,"an async hook must not depend on discarded stdout");
+assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:input(item).prompt_id,now:"2026-09-25T04:00:02.000Z"})).status,"none","the observer cannot inject into the turn it observed");
+const next=await runHook(input(item,{prompt_id:"prompt:next",event_id:"event:observer:next",prompt:"Bitte weiter.",timestamp:"2026-09-25T04:00:03.000Z"})),context=JSON.parse(next.context).sourceResolution.observer;
+assert.equal(context.status,"proposal");assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.proposal.kind,"next-step-correction");assert.equal(context.proposal.proposedNextStepSummary,null);assert.equal(context.sourceDigest,digest("Nein, erst die Prüfsumme prüfen."));assert.match(context.instruction,/one-use/);
+assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:later",now:"2026-09-25T04:00:04.000Z"})).status,"none","the next-turn handoff is one-use");
 assert.equal(await runClaudeObserver(input(item),{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
 });
 
