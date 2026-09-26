@@ -30,8 +30,8 @@ if(loaded.status!=="loaded"||await canonicalPath(i.transcript_path)!==loaded.rec
 const now=i.timestamp||new Date(),claim=h==="codex"?await claimCodexObserverTurn({root,sessionId,scope,turnId:id,model,now}):await claimClaudeObserverPrompt({root,sessionId,scope,promptId:id,now});if(claim.status!=="claimed")return null;
 const envelope=JSON.parse((await modelCall({cwd,model:claim.model,prompt:modelPrompt(i.prompt),environment})).stdout),value=envelope.structured_output??envelope.result??envelope;
 if(!validResult(value)||value.status==="none")return null;
-const proposal={kind:value.kind,proposedNextStepSummary:value.next,clarificationQuestion:value.question,completionVerified:false};
-const suggestion={schema:"agentspine.host-observer-suggestion/v1",sourceDigest:createHash("sha256").update(i.prompt).digest("hex"),modelProvider:h,activeModel:claim.model,proposal,completionVerified:false,authority:"context-only",instruction:"Reverify source. No rights/completion proof."};
+const proposal={kind:value.kind,proposedNextStepSummary:null,clarificationQuestion:null,completionVerified:false};
+const suggestion={schema:"agentspine.host-observer-suggestion/v1",sourceDigest:createHash("sha256").update(i.prompt).digest("hex"),modelProvider:h,activeModel:claim.model,proposal,completionVerified:false,authority:"context-only",instruction:"Reverify the exact source; kind is classification only. No rights/completion proof."};
 return {hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:JSON.stringify(suggestion)}};
 }catch{return null;}}
 export const runClaudeObserver=(input,options)=>runObserver("claude",input,options);

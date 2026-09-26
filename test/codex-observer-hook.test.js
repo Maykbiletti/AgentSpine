@@ -19,6 +19,7 @@ function input(item,patch={}){return {hook_event_name:"UserPromptSubmit",cwd:ite
 
 test("Codex observer uses the active host model once and preserves its private source",async t=>{const item=await fixture(t),before=hash(await readFile(item.transcript));let calls=0,seen;
 const output=await runCodexObserver(input(item),{modelCall:async request=>{calls++;seen=request;return {stdout:JSON.stringify({status:"proposal",kind:"next-step-correction",next:"Erst die Prüfsumme prüfen.",question:null})};}});assert.equal(calls,1);assert.equal(seen.model,"gpt-6-sol");assert.equal(hash(await readFile(item.transcript)),before);const context=JSON.parse(output.hookSpecificOutput.additionalContext);assert.equal(context.modelProvider,"codex");assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.sourceDigest,hash(input(item).prompt));
+assert.equal(context.proposal.proposedNextStepSummary,null);assert.equal(context.proposal.clarificationQuestion,null);assert.doesNotMatch(output.hookSpecificOutput.additionalContext,/Erst die Prüfsumme prüfen\./u);
 assert.equal(await runCodexObserver(input(item),{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:image",prompt:"<image source>"}),{modelCall:async()=>{throw new Error("image invoked");}}),null);
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:foreign",group_id:"group:foreign"}),{modelCall:async()=>{throw new Error("foreign invoked");}}),null);

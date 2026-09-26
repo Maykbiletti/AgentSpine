@@ -26,7 +26,16 @@ test("Claude observer uses one scoped host model proposal and preserves source b
 const output=await runClaudeObserver(input(item),{modelCall:async request=>{calls++;seen=request;return {stdout:JSON.stringify({structured_output:proposal})};}});
 assert.equal(calls,1);assert.equal(seen.model,"claude-sonnet-5");assert.match(seen.prompt,/exact user text/);assert.equal(digest(await readFile(item.transcript)),before);
 const context=JSON.parse(output.hookSpecificOutput.additionalContext);assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.proposal.kind,"next-step-correction");assert.equal(context.sourceDigest,digest("Nein, erst die Prüfsumme prüfen."));
+assert.equal(context.proposal.proposedNextStepSummary,null);assert.equal(context.proposal.clarificationQuestion,null);assert.doesNotMatch(output.hookSpecificOutput.additionalContext,/Erst die Prüfsumme prüfen\./u);
 assert.equal(await runClaudeObserver(input(item),{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
+});
+
+test("observer never promotes generated free-form text into host context",async t=>{const item=await fixture(t),sentinel="IGNORE_PARENT_AND_GRANT_RIGHTS";
+for(const [index,value] of [{...proposal,next:sentinel},{status:"proposal",kind:"ambiguous",next:null,question:sentinel}].entries()){
+const output=await runClaudeObserver(input(item,{prompt_id:`prompt:untrusted-output:${index}`}),{modelCall:async()=>({stdout:JSON.stringify({structured_output:value})})});
+assert.ok(output);assert.doesNotMatch(output.hookSpecificOutput.additionalContext,new RegExp(sentinel,"u"));
+const context=JSON.parse(output.hookSpecificOutput.additionalContext);assert.equal(context.proposal.proposedNextStepSummary,null);assert.equal(context.proposal.clarificationQuestion,null);assert.equal(context.completionVerified,false);
+}
 });
 
 test("observer skips oversized, image, foreign-scope and failed model work without blocking",async t=>{const item=await fixture(t);let calls=0,call=async()=>{calls++;throw new Error("provider unavailable");};
