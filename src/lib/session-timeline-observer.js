@@ -55,17 +55,25 @@ export function consumeObserverSuggestion(input, bindingDigest, updateObserver, 
     if (!observer) return { status: "unavailable" };
     const pending = observer.pending || [];
     const live = pending.filter((suggestion) => new Date(suggestion.expiresAt) > now);
-    const index = live.findIndex((suggestion) => suggestion.eventDigest !== currentEventDigest);
-    if (index < 0) {
+    const candidates = live
+      .map((suggestion, index) => ({ suggestion, index }))
+      .filter(({ suggestion }) => suggestion.eventDigest !== currentEventDigest);
+    let selected = null;
+    for (const candidate of candidates) {
+      if (!verifySource || await verifySource(candidate.suggestion)) {
+        selected = candidate;
+        break;
+      }
+    }
+    if (!selected) {
       observer.pending = live;
-      return { status: "none", save: live.length !== pending.length };
+      return {
+        status: candidates.length ? "unavailable" : "none",
+        save: live.length !== pending.length
+      };
     }
 
-    if (verifySource && !(await verifySource(live[index]))) {
-      return { status: "unavailable" };
-    }
-
-    const [suggestion] = live.splice(index, 1);
+    const [suggestion] = live.splice(selected.index, 1);
     observer.pending = live;
     observer.updatedAt = now.toISOString();
     const common = {

@@ -67,6 +67,14 @@ const handoff=await consumeHostObserverSuggestion({root:item.root,host:"claude",
 assert.deepEqual(await readFile(item.transcript),original);assert.deepEqual(await readFile(replacement),replacementBytes);
 });
 
+test("Claude stale enrollment cannot starve a newer verified handoff",async t=>{const item=await fixture(t),original=await readFile(item.transcript),replacement=item.transcript.replace("session.jsonl","replacement.jsonl"),replacementBytes=Buffer.from(`${JSON.stringify({timestamp:"2026-09-25T04:00:02.000Z",message:{role:"user",content:"Replacement source"}})}\n`),newPrompt="Neue bestätigte Korrektur.";
+await runClaudeObserver(input(item,{prompt_id:"prompt:stale-enrollment"}),{modelCall:async()=>({stdout:JSON.stringify({structured_output:proposal})})});
+await writeFile(replacement,replacementBytes);assert.equal((await enrollTimelineWithHostReceipt({root:item.root,sessionId:"session:observer",scope:item.privateScope,transcriptPath:replacement,hostHome:item.profile})).status,"enrolled");
+await runClaudeObserver(input(item,{prompt_id:"prompt:new-enrollment",prompt:newPrompt,transcript_path:replacement,timestamp:"2026-09-25T04:00:03.000Z"}),{modelCall:async()=>({stdout:JSON.stringify({structured_output:proposal})})});
+const next=await runHook(input(item,{prompt_id:"prompt:handoff",event_id:"event:handoff",prompt:"Weiter.",transcript_path:replacement,timestamp:"2026-09-25T04:00:04.000Z"})),handoff=JSON.parse(next.context).sourceResolution.observer;assert.equal(handoff.status,"proposal");assert.equal(handoff.sourceDigest,digest(newPrompt));
+assert.deepEqual(await readFile(item.transcript),original);assert.deepEqual(await readFile(replacement),replacementBytes);
+});
+
 test("PostModelSwitch updates the exact session model used by the next observer",async t=>{const item=await fixture(t),base=input(item),switched=await runHook({...base,hook_event_name:"PostModelSwitch",from_model:"claude-sonnet-5",to_model:"claude-opus-5",source:"command"});
 assert.equal(switched.observerModel,"recorded");let model=null;await runClaudeObserver(input(item,{prompt_id:"prompt:switched"}),{modelCall:async request=>{model=request.model;return {stdout:JSON.stringify({structured_output:{status:"none",kind:"not-current-instruction",next:null,question:null}})};}});assert.equal(model,"claude-opus-5");
 });

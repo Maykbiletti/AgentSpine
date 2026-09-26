@@ -56,6 +56,14 @@ const handoff=await consumeHostObserverSuggestion({root:item.root,host:"codex",s
 assert.deepEqual(await readFile(item.transcript),original);assert.deepEqual(await readFile(replacement),replacementBytes);
 });
 
+test("Codex stale enrollment cannot starve a newer verified handoff",async t=>{const item=await fixture(t),original=await readFile(item.transcript),replacement=item.transcript.replace("session-observer.jsonl","session-replacement.jsonl"),replacementBytes=Buffer.from(`${JSON.stringify({timestamp:"2026-09-25T11:00:02.000Z",type:"session_meta",payload:{id:"session:observer",session_id:"session:observer",cwd:item.root,cli_version:"0.0.0",originator:"codex_cli_rs",source:"cli",history_mode:"legacy"}})}\n`),newPrompt="New verified correction.";
+await runCodexObserver(input(item,{turn_id:"turn:stale-enrollment"}),{modelCall:async()=>({stdout:JSON.stringify({status:"proposal",kind:"next-step-correction",next:"Verify first.",question:null})})});
+await writeFile(replacement,replacementBytes);assert.equal((await enrollTimelineWithHostReceipt({root:item.root,host:"codex",sessionId:"session:observer",scope,transcriptPath:replacement,hostHome:item.profile})).status,"enrolled");
+await runCodexObserver(input(item,{turn_id:"turn:new-enrollment",prompt:newPrompt,transcript_path:replacement,timestamp:"2026-09-25T11:00:03.000Z"}),{modelCall:async()=>({stdout:JSON.stringify({status:"proposal",kind:"next-step-correction",next:"Verify first.",question:null})})});
+const next=await runHook(input(item,{turn_id:"turn:handoff",event_id:"event:handoff",prompt:"Continue.",transcript_path:replacement,timestamp:"2026-09-25T11:00:04.000Z"})),handoff=JSON.parse(next.context).sourceResolution.observer;assert.equal(handoff.status,"proposal");assert.equal(handoff.sourceDigest,hash(newPrompt));
+assert.deepEqual(await readFile(item.transcript),original);assert.deepEqual(await readFile(replacement),replacementBytes);
+});
+
 test("Claude and Codex deduplicate identical native turn ids independently",async t=>{const item=await fixture(t),id="turn:same-provider-local-id";
 assert.equal((await recordClaudeObserverModel({root:item.root,sessionId:"session:observer",scope,model:"claude-sonnet-5"})).status,"recorded");
 assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope,promptId:id})).status,"claimed");
