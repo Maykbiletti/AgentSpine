@@ -44,6 +44,6 @@ test("observer CLI disables settings, tools, persistence, nested hooks and exter
 for(const pair of [["--model","claude-opus-5"],["--tools",""],["--disallowedTools","mcp__*"],["--permission-prompts","none"],["--max-turns","1"]]){const index=args.indexOf(pair[0]);assert.equal(args[index+1],pair[1]);}
 for(const flag of ["--bare","--restricted","--no-session-persistence"])assert.ok(args.includes(flag));
 assert.ok(!args.join("\0").includes("PRIVATE_ARGV_SENTINEL"));
-const env=claudeObserverEnvironment({PATH:"safe",CLAUDECODE:"1",CLAUDE_CODE_ENTRYPOINT:"hook",CLAUDE_CODE_OAUTH_TOKEN:"host-login",ANTHROPIC_API_KEY:"foreign",Anthropic_Api_Key:"foreign",CLAUDE_CODE_USE_BEDROCK:"1",AWS_REGION:"eu-north-1",Aws_Secret_Access_Key:"foreign",CLAUDE_CODE_USE_VERTEX:"1",GOOGLE_APPLICATION_CREDENTIALS:"foreign.json",CLAUDE_CODE_USE_FOUNDRY:"1",AZURE_CLIENT_SECRET:"foreign"});
+const env=claudeObserverEnvironment({PATH:"safe",CLAUDECODE:"1",CLAUDE_CODE_ENTRYPOINT:"hook",CLAUDE_CODE_OAUTH_TOKEN:"host-login",CLAUDE_PLUGIN_ROOT:"private",AGENTSPINE_TIMELINE_SESSION_CAPABILITY:"private",blun_portal_token:"private",ANTHROPIC_API_KEY:"foreign",Anthropic_Api_Key:"foreign",CLAUDE_CODE_USE_BEDROCK:"1",AWS_REGION:"eu-north-1",Aws_Secret_Access_Key:"foreign",CLAUDE_CODE_USE_VERTEX:"1",GOOGLE_APPLICATION_CREDENTIALS:"foreign.json",CLAUDE_CODE_USE_FOUNDRY:"1",AZURE_CLIENT_SECRET:"foreign"});
 assert.deepEqual(env,{PATH:"safe",CLAUDE_CODE_OAUTH_TOKEN:"host-login"});
 });
