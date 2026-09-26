@@ -102,7 +102,7 @@ let scope = null, selfstarter = null, channelEvent = null, learningDelivery = nu
 let deliveryVerification = null, artifactGuard = null, premortem = null, lessonRecall = null;
 if(event==="PostModelSwitch"){
 scope=await runtimeScope(input,root,resolvedSources.userStateRoot,catalog);
-const observed=await recordClaudeObserverModel({root,sessionId:sessionId(input),scope,model:input.to_model,now:input.timestamp||new Date()});
+const observed=host==="claude"?await recordClaudeObserverModel({root,sessionId:sessionId(input),scope,model:input.to_model,now:input.timestamp||new Date()}):{status:"not-applicable"};
 if(payload)return {blocked:false,observerModel:observed.status};process.stdout.write("{}\n");return;
 }
 if (event === "PreToolUse" && isScanFailOpenTool(input.tool_name) && diagnostics.skipped?.length) {
@@ -325,7 +325,7 @@ let briefingOrigin = null;
 try {
 await syncPersonaRosterFromEnvironment({ root, env: process.env, now: input.timestamp || new Date(), catalog });
 scope ||= await runtimeScope(input, root, resolvedSources.userStateRoot, catalog);
-if(event==="SessionStart"&&typeof input.model==="string")await recordClaudeObserverModel({root,
+if(event==="SessionStart"&&host==="claude"&&typeof input.model==="string")await recordClaudeObserverModel({root,
 sessionId:sessionId(input),scope,model:input.model,now:input.timestamp||new Date()});
 if (event !== "UserPromptSubmit") {
 try { diagnostics.timeline = await captureSessionTimelineLifecycle({ root, event, input, scope,

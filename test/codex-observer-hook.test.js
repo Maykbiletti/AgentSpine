@@ -5,6 +5,7 @@ import {mkdir,mkdtemp,readFile,rm,writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {codexObserverArguments,codexObserverEnvironment,runCodexObserver} from "../src/claude-observer-hook.js";
+import {runHook} from "../src/hook.js";
 import {claimClaudeObserverPrompt,claimCodexObserverTurn,recordClaudeObserverModel} from "../src/lib/session-timeline.js";
 import {enrollTimelineWithHostReceipt} from "./session-timeline-invocation-support.js";
 
@@ -25,6 +26,14 @@ assert.equal(await runCodexObserver(input(item,{turn_id:"turn:foreign",group_id:
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:failure"}),{modelCall:async()=>{throw new Error("provider unavailable");}}),null);});
 
 test("Codex child is ephemeral, tool-less and cannot inherit an API key",()=>{const args=codexObserverArguments("gpt-6-sol","source");for(const flag of ["--ephemeral","--ignore-user-config","--ignore-rules"])assert.ok(args.includes(flag));for(const value of ["features.apps=false","features.hooks=false","features.multi_agent=false","features.plugins=false","features.shell_tool=false","features.unified_exec=false","project_doc_max_bytes=0","tools.view_image=false","tools.web_search=false"])assert.ok(args.includes(value),value);assert.equal(args[args.indexOf("--sandbox")+1],"read-only");assert.equal(args[args.indexOf("--model")+1],"gpt-6-sol");assert.deepEqual(codexObserverEnvironment({PATH:"safe",CODEX_HOME:"host-login",OPENAI_API_KEY:"foreign",OpenAI_Api_Key:"foreign",OPENAI_BASE_URL:"foreign",AZURE_OPENAI_API_KEY:"foreign",aZuRe_OpEnAi_ApI_KeY:"foreign",CODEX_API_KEY:"foreign"}),{PATH:"safe",CODEX_HOME:"host-login"});});
+
+test("Codex lifecycle cannot seed Claude observer model state",async t=>{const item=await fixture(t),before=hash(await readFile(item.transcript)),event=input(item,{hook_event_name:"SessionStart",host:"codex",model:"gpt-6-sol"});
+delete event.turn_id;delete event.prompt;
+await runHook(event);
+await runHook({...event,hook_event_name:"PostModelSwitch",from_model:"gpt-6-sol",to_model:"gpt-6-astra",source:"command"});
+assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope,promptId:"prompt:cross-provider"})).status,"unavailable");
+assert.equal(hash(await readFile(item.transcript)),before);
+});
 
 test("Claude and Codex deduplicate identical native turn ids independently",async t=>{const item=await fixture(t),id="turn:same-provider-local-id";
 assert.equal((await recordClaudeObserverModel({root:item.root,sessionId:"session:observer",scope,model:"claude-sonnet-5"})).status,"recorded");
