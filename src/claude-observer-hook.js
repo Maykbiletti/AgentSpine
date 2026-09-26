@@ -30,8 +30,8 @@ const enrollment=()=>resolvePrivateSessionTimelineContract({root,host:h,sessionI
 if(loaded.status!=="enrolled"||loaded.enrollmentDigest!==scoped.record.enrollmentDigest)return null;
 const now=i.timestamp||new Date(),claim=h==="codex"?await claimCodexObserverTurn({root,sessionId,scope,turnId:id,model,now}):await claimClaudeObserverPrompt({root,sessionId,scope,promptId:id,now});if(claim.status!=="claimed")return null;
 const envelope=JSON.parse((await modelCall({cwd,model:claim.model,prompt:modelPrompt(i.prompt),environment})).stdout),value=envelope.structured_output??envelope.result??envelope;
-const verified=await enrollment();if(!validResult(value)||value.status==="none"||verified.status!=="enrolled"||verified.enrollmentDigest!==loaded.enrollmentDigest)return null;
-await stageHostObserverSuggestion({root,host:h,sessionId,scope,eventId:id,sourceDigest:createHash("sha256").update(i.prompt).digest("hex"),enrollmentDigest:loaded.enrollmentDigest,kind:value.kind,model:claim.model,now});
+const verified=await enrollment();if(!validResult(value)||verified.status!=="enrolled"||verified.enrollmentDigest!==loaded.enrollmentDigest)return null;
+await stageHostObserverSuggestion({root,host:h,sessionId,scope,eventId:id,sourceDigest:createHash("sha256").update(i.prompt).digest("hex"),enrollmentDigest:loaded.enrollmentDigest,status:value.status,kind:value.kind,model:claim.model,now});
 return null;
 }catch{return null;}}
 export const runClaudeObserver=(input,options)=>runObserver("claude",input,options);
