@@ -16,6 +16,7 @@ const REQUIRED_PACKAGE_FILES = [
   "src/lib/codex-skill-installation.js", "src/cli-host.js",
   "docs/acceptance.md", "docs/source-roots.md", "docs/preflight-recall.md", "docs/preservation-contract.md",
   "docs/world-model.md", "docs/session-timeline.md", "scripts/run-acceptance.js", "skills/agent-spine/SKILL.md",
+  "scripts/check-hosts.js", "scripts/host-check-runtime.js", "scripts/host-environment.js",
   "docs/artifact-evaluation.md", "src/lib/learning-artifact-evaluator.js",
   "src/lib/gateway-group-response.js", "src/lib/channel-continuity.js",
   "src/index.js", "src/mcp.js", "src/lib/mcp-world-tools.js", "src/lib/world-model.js", "src/lib/session-timeline.js",
