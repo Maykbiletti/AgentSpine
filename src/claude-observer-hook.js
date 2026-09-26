@@ -6,6 +6,7 @@ import {resolveHostSourceCatalog} from "./lib/source-roots.js";
 import {runtimeScope} from "./lib/hook-context.js";
 import {claimClaudeObserverPrompt,claimCodexObserverTurn,stageHostObserverSuggestion} from "./lib/session-timeline.js";
 import {loadPrivateSessionTimelineEnrollment} from "./lib/session-timeline-enrollment.js";
+import {pathMatchesSource} from "./lib/session-timeline-source.js";
 import {isMainModule} from "./lib/runtime.js";
 
 const MAX_PROMPT=8192,KINDS=["next-step-correction","completion-claim","not-current-instruction","ambiguous"];
@@ -26,10 +27,11 @@ if(!i.prompt.trim()||Buffer.byteLength(i.prompt)>MAX_PROMPT||/(?:<(?:image|paste
 const cwd=await canonicalPath(i.cwd||process.cwd()),resolved=await resolveHostSourceCatalog({host:h,cwd,input:i}),root=resolved.projectRoot;
 const scope=await runtimeScope(i,root,resolved.userStateRoot,resolved.catalog);if(scope.groupId!==null)return null;
 const sessionId=i.session_id,loaded=await loadPrivateSessionTimelineEnrollment({root,host:h,sessionId,scope});
-if(loaded.status!=="loaded"||await canonicalPath(i.transcript_path)!==loaded.record.source.path)return null;
+const source=loaded.status==="loaded"?{...loaded.record.source,binding:loaded.record.binding}:null;
+if(!source||await canonicalPath(i.transcript_path)!==source.path||!await pathMatchesSource(source))return null;
 const now=i.timestamp||new Date(),claim=h==="codex"?await claimCodexObserverTurn({root,sessionId,scope,turnId:id,model,now}):await claimClaudeObserverPrompt({root,sessionId,scope,promptId:id,now});if(claim.status!=="claimed")return null;
 const envelope=JSON.parse((await modelCall({cwd,model:claim.model,prompt:modelPrompt(i.prompt),environment})).stdout),value=envelope.structured_output??envelope.result??envelope;
-if(!validResult(value)||value.status==="none")return null;
+if(!validResult(value)||value.status==="none"||!await pathMatchesSource(source))return null;
 await stageHostObserverSuggestion({root,host:h,sessionId,scope,eventId:id,sourceDigest:createHash("sha256").update(i.prompt).digest("hex"),kind:value.kind,model:claim.model,now});
 return null;
 }catch{return null;}}

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {mkdir,mkdtemp,readFile,rm,writeFile} from "node:fs/promises";
+import {appendFile,mkdir,mkdtemp,readFile,rm,writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {claudeObserverArguments,claudeObserverEnvironment,runClaudeObserver} from "../src/claude-observer-hook.js";
@@ -38,6 +38,11 @@ assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:large",prompt
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:image",prompt:"<image source>"}),{modelCall:call}),null);
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:group",group_id:"group:foreign"}),{modelCall:call}),null);
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:failure"}),{modelCall:call}),null);assert.equal(calls,1);
+});
+
+test("observer discards a proposal when its enrolled source changes during the model call",async t=>{const item=await fixture(t),before=await readFile(item.transcript);let calls=0;
+const output=await runClaudeObserver(input(item,{prompt_id:"prompt:source-race"}),{modelCall:async()=>{calls++;await appendFile(item.transcript,"changed during observation\n");return {stdout:JSON.stringify({structured_output:proposal})};}});
+assert.equal(output,null);assert.equal(calls,1);const changed=await readFile(item.transcript);assert.deepEqual(changed,Buffer.concat([before,Buffer.from("changed during observation\n")]));
 });
 
 test("PostModelSwitch updates the exact session model used by the next observer",async t=>{const item=await fixture(t),base=input(item),switched=await runHook({...base,hook_event_name:"PostModelSwitch",from_model:"claude-sonnet-5",to_model:"claude-opus-5",source:"command"});
