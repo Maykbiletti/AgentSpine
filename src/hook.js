@@ -17,7 +17,7 @@ import { consumeHostObserverSuggestion, recordClaudeObserverModel } from "./lib/
 import { fitTimelineRecallToHostContext } from "./lib/pre-answer-timeline-recall.js";
 import { timelineToolKind } from "./lib/mcp-timeline-tools.js";
 import { emitTimelineToolGuard, runTimelineToolGuard } from "./lib/timeline-tool-guard.js";
-import { readHookInput, SILENT_OVERSIZE_POST_TOOL_USE, SILENT_OVERSIZE_POST_TOOL_USE_ARG } from "./lib/hook-input.js";
+import { readHookInput, SILENT_OVERSIZE_POST_TOOL_USE, OVERSIZE_CONTEXT_INPUT, oversizedContextOutput, hookInputOptions } from "./lib/hook-input.js";
 import { isMainModule } from "./lib/runtime.js";
 import { deliveryActorSession, deliverySuccessEvidence, recordDeliveryToolUse, recordDeliveryWriteIntent } from "./lib/delivery-verification.js";
 import { blockPrompt, blockStop, blunRuntimeContext, blunRuntimeMessage, denyTool, hookOutput, lifecycleOutput } from "./lib/hook-output.js";
@@ -480,6 +480,8 @@ let input = payload;
 try {
 input ||= await readHookInput(options);
 if (input === SILENT_OVERSIZE_POST_TOOL_USE) return;
+if (input === OVERSIZE_CONTEXT_INPUT) {
+process.stdout.write(`${JSON.stringify(oversizedContextOutput(options.contextEvent))}\n`); return; }
 if (input.hook_event_name === "PreToolUse" && timelineToolKind(input.tool_name)) {
 const result = await runTimelineToolGuard(input);
 if (!payload) emitTimelineToolGuard(result);
@@ -491,10 +493,8 @@ if (!hookScanFailureFailsOpen(error) || input === SILENT_OVERSIZE_POST_TOOL_USE)
 return finishScanFailure(input, payload, "lifecycle", error);
 }
 }
-if (isMainModule(import.meta.url)) {const args = process.argv.slice(2);
-const silentOversizePostToolUse = args.length === 1 && args[0] === SILENT_OVERSIZE_POST_TOOL_USE_ARG;
-const argumentError=args.length&&!silentOversizePostToolUse?new Error(`unsupported hook argument: ${args[0]}`):null;
-(argumentError ? Promise.reject(argumentError) : runHook(null, { silentOversizePostToolUse })).catch((error) => {
+if (isMainModule(import.meta.url)) {
+Promise.resolve().then(() => runHook(null, hookInputOptions(process.argv.slice(2)))).catch((error) => {
 process.stderr.write(`AgentSpine hook: ${String(error.message).slice(0,2048)}\n`);process.exitCode=2;
 });
 }

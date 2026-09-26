@@ -43,7 +43,8 @@ function validateHooks(root, hooks, {
     const command = registrations[0].hooks[0];
     assertHostContract(command.type === "command", `${event} must use a command hook`);
     const expected = `node "\${${commandRoot}}/src/hook.js"${event === "PostToolUse"
-      ? " --silent-oversize-post-tool-use" : ""}`;
+      ? " --silent-oversize-post-tool-use" : ["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"].includes(event)
+        ? ` --context-event=${event}` : ""}`;
     assertHostContract(command.command === expected,
       `${event} must use the bundled lifecycle adapter`);
     assertHostContract(Number.isInteger(command.timeout) && command.timeout > 0
@@ -84,7 +85,8 @@ function validateBlunHooks(root, hooks) {
       `${event} must have exactly one BLUN registration`);
     const command = registrations[0];
     const expected = `node "./src/hook.js"${event === "PostToolUse"
-      ? " --silent-oversize-post-tool-use" : ""}`;
+      ? " --silent-oversize-post-tool-use" : ["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"].includes(event)
+        ? ` --context-event=${event}` : ""}`;
     assertHostContract(command.command === expected,
       `${event} must use the bundled BLUN lifecycle adapter`);
     assertHostContract(Number.isInteger(command.timeout) && command.timeout > 0
