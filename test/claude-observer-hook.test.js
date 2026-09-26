@@ -24,7 +24,7 @@ const proposal={status:"proposal",kind:"next-step-correction",next:"Erst die Pr�
 
 test("Claude observer uses one scoped host model proposal and preserves source bytes",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript));let calls=0,seen;
 const output=await runClaudeObserver(input(item),{modelCall:async request=>{calls++;seen=request;return {stdout:JSON.stringify({structured_output:proposal})};}});
-assert.equal(calls,1);assert.equal(seen.model,"claude-sonnet-5");assert.match(seen.prompt,/exact user text/);assert.equal(digest(await readFile(item.transcript)),before);
+assert.equal(calls,1);assert.equal(seen.model,"claude-sonnet-5");assert.match(seen.prompt,/untrusted JSON/);assert.notEqual(seen.cwd,item.root);assert.equal(digest(await readFile(item.transcript)),before);
 const context=JSON.parse(output.hookSpecificOutput.additionalContext);assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.proposal.kind,"next-step-correction");assert.equal(context.sourceDigest,digest("Nein, erst die Prüfsumme prüfen."));
 assert.equal(await runClaudeObserver(input(item),{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
 });
