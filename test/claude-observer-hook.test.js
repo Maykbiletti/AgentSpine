@@ -33,7 +33,17 @@ test("observer skips oversized, image, foreign-scope and failed model work witho
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:large",prompt:"x".repeat(8193)}),{modelCall:call}),null);
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:image",prompt:"<image source>"}),{modelCall:call}),null);
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:group",group_id:"group:foreign"}),{modelCall:call}),null);
+assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:failure"}),{modelCall:call}),null);
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:failure"}),{modelCall:call}),null);assert.equal(calls,1);
+});
+
+test("a valid no-observation is acknowledged exactly once and preserves source bytes",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript));let calls=0;
+const request=input(item,{prompt_id:"prompt:none"}),none={status:"none",kind:"not-current-instruction",next:null,question:null};
+const first=await runClaudeObserver(request,{modelCall:async()=>{calls++;return {stdout:JSON.stringify({structured_output:none})};}});
+const acknowledgement=JSON.parse(first.hookSpecificOutput.additionalContext);
+assert.deepEqual(acknowledgement,{schema:"agentspine.host-observer-ack/v1",status:"none",sourceDigest:digest(request.prompt),modelProvider:"claude",activeModel:"claude-sonnet-5",completionVerified:false,authority:"context-only"});
+assert.equal(await runClaudeObserver(request,{modelCall:async()=>{calls++;throw new Error("duplicate invoked");}}),null);assert.equal(calls,1);
+assert.equal(digest(await readFile(item.transcript)),before);
 });
 
 test("PostModelSwitch updates the exact session model used by the next observer",async t=>{const item=await fixture(t),base=input(item),switched=await runHook({...base,hook_event_name:"PostModelSwitch",from_model:"claude-sonnet-5",to_model:"claude-opus-5",source:"command"});

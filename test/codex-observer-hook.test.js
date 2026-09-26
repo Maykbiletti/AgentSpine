@@ -24,6 +24,12 @@ assert.equal(await runCodexObserver(input(item,{turn_id:"turn:image",prompt:"<im
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:foreign",group_id:"group:foreign"}),{modelCall:async()=>{throw new Error("foreign invoked");}}),null);
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:failure"}),{modelCall:async()=>{throw new Error("provider unavailable");}}),null);});
 
+test("Codex acknowledges one valid no-observation without changing its source",async t=>{const item=await fixture(t),before=hash(await readFile(item.transcript));let calls=0,request=input(item,{turn_id:"turn:none"});
+const first=await runCodexObserver(request,{modelCall:async()=>{calls++;return {stdout:JSON.stringify({status:"none",kind:"not-current-instruction",next:null,question:null})};}});
+const acknowledgement=JSON.parse(first.hookSpecificOutput.additionalContext);assert.equal(acknowledgement.schema,"agentspine.host-observer-ack/v1");assert.equal(acknowledgement.status,"none");assert.equal(acknowledgement.sourceDigest,hash(request.prompt));assert.equal(acknowledgement.modelProvider,"codex");assert.equal(acknowledgement.activeModel,"gpt-6-sol");assert.equal(acknowledgement.completionVerified,false);
+assert.equal(await runCodexObserver(request,{modelCall:async()=>{calls++;throw new Error("duplicate invoked");}}),null);assert.equal(calls,1);assert.equal(hash(await readFile(item.transcript)),before);
+});
+
 test("Codex child is ephemeral, tool-less and cannot inherit an API key",()=>{const args=codexObserverArguments("gpt-6-sol","source");for(const flag of ["--ephemeral","--ignore-user-config","--ignore-rules"])assert.ok(args.includes(flag));for(const value of ["features.apps=false","features.hooks=false","features.multi_agent=false","features.plugins=false","features.shell_tool=false","features.unified_exec=false","project_doc_max_bytes=0","tools.view_image=false","tools.web_search=false"])assert.ok(args.includes(value),value);assert.equal(args[args.indexOf("--sandbox")+1],"read-only");assert.equal(args[args.indexOf("--model")+1],"gpt-6-sol");assert.deepEqual(codexObserverEnvironment({PATH:"safe",CODEX_HOME:"host-login",OPENAI_API_KEY:"foreign",OpenAI_Api_Key:"foreign",OPENAI_BASE_URL:"foreign",AZURE_OPENAI_API_KEY:"foreign",aZuRe_OpEnAi_ApI_KeY:"foreign",CODEX_API_KEY:"foreign"}),{PATH:"safe",CODEX_HOME:"host-login"});});
 
 test("Claude and Codex deduplicate identical native turn ids independently",async t=>{const item=await fixture(t),id="turn:same-provider-local-id";
