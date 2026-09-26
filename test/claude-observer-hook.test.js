@@ -29,6 +29,13 @@ const context=JSON.parse(output.hookSpecificOutput.additionalContext);assert.equ
 assert.equal(await runClaudeObserver(input(item),{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
 });
 
+test("Claude observer derives one event from the documented prompt input without prompt_id",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript)),native=input(item);delete native.prompt_id;let calls=0;
+const output=await runClaudeObserver(native,{modelCall:async()=>{calls++;return {stdout:JSON.stringify({structured_output:proposal})};}});
+assert.equal(calls,1);assert.equal(JSON.parse(output.hookSpecificOutput.additionalContext).proposal.kind,"next-step-correction");
+assert.equal(await runClaudeObserver({...native},{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
+assert.equal(digest(await readFile(item.transcript)),before);
+});
+
 test("observer skips oversized, image, foreign-scope and failed model work without blocking",async t=>{const item=await fixture(t);let calls=0,call=async()=>{calls++;throw new Error("provider unavailable");};
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:large",prompt:"x".repeat(8193)}),{modelCall:call}),null);
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:image",prompt:"<image source>"}),{modelCall:call}),null);
