@@ -18,7 +18,7 @@ Object.assign(process.env,{AGENTSPINE_STATE_DIR:state,CLAUDE_CONFIG_DIR:profile,
 t.after(async()=>{for(const key of keys)prior[key]===undefined?delete process.env[key]:process.env[key]=prior[key];await rm(workspace,{recursive:true,force:true,maxRetries:3});});
 const privateScope=scope(),enrolled=await enrollTimelineWithHostReceipt({root,sessionId:"session:observer",scope:privateScope,transcriptPath:transcript,hostHome:profile});assert.equal(enrolled.status,"enrolled");
 assert.equal((await recordClaudeObserverModel({root,sessionId:"session:observer",scope:privateScope,model:"claude-sonnet-5"})).status,"recorded");
-return {root,transcript,privateScope};}
+return {root,transcript,privateScope,profile};}
 function input(item,patch={}){const s=item.privateScope;return {hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.root,session_id:"session:observer",prompt_id:"550e8400-e29b-41d4-a716-446655440000",transcript_path:item.transcript,prompt:"Nein, erst die Prüfsumme prüfen.",timestamp:"2026-09-25T04:00:01.000Z",entity_id:s.entityId,user_id:s.userId,tenant_id:s.tenantId,project_id:s.projectId,task_id:s.currentTaskId,goal_id:s.goalId,goal_step_id:s.goalStepId,group_id:null,...patch};}
 const proposal={status:"proposal",kind:"next-step-correction",next:"Erst die Prüfsumme prüfen.",question:null};
 
@@ -30,8 +30,13 @@ assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",
 const next=await runHook(input(item,{prompt_id:"prompt:next",event_id:"event:observer:next",prompt:"Bitte weiter.",timestamp:"2026-09-25T04:00:03.000Z"})),context=JSON.parse(next.context).sourceResolution.observer;
 assert.equal(context.status,"proposal");assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.proposal.kind,"next-step-correction");assert.equal(context.proposal.proposedNextStepSummary,null);assert.equal(context.sourceDigest,digest("Nein, erst die Prüfsumme prüfen."));assert.match(context.instruction,/one-use/);
 assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:later",now:"2026-09-25T04:00:04.000Z"})).status,"none","the next-turn handoff is one-use");
+assert.equal(digest(await readFile(item.transcript)),before,"next-turn source verification preserves transcript bytes");
 assert.equal(await runClaudeObserver(input(item),{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
 });
+
+test("Claude handoff rejects a replaced enrolled source without consuming it",async t=>{const item=await fixture(t),replacement=`${JSON.stringify({timestamp:"2026-09-25T04:00:02.000Z",message:{role:"user",content:"replacement"}})}\n`;await runClaudeObserver(input(item),{modelCall:async()=>({stdout:JSON.stringify({structured_output:proposal})})});await rm(item.transcript);await writeFile(item.transcript,replacement);const delivered=await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:next",now:"2026-09-25T04:00:03.000Z"});assert.equal(delivered.status,"unavailable");assert.equal(await readFile(item.transcript,"utf8"),replacement);});
+
+test("Claude observer discards a result superseded by a newer native prompt",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript));let release,started;const ready=new Promise(resolve=>started=resolve),late=runClaudeObserver(input(item),{modelCall:()=>new Promise(resolve=>{release=()=>resolve({stdout:JSON.stringify({structured_output:proposal})});started();})});await ready;await runClaudeObserver(input(item,{prompt_id:"prompt:newer",prompt:"Nur die neuere Frage."}),{modelCall:async()=>({stdout:JSON.stringify({structured_output:{status:"none",kind:"ambiguous",next:null,question:null}})})});release();await late;assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:later",now:"2026-09-25T04:00:04.000Z"})).status,"none");assert.equal(digest(await readFile(item.transcript)),before);});
 
 test("observer skips oversized, image, foreign-scope and failed model work without blocking",async t=>{const item=await fixture(t);let calls=0,call=async()=>{calls++;throw new Error("provider unavailable");};
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:large",prompt:"x".repeat(8193)}),{modelCall:call}),null);
@@ -46,6 +51,13 @@ assert.equal(output,null);assert.equal(calls,1);const appended=await readFile(it
 const next=await runHook(input(item,{prompt_id:"prompt:append-next",event_id:"event:observer:append-next",prompt:"Bitte weiter.",timestamp:"2026-09-25T04:00:03.000Z"}));assert.equal(JSON.parse(next.context).sourceResolution.observer.status,"proposal");
 const changed=Buffer.from(appended);changed[0]^=1;let changedCalls=0;assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:prefix-race"}),{modelCall:async()=>{changedCalls++;await writeFile(item.transcript,changed);return {stdout:JSON.stringify({structured_output:proposal})};}}),null);assert.equal(changedCalls,1);assert.deepEqual(await readFile(item.transcript),changed);
 assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:after-prefix-race",now:"2026-09-25T04:00:04.000Z"})).status,"none");
+});
+
+test("Claude handoff rejects a suggestion from a superseded private enrollment",async t=>{const item=await fixture(t),original=await readFile(item.transcript),replacement=item.transcript.replace("session.jsonl","replacement.jsonl"),replacementBytes=Buffer.from(`${JSON.stringify({timestamp:"2026-09-25T04:00:02.000Z",message:{role:"user",content:"Replacement source"}})}\n`);
+await runClaudeObserver(input(item,{prompt_id:"prompt:old-enrollment"}),{modelCall:async()=>({stdout:JSON.stringify({structured_output:proposal})})});
+await writeFile(replacement,replacementBytes);const enrolled=await enrollTimelineWithHostReceipt({root:item.root,sessionId:"session:observer",scope:item.privateScope,transcriptPath:replacement,hostHome:item.profile});assert.equal(enrolled.status,"enrolled");
+const handoff=await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,hostHome:item.profile,currentEventId:"prompt:next",now:"2026-09-25T04:00:03.000Z"});assert.equal(handoff.status,"unavailable");
+assert.deepEqual(await readFile(item.transcript),original);assert.deepEqual(await readFile(replacement),replacementBytes);
 });
 
 test("PostModelSwitch updates the exact session model used by the next observer",async t=>{const item=await fixture(t),base=input(item),switched=await runHook({...base,hook_event_name:"PostModelSwitch",from_model:"claude-sonnet-5",to_model:"claude-opus-5",source:"command"});

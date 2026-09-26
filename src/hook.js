@@ -389,7 +389,7 @@ prompt: promptFromInput(input), now: input.timestamp || new Date() });
 if (!finalized.preflightConsumed) throw new Error("preflight receipt could not be consumed atomically for this exact turn");
 briefingOrigin = finalized.briefingOrigin;
 diagnostics.timeline = finalized.timeline;
-if(Buffer.byteLength(context)<=hostContextLimit(preflight)-1024){const observer=await consumeHostObserverSuggestion({root,host:scope.host,sessionId:sessionId(input),scope,currentEventId:scope.host==="codex"?input.turn_id:input.prompt_id,now:input.timestamp||new Date()});if(observer.status==="delivered")diagnostics.observer=observer.suggestion;}
+if(Buffer.byteLength(context)<=hostContextLimit(preflight)-1024){const observer=await consumeHostObserverSuggestion({root,host:scope.host,sessionId:sessionId(input),scope,hostHome:resolvedSources.hostHome,currentEventId:scope.host==="codex"?input.turn_id:input.prompt_id,now:input.timestamp||new Date()});if(observer.status==="delivered")diagnostics.observer=observer.suggestion;}
 }
 if (event === "UserPromptSubmit") {
 const activeCanaries = briefing.learning.filter((item) => ["active", "revalidating"].includes(item.outcomeStatus));

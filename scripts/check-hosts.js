@@ -1,2 +1,178 @@
 #!/usr/bin/env node
-import{spawn as e}from"node:child_process";import{readFile as o,stat as t}from"node:fs/promises";import{isAbsolute as s,relative as n,resolve as r}from"node:path";import{fileURLToPath as i}from"node:url";import{installedHostEnvironment as a}from"./check-install-hook.js";function c(e,o){if(!e)throw new Error(o)}async function l(e,t){return JSON.parse(await o(r(e,t),"utf8"))}async function m(e,o){const i=r(o),a=n(e,i);c(a&&!a.startsWith("..")&&!s(a),"MCP entrypoint must remain inside the plugin");c((await t(i)).isFile(),"MCP entrypoint must be a regular file")}function u(e,o,{required:t,commandRoot:s,matcher:i="^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search|capture))$",asyncObserver:a=!1}){c(o&&"object"==typeof o&&!Array.isArray(o),"hook bundle is missing"),c(Object.keys(o).every(e=>["description","hooks"].includes(e)),"hook bundle contains unsupported top-level metadata"),c(o.description&&"string"==typeof o.description,"hook bundle description is missing");for(const e of t){const t=o.hooks?.[e];c(Array.isArray(t)&&1===t.length,`${e} must have exactly one registration`);const n=a&&"UserPromptSubmit"===e?2:1;c(Array.isArray(t[0].hooks)&&t[0].hooks.length===n,`${e} has an unsafe hook command count`);const r=t[0].hooks[0];c("command"===r.type,`${e} must use a command hook`);const l=`node "\${${s}}/src/hook.js"${"PostToolUse"===e?" --silent-oversize-post-tool-use":""}`;if(c(r.command===l,`${e} must use the bundled lifecycle adapter`),c(Number.isInteger(r.timeout)&&r.timeout>0&&r.timeout<=15,`${e} timeout is unsafe`),2===n){const e=t[0].hooks[1];c("command"===e.type&&e.command===`node "\${${s}}/src/claude-observer-hook.js"`&&!0===e.async&&3===Object.keys(e).length,"UserPromptSubmit observer must be one bundled async command")}"PreToolUse"===e&&c(t[0].matcher===i,"PreToolUse must route only exact mutations and timeline MCP calls through one guard")}const l=Object.keys(o.hooks||{}).filter(e=>!t.includes(e));return c(0===l.length,`unknown hook events: ${l.join(", ")}`),{events:t,commands:t.length+(a?1:0),entrypoint:n(e,r(e,"src/hook.js"))}}async function p({label:o,root:t,variable:i,server:l,version:u}){c(l&&"object"==typeof l&&!Array.isArray(l),`${o} MCP registration is missing`),c("node"===l.command,`${o} MCP registration must use the Node.js runtime`),c(Array.isArray(l.args)&&1===l.args.length,`${o} MCP registration must name exactly one entrypoint`);const p=process.execPath,d=l.args.map(e=>{const o=function(e,o,t){return c("string"==typeof e&&e.length>0,"host command values must be non-empty strings"),e.split(`\${${o}}`).join(t)}(e,i,t);return s(o)?o:r(t,o)});return c(!d.some(e=>e.includes("${")),`${o} MCP registration contains an unresolved variable`),await m(t,d[0]),await new Promise((s,r)=>{const i=e(p,d,{cwd:t,env:a(o,t),stdio:["pipe","pipe","pipe"]});let l="",m="",h=!1;const g=(e,o)=>{if(h)return;h=!0,clearTimeout(v);const t=()=>{e?r(e):s(o)};if(null!==i.exitCode||null!==i.signalCode)return t();i.once("close",t),i.kill()},v=setTimeout(()=>{g(new Error(`${o} MCP initialize timed out${m?`: ${m.trim()}`:""}`))},3e3);i.stderr.setEncoding("utf8"),i.stderr.on("data",e=>{m+=e}),i.stdout.setEncoding("utf8"),i.stdout.on("data",e=>{l+=e;const s=l.indexOf("\n");if(!(s<0))try{const e=JSON.parse(l.slice(0,s));c(1===e.id,`${o} MCP initialize returned the wrong request id`),c("agent-spine"===e.result?.serverInfo?.name,`${o} MCP initialize returned the wrong server identity`),c(e.result?.serverInfo?.version===u,`${o} MCP initialize returned a stale server version`),g(null,{label:o,server:e.result.serverInfo.name,entrypoint:n(t,d[0])})}catch(e){g(e)}}),i.once("error",e=>g(e)),i.once("close",e=>{h||g(new Error(`${o} MCP server exited with ${e}${m?`: ${m.trim()}`:""}`))}),i.stdin.write(`${JSON.stringify({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2025-06-18"}})}\n`)})}export async function checkHosts(e=process.cwd()){e=r(e);const[o,t,s,i,a,d,h,g]=await Promise.all([l(e,"package.json"),l(e,"blun.plugin.json"),l(e,".claude-plugin/plugin.json"),l(e,".mcp.json"),l(e,".codex-plugin/plugin.json"),l(e,"hooks/hooks.json"),l(e,"hooks/codex.json"),l(e,"hooks/version.json")]);c(t.version===o.version&&s.version===o.version&&a.version===o.version,"host manifests must use the package cache version"),c("agentspine.hook-bundle/v1"===g.schema&&g.version===o.version,"hook bundle version must match the package cache version"),c("agentspine.preflight/v2"===g.contract,"hook bundle preflight contract is missing"),c("./src/worker.js"===o.bin?.["agentspine-worker"],"package must register exactly one gateway worker entrypoint"),await m(e,r(e,o.bin["agentspine-worker"])),c("./.mcp.json"===s.mcpServers,"Claude manifest must explicitly reference ./.mcp.json"),c(void 0===s.hooks,"default hooks/hooks.json must not also be registered through a supplemental manifest path"),c("./hooks/codex.json"===a.hooks,"Codex manifest must select its host-specific hook adapter"),c(i.mcpServers&&1===Object.keys(i.mcpServers).length,"Claude MCP file must contain one mcpServers registration"),c(a.mcpServers&&1===Object.keys(a.mcpServers).length,"Codex manifest must contain one MCP registration");const v=["SessionStart","UserPromptSubmit","PreToolUse","PostToolUse","PreCompact","PostCompact","Stop","SubagentStop"],y=u(e,d,{required:[...v,"InstructionsLoaded","PostModelSwitch"],commandRoot:"CLAUDE_PLUGIN_ROOT",asyncObserver:!0}),f=u(e,h,{required:v,commandRoot:"PLUGIN_ROOT",matcher:"^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__(?:plugin_agent-spine_agent-spine|agent-spine)__session_timeline_(?:index|search|capture))$",asyncObserver:!0}),k=function(e,o){const t=["SessionStart","UserPromptSubmit","PreToolUse","PostToolUse","PreCompact","PostCompact","Stop","SubagentStop"];c(Array.isArray(o),"BLUN hook bundle is missing"),c(o.length===t.length,"BLUN must register exactly one command per lifecycle event"),c(JSON.stringify(o.map(({event:e})=>e))===JSON.stringify(t),"BLUN lifecycle events must remain complete and ordered");for(const e of t){const t=o.filter(o=>o.event===e);c(1===t.length,`${e} must have exactly one BLUN registration`);const s=t[0],n='node "./src/hook.js"'+("PostToolUse"===e?" --silent-oversize-post-tool-use":"");c(s.command===n,`${e} must use the bundled BLUN lifecycle adapter`),c(Number.isInteger(s.timeout)&&s.timeout>0&&s.timeout<=15,`${e} BLUN timeout is unsafe`),"PreToolUse"===e&&c("^(?:Edit|Write|apply_patch|Bash|PowerShell|exec_command|mcp__agent-spine__session_timeline_(?:index|search|capture))$"===s.matcher,"BLUN PreToolUse must route only exact mutations and timeline MCP calls through one guard")}return{events:t,commands:t.length,entrypoint:n(e,r(e,"src/hook.js"))}}(e,t.hooks),b=await Promise.all([p({label:"blun",root:e,variable:"BLUN_PLUGIN_ROOT",server:t.mcpServers["agent-spine"],version:o.version}),p({label:"claude",root:e,variable:"CLAUDE_PLUGIN_ROOT",server:i.mcpServers["agent-spine"],version:o.version}),p({label:"codex",root:e,variable:"PLUGIN_ROOT",server:a.mcpServers["agent-spine"],version:o.version})]);return{ok:!0,root:e,version:o.version,registrations:b,hooks:{blun:k,claude:y,codex:f},hookDiscovery:{blun:"plugin-manifest",claude:"default-hooks-directory",codex:"plugin-manifest",trust:"host-user-required",liveTrustVerified:!1},worker:{entrypoint:o.bin["agentspine-worker"],setsPerInstall:1},exactlyOnce:{mcpServersPerHost:1,hookSetsPerHost:1,workerSetsPerInstall:1},authority:"registration-check-only"}}process.argv[1]&&r(process.argv[1])===r(i(import.meta.url))&&async function(){const e=process.argv.slice(2);let o=process.cwd(),t=!1;for(let s=0;s<e.length;s+=1)if("--root"===e[s])o=e[++s];else{if("--json"!==e[s])throw new Error(`unknown host-check argument: ${e[s]}`);t=!0}process.stdout.write(`${JSON.stringify(await checkHosts(o),null,t?2:0)}\n`)}().catch(e=>{process.stderr.write(`AgentSpine host check failed: ${e.message}\n`),process.exitCode=1});
+import { relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  assertHostContract,
+  initializeServer,
+  readHostJson,
+  validateEntrypoint
+} from "./host-check-runtime.js";
+
+const COMMON_EVENTS = [
+  "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+  "PreCompact", "PostCompact", "Stop", "SubagentStop"
+];
+const CLAUDE_PRE_TOOL_MATCHER =
+  "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__plugin_agent-spine_agent-spine__session_timeline_(?:index|search|capture))$";
+const CODEX_PRE_TOOL_MATCHER =
+  "^(?:Edit|Write|apply_patch|Bash|PowerShell|mcp__(?:plugin_agent-spine_agent-spine|agent-spine)__session_timeline_(?:index|search|capture))$";
+const BLUN_PRE_TOOL_MATCHER =
+  "^(?:Edit|Write|apply_patch|Bash|PowerShell|exec_command|mcp__agent-spine__session_timeline_(?:index|search|capture))$";
+
+function validateHooks(root, hooks, {
+  required,
+  commandRoot,
+  matcher = CLAUDE_PRE_TOOL_MATCHER,
+  asyncObserver = false
+}) {
+  assertHostContract(hooks && typeof hooks === "object" && !Array.isArray(hooks),
+    "hook bundle is missing");
+  assertHostContract(Object.keys(hooks).every((key) => ["description", "hooks"].includes(key)),
+    "hook bundle contains unsupported top-level metadata");
+  assertHostContract(typeof hooks.description === "string" && hooks.description,
+    "hook bundle description is missing");
+
+  for (const event of required) {
+    const registrations = hooks.hooks?.[event];
+    assertHostContract(Array.isArray(registrations) && registrations.length === 1,
+      `${event} must have exactly one registration`);
+    const expectedCount = asyncObserver && event === "UserPromptSubmit" ? 2 : 1;
+    assertHostContract(Array.isArray(registrations[0].hooks)
+      && registrations[0].hooks.length === expectedCount,
+    `${event} has an unsafe hook command count`);
+    const command = registrations[0].hooks[0];
+    assertHostContract(command.type === "command", `${event} must use a command hook`);
+    const expected = `node "\${${commandRoot}}/src/hook.js"${event === "PostToolUse"
+      ? " --silent-oversize-post-tool-use" : ""}`;
+    assertHostContract(command.command === expected,
+      `${event} must use the bundled lifecycle adapter`);
+    assertHostContract(Number.isInteger(command.timeout) && command.timeout > 0
+      && command.timeout <= 15, `${event} timeout is unsafe`);
+
+    if (expectedCount === 2) {
+      const observer = registrations[0].hooks[1];
+      assertHostContract(observer.type === "command"
+        && observer.command === `node "\${${commandRoot}}/src/claude-observer-hook.js"`
+        && observer.async === true && Object.keys(observer).length === 3,
+      "UserPromptSubmit observer must be one bundled async command");
+    }
+    if (event === "PreToolUse") {
+      assertHostContract(registrations[0].matcher === matcher,
+        "PreToolUse must route only exact mutations and timeline MCP calls through one guard");
+    }
+  }
+
+  const extras = Object.keys(hooks.hooks || {}).filter((event) => !required.includes(event));
+  assertHostContract(extras.length === 0, `unknown hook events: ${extras.join(", ")}`);
+  return {
+    events: required,
+    commands: required.length + (asyncObserver ? 1 : 0),
+    entrypoint: relative(root, resolve(root, "src/hook.js"))
+  };
+}
+
+function validateBlunHooks(root, hooks) {
+  assertHostContract(Array.isArray(hooks), "BLUN hook bundle is missing");
+  assertHostContract(hooks.length === COMMON_EVENTS.length,
+    "BLUN must register exactly one command per lifecycle event");
+  assertHostContract(JSON.stringify(hooks.map(({ event }) => event))
+    === JSON.stringify(COMMON_EVENTS), "BLUN lifecycle events must remain complete and ordered");
+
+  for (const event of COMMON_EVENTS) {
+    const registrations = hooks.filter((hook) => hook.event === event);
+    assertHostContract(registrations.length === 1,
+      `${event} must have exactly one BLUN registration`);
+    const command = registrations[0];
+    const expected = `node "./src/hook.js"${event === "PostToolUse"
+      ? " --silent-oversize-post-tool-use" : ""}`;
+    assertHostContract(command.command === expected,
+      `${event} must use the bundled BLUN lifecycle adapter`);
+    assertHostContract(Number.isInteger(command.timeout) && command.timeout > 0
+      && command.timeout <= 15, `${event} BLUN timeout is unsafe`);
+    if (event === "PreToolUse") {
+      assertHostContract(command.matcher === BLUN_PRE_TOOL_MATCHER,
+        "BLUN PreToolUse must route only exact mutations and timeline MCP calls through one guard");
+    }
+  }
+  return { events: COMMON_EVENTS, commands: COMMON_EVENTS.length,
+    entrypoint: relative(root, resolve(root, "src/hook.js")) };
+}
+
+export async function checkHosts(root = process.cwd()) {
+  root = resolve(root);
+  const [pkg, blun, claude, claudeMcp, codex, claudeHooks, codexHooks, hookVersion]
+    = await Promise.all([
+      readHostJson(root, "package.json"), readHostJson(root, "blun.plugin.json"),
+      readHostJson(root, ".claude-plugin/plugin.json"), readHostJson(root, ".mcp.json"),
+      readHostJson(root, ".codex-plugin/plugin.json"), readHostJson(root, "hooks/hooks.json"),
+      readHostJson(root, "hooks/codex.json"), readHostJson(root, "hooks/version.json")
+    ]);
+
+  assertHostContract(blun.version === pkg.version && claude.version === pkg.version
+    && codex.version === pkg.version, "host manifests must use the package cache version");
+  assertHostContract(hookVersion.schema === "agentspine.hook-bundle/v1"
+    && hookVersion.version === pkg.version, "hook bundle version must match the package cache version");
+  assertHostContract(hookVersion.contract === "agentspine.preflight/v2",
+    "hook bundle preflight contract is missing");
+  assertHostContract(pkg.bin?.["agentspine-worker"] === "./src/worker.js",
+    "package must register exactly one gateway worker entrypoint");
+  await validateEntrypoint(root, resolve(root, pkg.bin["agentspine-worker"]));
+  assertHostContract(claude.mcpServers === "./.mcp.json",
+    "Claude manifest must explicitly reference ./.mcp.json");
+  assertHostContract(claude.hooks === undefined,
+    "default hooks/hooks.json must not also be registered through a supplemental manifest path");
+  assertHostContract(codex.hooks === "./hooks/codex.json",
+    "Codex manifest must select its host-specific hook adapter");
+  assertHostContract(claudeMcp.mcpServers && Object.keys(claudeMcp.mcpServers).length === 1,
+    "Claude MCP file must contain one mcpServers registration");
+  assertHostContract(codex.mcpServers && Object.keys(codex.mcpServers).length === 1,
+    "Codex manifest must contain one MCP registration");
+
+  const inventories = {
+    blun: validateBlunHooks(root, blun.hooks),
+    claude: validateHooks(root, claudeHooks, {
+      required: [...COMMON_EVENTS, "InstructionsLoaded", "PostModelSwitch"],
+      commandRoot: "CLAUDE_PLUGIN_ROOT", asyncObserver: true
+    }),
+    codex: validateHooks(root, codexHooks, {
+      required: COMMON_EVENTS, commandRoot: "PLUGIN_ROOT",
+      matcher: CODEX_PRE_TOOL_MATCHER, asyncObserver: true
+    })
+  };
+  const registrations = await Promise.all([
+    initializeServer({ label: "blun", root, variable: "BLUN_PLUGIN_ROOT",
+      server: blun.mcpServers["agent-spine"], version: pkg.version }),
+    initializeServer({ label: "claude", root, variable: "CLAUDE_PLUGIN_ROOT",
+      server: claudeMcp.mcpServers["agent-spine"], version: pkg.version }),
+    initializeServer({ label: "codex", root, variable: "PLUGIN_ROOT",
+      server: codex.mcpServers["agent-spine"], version: pkg.version })
+  ]);
+
+  return {
+    ok: true, root, version: pkg.version, registrations, hooks: inventories,
+    hookDiscovery: { blun: "plugin-manifest", claude: "default-hooks-directory",
+      codex: "plugin-manifest", trust: "host-user-required", liveTrustVerified: false },
+    worker: { entrypoint: pkg.bin["agentspine-worker"], setsPerInstall: 1 },
+    exactlyOnce: { mcpServersPerHost: 1, hookSetsPerHost: 1, workerSetsPerInstall: 1 },
+    authority: "registration-check-only"
+  };
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  let root = process.cwd();
+  let pretty = false;
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--root") root = args[++index];
+    else if (args[index] === "--json") pretty = true;
+    else throw new Error(`unknown host-check argument: ${args[index]}`);
+  }
+  process.stdout.write(`${JSON.stringify(await checkHosts(root), null, pretty ? 2 : 0)}\n`);
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  main().catch((error) => {
+    process.stderr.write(`AgentSpine host check failed: ${error.message}\n`);
+    process.exitCode = 1;
+  });
+}
