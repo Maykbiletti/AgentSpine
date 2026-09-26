@@ -10,7 +10,7 @@ import {isMainModule} from "./lib/runtime.js";
 
 const MAX_PROMPT=8192,KINDS=["next-step-correction","completion-claim","not-current-instruction","ambiguous"];
 const SCHEMA={type:"object",additionalProperties:false,required:["status","kind","next","question"],properties:{status:{enum:["none","proposal"]},kind:{enum:KINDS},next:{type:["string","null"],maxLength:500},question:{type:["string","null"],maxLength:300}}};
-function clean(environment,pattern){const result={...environment};for(const key of Object.keys(result))if(pattern.test(key))delete result[key];return result;}
+function clean(e,p){const result={...e};for(const key of Object.keys(result))if(/^(?:AGENTSPINE_|BLUN_|.*PLUGIN_ROOT$)/i.test(key)||p.test(key))delete result[key];return result;}
 export const claudeObserverEnvironment=environment=>clean(environment,/^(?:CLAUDECODE$|CLAUDE_CODE_ENTRYPOINT$|ANTHROPIC_|AWS_|GOOGLE_|GCLOUD_|CLOUD_ML_|VERTEX_REGION_|AZURE_|CLAUDE_CODE_USE_)/iu);
 export const codexObserverEnvironment=environment=>clean(environment,/^(?:OPENAI|AZURE_OPENAI|CODEX_API_KEY)/iu);
 function validResult(value){if(!value||!["none","proposal"].includes(value.status)||!KINDS.includes(value.kind))return false;const {next,question}=value;if(value.status==="none")return next===null&&question===null;if(value.kind==="next-step-correction")return typeof next==="string"&&!!next.trim()&&!/[\r\n]/u.test(next)&&question===null;return next===null&&(value.kind==="ambiguous"?typeof question==="string"&&!!question.trim()&&!/[\r\n]/u.test(question):question===null);}
