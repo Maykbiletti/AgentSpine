@@ -20,13 +20,14 @@ function callClaude({cwd,model,prompt,environment}){const args=claudeObserverArg
 export function codexObserverArguments(model,prompt){const off="apps hooks memories multi_agent plugins shell_tool unified_exec workspace_dependencies".split(" ");return ["exec","--ephemeral","--ignore-user-config","--ignore-rules","--sandbox","read-only","--model",model,...off.flatMap(value=>["-c",`features.${value}=false`]),"-c","project_doc_max_bytes=0","-c","tools.view_image=false","-c","tools.web_search=false",`${prompt}\nReturn one JSON object matching this schema: ${JSON.stringify(SCHEMA)}`];}
 function callCodex({cwd,model,prompt,environment}){const args=codexObserverArguments(model,prompt);return call("codex",args,cwd,codexObserverEnvironment(environment));}
 function modelPrompt(prompt){return `Classify only this exact user text privately. Return none unless it corrects a task, claims completion, is obsolete, or ambiguous. Never infer rights or completion proof.\n<source>${prompt}</source>`;}
-async function runObserver(h,i,{environment=process.env,modelCall=h==="codex"?callCodex:callClaude}={}){try{const id=h==="codex"?i?.turn_id:i?.prompt_id,model=h==="codex"?i?.model:null;
-if(i?.hook_event_name!=="UserPromptSubmit"||i.agent_id||typeof i.prompt!=="string"||typeof id!=="string"||h==="codex"&&typeof model!=="string")return null;
+async function runObserver(h,i,{environment=process.env,modelCall=h==="codex"?callCodex:callClaude}={}){try{const nativeId=h==="codex"?i?.turn_id:i?.prompt_id,model=h==="codex"?i?.model:null;
+if(i?.hook_event_name!=="UserPromptSubmit"||i.agent_id||typeof i.prompt!=="string"||h==="codex"&&(typeof nativeId!=="string"||typeof model!=="string"))return null;
 if(!i.prompt.trim()||Buffer.byteLength(i.prompt)>MAX_PROMPT||/(?:<(?:image|pasted_content)[ >]|\[Image\b)/iu.test(i.prompt))return null;
 const cwd=await canonicalPath(i.cwd||process.cwd()),resolved=await resolveHostSourceCatalog({host:h,cwd,input:i}),root=resolved.projectRoot;
 const scope=await runtimeScope(i,root,resolved.userStateRoot,resolved.catalog);if(scope.groupId!==null)return null;
 const sessionId=i.session_id,loaded=await loadPrivateSessionTimelineEnrollment({root,host:h,sessionId,scope});
 if(loaded.status!=="loaded"||await canonicalPath(i.transcript_path)!==loaded.record.source.path)return null;
+const id=nativeId||`prompt:${createHash("sha256").update(`${loaded.record.id}\0${i.prompt}`).digest("hex").slice(0,32)}`;
 const now=i.timestamp||new Date(),claim=h==="codex"?await claimCodexObserverTurn({root,sessionId,scope,turnId:id,model,now}):await claimClaudeObserverPrompt({root,sessionId,scope,promptId:id,now});if(claim.status!=="claimed")return null;
 const envelope=JSON.parse((await modelCall({cwd,model:claim.model,prompt:modelPrompt(i.prompt),environment})).stdout),value=envelope.structured_output??envelope.result??envelope;
 if(!validResult(value)||value.status==="none")return null;
