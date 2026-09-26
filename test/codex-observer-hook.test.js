@@ -5,7 +5,8 @@ import {mkdir,mkdtemp,readFile,rm,writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {codexObserverArguments,codexObserverEnvironment,runCodexObserver} from "../src/claude-observer-hook.js";
-import {claimClaudeObserverPrompt,claimCodexObserverTurn,recordClaudeObserverModel} from "../src/lib/session-timeline.js";
+import {runHook} from "../src/hook.js";
+import {claimClaudeObserverPrompt,claimCodexObserverTurn,consumeHostObserverSuggestion,recordClaudeObserverModel} from "../src/lib/session-timeline.js";
 import {enrollTimelineWithHostReceipt} from "./session-timeline-invocation-support.js";
 
 const hash=value=>createHash("sha256").update(value).digest("hex");
@@ -15,10 +16,12 @@ await Promise.all([mkdir(state),mkdir(join(root,".git"),{recursive:true}),mkdir(
 const keys=["AGENTSPINE_STATE_DIR","CODEX_HOME","AGENTSPINE_TIMELINE_SESSION_CAPABILITY","AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID"],prior=Object.fromEntries(keys.map(key=>[key,process.env[key]]));Object.assign(process.env,{AGENTSPINE_STATE_DIR:state,CODEX_HOME:profile,AGENTSPINE_TIMELINE_SESSION_CAPABILITY:`astc_${"a".repeat(43)}`,AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID:"session:observer"});
 t.after(async()=>{for(const key of keys)prior[key]===undefined?delete process.env[key]:process.env[key]=prior[key];await rm(workspace,{recursive:true,force:true,maxRetries:3});});
 assert.equal((await enrollTimelineWithHostReceipt({root,host:"codex",sessionId:"session:observer",scope,transcriptPath:transcript,hostHome:profile})).status,"enrolled");return {root,transcript};}
-function input(item,patch={}){return {hook_event_name:"UserPromptSubmit",cwd:item.root,session_id:"session:observer",turn_id:"turn:one",transcript_path:item.transcript,model:"gpt-6-sol",prompt:"Nein, erst die Prüfsumme prüfen.",entity_id:scope.entityId,user_id:scope.userId,tenant_id:scope.tenantId,project_id:scope.projectId,task_id:scope.currentTaskId,group_id:null,...patch};}
+function input(item,patch={}){return {hook_event_name:"UserPromptSubmit",cwd:item.root,session_id:"session:observer",turn_id:"turn:one",transcript_path:item.transcript,model:"gpt-6-sol",prompt:"Nein, erst die Prüfsumme prüfen.",timestamp:"2026-09-25T11:00:01.000Z",entity_id:scope.entityId,user_id:scope.userId,tenant_id:scope.tenantId,project_id:scope.projectId,task_id:scope.currentTaskId,group_id:null,...patch};}
 
 test("Codex observer uses the active host model once and preserves its private source",async t=>{const item=await fixture(t),before=hash(await readFile(item.transcript));let calls=0,seen;
-const output=await runCodexObserver(input(item),{modelCall:async request=>{calls++;seen=request;return {stdout:JSON.stringify({status:"proposal",kind:"next-step-correction",next:"Erst die Prüfsumme prüfen.",question:null})};}});assert.equal(calls,1);assert.equal(seen.model,"gpt-6-sol");assert.equal(hash(await readFile(item.transcript)),before);const context=JSON.parse(output.hookSpecificOutput.additionalContext);assert.equal(context.modelProvider,"codex");assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.sourceDigest,hash(input(item).prompt));
+const output=await runCodexObserver(input(item),{modelCall:async request=>{calls++;seen=request;return {stdout:JSON.stringify({status:"proposal",kind:"next-step-correction",next:"Erst die Prüfsumme prüfen.",question:null})};}});assert.equal(calls,1);assert.equal(seen.model,"gpt-6-sol");assert.equal(hash(await readFile(item.transcript)),before);assert.equal(output,null);
+assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"codex",sessionId:"session:observer",scope,currentEventId:"turn:one",now:"2026-09-25T11:00:02.000Z"})).status,"none");const next=await runHook(input(item,{turn_id:"turn:two",event_id:"event:observer:next",prompt:"Bitte weiter.",timestamp:"2026-09-25T11:00:03.000Z"})),context=JSON.parse(next.context).sourceResolution.observer;assert.equal(context.status,"proposal");assert.equal(context.modelProvider,"codex");assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.proposal.proposedNextStepSummary,null);assert.equal(context.sourceDigest,hash(input(item).prompt));
+assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"codex",sessionId:"session:observer",scope,currentEventId:"turn:three",now:"2026-09-25T11:00:04.000Z"})).status,"none");
 assert.equal(await runCodexObserver(input(item),{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:image",prompt:"<image source>"}),{modelCall:async()=>{throw new Error("image invoked");}}),null);
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:foreign",group_id:"group:foreign"}),{modelCall:async()=>{throw new Error("foreign invoked");}}),null);

@@ -18,6 +18,7 @@ import { pathMatchesSource, sameSessionTimelineSourceLocation } from "./session-
 import {captureTimelineAppend,MAX_BACKGROUND_CAPTURE_BYTES,readRange,sourceSnapshotDigest,unchangedHandle,validatedHandle} from "./session-timeline-source-open.js";
 import { readTimelineState, saveTimelineState } from "./session-timeline-state.js";
 import { sessionTimelineRootDigest } from "./session-timeline-root.js";
+import {consumeObserverSuggestion,stageObserverSuggestion,validObserver} from "./session-timeline-observer.js";
 import { priorTimelineHint, selectPriorTimelineSource, timelineSessionReference } from "./session-timeline-prior.js";
 import { crossProviderTimelineEnabled } from "./session-timeline-provider.js";
 export const SESSION_TIMELINE_SCHEMA = "agentspine.session-timeline/v1";
@@ -75,10 +76,6 @@ return item && validTimelineBinding(item.binding) && typeof item.path === "strin
 && (item.snapshotDigest === undefined || item.snapshotDigest === null || /^[a-f0-9]{64}$/.test(item.snapshotDigest))
 && date(item.updatedAt) && item.authority === AUTHORITY;
 }
-function validObserver(item){return item&&/^[a-f0-9]{64}$/.test(item.bindingDigest||"")
-&&/^[A-Za-z0-9._:-]{1,256}$/.test(item.model||"")&&date(item.updatedAt)
-&&Array.isArray(item.prompts)&&item.prompts.length<=32
-&&item.prompts.every(value=>/^[a-f0-9]{64}$/.test(value))&&item.authority===AUTHORITY;}
 function validate(value, root) {
 if (!value || value.schema !== STATE_SCHEMA || value.rootDigest !== sessionTimelineRootDigest(root) || value.authority !== AUTHORITY
 || !Array.isArray(value.sources) || value.sources.length > MAX_SOURCES || value.sources.some((item) => !validSource(item))
@@ -95,13 +92,11 @@ function unavailable(reason) { return status({ status: "unavailable", reason });
 function blocked(reason) { return { blocked: true, reason, authority: AUTHORITY }; }
 function hasExactPrivateTimelineScope(scope) { return scope?.groupId === null; }
 function sourceFor(state, scope) { return state.sources.find((item) => sameTimelineBinding(item.binding, scope)) || null; }
-function observerBindingDigest(host,sessionId,scope){const binding=sessionTimelineBinding({host,sessionId,scope});
-return ["claude","codex"].includes(host)&&completeTimelineBinding(binding)?digest(JSON.stringify(binding)):null;}
+function observerBindingDigest(host,sessionId,scope){const binding=sessionTimelineBinding({host,sessionId,scope});return ["claude","codex"].includes(host)&&completeTimelineBinding(binding)?digest(JSON.stringify(binding)):null;}
 async function mutateObserver(root,bindingDigest,task){try{await ensureSessionTimelineTrust({create:true});const names=await paths(root);
 return await withOwnedFileLock(names.lock,async({assertOwned})=>{const state=await readState(names.path,root,names.assertStable);
 state.observers||=[];const result=task(state.observers.find(item=>item.bindingDigest===bindingDigest)||null,state);
-if(result.save)await saveState(state,names.path,assertOwned,root,names.assertStable);return result;},{assertPath:names.assertStable});
-}catch{return {status:"unavailable"};}}
+if(result.save)await saveState(state,names.path,assertOwned,root,names.assertStable);return result;},{assertPath:names.assertStable});}catch{return {status:"unavailable"};}}
 export async function recordClaudeObserverModel({root,sessionId,scope,model,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),at=asDate(now).toISOString();
 if(!bindingDigest||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
 return mutateObserver(root,bindingDigest,(current,state)=>{if(current){current.model=model;current.updatedAt=at;}
@@ -112,6 +107,8 @@ return mutateObserver(root,bindingDigest,(current)=>{if(!current)return {status:
 current.updatedAt=asDate(now).toISOString();return {status:"claimed",model:current.model,save:true};});}
 export async function claimCodexObserverTurn({root,sessionId,scope,turnId,model,now=new Date()}){const bindingDigest=observerBindingDigest("codex",sessionId,scope),prompt=digest(turnId||"");if(!bindingDigest||typeof turnId!=="string"||turnId.length>256||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
 return mutateObserver(root,bindingDigest,(current,state)=>{if(!current){current={bindingDigest,model,prompts:[],authority:AUTHORITY};state.observers=[current,...state.observers].slice(0,MAX_SOURCES);}if(current.prompts.includes(prompt))return {status:"duplicate"};current.model=model;current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);current.updatedAt=asDate(now).toISOString();return {status:"claimed",model,save:true};});}
+export function stageHostObserverSuggestion(input){return stageObserverSuggestion(input,observerBindingDigest(input.host,input.sessionId,input.scope),mutateObserver);}
+export function consumeHostObserverSuggestion(input){return consumeObserverSuggestion(input,observerBindingDigest(input.host,input.sessionId,input.scope),mutateObserver);}
 function sourceMetadata(source) {const sourceDigest = digest(`${source.pathDigest}\0${source.identity}\0${source.size}\0${source.mtimeNs}\0${source.ctimeNs}`);
 return { sourceDigest, indexedBytes: source.indexedBytes, size: source.size, events: source.events.length,
 rooms: Math.ceil(source.size / ROOM_BYTES), continuation: timelineContinuationCapsule({ source, sourceDigest, roomBytes: ROOM_BYTES, authority: AUTHORITY }) };}

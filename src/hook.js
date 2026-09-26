@@ -13,7 +13,7 @@ import { syncPersonaRosterFromEnvironment } from "./lib/persona-runtime.js";
 import { captureMustRememberPrompt, recordPreflightFailure, runPreflight, verifyPreflightReceipt } from "./lib/preflight.js";
 import { actionLessonRecall } from "./lib/action-lesson-recall.js";
 import { captureSessionTimelineLifecycle, finalizeUserPromptSessionTimeline } from "./lib/hook-timeline.js";
-import { recordClaudeObserverModel } from "./lib/session-timeline.js";
+import { consumeHostObserverSuggestion, recordClaudeObserverModel } from "./lib/session-timeline.js";
 import { fitTimelineRecallToHostContext } from "./lib/pre-answer-timeline-recall.js";
 import { timelineToolKind } from "./lib/mcp-timeline-tools.js";
 import { emitTimelineToolGuard, runTimelineToolGuard } from "./lib/timeline-tool-guard.js";
@@ -29,8 +29,7 @@ import { verifyHookStopContracts } from "./lib/hook-stop-verification.js";
 import { processAdvisory } from "./lib/hook-process-advisory.js";
 import { recordHookBriefingUse } from "./lib/hook-briefing-use.js";
 export { blunRuntimeContext, blunRuntimeMessage } from "./lib/hook-output.js";
-const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]);
-const KNOWN_EVENTS = new Set([...CONTEXT_EVENTS, "InstructionsLoaded", "PreToolUse", "PostToolUse", "Stop", "SubagentStop", "PostModelSwitch"]);
+const CONTEXT_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact"]),KNOWN_EVENTS = new Set([...CONTEXT_EVENTS, "InstructionsLoaded", "PreToolUse", "PostToolUse", "Stop", "SubagentStop", "PostModelSwitch"]);
 async function writeContextOutput(output, host) {
 const field = Object.hasOwn(output.hookSpecificOutput, "additionalContext") ? "additionalContext" : "message", content = output.hookSpecificOutput[field];
 await new Promise((resolveWrite, rejectWrite) => process.stdout.write(`${JSON.stringify(output)}\n`, (error) => error ? rejectWrite(error) : resolveWrite()));
@@ -390,6 +389,7 @@ prompt: promptFromInput(input), now: input.timestamp || new Date() });
 if (!finalized.preflightConsumed) throw new Error("preflight receipt could not be consumed atomically for this exact turn");
 briefingOrigin = finalized.briefingOrigin;
 diagnostics.timeline = finalized.timeline;
+if(Buffer.byteLength(context)<=hostContextLimit(preflight)-1024){const observer=await consumeHostObserverSuggestion({root,host:scope.host,sessionId:sessionId(input),scope,currentEventId:scope.host==="codex"?input.turn_id:input.prompt_id,now:input.timestamp||new Date()});if(observer.status==="delivered")diagnostics.observer=observer.suggestion;}
 }
 if (event === "UserPromptSubmit") {
 const activeCanaries = briefing.learning.filter((item) => ["active", "revalidating"].includes(item.outcomeStatus));
