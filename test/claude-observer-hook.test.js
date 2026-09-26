@@ -30,8 +30,11 @@ assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",
 const next=await runHook(input(item,{prompt_id:"prompt:next",event_id:"event:observer:next",prompt:"Bitte weiter.",timestamp:"2026-09-25T04:00:03.000Z"})),context=JSON.parse(next.context).sourceResolution.observer;
 assert.equal(context.status,"proposal");assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(context.proposal.kind,"next-step-correction");assert.equal(context.proposal.proposedNextStepSummary,null);assert.equal(context.sourceDigest,digest("Nein, erst die Prüfsumme prüfen."));assert.match(context.instruction,/one-use/);
 assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:later",now:"2026-09-25T04:00:04.000Z"})).status,"none","the next-turn handoff is one-use");
+assert.equal(digest(await readFile(item.transcript)),before,"next-turn source verification preserves transcript bytes");
 assert.equal(await runClaudeObserver(input(item),{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
 });
+
+test("Claude handoff rejects a replaced enrolled source without consuming it",async t=>{const item=await fixture(t),replacement=`${JSON.stringify({timestamp:"2026-09-25T04:00:02.000Z",message:{role:"user",content:"replacement"}})}\n`;await runClaudeObserver(input(item),{modelCall:async()=>({stdout:JSON.stringify({structured_output:proposal})})});await rm(item.transcript);await writeFile(item.transcript,replacement);const delivered=await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:next",now:"2026-09-25T04:00:03.000Z"});assert.equal(delivered.status,"unavailable");assert.equal(await readFile(item.transcript,"utf8"),replacement);});
 
 test("observer skips oversized, image, foreign-scope and failed model work without blocking",async t=>{const item=await fixture(t);let calls=0,call=async()=>{calls++;throw new Error("provider unavailable");};
 assert.equal(await runClaudeObserver(input(item,{prompt_id:"prompt:large",prompt:"x".repeat(8193)}),{modelCall:call}),null);
