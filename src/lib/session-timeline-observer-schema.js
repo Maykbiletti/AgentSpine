@@ -14,6 +14,13 @@ export function observerDigest(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export function claudeObserverEventId({ promptId, enrollmentId, prompt }) {
+  if (promptId !== undefined) return promptId;
+  if (typeof enrollmentId !== "string" || !enrollmentId || enrollmentId.length > 256
+    || typeof prompt !== "string") return null;
+  return `prompt:${observerDigest(`${enrollmentId}\0${prompt}`).slice(0, 32)}`;
+}
+
 export function observerDate(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) {
