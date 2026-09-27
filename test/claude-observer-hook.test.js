@@ -76,6 +76,15 @@ const next=await runHook(input(item,{prompt_id:"prompt:none-next",event_id:"even
 assert.equal(await runClaudeObserver(request,{modelCall:async()=>{calls++;throw new Error("duplicate invoked");}}),null);assert.equal(calls,1);assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:none-later",now:"2026-09-25T04:00:04.000Z"})).status,"none");assert.equal(digest(await readFile(item.transcript)),before);
 });
 
+test("Claude hands off only the newest eligible observation",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript)),oldPrompt="Old correction.",latestPrompt="Latest correction.";
+await runClaudeObserver(input(item,{prompt_id:"prompt:old",prompt:oldPrompt}),{modelCall:async()=>({stdout:JSON.stringify({structured_output:proposal})})});
+await runClaudeObserver(input(item,{prompt_id:"prompt:latest",prompt:latestPrompt,timestamp:"2026-09-25T04:00:02.000Z"}),{modelCall:async()=>({stdout:JSON.stringify({structured_output:proposal})})});
+const delivered=await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:handoff",now:"2026-09-25T04:00:03.000Z"});
+assert.equal(delivered.status,"delivered");assert.equal(delivered.suggestion.sourceDigest,digest(latestPrompt));
+assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:later",now:"2026-09-25T04:00:04.000Z"})).status,"none");
+assert.equal(digest(await readFile(item.transcript)),before);
+});
+
 test("observer accepts host transcript appends without changing enrolled bytes",async t=>{const item=await fixture(t),before=await readFile(item.transcript);let calls=0;
 const output=await runClaudeObserver(input(item,{prompt_id:"prompt:source-append"}),{modelCall:async()=>{calls++;await appendFile(item.transcript,"host append during observation\n");return {stdout:JSON.stringify({structured_output:proposal})};}});
 assert.equal(output,null);assert.equal(calls,1);const appended=await readFile(item.transcript);assert.deepEqual(appended,Buffer.concat([before,Buffer.from("host append during observation\n")]));
