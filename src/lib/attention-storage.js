@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildCatalog } from "./catalog.js";
-import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
+import { isFileLockContention, isTransientLockMetadataError, replaceFileWithRetry } from "./filesystem-retry.js";
 import { projectStateDir } from "./paths.js";
 import { MAX_STATE_BYTES, emptyAttention, normalizeAttention } from "./attention-schema.js";
 
@@ -43,7 +43,7 @@ export async function saveAttention(state, path) {
   await replaceFileWithRetry(temporary, path);
 }
 
-export async function withAttentionLock(path, task) {
+export async function withAttentionLock(path, task, { lockStat = stat, platform = process.platform } = {}) {
   const lockPath = `${path}.lock`;
   let handle;
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -53,10 +53,10 @@ export async function withAttentionLock(path, task) {
     } catch (error) {
       if (!isFileLockContention(error)) throw error;
       try {
-        const metadata = await stat(lockPath);
+        const metadata = await lockStat(lockPath);
         if (Date.now() - metadata.mtimeMs > 15000) await unlink(lockPath);
       } catch (lockError) {
-        if (lockError.code !== "ENOENT") throw lockError;
+        if (!isTransientLockMetadataError(lockError, platform)) throw lockError;
       }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
