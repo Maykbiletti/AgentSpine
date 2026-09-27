@@ -8,6 +8,7 @@ import {
   indexSessionTimeline, searchSessionTimeline, sessionTimelineStatus
 } from "../src/lib/session-timeline.js";
 import { sessionTimelineStatePaths } from "../src/lib/session-timeline-auth.js";
+import { settleTimelineStateWrite } from "../src/lib/session-timeline-state.js";
 import { projectId } from "../src/lib/paths.js";
 import { boundTimelineInvocation, enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
 
@@ -16,6 +17,33 @@ function scope() {
   return { entityId: "agent:storage", userId: "person:storage", tenantId: "tenant:storage",
     projectId: "project:storage", currentTaskId: "task:storage", groupId: null, timelineVisibility: "private-verified" };
 }
+
+test("a committed timeline mutation survives a post-commit reporting failure", async () => {
+  const committed = { signature: "a".repeat(64), generation: 8, previousSignature: "b".repeat(64) };
+  const source = Buffer.from("private source bytes stay outside state reconciliation\n");
+  const before = digest(source);
+  const reported = Object.assign(new Error("post-commit verification unavailable"), { code: "EPERM" });
+  let writes = 0;
+  let reads = 0;
+  await settleTimelineStateWrite(committed, async () => {
+    writes += 1;
+    throw reported;
+  }, async () => {
+    reads += 1;
+    return structuredClone(committed);
+  });
+  assert.equal(writes, 1, "the mutation is never replayed");
+  assert.equal(reads, 1, "the exact authenticated commit is reconciled once");
+  assert.equal(digest(source), before, "state reconciliation preserves private source bytes");
+});
+
+test("timeline reconciliation never accepts a different commit", async () => {
+  const intended = { signature: "c".repeat(64), generation: 9, previousSignature: "d".repeat(64) };
+  const failure = new Error("write failed before commit");
+  await assert.rejects(settleTimelineStateWrite(intended, async () => { throw failure; }, async () => ({
+    signature: "e".repeat(64), generation: 8, previousSignature: "f".repeat(64)
+  })), (error) => error === failure);
+});
 
 test("timeline state stays in the anchored integrity directory when legacy project state is redirected", async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), "agentspine-timeline-storage-"));

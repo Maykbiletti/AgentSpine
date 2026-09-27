@@ -24,6 +24,16 @@ function sameState(left, right) {
     && left.previousSignature === right.previousSignature;
 }
 
+export async function settleTimelineStateWrite(expected, write, read) {
+  try {
+    await write();
+  } catch (error) {
+    let committed;
+    try { committed = await read(); } catch { throw error; }
+    if (!committed || !sameState(expected, committed)) throw error;
+  }
+}
+
 function sameHead(left, right) {
   return left.signature === right.signature && left.stateSignature === right.stateSignature
     && left.generation === right.generation && left.previousSignature === right.previousSignature;

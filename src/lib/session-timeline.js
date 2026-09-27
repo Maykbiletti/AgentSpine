@@ -16,7 +16,7 @@ import { eventFromTimelineLine, extractTimelineTimestamp } from "./session-timel
 import { verifiedTimelineEventFromLine } from "./session-timeline-event-extract.js";
 import { pathMatchesSource, sameSessionTimelineSourceLocation } from "./session-timeline-source.js";
 import {captureTimelineAppend,MAX_BACKGROUND_CAPTURE_BYTES,readRange,sourceSnapshotDigest,unchangedHandle,validatedHandle} from "./session-timeline-source-open.js";
-import { readTimelineState, saveTimelineState } from "./session-timeline-state.js";
+import { readTimelineState, saveTimelineState, settleTimelineStateWrite } from "./session-timeline-state.js";
 import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 import {consumeObserverSuggestion,stageObserverSuggestion,validObserver} from "./session-timeline-observer.js";
 import { claudeObserverEventId } from "./session-timeline-observer-schema.js";
@@ -86,7 +86,7 @@ return value;
 }
 function paths(root) {return sessionTimelineStatePaths(root);}
 function readState(path,root,assertStable,assertOwned=null) {return readTimelineState({path,root,maximumBytes:MAX_STATE_BYTES,empty,validate,assertStable,assertOwned});}
-function saveState(state,path,assertOwned,root,assertStable) {return saveTimelineState({state,path,root,maximumBytes:MAX_STATE_BYTES,assertOwned,assertStable});}
+function saveState(state,path,assertOwned,root,assertStable) {return settleTimelineStateWrite(state,()=>saveTimelineState({state,path,root,maximumBytes:MAX_STATE_BYTES,assertOwned,assertStable}),()=>readState(path,root,assertStable,assertOwned));}
 function status(value, extra = {}) { return { schema: SESSION_TIMELINE_SCHEMA, ...value, ...extra, authority: AUTHORITY }; }
 function unavailable(reason) { return status({ status: "unavailable", reason }); }
 function blocked(reason) { return { blocked: true, reason, authority: AUTHORITY }; }
