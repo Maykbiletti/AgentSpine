@@ -64,6 +64,14 @@ const next=await runHook(input(item,{turn_id:"turn:handoff",event_id:"event:hand
 assert.deepEqual(await readFile(item.transcript),original);assert.deepEqual(await readFile(replacement),replacementBytes);
 });
 
+test("Codex lifecycle cannot seed Claude observer model state",async t=>{const item=await fixture(t),before=hash(await readFile(item.transcript)),event=input(item,{hook_event_name:"SessionStart",host:"codex",model:"gpt-6-sol"});
+delete event.turn_id;delete event.prompt;
+await runHook(event);
+await runHook({...event,hook_event_name:"PostModelSwitch",from_model:"gpt-6-sol",to_model:"gpt-6-astra",source:"command"});
+assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope,promptId:"prompt:cross-provider"})).status,"unavailable");
+assert.equal(hash(await readFile(item.transcript)),before);
+});
+
 test("Claude and Codex deduplicate identical native turn ids independently",async t=>{const item=await fixture(t),id="turn:same-provider-local-id";
 assert.equal((await recordClaudeObserverModel({root:item.root,sessionId:"session:observer",scope,model:"claude-sonnet-5"})).status,"recorded");
 assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope,promptId:id})).status,"claimed");
