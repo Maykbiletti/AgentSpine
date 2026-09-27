@@ -52,20 +52,22 @@ async function prepareHostPromptScope(root, scope) {
   }
 }
 
-function hostPrompt({ root, host, sessionId, scope, transcriptPath, eventId, clock, prompt }) {
+function hostPrompt({ root, host, sessionId, scope, transcriptPath, eventId, promptId, clock, prompt }) {
   return {
     hook_event_name: "UserPromptSubmit", host, cwd: root, session_id: sessionId, event_id: eventId,
     entity_id: scope.entityId, user_id: scope.userId, tenant_id: scope.tenantId, project_id: scope.projectId,
     task_id: scope.currentTaskId, goal_id: scope.goalId, goal_step_id: scope.goalStepId, group_id: scope.groupId,
     portal_ref: scope.portalRef ?? null, thread_ref: scope.threadRef ?? null,
     profile_id: "profile:synthetic-timeline-host", transcript_path: transcriptPath,
-    prompt, ...(clock ? { timestamp: clock().toISOString() } : {})
+    prompt, ...(promptId === undefined ? {} : { prompt_id: promptId }),
+    ...(clock ? { timestamp: clock().toISOString() } : {})
   };
 }
 
 export async function requestTimelineHostReceipt({
   root, host = "claude", sessionId, scope, transcriptPath, hostHome, eventId = undefined,
-  clock = null, environment = process.env, prompt = "Prepare the synthetic timeline enrollment."
+  promptId = undefined, clock = null, environment = process.env,
+  prompt = "Prepare the synthetic timeline enrollment."
 }) {
   const currentHome = host === "king" ? process.env.BLUN_HOME
     : host === "codex" ? process.env.CODEX_HOME : process.env.CLAUDE_CONFIG_DIR;
@@ -73,7 +75,8 @@ export async function requestTimelineHostReceipt({
   if (!completePrivateScope(scope)) return unavailable("test-host-scope-invalid");
   await prepareHostPromptScope(root, scope);
   const result = await runHook(hostPrompt({ root, host: host === "king" ? "codex" : host, sessionId, scope, transcriptPath,
-    eventId: eventId === undefined ? `test-timeline-receipt:${sessionId}:${++receiptSequence}` : eventId, clock, prompt }));
+    eventId: eventId === undefined ? `test-timeline-receipt:${sessionId}:${++receiptSequence}` : eventId,
+    promptId, clock, prompt }));
   if (result.blocked) return unavailable(`host-prompt-rejected:${result.error || result.reason || "unknown"}`);
   if (result.timeline?.hostReceipt?.status === "unavailable") return result.timeline.hostReceipt;
   if (host === "king") {
@@ -86,10 +89,10 @@ export async function requestTimelineHostReceipt({
 
 export async function enrollTimelineWithHostReceipt({
   root, host = "claude", sessionId, scope, transcriptPath, hostHome, eventId = undefined,
-  clock = null, environment = process.env, ttlMs, bootstrap = true, prompt
+  promptId = undefined, clock = null, environment = process.env, ttlMs, bootstrap = true, prompt
 }) {
   const receipt = await requestTimelineHostReceipt({ root, host, sessionId, scope, transcriptPath, hostHome,
-    eventId, clock, environment, ...(prompt === undefined ? {} : { prompt }) });
+    eventId, promptId, clock, environment, ...(prompt === undefined ? {} : { prompt }) });
   if (receipt.status !== "pending") return receipt;
   const enrolled = await enrollPrivateSessionTimeline({
     root, hostReceipt: receipt.receipt, confirmation: LOCAL_TIMELINE_ENROLLMENT_CONFIRMATION,
