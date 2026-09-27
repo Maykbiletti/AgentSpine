@@ -7,6 +7,7 @@ import {join} from "node:path";
 import {codexObserverArguments,codexObserverEnvironment,runCodexObserver} from "../src/claude-observer-hook.js";
 import {runHook} from "../src/hook.js";
 import {claimClaudeObserverPrompt,claimCodexObserverTurn,consumeHostObserverSuggestion,recordClaudeObserverModel} from "../src/lib/session-timeline.js";
+import {recordSessionTimelineHead,sealSessionTimelineState,sessionTimelineStatePaths} from "../src/lib/session-timeline-auth.js";
 import {enrollTimelineWithHostReceipt} from "./session-timeline-invocation-support.js";
 
 const hash=value=>createHash("sha256").update(value).digest("hex");
@@ -85,6 +86,21 @@ for(const current of scopes.slice(-63))assert.equal((await claimClaudeObserverPr
 assert.equal((await recordClaudeObserverModel({root:item.root,sessionId:"session:observer",scope:scopes.at(-1),model:"claude-opus-5"})).status,"recorded");
 for(const [index,current] of scopes.entries()){const claimed=await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope:current,promptId:`turn:after-switch:${index}`});assert.equal(claimed.status,"claimed");assert.equal(claimed.model,"claude-opus-5");}
 assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:foreign",scope,promptId:"turn:foreign-session"})).status,"unavailable");assert.equal(hash(await readFile(item.transcript)),before);});
+
+test("observer state repairs only an authenticated interrupted forward commit",async t=>{const item=await fixture(t),before=hash(await readFile(item.transcript)),state=await sessionTimelineStatePaths(item.root),headPath=state.path.replace("session-timeline-state-","session-timeline-head-");
+const legacy=JSON.parse(await readFile(state.path,"utf8"));delete legacy.generation;delete legacy.previousSignature;delete legacy.signature;await sealSessionTimelineState(legacy);await writeFile(state.path,`${JSON.stringify(legacy,null,2)}\n`,{mode:0o600});await recordSessionTimelineHead({root:item.root,stateSignature:legacy.signature});
+assert.equal((await claimCodexObserverTurn({root:item.root,sessionId:"session:observer",scope,turnId:"turn:recovery:one",model:"gpt-6-sol"})).status,"claimed");
+const priorHead=await readFile(headPath),priorState=await readFile(state.path),upgraded=JSON.parse(priorState);assert.equal(upgraded.generation,1);assert.equal(upgraded.previousSignature,legacy.signature);
+assert.equal((await claimCodexObserverTurn({root:item.root,sessionId:"session:observer",scope,turnId:"turn:recovery:two",model:"gpt-6-sol"})).status,"claimed");
+const successor=JSON.parse(await readFile(state.path,"utf8")),successorHead=JSON.parse(await readFile(headPath,"utf8")),previous=JSON.parse(priorHead);
+assert.equal(successor.generation,previous.generation+1);assert.equal(successor.previousSignature,previous.stateSignature);assert.equal(successorHead.stateSignature,successor.signature);
+await writeFile(headPath,priorHead,{mode:0o600});
+assert.equal((await claimCodexObserverTurn({root:item.root,sessionId:"session:observer",scope,turnId:"turn:recovery:three",model:"gpt-6-sol"})).status,"claimed");
+const repairedState=JSON.parse(await readFile(state.path,"utf8")),repairedHead=JSON.parse(await readFile(headPath,"utf8"));
+assert.equal(repairedState.generation,successor.generation+1);assert.equal(repairedState.previousSignature,successor.signature);assert.equal(repairedHead.stateSignature,repairedState.signature);
+await writeFile(state.path,priorState,{mode:0o600});
+assert.equal((await claimCodexObserverTurn({root:item.root,sessionId:"session:observer",scope,turnId:"turn:recovery:rollback",model:"gpt-6-sol"})).status,"unavailable");
+assert.equal(hash(await readFile(item.transcript)),before);});
 
 test("observer claims reject malformed native event ids without touching source bytes",async t=>{const item=await fixture(t),before=hash(await readFile(item.transcript));
 assert.equal((await recordClaudeObserverModel({root:item.root,sessionId:"session:observer",scope,model:"claude-sonnet-5"})).status,"recorded");

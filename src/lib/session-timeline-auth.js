@@ -237,10 +237,17 @@ function headPath(integrity, root) {
   return join(integrity.path, `session-timeline-head-${sessionTimelineRootDigest(root)}.json`);
 }
 
-async function saveHead(integrity, root, stateSignature, assertOwned = null) {
+function validHeadGeneration(generation, previousSignature) {
+  return generation === undefined && previousSignature === undefined
+    || Number.isSafeInteger(generation) && generation > 0
+    && (generation === 1 && previousSignature === null || SIGNATURE_RE.test(previousSignature || ""));
+}
+
+async function saveHead(integrity, root, stateSignature, generation, previousSignature, assertOwned = null) {
   const path = headPath(integrity, root);
   await verifyExistingPrivateTimelineFile(path, "head", HEAD_MAX_BYTES);
-  const head = { schema: HEAD_SCHEMA, rootDigest: sessionTimelineRootDigest(root), stateSignature, authority: "state-integrity-only" };
+  const head = { schema: HEAD_SCHEMA, rootDigest: sessionTimelineRootDigest(root), stateSignature,
+    ...(generation === undefined ? {} : { generation, previousSignature }), authority: "state-integrity-only" };
   head.signature = signature(head, await signingKey({ create: true }));
   const content = `${JSON.stringify(head)}\n`;
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
@@ -260,10 +267,14 @@ async function saveHead(integrity, root, stateSignature, assertOwned = null) {
   }
 }
 
-export async function recordSessionTimelineHead({ root, stateSignature, assertOwned = null }) {
-  if (!SIGNATURE_RE.test(stateSignature || "")) throw new Error("session timeline state signature is invalid");
+export async function recordSessionTimelineHead({
+  root, stateSignature, generation = undefined, previousSignature = undefined, assertOwned = null
+}) {
+  if (!SIGNATURE_RE.test(stateSignature || "") || !validHeadGeneration(generation, previousSignature)) {
+    throw new Error("session timeline state signature or generation is invalid");
+  }
   const integrity = await integrityDirectory(true);
-  await saveHead(integrity, root, stateSignature, assertOwned);
+  await saveHead(integrity, root, stateSignature, generation, previousSignature, assertOwned);
 }
 
 export async function sessionTimelineHeadExists({ root }) {
@@ -284,7 +295,7 @@ export async function sessionTimelineHeadExists({ root }) {
   }
 }
 
-export async function verifySessionTimelineHead({ root, stateSignature }) {
+export async function readSessionTimelineHead({ root }) {
   let integrity;
   let head;
   try {
@@ -294,10 +305,20 @@ export async function verifySessionTimelineHead({ root, stateSignature }) {
   }
   catch { throw new Error("session timeline state head is unavailable"); }
   if (head?.schema !== HEAD_SCHEMA || head.rootDigest !== sessionTimelineRootDigest(root) || !SIGNATURE_RE.test(head.stateSignature || "")
+    || !validHeadGeneration(head.generation, head.previousSignature)
     || head.authority !== "state-integrity-only") throw new Error("session timeline state head is invalid");
   await verifySessionTimelineState(head);
   await assertIntegrityDirectory(integrity);
-  if (head.stateSignature !== stateSignature) throw new Error("session timeline state replay was rejected");
+  return head;
+}
+
+export async function verifySessionTimelineHead({
+  root, stateSignature, generation = undefined, previousSignature = undefined
+}) {
+  const head = await readSessionTimelineHead({ root });
+  if (head.stateSignature !== stateSignature || head.generation !== generation
+    || head.previousSignature !== previousSignature) throw new Error("session timeline state replay was rejected");
+  return head;
 }
 
 export async function sealSessionTimelineState(state) {
