@@ -48,6 +48,16 @@ const nextInput=input(item,{event_id:"event:native-next",prompt:"Weiter.",timest
 assert.equal(context.status,"proposal");assert.equal(context.sourceDigest,digest(native.prompt));assert.equal(context.authority,"context-only");assert.equal(context.completionVerified,false);assert.equal(digest(await readFile(item.transcript)),before);
 });
 
+test("Claude fallback distinguishes a later turn that repeats the exact prompt",async t=>{const item=await fixture(t),native=input(item);delete native.prompt_id;let calls=0;
+await runClaudeObserver(native,{modelCall:async()=>{calls++;return {stdout:JSON.stringify({structured_output:proposal})};}});assert.equal(calls,1);
+const append=Buffer.from(`${JSON.stringify({timestamp:"2026-09-25T04:00:02.000Z",message:{role:"assistant",content:"Prior turn completed"}})}\n`);await appendFile(item.transcript,append);
+const repeated={...native,timestamp:"2026-09-25T04:00:03.000Z"},next=await runHook(repeated),context=JSON.parse(next.context).sourceResolution.observer;
+assert.equal(context.status,"proposal");assert.equal(context.sourceDigest,digest(native.prompt));
+await runClaudeObserver(repeated,{modelCall:async()=>{calls++;return {stdout:JSON.stringify({structured_output:proposal})};}});assert.equal(calls,2);
+await runClaudeObserver({...repeated},{modelCall:async()=>{calls++;throw new Error("same event replay invoked");}});assert.equal(calls,2);
+const after=await readFile(item.transcript);assert.deepEqual(after.subarray(-append.length),append,"observer preserves the appended transcript bytes");
+});
+
 test("Claude handoff rejects a replaced enrolled source without consuming it",async t=>{const item=await fixture(t),replacement=`${JSON.stringify({timestamp:"2026-09-25T04:00:02.000Z",message:{role:"user",content:"replacement"}})}\n`;await runClaudeObserver(input(item),{modelCall:async()=>({stdout:JSON.stringify({structured_output:proposal})})});await rm(item.transcript);await writeFile(item.transcript,replacement);const delivered=await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:next",now:"2026-09-25T04:00:03.000Z"});assert.equal(delivered.status,"unavailable");assert.equal(await readFile(item.transcript,"utf8"),replacement);});
 
 test("Claude observer discards a result superseded by a newer native prompt",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript));let release,started;const ready=new Promise(resolve=>started=resolve),late=runClaudeObserver(input(item),{modelCall:()=>new Promise(resolve=>{release=()=>resolve({stdout:JSON.stringify({structured_output:proposal})});started();})});await ready;await runClaudeObserver(input(item,{prompt_id:"prompt:newer",prompt:"Nur die neuere Frage."}),{modelCall:async()=>({stdout:JSON.stringify({structured_output:{status:"none",kind:"ambiguous",next:null,question:null}})})});release();await late;const handoff=await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:later",now:"2026-09-25T04:00:04.000Z"});assert.equal(handoff.status,"delivered");assert.equal(handoff.suggestion.status,"none");assert.equal(digest(await readFile(item.transcript)),before);});
