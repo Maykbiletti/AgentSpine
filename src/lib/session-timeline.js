@@ -37,7 +37,7 @@ const EVENT_KEYS = new Set(["nativeMessageId", "id", "at", "offset", "bytes", "s
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
 function asDate(value) {const date=value instanceof Date?value:new Date(value);if(!Number.isFinite(date.getTime()))throw new Error("session timeline timestamp is invalid");return date;}
 function date(value) { return Number.isFinite(new Date(value).getTime()); }
-function empty(root) { return { schema: STATE_SCHEMA, rootDigest: sessionTimelineRootDigest(root), sources: [], observers: [], authority: AUTHORITY }; }
+function empty(root) { return { schema: STATE_SCHEMA, rootDigest: sessionTimelineRootDigest(root), sources: [], observers: [], generation: 0, previousSignature: null, authority: AUTHORITY }; }
 function hasOnlyKeys(item, allowed) { return Object.keys(item).every((key) => allowed.has(key)); }
 function validCount(item) {return item===null||Boolean(item&&typeof item==="object"&&Object.keys(item).length===2
 &&Number.isSafeInteger(item.value)&&item.value>=0&&Number.isSafeInteger(item.total)&&item.total>0&&item.value<=item.total);}
@@ -86,7 +86,7 @@ throw new Error("session timeline state is invalid");
 return value;
 }
 function paths(root) {return sessionTimelineStatePaths(root);}
-function readState(path,root,assertStable) {return readTimelineState({path,root,maximumBytes:MAX_STATE_BYTES,empty,validate,assertStable});}
+function readState(path,root,assertStable,assertOwned=null) {return readTimelineState({path,root,maximumBytes:MAX_STATE_BYTES,empty,validate,assertStable,assertOwned});}
 function saveState(state,path,assertOwned,root,assertStable) {return saveTimelineState({state,path,root,maximumBytes:MAX_STATE_BYTES,assertOwned,assertStable});}
 function status(value, extra = {}) { return { schema: SESSION_TIMELINE_SCHEMA, ...value, ...extra, authority: AUTHORITY }; }
 function unavailable(reason) { return status({ status: "unavailable", reason }); }
@@ -96,7 +96,7 @@ function sourceFor(state, scope) { return state.sources.find((item) => sameTimel
 function observerBindingDigest(host,sessionId,scope){const binding=sessionTimelineBinding({host,sessionId,scope});return ["claude","codex"].includes(host)&&completeTimelineBinding(binding)?digest(JSON.stringify(binding)):null;}
 function observerSession(host,sessionId){return ["claude","codex"].includes(host)&&TIMELINE_ID_RE.test(sessionId||"")?digest(JSON.stringify({host,sessionId})):null;}
 async function mutateObserver(root,bindingDigest,task){try{await ensureSessionTimelineTrust({create:true});const names=await paths(root);
-return await withOwnedFileLock(names.lock,async({assertOwned})=>{const state=await readState(names.path,root,names.assertStable);
+return await withOwnedFileLock(names.lock,async({assertOwned})=>{const state=await readState(names.path,root,names.assertStable,assertOwned);
 state.observers||=[];const result=await task(state.observers.find(item=>item.bindingDigest===bindingDigest)||null,state);
 if(result.save)await saveState(state,names.path,assertOwned,root,names.assertStable);return result;},{assertPath:names.assertStable});}catch{return {status:"unavailable"};}}
 export async function recordClaudeObserverModel({root,sessionId,scope,model,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),session=observerSession("claude",sessionId),at=asDate(now).toISOString();
@@ -166,7 +166,7 @@ catch{return unavailable("timeline-state-unavailable");}
 try{
 const names=await paths(rootPath);
 await withOwnedFileLock(names.lock,async({assertOwned})=>{
-const state=await readState(names.path,rootPath,names.assertStable);
+const state=await readState(names.path,rootPath,names.assertStable,assertOwned);
 const previous=sourceFor(state,record.binding);
 if(previous&&sameSourceSnapshot(previous,record.source))return;
 state.sources=state.sources.filter(item=>!sameTimelineBinding(item.binding,record.binding));
@@ -263,7 +263,7 @@ try { names = await paths(root); }
 catch { return unavailable("timeline-state-unavailable"); }
 return withOwnedFileLock(names.lock, async ({ assertOwned }) => {
 let state;
-try { state = await readState(names.path, root, names.assertStable); }
+try { state = await readState(names.path, root, names.assertStable, assertOwned); }
 catch { return unavailable("timeline-state-unavailable"); }
 const source = sourceFor(state, scoped);
 if (!source) return unavailable("timeline-not-registered");
