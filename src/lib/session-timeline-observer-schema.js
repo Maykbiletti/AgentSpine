@@ -63,6 +63,9 @@ export function validObserver(observer) {
     && DIGEST_PATTERN.test(observer.bindingDigest || "")
     && MODEL_PATTERN.test(observer.model || "")
     && Number.isFinite(new Date(observer.updatedAt).getTime())
+    && (observer.lastEventAt === undefined
+      || (Number.isFinite(new Date(observer.lastEventAt).getTime())
+        && new Date(observer.lastEventAt) <= new Date(observer.updatedAt)))
     && Array.isArray(observer.prompts)
     && observer.prompts.length <= 32
     && observer.prompts.every((digest) => DIGEST_PATTERN.test(digest))
