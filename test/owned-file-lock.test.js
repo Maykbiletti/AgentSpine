@@ -144,3 +144,58 @@ test("local serialization remains independent for different lock paths", async (
   ]);
   assert.equal(entered, 2);
 });
+
+test("Windows transient owner reads retry without weakening lock ownership", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-owned-lock-metadata-"));
+  const lockPath = join(root, "state.json.lock");
+  const sourcePath = join(root, "source.txt");
+  const source = Buffer.from("synthetic private source remains byte exact\n", "utf8");
+  await writeFile(sourcePath, source);
+  t.after(async () => rm(root, { recursive: true, force: true }));
+
+  let reads = 0;
+  const waits = [];
+  const result = await withOwnedFileLock(lockPath, async ({ assertOwned }) => {
+    await assertOwned();
+    return "owned";
+  }, {
+    ...testLease,
+    platform: "win32",
+    metadataWait: async (milliseconds) => { waits.push(milliseconds); },
+    readLockFile: async (...arguments_) => {
+      reads += 1;
+      if (reads <= 2) throw Object.assign(new Error("synthetic Windows metadata race"), { code: "EPERM" });
+      return readFile(...arguments_);
+    }
+  });
+
+  assert.equal(result, "owned");
+  assert.deepEqual(waits, [10, 20]);
+  assert.ok(reads >= 4, "the callback, final assertion, and cleanup each revalidate ownership");
+  assert.deepEqual(await readFile(sourcePath), source, "metadata retries never change private source bytes");
+  await assert.rejects(readFile(lockPath), /ENOENT/);
+});
+
+test("persistent Windows owner-read failures remain fail closed and bounded", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "agentspine-owned-lock-metadata-failure-"));
+  const lockPath = join(root, "state.json.lock");
+  t.after(async () => rm(root, { recursive: true, force: true }));
+  let mutationRan = false;
+  let reads = 0;
+
+  await assert.rejects(withOwnedFileLock(lockPath, async ({ assertOwned }) => {
+    await assertOwned();
+    mutationRan = true;
+  }, {
+    ...testLease,
+    platform: "win32",
+    metadataWait: async () => {},
+    readLockFile: async () => {
+      reads += 1;
+      throw Object.assign(new Error("persistent Windows metadata failure"), { code: "EPERM" });
+    }
+  }), /persistent Windows metadata failure/);
+
+  assert.equal(reads, 6, "owner assertion and cleanup each stop after three reads");
+  assert.equal(mutationRan, false, "unverified ownership cannot authorize a mutation");
+});
