@@ -23,7 +23,7 @@
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/claude-observer-hook.js\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/claude-observer-hook.js\" --host=claude",
             "async": true
           }
         ]

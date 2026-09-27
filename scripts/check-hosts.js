@@ -22,6 +22,7 @@ const BLUN_PRE_TOOL_MATCHER =
 function validateHooks(root, hooks, {
   required,
   commandRoot,
+  observerHost,
   matcher = CLAUDE_PRE_TOOL_MATCHER,
   asyncObserver = false
 }) {
@@ -53,7 +54,7 @@ function validateHooks(root, hooks, {
     if (expectedCount === 2) {
       const observer = registrations[0].hooks[1];
       assertHostContract(observer.type === "command"
-        && observer.command === `node "\${${commandRoot}}/src/claude-observer-hook.js"`
+        && observer.command === `node "\${${commandRoot}}/src/claude-observer-hook.js" --host=${observerHost}`
         && observer.async === true && Object.keys(observer).length === 3,
       "UserPromptSubmit observer must be one bundled async command");
     }
@@ -134,11 +135,11 @@ export async function checkHosts(root = process.cwd()) {
     blun: validateBlunHooks(root, blun.hooks),
     claude: validateHooks(root, claudeHooks, {
       required: [...COMMON_EVENTS, "InstructionsLoaded", "PostModelSwitch"],
-      commandRoot: "CLAUDE_PLUGIN_ROOT", asyncObserver: true
+      commandRoot: "CLAUDE_PLUGIN_ROOT", observerHost: "claude", asyncObserver: true
     }),
     codex: validateHooks(root, codexHooks, {
       required: COMMON_EVENTS, commandRoot: "PLUGIN_ROOT",
-      matcher: CODEX_PRE_TOOL_MATCHER, asyncObserver: true
+      matcher: CODEX_PRE_TOOL_MATCHER, observerHost: "codex", asyncObserver: true
     })
   };
   const registrations = await Promise.all([
