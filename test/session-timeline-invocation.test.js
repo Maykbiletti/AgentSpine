@@ -17,10 +17,40 @@ import {
   indexSessionTimeline
 } from "../src/lib/session-timeline.js";
 import { boundTimelineInvocation, enrollTimelineWithHostReceipt } from "./session-timeline-invocation-support.js";
+import { settleSessionTimelineInvocationWrite } from "../src/lib/session-timeline-invocation.js";
 
 const HOOK_PATH = fileURLToPath(new URL("../src/hook.js", import.meta.url));
 
 function digest(value) { return createHash("sha256").update(value).digest("hex"); }
+
+test("a committed invocation permit survives one post-commit reporting failure", async () => {
+  const committed = { signature: "a".repeat(64), generation: 7,
+    previousSignature: "b".repeat(64), permits: [] };
+  const source = Buffer.from("private transcript bytes stay outside permit reconciliation\n");
+  const before = digest(source);
+  const failure = Object.assign(new Error("post-commit invocation verification unavailable"), { code: "EPERM" });
+  let writes = 0;
+  let reads = 0;
+  await settleSessionTimelineInvocationWrite(committed, async () => {
+    writes += 1;
+    throw failure;
+  }, async () => {
+    reads += 1;
+    return structuredClone(committed);
+  });
+  assert.equal(writes, 1, "the invocation mutation is never replayed");
+  assert.equal(reads, 1, "the exact authenticated invocation commit is reconciled once");
+  assert.equal(digest(source), before, "invocation reconciliation preserves private source bytes");
+});
+
+test("invocation reconciliation rejects a different signed commit", async () => {
+  const intended = { signature: "c".repeat(64), generation: 8,
+    previousSignature: "d".repeat(64), permits: [] };
+  const failure = new Error("invocation write failed before commit");
+  await assert.rejects(settleSessionTimelineInvocationWrite(intended,
+    async () => { throw failure; }, async () => ({ signature: "e".repeat(64), generation: 7,
+      previousSignature: "f".repeat(64), permits: [] })), (error) => error === failure);
+});
 function scope(overrides = {}) {
   return { entityId: "agent:permit", userId: "person:permit", tenantId: "tenant:permit",
     projectId: "project:permit", currentTaskId: "task:permit", goalId: "goal:permit",

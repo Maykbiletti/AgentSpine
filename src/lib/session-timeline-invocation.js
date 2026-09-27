@@ -6,6 +6,7 @@ import {
   readAuthenticatedTimelineState, sealSessionTimelineState, sessionTimelinePrivatePaths,
   verifySessionTimelineState
 } from "./session-timeline-auth.js";
+import { settleTimelineStateWrite } from "./session-timeline-state.js";
 import { sameTimelineTransportDigest, validTimelineTransportDigest } from "./session-timeline-transport.js";
 import { sessionTimelineRootDigest } from "./session-timeline-root.js";
 
@@ -131,6 +132,16 @@ async function saveState(state, path, headPath, root, assertOwned, assertStable)
   await saveHead(state, headPath, root, assertOwned, assertStable);
 }
 
+export async function settleSessionTimelineInvocationWrite(expected, write, read) {
+  return settleTimelineStateWrite(expected, write, read);
+}
+
+async function commitState(state, path, headPath, root, assertOwned, assertStable) {
+  await settleSessionTimelineInvocationWrite(state,
+    () => saveState(state, path, headPath, root, assertOwned, assertStable),
+    () => readState(path, headPath, root, assertStable, assertOwned));
+}
+
 function requestDigest({ root, tool, binding, sourceDigest, request }) {
   if (!/^(index|search|capture)$/.test(tool || "") || !/^[a-f0-9]{64}$/.test(sourceDigest || "")
     || !binding || !request) {
@@ -166,7 +177,7 @@ export async function issueSessionTimelineInvocation({
     state.permits.push({ requestDigest: requested, transportDigest, toolUseDigest,
       expiresAt: new Date(current.getTime() + PERMIT_TTL_MS).toISOString(), authority: AUTHORITY });
     state.permits = state.permits.slice(-MAX_PERMITS);
-    await saveState(state, names.path, heads.path, root, assertOwned, names.assertStable);
+    await commitState(state, names.path, heads.path, root, assertOwned, names.assertStable);
   }, { assertPath: names.assertStable });
   return true;
 }
@@ -194,7 +205,7 @@ export async function consumeSessionTimelineInvocation({
         && sameTimelineTransportDigest(item.transportDigest, transportDigest));
       if (index < 0) return false;
       state.permits.splice(index, 1);
-      await saveState(state, names.path, heads.path, root, assertOwned, names.assertStable);
+      await commitState(state, names.path, heads.path, root, assertOwned, names.assertStable);
       return true;
     }, { assertPath: names.assertStable });
   } catch { return false; }
