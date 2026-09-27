@@ -25,7 +25,9 @@ export function stageObserverSuggestion(input, bindingDigest, updateObserver) {
     if (observer.pending.some((suggestion) => suggestion.id === id)) {
       return { status: "duplicate" };
     }
-    if (observer.pending.length >= MAX_PENDING_SUGGESTIONS) return { status: "unavailable" };
+    if (observer.pending.length >= MAX_PENDING_SUGGESTIONS) {
+      observer.pending = observer.pending.slice(-(MAX_PENDING_SUGGESTIONS - 1));
+    }
 
     observer.pending.push({
       id,

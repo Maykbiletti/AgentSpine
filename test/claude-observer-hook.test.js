@@ -91,6 +91,12 @@ assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",
 assert.equal(digest(await readFile(item.transcript)),before);
 });
 
+test("Claude retains the newest observation when the bounded handoff queue is full",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript));let newestPrompt;
+for(let index=1;index<=5;index++){newestPrompt=`Correction ${index}.`;await runClaudeObserver(input(item,{prompt_id:`prompt:queue:${index}`,prompt:newestPrompt,timestamp:`2026-09-25T04:00:0${index}.000Z`}),{modelCall:async()=>({stdout:JSON.stringify({structured_output:proposal})})});}
+const delivered=await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:queue:handoff",now:"2026-09-25T04:00:06.000Z"});
+assert.equal(delivered.status,"delivered");assert.equal(delivered.suggestion.sourceDigest,digest(newestPrompt));assert.equal(digest(await readFile(item.transcript)),before);
+});
+
 test("observer accepts host transcript appends without changing enrolled bytes",async t=>{const item=await fixture(t),before=await readFile(item.transcript);let calls=0;
 const output=await runClaudeObserver(input(item,{prompt_id:"prompt:source-append"}),{modelCall:async()=>{calls++;await appendFile(item.transcript,"host append during observation\n");return {stdout:JSON.stringify({structured_output:proposal})};}});
 assert.equal(output,null);assert.equal(calls,1);const appended=await readFile(item.transcript);assert.deepEqual(appended,Buffer.concat([before,Buffer.from("host append during observation\n")]));
