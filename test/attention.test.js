@@ -189,11 +189,13 @@ test("a transient Windows lock metadata error waits for the next attention lock 
   const { root } = await fixture(t);
   const sourcePath = join(root, "AGENTS.md");
   const sourceBefore = hash(await readFile(sourcePath));
-  const { attentionPath } = await loadAttention(root);
+  const { attentionPath, catalog } = await loadAttention(root);
   const lockPath = `${attentionPath}.lock`;
   await writeFile(lockPath, "synthetic competing lock\n", "utf8");
   let inspections = 0;
-  await withAttentionLock(attentionPath, { root, run: (state) => { state.config.enabled = false; } }, {
+  await withAttentionLock(attentionPath, {
+    root: catalog.root, run: (state) => { state.config.enabled = false; }
+  }, {
     platform: "win32",
     lockStat: async (path) => {
       inspections += 1;
