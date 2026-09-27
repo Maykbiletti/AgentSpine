@@ -33,15 +33,22 @@ function lockPayload(token, acquiredAt, leaseMs) {
   };
 }
 
-async function readOwner(path) {
-  try {
-    const value = JSON.parse(await readFile(path, "utf8"));
-    if (!value || typeof value !== "object" || Array.isArray(value)
-      || value.schema !== LOCK_SCHEMA || typeof value.token !== "string") return null;
-    return value;
-  } catch (error) {
-    if (error.code === "ENOENT" || error instanceof SyntaxError) return null;
-    throw error;
+async function readOwner(path, {
+  readLockFile = readFile,
+  platform = process.platform,
+  metadataWait = delay
+} = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const value = JSON.parse(await readLockFile(path, "utf8"));
+      if (!value || typeof value !== "object" || Array.isArray(value)
+        || value.schema !== LOCK_SCHEMA || typeof value.token !== "string") return null;
+      return value;
+    } catch (error) {
+      if (error.code === "ENOENT" || error instanceof SyntaxError) return null;
+      if (!isTransientLockMetadataError(error, platform) || attempt >= 2) throw error;
+      await metadataWait(10 * (attempt + 1));
+    }
   }
 }
 
@@ -50,23 +57,23 @@ function sameFile(left, right) {
     && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
 }
 
-async function removeStaleLock(path, staleAfterMs, assertPath = null) {
+async function removeStaleLock(path, staleAfterMs, assertPath = null, ownerOptions = {}) {
   let before;
   try {
     await assertPath?.();
     before = await stat(path);
   } catch (error) {
-    if (isTransientLockMetadataError(error)) return false;
+    if (isTransientLockMetadataError(error, ownerOptions.platform)) return false;
     throw error;
   }
   if (Date.now() - before.mtimeMs <= staleAfterMs) return false;
-  await readOwner(path);
+  await readOwner(path, ownerOptions);
   let after;
   try {
     await assertPath?.();
     after = await stat(path);
   } catch (error) {
-    if (isTransientLockMetadataError(error)) return false;
+    if (isTransientLockMetadataError(error, ownerOptions.platform)) return false;
     throw error;
   }
   if (!sameFile(before, after) || Date.now() - after.mtimeMs <= staleAfterMs) return false;
@@ -76,7 +83,8 @@ async function removeStaleLock(path, staleAfterMs, assertPath = null) {
     await assertPath?.();
     return true;
   } catch (error) {
-    if (isFileLockContention(error) || isTransientLockMetadataError(error)) return false;
+    if (isFileLockContention(error, ownerOptions.platform)
+      || isTransientLockMetadataError(error, ownerOptions.platform)) return false;
     throw error;
   }
 }
@@ -86,7 +94,10 @@ async function acquire(path, task, {
   heartbeatIntervalMs = 1000,
   retryDelayMs = 25,
   maxAttempts = 80,
-  assertPath = null
+  assertPath = null,
+  readLockFile = readFile,
+  platform = process.platform,
+  metadataWait = delay
 } = {}) {
   if (typeof task !== "function") throw new Error("owned file lock requires a task");
   if (!Number.isInteger(staleAfterMs) || staleAfterMs < 50
@@ -98,6 +109,7 @@ async function acquire(path, task, {
   }
   const token = randomUUID();
   const acquiredAt = new Date().toISOString();
+  const ownerOptions = { readLockFile, platform, metadataWait };
   let acquired = false; let recovered = false;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     let handle; let created = false;
@@ -111,7 +123,7 @@ async function acquire(path, task, {
       acquired = true;
       break;
     } catch (error) {
-      if (!isFileLockContention(error)) {
+      if (!isFileLockContention(error, platform)) {
         if (handle) {
           await handle.close();
           handle = null;
@@ -124,7 +136,7 @@ async function acquire(path, task, {
         }
         throw error;
       }
-      recovered ||= await removeStaleLock(path, staleAfterMs, assertPath);
+      recovered ||= await removeStaleLock(path, staleAfterMs, assertPath, ownerOptions);
       if (attempt + 1 < maxAttempts) await delay(retryDelayMs);
     } finally {
       await handle?.close();
@@ -137,7 +149,7 @@ async function acquire(path, task, {
   const assertOwned = async () => {
     if (ownershipError) throw ownershipError;
     await assertPath?.();
-    const owner = await readOwner(path);
+    const owner = await readOwner(path, ownerOptions);
     await assertPath?.();
     if (!owner || owner.token !== token) {
       ownershipError = new Error("state lock ownership was lost; mutation aborted");
@@ -164,7 +176,7 @@ async function acquire(path, task, {
     await heartbeat;
     const owner = await (async () => {
       await assertPath?.();
-      return readOwner(path);
+      return readOwner(path, ownerOptions);
     })().catch(() => null);
     if (owner?.token === token) {
       await (async () => {
