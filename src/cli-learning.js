@@ -295,7 +295,10 @@ export async function runLearningCommand({ command, flags, positional, json }) {
   }
 
   if (command === "learn-delete") {
-    return output(await deleteLearning({ root: flags.root || process.cwd(), id: positional[0] }), json);
+    return output(await deleteLearning({
+      root: flags.root || process.cwd(), id: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
+    }), json);
   }
 
   if (command === "learn-config") {

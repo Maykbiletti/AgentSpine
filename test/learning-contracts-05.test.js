@@ -162,7 +162,7 @@ test("locally attested evidence sources reject relabeling before measurement and
   assert.equal((await learningOutcomeStatus({ root, scope: betaScope, now: start }))
     .candidateEvidenceLineageReceipts, 0);
 
-  await deleteLearning({ root, id: winner.id });
+  await deleteLearning({ root, id: winner.id, confirmation: "local-user-purge-confirmed" });
   stored = await loadLearning(root);
   assert.equal(stored.learning.candidateEvidenceLineage.length, 2,
     "single-use lineage survives ordinary candidate deletion");
@@ -317,7 +317,7 @@ test("locally revoked evidence source attestations withhold and roll back their 
   assert.deepEqual((await learningContext({ root, groupId: alphaScope.groupId, scope: alphaScope,
     now: new Date(start.getTime() + 4000) })).items.map((item) => item.id),
   ["learning:source-revocation-prior"]);
-  await deleteLearning({ root, id: candidate.id });
+  await deleteLearning({ root, id: candidate.id, confirmation: "local-user-purge-confirmed" });
   assert.equal((await loadLearning(root)).learning.evidenceSourceAttestationRevocations.length, 0);
   assert.equal((await purgeLearningBySubject({ root,
     subjectId: "person:source-revocation-member" })).deleted, 1);

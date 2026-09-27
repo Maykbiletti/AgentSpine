@@ -128,7 +128,7 @@ test("delivery revocation invalidates turn proof, withholds context, and rolls b
     .rollback.mode, "automatic-delivery-revocation");
   assert.deepEqual((await learningContext({ root, groupId: "group:delivery-alpha", scope: alphaScope,
     now: new Date(start.getTime() + 6000) })).items.map((item) => item.id), ["learning:delivery-old"]);
-  await deleteLearning({ root, id: "learning:delivery-new" });
+  await deleteLearning({ root, id: "learning:delivery-new", confirmation: "local-user-purge-confirmed" });
   assert.equal((await loadLearning(root)).learning.deliveryRevocations.length, 0);
   assert.equal((await purgeLearningBySubject({ root, subjectId: "person:delivery-member" })).deleted, 1);
 
@@ -153,7 +153,7 @@ test("delivery revocation invalidates turn proof, withholds context, and rolls b
   assert.equal((await loadLearning(root)).learning.candidates
     .find((item) => item.id === "learning:delivery-validated").rollback.mode,
   "automatic-delivery-revocation");
-  await deleteLearning({ root, id: "learning:delivery-validated" });
+  await deleteLearning({ root, id: "learning:delivery-validated", confirmation: "local-user-purge-confirmed" });
   assert.equal((await loadLearning(root)).learning.deliveryRevocations.length, 0);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
@@ -256,7 +256,7 @@ test("application revocation withdraws the exact projection and blocks every dow
   assert.deepEqual((await learningContext({ root, scope: scopedTurn,
     now: new Date(start.getTime() + 7000) })).items.map((item) => item.id),
   ["learning:application-prior"]);
-  await deleteLearning({ root, id: "learning:application-current" });
+  await deleteLearning({ root, id: "learning:application-current", confirmation: "local-user-purge-confirmed" });
   assert.equal((await loadLearning(root)).learning.applicationRevocations.length, 0);
   assert.equal((await purgeLearningBySubject({ root, subjectId: "person:application-member" })).deleted, 1);
 
@@ -394,7 +394,7 @@ test("evaluation revocation withdraws the exact contract and blocks its complete
   assert.equal(rolledBack.rollback.mode, "automatic-evaluation-revocation");
   assert.deepEqual((await learningContext({ root, scope: scopedTurn,
     now: new Date(start.getTime() + 4000) })).items.map((item) => item.id), ["learning:evaluation-prior"]);
-  await deleteLearning({ root, id: candidate.id });
+  await deleteLearning({ root, id: candidate.id, confirmation: "local-user-purge-confirmed" });
   assert.equal((await loadLearning(root)).learning.evaluationRevocations.length, 0);
   assert.equal((await purgeLearningBySubject({ root, subjectId: "person:evaluation-member" })).deleted, 1);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);

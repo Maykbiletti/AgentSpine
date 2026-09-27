@@ -121,7 +121,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
     scope: alphaScope, retryTrialFailureId: failure.id, confirmLocalTrialRetry: true,
     now: retryBase, expiresAt: new Date(retryBase.getTime() + 86400000)
   }), /(?:fresh candidate and independently observed evidence|already admitted in this exact scope)/);
-  await deleteLearning({ root, id: "learning:failure-retry-stale" });
+  await deleteLearning({ root, id: "learning:failure-retry-stale", confirmation: "local-user-purge-confirmed" });
   await proposeLearning({ root, id: "learning:failure-retry-reused", kind: "behavior",
     claim: "Use the measured synthetic group procedure.", subjectId: "person:failure-member",
     privacy: "group", groupId: "group:failure-alpha", scope: alphaScope,
@@ -133,7 +133,7 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
     scope: alphaScope, retryTrialFailureId: failure.id, confirmLocalTrialRetry: true,
     now: new Date(retryBase.getTime() + 1000), expiresAt: new Date(retryBase.getTime() + 86400000)
   }), /already admitted in this exact scope/);
-  await deleteLearning({ root, id: "learning:failure-retry-reused" });
+  await deleteLearning({ root, id: "learning:failure-retry-reused", confirmation: "local-user-purge-confirmed" });
   await proposeLearning({ root, id: "learning:failure-retry", kind: "behavior",
     claim: "Use the measured synthetic group procedure.", subjectId: "person:failure-member",
     privacy: "group", groupId: "group:failure-alpha", scope: alphaScope,
@@ -306,7 +306,8 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
   "parallel callers cannot admit a third selectively favorable trial");
   assert.equal((await loadLearning(root)).learning.evaluations.some((item) =>
     item.learningId === "learning:failure-retry-exhausted"), false);
-  await assert.rejects(deleteLearning({ root, id: "learning:failure-current" }), /dependent trial-retry/);
+  await assert.rejects(deleteLearning({ root, id: "learning:failure-current",
+    confirmation: "local-user-purge-confirmed" }), /dependent trial-retry/);
   const compatibleState = await loadLearning(root);
   const compatibleSnapshot = JSON.stringify(compatibleState.learning);
   compatibleState.learning.trialFailures = compatibleState.learning.trialFailures.filter((item) =>
@@ -471,7 +472,8 @@ test("trial failure revocation withdraws false blocking proof without resurrecti
   await assert.rejects(loadLearning(root), /evaluation state is invalid|trial retry state is invalid|trial failure state is invalid/,
     "a rewritten retry budget must fail closed after restart");
   await writeFile(restoredRetryState.learningPath, `${originalState}\n`, "utf8");
-  await assert.rejects(deleteLearning({ root, id: "learning:failure-retry" }),
+  await assert.rejects(deleteLearning({ root, id: "learning:failure-retry",
+    confirmation: "local-user-purge-confirmed" }),
     /purge the shared subject atomically/);
   assert.equal((await purgeLearningBySubject({ root, subjectId: "person:failure-member" })).deleted, 4);
   const deleted = (await loadLearning(root)).learning;

@@ -62,7 +62,7 @@ Usage:
   agentspine learn-delivery-purge [root] --confirm-local-purge
   agentspine learn-measurement-purge [root] --confirm-local-purge
   agentspine learn-rollback <id> --reason text
-  agentspine learn-delete <id>
+  agentspine learn-delete <id> --confirm-local-purge
   agentspine learn-config [root] [--auto-promote true|false] [--min-confidence 0.85] [--min-outcomes 2 --min-improvement 0.05 --canary-receipts 2 --canary-ttl-days 14]
   agentspine continuity-config [root] [--enabled true|false] [--entity id] [--project id] [--confirm-local-opt-in]
   agentspine continuity-status [root]

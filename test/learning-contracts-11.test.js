@@ -358,5 +358,14 @@ test("CLI learning workflow proposes, confirms, reads, rolls back, and deletes a
   assert.equal(runCli(["learn-context", root, "--json"], state).items[0].id, "learning:cli");
   runCli(["learn-rollback", "learning:cli", "--root", root, "--reason", "No longer current.", "--json"], state);
   assert.equal(runCli(["learn-context", root, "--json"], state).items.length, 0);
-  assert.equal(runCli(["learn-delete", "learning:cli", "--root", root, "--json"], state).deleted, true);
+  const { learningPath } = await loadLearning(root);
+  const beforeRejectedDelete = await readFile(learningPath);
+  await assert.rejects(deleteLearning({ root, id: "learning:cli" }), /explicit local user confirmation/);
+  assert.throws(() => runCli(["learn-delete", "learning:cli", "--root", root, "--json"], state),
+    /explicit local user confirmation/);
+  assert.deepEqual(await readFile(learningPath), beforeRejectedDelete,
+    "unconfirmed API and CLI deletion attempts must preserve the state bytes");
+  assert.equal((await loadLearning(root)).learning.candidates.some((entry) => entry.id === "learning:cli"), true,
+    "a rejected deletion must preserve the learning candidate");
+  assert.equal(runCli(["learn-delete", "learning:cli", "--root", root, "--confirm-local-purge", "--json"], state).deleted, true);
 });
