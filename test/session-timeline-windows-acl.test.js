@@ -140,6 +140,42 @@ test("unchanged file metadata reuses an ACL while a changed ctime forces a fresh
   assert.deepEqual(calls.map((call) => call.args), [["/user", "/fo", "csv", "/nh"], windowsSidAclCommand(path), windowsSidAclCommand(path)]);
 });
 
+test("one transient Windows ACL command failure is retried without trusting its output", async () => {
+  const path = "/synthetic/transient-acl-command";
+  let aclAttempts = 0;
+  const calls = [];
+  const verify = fileVerifier((binary, args, options) => {
+    calls.push({ binary, args, options });
+    if (binary.endsWith("whoami.exe")) return { status: 0, stdout: `"${ACCOUNT}","${SID}"\r\n` };
+    aclAttempts += 1;
+    if (aclAttempts === 1) {
+      return { status: null, error: Object.assign(new Error("synthetic ACL timeout"), { code: "ETIMEDOUT" }) };
+    }
+    return { status: 0, stdout: sidOutput(`${path} ${ACCOUNT}:(F)\r\n`, path) };
+  });
+
+  await verify(path, { role: "state" });
+  assert.equal(aclAttempts, 2);
+  assert.deepEqual(calls.map((call) => call.args), [
+    ["/user", "/fo", "csv", "/nh"], windowsSidAclCommand(path), windowsSidAclCommand(path)
+  ]);
+  assert.ok(calls.every((call) => call.options.timeout === 1_500 && call.options.shell === false));
+});
+
+test("persistent Windows ACL command failure remains fail closed and bounded", async () => {
+  const path = "/synthetic/persistent-acl-command";
+  let aclAttempts = 0;
+  const verify = fileVerifier((binary) => {
+    if (binary.endsWith("whoami.exe")) return { status: 0, stdout: `"${ACCOUNT}","${SID}"\r\n` };
+    aclAttempts += 1;
+    return { status: null,
+      error: Object.assign(new Error("persistent ACL timeout"), { code: "ETIMEDOUT" }) };
+  });
+
+  await assert.rejects(verify(path, { role: "state" }), /persistent ACL timeout/);
+  assert.equal(aclAttempts, 2, "a persistent ACL failure stops after one retry");
+});
+
 test("a foreign write ACE on a state, head, or inherited private file fails closed without repair", async () => {
   for (const role of ["state", "head"]) {
     const broad = runner((value) => `${value} ${ACCOUNT}:(I)(F)\r\n        Everyone:(M)\r\n`);
