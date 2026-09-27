@@ -31,7 +31,7 @@ assert.equal(digest(await readFile(item.transcript)),before);
 
 test("Claude observer uses one scoped host model proposal and preserves source bytes",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript));let calls=0,seen;
 const output=await runClaudeObserver(input(item),{modelCall:async request=>{calls++;seen=request;return {stdout:JSON.stringify({structured_output:proposal})};}});
-assert.equal(calls,1);assert.equal(seen.model,"claude-sonnet-5");assert.match(seen.prompt,/exact user text/);assert.equal(digest(await readFile(item.transcript)),before);
+assert.equal(calls,1);assert.equal(seen.model,"claude-sonnet-5");assert.equal(seen.cwd.href,new URL("..",import.meta.url).href);assert.match(seen.prompt,/exact user text/);assert.equal(digest(await readFile(item.transcript)),before);
 assert.equal(output,null,"an async hook must not depend on discarded stdout");
 assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:input(item).prompt_id,now:"2026-09-25T04:00:02.000Z"})).status,"none","the observer cannot inject into the turn it observed");
 const next=await runHook(input(item,{prompt_id:"prompt:next",event_id:"event:observer:next",prompt:"Bitte weiter.",timestamp:"2026-09-25T04:00:03.000Z"})),context=JSON.parse(next.context).sourceResolution.observer;
