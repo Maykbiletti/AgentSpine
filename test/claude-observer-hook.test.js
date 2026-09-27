@@ -5,7 +5,7 @@ import {spawnSync} from "node:child_process";
 import {appendFile,mkdir,mkdtemp,readFile,rm,writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {callObserverCommand,claudeObserverArguments,claudeObserverEnvironment,runClaudeObserver} from "../src/claude-observer-hook.js";
+import {callObserverCommand,claudeObserverArguments,claudeObserverEnvironment,observerHostFromLaunch,runClaudeObserver} from "../src/claude-observer-hook.js";
 import {runHook} from "../src/hook.js";
 import {consumeHostObserverSuggestion,recordClaudeObserverModel} from "../src/lib/session-timeline.js";
 import {enrollTimelineWithHostReceipt} from "./session-timeline-invocation-support.js";
@@ -130,6 +130,16 @@ for(const flag of ["--bare","--restricted","--no-session-persistence"])assert.ok
 assert.ok(!args.join("\0").includes("PRIVATE_ARGV_SENTINEL"));
 const env=claudeObserverEnvironment({PATH:"safe",CLAUDECODE:"1",CLAUDE_CODE_ENTRYPOINT:"hook",CLAUDE_CODE_OAUTH_TOKEN:"host-login",CLAUDE_PLUGIN_ROOT:"private",AGENTSPINE_TIMELINE_SESSION_CAPABILITY:"private",blun_portal_token:"private",ANTHROPIC_API_KEY:"foreign",Anthropic_Api_Key:"foreign",CLAUDE_CODE_USE_BEDROCK:"1",AWS_REGION:"eu-north-1",Aws_Secret_Access_Key:"foreign",CLAUDE_CODE_USE_VERTEX:"1",GOOGLE_APPLICATION_CREDENTIALS:"foreign.json",CLAUDE_CODE_USE_FOUNDRY:"1",AZURE_CLIENT_SECRET:"foreign",OPENAI_API_KEY:"foreign",OpenAI_Base_Url:"foreign",CODEX_API_KEY:"foreign",CODEX_HOME:"foreign",NODE_OPTIONS:"--require=foreign.js",Node_Path:"foreign",LD_PRELOAD:"foreign.so",Dyld_Insert_Libraries:"foreign.dylib"});
 assert.deepEqual(env,{PATH:"safe",CLAUDE_CODE_OAUTH_TOKEN:"host-login"});
+});
+
+test("observer launcher binds explicitly to its host when plugin roots overlap",()=>{
+const both={CLAUDE_PLUGIN_ROOT:"/claude",PLUGIN_ROOT:"/codex"};
+assert.equal(observerHostFromLaunch(["--host=claude"],both),"claude");
+assert.equal(observerHostFromLaunch(["--host=codex"],both),"codex");
+assert.equal(observerHostFromLaunch([],both),null);
+assert.equal(observerHostFromLaunch(["--host=claude","--host=codex"],both),null);
+assert.equal(observerHostFromLaunch([],{CLAUDE_PLUGIN_ROOT:"/claude"}),"claude");
+assert.equal(observerHostFromLaunch([],{PLUGIN_ROOT:"/codex"}),"codex");
 });
 
 test("a stalled observer child is terminated at its deadline",async()=>{
