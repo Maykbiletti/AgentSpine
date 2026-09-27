@@ -60,7 +60,7 @@ export function consumeObserverSuggestion(input, bindingDigest, updateObserver, 
       .map((suggestion, index) => ({ suggestion, index }))
       .filter(({ suggestion }) => suggestion.eventDigest !== currentEventDigest);
     let selected = null;
-    for (const candidate of candidates) {
+    for (const candidate of [...candidates].reverse()) {
       if (!verifySource || await verifySource(candidate.suggestion)) {
         selected = candidate;
         break;
@@ -74,8 +74,9 @@ export function consumeObserverSuggestion(input, bindingDigest, updateObserver, 
       };
     }
 
-    const [suggestion] = live.splice(selected.index, 1);
-    observer.pending = live;
+    const suggestion = selected.suggestion;
+    observer.pending = live.filter((item, index) =>
+      index > selected.index || item.eventDigest === currentEventDigest);
     observer.updatedAt = now.toISOString();
     const common = {
       sourceDigest: suggestion.sourceDigest,
