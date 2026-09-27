@@ -18,7 +18,7 @@ const keys=["AGENTSPINE_STATE_DIR","CLAUDE_CONFIG_DIR","AGENTSPINE_TIMELINE_SESS
 Object.assign(process.env,{AGENTSPINE_STATE_DIR:state,CLAUDE_CONFIG_DIR:profile,AGENTSPINE_TIMELINE_SESSION_CAPABILITY:`astc_${"a".repeat(43)}`,AGENTSPINE_TIMELINE_TRANSPORT_SESSION_ID:"session:observer"});
 t.after(async()=>{for(const key of keys)prior[key]===undefined?delete process.env[key]:process.env[key]=prior[key];await rm(workspace,{recursive:true,force:true,maxRetries:3});});
 const privateScope=scope(),enrolled=await enrollTimelineWithHostReceipt({root,sessionId:"session:observer",scope:privateScope,transcriptPath:transcript,hostHome:profile});assert.equal(enrolled.status,"enrolled");
-assert.equal((await recordClaudeObserverModel({root,sessionId:"session:observer",scope:privateScope,model:"claude-sonnet-5"})).status,"recorded");
+assert.equal((await recordClaudeObserverModel({root,sessionId:"session:observer",scope:privateScope,model:"claude-sonnet-5",now:"2026-09-25T03:59:59.000Z"})).status,"recorded");
 return {root,transcript,privateScope,profile};}
 function input(item,patch={}){const s=item.privateScope;return {hook_event_name:"UserPromptSubmit",host:"claude",cwd:item.root,session_id:"session:observer",prompt_id:"550e8400-e29b-41d4-a716-446655440000",transcript_path:item.transcript,prompt:"Nein, erst die Prüfsumme prüfen.",timestamp:"2026-09-25T04:00:01.000Z",entity_id:s.entityId,user_id:s.userId,tenant_id:s.tenantId,project_id:s.projectId,task_id:s.currentTaskId,goal_id:s.goalId,goal_step_id:s.goalStepId,group_id:null,...patch};}
 const proposal={status:"proposal",kind:"next-step-correction",next:"Erst die Prüfsumme prüfen.",question:null};
@@ -106,6 +106,13 @@ const encoded=seen.match(/<source-json>(.*)<\/source-json>/su)?.[1];assert.equal
 
 test("PostModelSwitch updates the exact session model used by the next observer",async t=>{const item=await fixture(t),base=input(item),switched=await runHook({...base,hook_event_name:"PostModelSwitch",from_model:"claude-sonnet-5",to_model:"claude-opus-5",source:"command"});
 assert.equal(switched.observerModel,"recorded");let model=null;await runClaudeObserver(input(item,{prompt_id:"prompt:switched"}),{modelCall:async request=>{model=request.model;return {stdout:JSON.stringify({structured_output:{status:"none",kind:"not-current-instruction",next:null,question:null}})};}});assert.equal(model,"claude-opus-5");
+});
+
+test("a delayed Claude lifecycle event cannot roll back the active session model",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript)),base=input(item);
+assert.equal((await runHook({...base,hook_event_name:"PostModelSwitch",from_model:"claude-sonnet-5",to_model:"claude-opus-5",source:"command",timestamp:"2026-09-25T04:00:03.000Z"})).observerModel,"recorded");
+assert.equal((await runHook({...base,hook_event_name:"PostModelSwitch",from_model:"claude-opus-5",to_model:"claude-haiku-5",source:"command",timestamp:"2026-09-25T04:00:02.000Z"})).observerModel,"stale");
+let model=null;await runClaudeObserver(input(item,{prompt_id:"prompt:after-delayed-switch",timestamp:"2026-09-25T04:00:04.000Z"}),{modelCall:async request=>{model=request.model;return {stdout:JSON.stringify({structured_output:{status:"none",kind:"not-current-instruction",next:null,question:null}})};}});
+assert.equal(model,"claude-opus-5");assert.equal(digest(await readFile(item.transcript)),before);
 });
 
 test("observer CLI disables settings, tools, persistence, nested hooks and external API overrides",()=>{const args=claudeObserverArguments("claude-opus-5","PRIVATE_ARGV_SENTINEL");

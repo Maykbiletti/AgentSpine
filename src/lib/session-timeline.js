@@ -101,7 +101,7 @@ state.observers||=[];const result=await task(state.observers.find(item=>item.bin
 if(result.save)await saveState(state,names.path,assertOwned,root,names.assertStable);return result;},{assertPath:names.assertStable});}catch{return {status:"unavailable"};}}
 export async function recordClaudeObserverModel({root,sessionId,scope,model,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),session=observerSession("claude",sessionId),at=asDate(now).toISOString();
 if(!bindingDigest||!session||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
-return mutateObserver(root,session,(current,state)=>{if(current){current.model=model;current.updatedAt=at;}
+return mutateObserver(root,session,(current,state)=>{if(current&&new Date(current.updatedAt)>=new Date(at))return {status:current.model===model?"recorded":"stale"};if(current){current.model=model;current.updatedAt=at;}
 else{state.observers.unshift({bindingDigest:session,model,updatedAt:at,prompts:[],authority:AUTHORITY});state.observers=state.observers.slice(0,MAX_SOURCES);}
 return {status:"recorded",save:true};});}
 export async function claimClaudeObserverPrompt({root,sessionId,scope,promptId,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),session=observerSession("claude",sessionId);if(!bindingDigest||!session||!safeTimelineId(promptId))return {status:"unavailable"};const prompt=digest(promptId);
