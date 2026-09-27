@@ -6,7 +6,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {codexObserverArguments,codexObserverEnvironment,runCodexObserver} from "../src/claude-observer-hook.js";
 import {runHook} from "../src/hook.js";
-import {claimClaudeObserverPrompt,claimCodexObserverTurn,consumeHostObserverSuggestion,recordClaudeObserverModel} from "../src/lib/session-timeline.js";
+import {claimClaudeObserverPrompt,claimCodexObserverTurn,consumeHostObserverSuggestion,recordClaudeObserverModel,stageHostObserverSuggestion} from "../src/lib/session-timeline.js";
 import {recordSessionTimelineHead,sealSessionTimelineState,sessionTimelineStatePaths} from "../src/lib/session-timeline-auth.js";
 import {enrollTimelineWithHostReceipt} from "./session-timeline-invocation-support.js";
 
@@ -28,6 +28,16 @@ assert.equal(await runCodexObserver(input(item),{modelCall:async()=>{throw new E
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:image",prompt:"<image source>"}),{modelCall:async()=>{throw new Error("image invoked");}}),null);
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:foreign",group_id:"group:foreign"}),{modelCall:async()=>{throw new Error("foreign invoked");}}),null);
 assert.equal(await runCodexObserver(input(item,{turn_id:"turn:failure"}),{modelCall:async()=>{throw new Error("provider unavailable");}}),null);});
+
+test("Codex observer handoff fails open on malformed staging metadata",async t=>{const item=await fixture(t),before=hash(await readFile(item.transcript)),request=input(item);
+await runCodexObserver(request,{modelCall:async()=>({stdout:JSON.stringify({status:"proposal",kind:"next-step-correction",next:"Verify first.",question:null})})});
+const malformed=await stageHostObserverSuggestion({root:item.root,host:"codex",sessionId:"session:observer",scope,eventId:{invalid:true},sourceDigest:"a".repeat(64),enrollmentDigest:"b".repeat(64),status:"none",kind:"ambiguous",model:"gpt-6-sol",now:"2026-09-25T11:00:02.000Z"});
+assert.equal(malformed.status,"unavailable");
+const invalidTime=await consumeHostObserverSuggestion({root:item.root,host:"codex",sessionId:"session:observer",scope,currentEventId:"turn:next",now:"not-a-date"});
+assert.equal(invalidTime.status,"unavailable");
+const delivered=await consumeHostObserverSuggestion({root:item.root,host:"codex",sessionId:"session:observer",scope,currentEventId:"turn:next",now:"2026-09-25T11:00:03.000Z"});
+assert.equal(delivered.status,"delivered");assert.equal(delivered.suggestion.sourceDigest,hash(request.prompt));assert.equal(hash(await readFile(item.transcript)),before);
+});
 
 test("Codex handoff rejects a replaced enrolled source without consuming it",async t=>{const item=await fixture(t),replacement=`${JSON.stringify({type:"session_meta",timestamp:"2026-09-25T11:00:02.000Z",payload:{id:"session:other"}})}\n`;await runCodexObserver(input(item),{modelCall:async()=>({stdout:JSON.stringify({status:"proposal",kind:"next-step-correction",next:"Verify first.",question:null})})});await rm(item.transcript);await writeFile(item.transcript,replacement);const delivered=await consumeHostObserverSuggestion({root:item.root,host:"codex",sessionId:"session:observer",scope,currentEventId:"turn:two",now:"2026-09-25T11:00:03.000Z"});assert.equal(delivered.status,"unavailable");assert.equal(await readFile(item.transcript,"utf8"),replacement);});
 

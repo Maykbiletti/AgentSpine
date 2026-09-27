@@ -7,7 +7,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {callObserverCommand,claudeObserverArguments,claudeObserverEnvironment,observerHostFromLaunch,runClaudeObserver} from "../src/claude-observer-hook.js";
 import {runHook} from "../src/hook.js";
-import {consumeHostObserverSuggestion,recordClaudeObserverModel} from "../src/lib/session-timeline.js";
+import {consumeHostObserverSuggestion,recordClaudeObserverModel,stageHostObserverSuggestion} from "../src/lib/session-timeline.js";
 import {enrollTimelineWithHostReceipt} from "./session-timeline-invocation-support.js";
 
 const digest=value=>createHash("sha256").update(value).digest("hex");
@@ -39,6 +39,16 @@ assert.equal(context.status,"proposal");assert.equal(context.authority,"context-
 assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:later",now:"2026-09-25T04:00:04.000Z"})).status,"none","the next-turn handoff is one-use");
 assert.equal(digest(await readFile(item.transcript)),before,"next-turn source verification preserves transcript bytes");
 assert.equal(await runClaudeObserver(input(item),{modelCall:async()=>{throw new Error("duplicate invoked");}}),null);
+});
+
+test("Claude observer handoff fails open on malformed staging metadata",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript)),request=input(item);
+await runClaudeObserver(request,{modelCall:async()=>({stdout:JSON.stringify({structured_output:proposal})})});
+const malformed=await stageHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,eventId:{invalid:true},sourceDigest:"a".repeat(64),enrollmentDigest:"b".repeat(64),status:"none",kind:"ambiguous",model:"claude-sonnet-5",now:"2026-09-25T04:00:02.000Z"});
+assert.equal(malformed.status,"unavailable");
+const invalidTime=await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:next",now:"not-a-date"});
+assert.equal(invalidTime.status,"unavailable");
+const delivered=await consumeHostObserverSuggestion({root:item.root,host:"claude",sessionId:"session:observer",scope:item.privateScope,currentEventId:"prompt:next",now:"2026-09-25T04:00:03.000Z"});
+assert.equal(delivered.status,"delivered");assert.equal(delivered.suggestion.sourceDigest,digest(request.prompt));assert.equal(digest(await readFile(item.transcript)),before);
 });
 
 test("Claude observer derives one event from the documented prompt input without prompt_id",async t=>{const item=await fixture(t),before=digest(await readFile(item.transcript)),native=input(item);delete native.prompt_id;let calls=0;
