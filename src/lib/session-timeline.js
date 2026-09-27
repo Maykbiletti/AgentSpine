@@ -94,18 +94,19 @@ function blocked(reason) { return { blocked: true, reason, authority: AUTHORITY 
 function hasExactPrivateTimelineScope(scope) { return scope?.groupId === null; }
 function sourceFor(state, scope) { return state.sources.find((item) => sameTimelineBinding(item.binding, scope)) || null; }
 function observerBindingDigest(host,sessionId,scope){const binding=sessionTimelineBinding({host,sessionId,scope});return ["claude","codex"].includes(host)&&completeTimelineBinding(binding)?digest(JSON.stringify(binding)):null;}
+function observerSession(host,sessionId){return ["claude","codex"].includes(host)&&TIMELINE_ID_RE.test(sessionId||"")?digest(JSON.stringify({host,sessionId})):null;}
 async function mutateObserver(root,bindingDigest,task){try{await ensureSessionTimelineTrust({create:true});const names=await paths(root);
 return await withOwnedFileLock(names.lock,async({assertOwned})=>{const state=await readState(names.path,root,names.assertStable);
 state.observers||=[];const result=await task(state.observers.find(item=>item.bindingDigest===bindingDigest)||null,state);
 if(result.save)await saveState(state,names.path,assertOwned,root,names.assertStable);return result;},{assertPath:names.assertStable});}catch{return {status:"unavailable"};}}
-export async function recordClaudeObserverModel({root,sessionId,scope,model,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),at=asDate(now).toISOString();
-if(!bindingDigest||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
-return mutateObserver(root,bindingDigest,(current,state)=>{if(current){current.model=model;current.updatedAt=at;}
-else{state.observers.unshift({bindingDigest,model,updatedAt:at,prompts:[],authority:AUTHORITY});state.observers=state.observers.slice(0,MAX_SOURCES);}
+export async function recordClaudeObserverModel({root,sessionId,scope,model,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),session=observerSession("claude",sessionId),at=asDate(now).toISOString();
+if(!bindingDigest||!session||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};
+return mutateObserver(root,session,(current,state)=>{if(current){current.model=model;current.updatedAt=at;}
+else{state.observers.unshift({bindingDigest:session,model,updatedAt:at,prompts:[],authority:AUTHORITY});state.observers=state.observers.slice(0,MAX_SOURCES);}
 return {status:"recorded",save:true};});}
-export async function claimClaudeObserverPrompt({root,sessionId,scope,promptId,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope);if(!bindingDigest||!safeTimelineId(promptId))return {status:"unavailable"};const prompt=digest(promptId);
-return mutateObserver(root,bindingDigest,(current)=>{if(!current)return {status:"unavailable"};if(current.prompts.includes(prompt))return {status:"duplicate"};current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);
-current.last=prompt;current.updatedAt=asDate(now).toISOString();return {status:"claimed",model:current.model,save:true};});}
+export async function claimClaudeObserverPrompt({root,sessionId,scope,promptId,now=new Date()}){const bindingDigest=observerBindingDigest("claude",sessionId,scope),session=observerSession("claude",sessionId);if(!bindingDigest||!session||!safeTimelineId(promptId))return {status:"unavailable"};const prompt=digest(promptId);
+return mutateObserver(root,bindingDigest,(current,state)=>{const active=state.observers.find(item=>item.bindingDigest===session);if(!active)return {status:"unavailable"};if(!current)current={bindingDigest,model:active.model,prompts:[],authority:AUTHORITY};state.observers=[...new Set([current,active,...state.observers])].slice(0,MAX_SOURCES);if(current.prompts.includes(prompt))return {status:"duplicate"};current.model=active.model;current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);
+current.last=prompt;current.updatedAt=asDate(now).toISOString();return {status:"claimed",model:active.model,save:true};});}
 export async function claimCodexObserverTurn({root,sessionId,scope,turnId,model,now=new Date()}){const bindingDigest=observerBindingDigest("codex",sessionId,scope);if(!bindingDigest||!safeTimelineId(turnId)||!/^[-A-Za-z0-9._:]{1,256}$/.test(model||""))return {status:"unavailable"};const prompt=digest(turnId);
 return mutateObserver(root,bindingDigest,(current,state)=>{if(!current){current={bindingDigest,model,prompts:[],authority:AUTHORITY};state.observers=[current,...state.observers].slice(0,MAX_SOURCES);}if(current.prompts.includes(prompt))return {status:"duplicate"};current.model=model;current.prompts.push(prompt);current.prompts=current.prompts.slice(-32);current.last=prompt;current.updatedAt=asDate(now).toISOString();return {status:"claimed",model,save:true};});}
 export function stageHostObserverSuggestion(input){return stageObserverSuggestion(input,observerBindingDigest(input.host,input.sessionId,input.scope),mutateObserver);}
