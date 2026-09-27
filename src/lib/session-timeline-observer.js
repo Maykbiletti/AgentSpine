@@ -11,11 +11,20 @@ export { validObserver } from "./session-timeline-observer-schema.js";
 const SUGGESTION_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_SUGGESTIONS = 4;
 
+function safeObserverDate(value) {
+  try {
+    return observerDate(value);
+  } catch {
+    return null;
+  }
+}
+
 export function stageObserverSuggestion(input, bindingDigest, updateObserver) {
   const { root, eventId, sourceDigest, enrollmentDigest, status, kind, model } = input;
-  const eventDigest = observerDigest(eventId || "");
-  const now = observerDate(input.now || new Date());
   if (!bindingDigest || !validObserverInput(input)) return { status: "unavailable" };
+  const now = safeObserverDate(input.now || new Date());
+  if (!now) return { status: "unavailable" };
+  const eventDigest = observerDigest(eventId);
 
   return updateObserver(root, bindingDigest, (observer) => {
     if (!observer || observer.last !== eventDigest) return { status: "unavailable" };
@@ -48,10 +57,11 @@ export function stageObserverSuggestion(input, bindingDigest, updateObserver) {
 
 export function consumeObserverSuggestion(input, bindingDigest, updateObserver, verifySource) {
   const { root, host, currentEventId } = input;
-  const now = observerDate(input.now || new Date());
   if (!bindingDigest || !safeTimelineId(currentEventId)) {
     return { status: "unavailable" };
   }
+  const now = safeObserverDate(input.now || new Date());
+  if (!now) return { status: "unavailable" };
   const currentEventDigest = observerDigest(currentEventId);
 
   return updateObserver(root, bindingDigest, async (observer) => {
