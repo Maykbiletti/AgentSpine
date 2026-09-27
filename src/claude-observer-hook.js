@@ -29,7 +29,7 @@ const scope=await runtimeScope(i,root,resolved.userStateRoot,resolved.catalog);i
 const sessionId=i.session_id,scoped=await loadPrivateSessionTimelineEnrollment({root,host:h,sessionId,scope});if(scoped.status!=="loaded")return null;
 const enrollment=()=>resolvePrivateSessionTimelineContract({root,host:h,sessionId,transcriptPath:i.transcript_path,hostHome:resolved.hostHome}),loaded=await enrollment();
 if(loaded.status!=="enrolled"||loaded.enrollmentDigest!==scoped.record.enrollmentDigest)return null;
-const id=h==="claude"?claudeObserverEventId({promptId:nativeId,enrollmentId:loaded.id,prompt:i.prompt}):nativeId;
+const id=h==="claude"?claudeObserverEventId({promptId:nativeId,enrollmentId:loaded.id,prompt:i.prompt,source:loaded.source}):nativeId;
 const now=i.timestamp||new Date(),claim=h==="codex"?await claimCodexObserverTurn({root,sessionId,scope,turnId:id,model,now}):await claimClaudeObserverPrompt({root,sessionId,scope,promptId:id,now});if(claim.status!=="claimed")return null;
 const envelope=JSON.parse((await modelCall({cwd:new URL("..",import.meta.url),model:claim.model,prompt:modelPrompt(i.prompt),environment})).stdout),value=envelope.structured_output??envelope.result??envelope;
 const verified=await enrollment();if(!validResult(value)||verified.status!=="enrolled"||verified.enrollmentDigest!==loaded.enrollmentDigest)return null;

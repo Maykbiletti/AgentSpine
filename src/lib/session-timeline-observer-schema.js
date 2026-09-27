@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { validSessionTimelineSourceMetadata } from "./session-timeline-source.js";
 
 export const OBSERVER_AUTHORITY = "context-only";
 export const OBSERVER_KINDS = new Set([
@@ -14,11 +15,12 @@ export function observerDigest(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-export function claudeObserverEventId({ promptId, enrollmentId, prompt }) {
+export function claudeObserverEventId({ promptId, enrollmentId, prompt, source }) {
   if (promptId !== undefined) return promptId;
   if (typeof enrollmentId !== "string" || !enrollmentId || enrollmentId.length > 256
-    || typeof prompt !== "string") return null;
-  return `prompt:${observerDigest(`${enrollmentId}\0${prompt}`).slice(0, 32)}`;
+    || typeof prompt !== "string" || !validSessionTimelineSourceMetadata(source)) return null;
+  const sourceVersion = [source.pathDigest, source.identity, source.size, source.mtimeNs, source.ctimeNs].join("\0");
+  return `prompt:${observerDigest(`${enrollmentId}\0${sourceVersion}\0${prompt}`).slice(0, 32)}`;
 }
 
 export function observerDate(value) {
