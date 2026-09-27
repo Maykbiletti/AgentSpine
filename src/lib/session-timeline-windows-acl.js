@@ -9,6 +9,7 @@ const SYSTEM_PRINCIPALS = new Set([
 ]);
 const MANDATORY_LABEL_PREFIX = "mandatory label\\";
 const FILE_ROLES = new Set(["key", "state", "head", "private"]);
+const TRANSIENT_COMMAND_ERRORS = new Set(["EAGAIN", "EBUSY", "ETIMEDOUT"]);
 
 function failure(message, result = null) {
   const detail = result?.error?.message || result?.stderr || result?.stdout || "no diagnostic";
@@ -22,9 +23,14 @@ function executable(name, env) {
 }
 
 function runCommand(run, binary, args, env) {
-  const result = run(binary, args, { encoding: "utf8", env, shell: false, timeout: 1_500, windowsHide: true });
-  if (!result || result.status !== 0 || result.error || result.signal) failure(`${binary} failed`, result);
-  return `${result.stdout || ""}\n${result.stderr || ""}`;
+  for (let attempt = 0; ; attempt += 1) {
+    const result = run(binary, args, { encoding: "utf8", env, shell: false, timeout: 1_500, windowsHide: true });
+    if (result && result.status === 0 && !result.error && !result.signal) {
+      return `${result.stdout || ""}\n${result.stderr || ""}`;
+    }
+    if (attempt === 0 && TRANSIENT_COMMAND_ERRORS.has(result?.error?.code)) continue;
+    failure(`${binary} failed`, result);
+  }
 }
 
 function identityFrom(output) {
