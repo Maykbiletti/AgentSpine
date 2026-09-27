@@ -4,6 +4,7 @@ import {
   observerDigest,
   validObserverInput
 } from "./session-timeline-observer-schema.js";
+import { safeTimelineId } from "./session-timeline-contract.js";
 
 export { validObserver } from "./session-timeline-observer-schema.js";
 
@@ -45,11 +46,11 @@ export function stageObserverSuggestion(input, bindingDigest, updateObserver) {
 
 export function consumeObserverSuggestion(input, bindingDigest, updateObserver, verifySource) {
   const { root, host, currentEventId } = input;
-  const currentEventDigest = observerDigest(currentEventId || "");
   const now = observerDate(input.now || new Date());
-  if (!bindingDigest || typeof currentEventId !== "string" || currentEventId.length > 256) {
+  if (!bindingDigest || !safeTimelineId(currentEventId)) {
     return { status: "unavailable" };
   }
+  const currentEventDigest = observerDigest(currentEventId);
 
   return updateObserver(root, bindingDigest, async (observer) => {
     if (!observer) return { status: "unavailable" };

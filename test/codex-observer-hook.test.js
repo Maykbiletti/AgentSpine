@@ -84,3 +84,9 @@ assert.equal((await claimCodexObserverTurn({root:item.root,sessionId:"session:ob
 assert.equal(hash(await readFile(item.transcript)),before);
 assert.equal((await claimClaudeObserverPrompt({root:item.root,sessionId:"session:observer",scope,promptId:"prompt:valid"})).status,"claimed");
 assert.equal((await claimCodexObserverTurn({root:item.root,sessionId:"session:observer",scope,turnId:"turn:valid",model:"gpt-6-sol"})).status,"claimed");});
+
+test("observer handoff rejects malformed current event ids without consuming its suggestion",async t=>{const item=await fixture(t),before=hash(await readFile(item.transcript));
+await runCodexObserver(input(item),{modelCall:async()=>({stdout:JSON.stringify({status:"proposal",kind:"next-step-correction",next:"Verify first.",question:null})})});
+for(const currentEventId of [""," ","turn:<invalid>","x".repeat(129),null,42,{}])assert.equal((await consumeHostObserverSuggestion({root:item.root,host:"codex",sessionId:"session:observer",scope,currentEventId,now:"2026-09-25T11:00:02.000Z"})).status,"unavailable");
+const delivered=await consumeHostObserverSuggestion({root:item.root,host:"codex",sessionId:"session:observer",scope,currentEventId:"turn:valid-next",now:"2026-09-25T11:00:03.000Z"});
+assert.equal(delivered.status,"delivered");assert.equal(delivered.suggestion.status,"proposal");assert.equal(hash(await readFile(item.transcript)),before);});
