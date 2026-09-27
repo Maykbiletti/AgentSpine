@@ -194,7 +194,7 @@ test("evidence revocation is immutable, immediately withheld, group-isolated, an
   assert.equal((await loadLearning(root)).learning.candidates.find((item) => item.id === "learning:revocation-new")
     .rollback.mode, "automatic-evidence-revocation");
 
-  await deleteLearning({ root, id: "learning:revocation-new" });
+  await deleteLearning({ root, id: "learning:revocation-new", confirmation: "local-user-purge-confirmed" });
   assert.equal((await loadLearning(root)).learning.evidenceRevocations.length, 0);
   assert.equal((await purgeLearningBySubject({ root, subjectId: "person:revocation-member" })).deleted, 1);
   await proposeLearning({ root, id: "learning:revocation-cli", kind: "project-fact",
@@ -314,7 +314,7 @@ test("measurement revocation is immutable, immediately withheld, group-isolated,
     learningId: "learning:measurement-new", evaluationId: "evaluation:measurement-new",
     measurementReceiptId: "measurement:outcome:measurement-before-a", now: new Date(start.getTime() + 6000) }),
   /explicitly revoked/);
-  await deleteLearning({ root, id: "learning:measurement-new" });
+  await deleteLearning({ root, id: "learning:measurement-new", confirmation: "local-user-purge-confirmed" });
   assert.equal((await loadLearning(root)).learning.measurementRevocations.length, 0);
   assert.equal((await purgeLearningBySubject({ root, subjectId: "person:measurement-member" })).deleted, 1);
 
@@ -342,7 +342,7 @@ test("measurement revocation is immutable, immediately withheld, group-isolated,
   assert.equal((await loadLearning(root)).learning.measurements.some((item) => item.id === "measurement:unconsumed"), true);
   await assert.rejects(reviewLearning({ root, id: "learning:measurement-unconsumed", decision: "accept",
     reason: "Synthetic local review.", confirmedByUser: true }), /measurement was revoked/);
-  await deleteLearning({ root, id: "learning:measurement-unconsumed" });
+  await deleteLearning({ root, id: "learning:measurement-unconsumed", confirmation: "local-user-purge-confirmed" });
   assert.equal((await loadLearning(root)).learning.measurementRevocations.length, 0);
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });

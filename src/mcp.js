@@ -353,10 +353,13 @@ const tools = [
   },
   {
     name: "delete_learning",
-    description: "Permanently delete one candidate and its retained learning history. Superseding active facts must be rolled back first.",
+    description: "Permanently delete one candidate and its retained learning history after explicit local user confirmation. Superseding active facts must be rolled back first.",
     inputSchema: {
-      type: "object", required: ["id"],
-      properties: { root: { type: "string" }, id: { type: "string" } }
+      type: "object", required: ["id", "confirmation"], additionalProperties: false,
+      properties: {
+        root: { type: "string" }, id: { type: "string" },
+        confirmation: { type: "string", enum: ["local-user-purge-confirmed"] }
+      }
     }
   },
   {

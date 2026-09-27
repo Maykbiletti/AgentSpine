@@ -103,7 +103,7 @@ test("validation revocation withdraws an exact decision through its immutable re
     "validation revocation must not mutate its underlying outcomes");
   assert.deepEqual((await learningContext({ root, scope: scopedTurn,
     now: new Date(renewalAt.getTime() + 11000) })).items.map((item) => item.id), ["learning:validation-prior"]);
-  await deleteLearning({ root, id: "learning:validation-current" });
+  await deleteLearning({ root, id: "learning:validation-current", confirmation: "local-user-purge-confirmed" });
   const deletedState = (await loadLearning(root)).learning;
   assert.equal(deletedState.validationRevocations.length, 0);
   assert.equal(deletedState.history.some((entry) => entry.value?.learningId === "learning:validation-current"), false,
@@ -191,7 +191,7 @@ test("outcome revocation withdraws only the exact result and rolls back its vali
   assert.equal(rolledBack.rollback.mode, "automatic-outcome-revocation");
   assert.deepEqual((await learningContext({ root, scope: scopedTurn,
     now: new Date(start.getTime() + 7000) })).items.map((item) => item.id), ["learning:outcome-prior"]);
-  await deleteLearning({ root, id: "learning:outcome-current" });
+  await deleteLearning({ root, id: "learning:outcome-current", confirmation: "local-user-purge-confirmed" });
   assert.equal((await loadLearning(root)).learning.outcomeRevocations.length, 0);
   assert.equal((await purgeLearningBySubject({ root, subjectId: "person:outcome-member" })).deleted, 1);
 
@@ -223,7 +223,7 @@ test("outcome revocation withdraws only the exact result and rolls back its vali
     now: new Date(start.getTime() + 11000) });
   assert.deepEqual(activeWithheld.items, []);
   assert.deepEqual(activeWithheld.diagnostics, ["revoked-learning-outcome:learning:outcome-active"]);
-  await deleteLearning({ root, id: "learning:outcome-active" });
+  await deleteLearning({ root, id: "learning:outcome-active", confirmation: "local-user-purge-confirmed" });
   assert.deepEqual(await readFile(join(root, "AGENTS.md")), sourceBytes);
 });
 

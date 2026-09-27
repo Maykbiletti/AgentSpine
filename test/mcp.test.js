@@ -93,6 +93,8 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   assert.equal(timelineSearch.inputSchema.anyOf.length, 2);
   assert.deepEqual(timelineCapture.inputSchema.required, ["eventId"]);
   assert.equal(timelineCapture.inputSchema.properties.eventId.pattern, "^timeline-event:[a-f0-9]{32}$");
+  const deleteLearning = messages[1].result.tools.find((tool) => tool.name === "delete_learning"); assert.deepEqual(
+    [deleteLearning.inputSchema.required, deleteLearning.inputSchema.additionalProperties, deleteLearning.inputSchema.properties.confirmation.enum], [["id", "confirmation"], false, ["local-user-purge-confirmed"]]);
   const premortem = messages[1].result.tools.find(tool => tool.name === "record_delivery_premortem");
   assert.deepEqual(premortem.inputSchema.required, ["root", "requirementId", "items"]);
   assert.equal(premortem.inputSchema.properties.root.type, "string");
@@ -370,7 +372,9 @@ test("MCP learning tools keep candidates hidden until confirmed and support roll
     },
     { id: 24, name: "learning_context", arguments: { root } },
     { id: 25, name: "rollback_learning", arguments: { root, id: "learning:mcp", reason: "Synthetic rollback." } },
-    { id: 26, name: "learning_context", arguments: { root } }
+    { id: 26, name: "learning_context", arguments: { root } },
+    { id: 27, name: "delete_learning", arguments: { root, id: "learning:mcp" } }, { id: 28,
+      name: "delete_learning", arguments: { root, id: "learning:mcp", confirmation: "local-user-purge-confirmed" } }
   ];
   for (const call of calls) {
     input.write(`${JSON.stringify({
@@ -392,7 +396,9 @@ test("MCP learning tools keep candidates hidden until confirmed and support roll
   assert.equal(JSON.parse(messages[1].result.content[0].text).items.length, 0);
   assert.equal(JSON.parse(messages[3].result.content[0].text).items[0].id, "learning:mcp");
   assert.equal(JSON.parse(messages[5].result.content[0].text).items.length, 0);
-  assert.equal(messages.every((message) => message.result.isError === false), true);
+  assert.equal(messages[6].result.isError, true); assert.match(messages[6].result.content[0].text, /explicit local user confirmation/);
+  assert.equal(JSON.parse(messages[7].result.content[0].text).deleted, true);
+  assert.equal(messages.filter((_message, index) => index !== 6).every((message) => message.result.isError === false), true);
 });
 
 test("MCP coordination tools enforce separately configured delegation and retain task context", async (t) => {

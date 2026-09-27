@@ -400,7 +400,10 @@ export async function configureLearning({ root = process.cwd(), config = {}, now
   });
 }
 
-export async function deleteLearning({ root = process.cwd(), id }) {
+export async function deleteLearning({ root = process.cwd(), id, confirmation = null }) {
+  if (confirmation !== "local-user-purge-confirmed") {
+    throw new Error("permanent learning deletion requires explicit local user confirmation");
+  }
   if (!ID_RE.test(id || "")) throw new Error("id is required");
   return mutation(root, (state, _catalog, learningPath) => {
     const candidate = state.candidates.find((entry) => entry.id === id);
