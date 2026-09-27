@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import {
   recordActivity, resolveAttention, upsertAttention
 } from "../src/lib/attention.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
+import { withAttentionLock } from "../src/lib/attention-storage.js";
 import { runHook } from "../src/hook.js";
 
 async function fixture(t) {
@@ -182,6 +183,30 @@ test("concurrent activity writes are serialized and entity purge removes their t
   const purged = await deleteAttention({ root, entityId: "agent:worker" });
   assert.equal(purged.deletedActivities, 12);
   assert.equal((await loadAttention(root)).attention.activities.length, 0);
+});
+
+test("a transient Windows lock metadata error waits for the next attention lock attempt", async (t) => {
+  const { root } = await fixture(t);
+  const sourcePath = join(root, "AGENTS.md");
+  const sourceBefore = hash(await readFile(sourcePath));
+  const { attentionPath, catalog } = await loadAttention(root);
+  const lockPath = `${attentionPath}.lock`;
+  await writeFile(lockPath, "synthetic competing lock\n", "utf8");
+  let inspections = 0;
+  await withAttentionLock(attentionPath, {
+    root: catalog.root, run: (state) => { state.config.enabled = false; }
+  }, {
+    platform: "win32",
+    lockStat: async (path) => {
+      inspections += 1;
+      assert.equal(path, lockPath);
+      await unlink(path);
+      throw Object.assign(new Error("transient Windows lock metadata failure"), { code: "EPERM" });
+    }
+  });
+  assert.equal(inspections, 1);
+  assert.equal((await loadAttention(root)).attention.config.enabled, false);
+  assert.equal(hash(await readFile(sourcePath)), sourceBefore, "source bytes remain unchanged");
 });
 
 test("session hooks inject the real focused briefing without surfacing suppressed attention", async (t) => {
