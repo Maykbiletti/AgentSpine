@@ -224,6 +224,7 @@ export function emptyLearning(root) {
     applicationRevocations: [],
     deliveryRevocations: [],
     outcomeRevocations: [],
+    deletionTombstones: [],
     history: []
   };
 }

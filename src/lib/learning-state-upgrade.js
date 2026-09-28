@@ -31,6 +31,9 @@ import {
   storedDeliveryStructure, storedApplicationRevocationStructure, applicationRevocationMatchesState, storedDeliveryRevocationStructure, deliveryRevocationMatchesState, storedOutcomeRevocationStructure,
   outcomeRevocationMatchesState
 } from "./learning-delivery-contracts.js";
+import {
+  storedDeletionTombstone
+} from "./learning-deletions.js";
 
 export function normalizeState(value, root) {
   if (!value || typeof value !== "object" || Array.isArray(value)
@@ -70,6 +73,8 @@ export function normalizeState(value, root) {
       || !value.deliveryRevocations.every((item) => item && typeof item === "object")))
     || (value.outcomeRevocations !== undefined && (!Array.isArray(value.outcomeRevocations)
       || !value.outcomeRevocations.every((item) => item && typeof item === "object")))
+    || (value.deletionTombstones !== undefined && (!Array.isArray(value.deletionTombstones)
+      || !value.deletionTombstones.every((item) => item && typeof item === "object")))
     || !Array.isArray(value.history) || !value.history.every((item) => item && typeof item === "object")) {
     throw new Error("learning state structure is invalid; run the audit before learning");
   }
@@ -101,8 +106,14 @@ export function normalizeState(value, root) {
     measurementRevocations: value.measurementRevocations || [],
     applicationRevocations: value.applicationRevocations || [],
     deliveryRevocations: value.deliveryRevocations || [],
-    outcomeRevocations: value.outcomeRevocations || []
+    outcomeRevocations: value.outcomeRevocations || [],
+    deletionTombstones: value.deletionTombstones || []
   };
+  if (normalized.deletionTombstones.some((tombstone) => !storedDeletionTombstone(tombstone))
+    || new Set(normalized.deletionTombstones.map((tombstone) => tombstone.id)).size
+      !== normalized.deletionTombstones.length) {
+    throw new Error("learning deletion tombstone state is invalid; run the audit before learning");
+  }
   if (normalized.outcomes.some((receipt) => !storedOutcomeStructure(receipt))) {
     throw new Error("learning outcome state is invalid; run the audit before learning");
   }

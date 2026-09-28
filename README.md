@@ -263,7 +263,7 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine learn-status …` | Diagnose contradictions, receipt counts, canary health, and staleness |
 | `agentspine learn-rollback …` | Restore the accepted fact replaced by a learning |
 | `agentspine learn-config …` | Configure auto-promotion thresholds, initial-trial outcome deadlines, and context limits |
-| `agentspine learn-delete … --confirm-local-purge` | Permanently remove one candidate and its learning history after explicit local user confirmation |
+| `agentspine learn-delete … --confirm-local-purge` | Permanently remove one candidate and its learning history after explicit local user confirmation; retain only a content-free digest tombstone so deleted evidence cannot silently reappear |
 | `agentspine continuity-config …` | Enable, disable, scope, and budget automatic continuity after local opt-in |
 | `agentspine continuity-status …` | Inspect configuration and minimal signal counts without transcript content |
 | `agentspine continuity-purge …` | Permanently remove one identity's automatic signals and learned context |

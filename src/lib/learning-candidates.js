@@ -11,6 +11,9 @@ import {
   revokedOutcomeForCandidate
 } from "./learning-delivery-contracts.js";
 import {
+  deletedEvidenceState
+} from "./learning-deletions.js";
+import {
   date, safeText, assertSafeClaim, validateScope, mutation, preserve,
   normalizeEvidence, evidenceConfidence
 } from "./learning-storage.js";
@@ -35,9 +38,16 @@ export async function proposeLearning({
     validateScope(privacy, groupId, graph, subjectId);
     const duplicate = state.candidates.find((candidate) => candidate.kind === kind
       && candidate.claim === claim && exactScope(candidate.scope, normalizedScope)
-      && candidate.privacy === privacy && candidate.status !== "rejected" && candidate.status !== "rolled-back");
+      && candidate.subjectId === subjectId && candidate.privacy === privacy && candidate.groupId === groupId
+      && candidate.status !== "rejected" && candidate.status !== "rolled-back");
     if (duplicate) return { candidate: duplicate, learningPath, unchanged: true };
     const normalizedEvidence = normalizeEvidence(evidence, catalog, timestamp);
+    const deletionState = deletedEvidenceState(state, {
+      kind, claim, subjectId, privacy, groupId, scope: normalizedScope
+    }, normalizedEvidence);
+    if (deletionState.evidenceDeleted) {
+      throw new Error("deleted learning evidence cannot be reused; provide genuinely new explicit evidence");
+    }
     const superseded = supersedesId ? state.candidates.find((candidate) => candidate.id === supersedesId) : null;
     if (supersedesId && (!superseded || superseded.status !== "accepted")) {
       throw new Error(`supersedesId must reference an accepted learning: ${supersedesId}`);
@@ -48,6 +58,7 @@ export async function proposeLearning({
     }
     const conflictsWith = state.candidates.filter((candidate) => candidate.kind === kind
       && candidate.claim !== claim && exactScope(candidate.scope, normalizedScope)
+      && candidate.subjectId === subjectId && candidate.privacy === privacy && candidate.groupId === groupId
       && ["candidate", "accepted"].includes(candidate.status) && candidate.id !== supersedesId)
       .map((candidate) => candidate.id).sort();
     if (conflictsWith.length) {
@@ -69,7 +80,8 @@ export async function proposeLearning({
       supersedesId,
       supersededIds: [],
       conflictsWith,
-      requiresLocalReview: PROTECTED_LESSON_RE.test(claim),
+      requiresLocalReview: PROTECTED_LESSON_RE.test(claim)
+        || (deletionState.targetDeleted && kind !== "behavior"),
       automatic: false,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -105,6 +117,9 @@ export async function addLearningEvidence({
       throw new Error("evaluated learning target is immutable; propose a superseding candidate and evaluation contract");
     }
     const item = normalizeEvidence(evidence, catalog, timestamp);
+    if (deletedEvidenceState(state, previous, item).evidenceDeleted) {
+      throw new Error("deleted learning evidence cannot be reused; provide genuinely new explicit evidence");
+    }
     if (previous.evidence.some((entry) => entry.id === item.id)) throw new Error(`duplicate evidence id: ${item.id}`);
     preserve(state, "learning-candidate", previous, timestamp);
     const candidate = {
