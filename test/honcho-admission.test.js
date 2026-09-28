@@ -5,17 +5,14 @@ import {
   evaluateHonchoAdmission, honchoEvidenceBindingDigest, honchoReceiptPublicKeyDigest,
   honchoReceiptTrustStoreDigest, HONCHO_ADMISSION_SCHEMA
 } from "../src/lib/honcho-admission.js";
-
 const DEFAULT_SCOPE = {
   tenantId: "tenant:a", workspaceId: "workspace:a", userId: "user:a",
   projectId: "project:a", threadId: "thread:a"
 };
-
 function signer() {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   return { privateKey, publicKey: publicKey.export({ format: "pem", type: "spki" }).toString("utf8") };
 }
-
 const TRUSTED_SIGNER = signer();
 const ROTATED_SIGNER = signer();
 const TRUST_REVISION = 7;
@@ -27,7 +24,6 @@ const TRUST_STORE_DIGEST = honchoReceiptTrustStoreDigest(TRUST_STORE);
 const TRUSTED_OPTIONS = { receiptTrustStore: TRUST_STORE,
   minimumReceiptTrustRevision: TRUST_REVISION,
   trustedReceiptTrustStoreDigest: TRUST_STORE_DIGEST };
-
 function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = new Date().toISOString(),
   receiptSigner = TRUSTED_SIGNER, receiptTrustRevision = TRUST_REVISION,
   receiptTrustStoreDigest = TRUST_STORE_DIGEST) {
@@ -65,7 +61,6 @@ function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = ne
       null, Buffer.from(sourceOfferBinding, "utf8"), receiptSigner.privateKey
     ).toString("base64") } };
 }
-
 function plan(overrides = {}) {
   return {
     schema: HONCHO_ADMISSION_SCHEMA,
@@ -86,20 +81,17 @@ function plan(overrides = {}) {
     ...overrides
   };
 }
-
 test("evaluation admits one AgentSpine writer and three separately approved self-hosted endpoint roles", () => {
   assert.deepEqual(evaluateHonchoAdmission(plan()), {
     schema: HONCHO_ADMISSION_SCHEMA, admitted: true, phase: "evaluation", blockers: []
   });
 });
-
 test("King vLLM cannot be mistaken for the Honcho server even when both use port 8000", () => {
   const value = plan({ honcho: { serverUrl: "http://100.74.238.1:8000" } });
   const result = evaluateHonchoAdmission(value);
   assert.equal(result.admitted, false);
   assert.ok(result.blockers.some((item) => item.code === "endpoint-role-collision"));
 });
-
 test("the supplied native Ollama api/embed endpoint is not claimed as direct upstream Honcho compatibility", () => {
   const value = plan({ embedding: {
     baseUrl: "http://100.74.238.1:11434/api/embed", transport: "ollama-native", model: "bge-m3", dimensions: 1024
@@ -108,7 +100,6 @@ test("the supplied native Ollama api/embed endpoint is not claimed as direct ups
   assert.equal(result.admitted, false);
   assert.ok(result.blockers.some((item) => item.code === "embedding-protocol-unverified"));
 });
-
 test("an allowlisted public endpoint cannot satisfy BLUN self-hosted data residency", () => {
   const value = plan({
     honcho: { serverUrl: "https://memory.example" },
@@ -122,7 +113,6 @@ test("an allowlisted public endpoint cannot satisfy BLUN self-hosted data reside
     { code: "endpoint-not-private-network", field: "server" }
   ]);
 });
-
 test("loopback, RFC1918, Tailscale CGNAT and IPv6 ULA hosts are private-network eligible", () => {
   const serverUrls = ["http://localhost:18000", "http://10.0.0.4:18000",
     "http://172.31.0.4:18000", "http://192.168.0.4:18000", "http://100.127.255.254:18000",
@@ -135,7 +125,6 @@ test("loopback, RFC1918, Tailscale CGNAT and IPv6 ULA hosts are private-network 
     assert.equal(evaluateHonchoAdmission(value).admitted, true, serverUrl);
   }
 });
-
 test("public, link-local and ambiguous hostname forms fail the private-network boundary", () => {
   for (const serverUrl of ["https://203.0.113.10", "http://169.254.169.254", "http://internal.example",
     "http://010.0.0.4", "http://localhost.example"]) {
@@ -147,14 +136,12 @@ test("public, link-local and ambiguous hostname forms fail the private-network b
       item.code === "endpoint-not-private-network" && item.field === "server"), serverUrl);
   }
 });
-
 test("evaluation and cutover reject parallel memory writers", () => {
   const evaluation = evaluateHonchoAdmission(plan({ writes: { agentspine: true, honcho: true } }));
   assert.ok(evaluation.blockers.some((item) => item.code === "memory-writer-not-exclusive"));
   const cutover = evaluateHonchoAdmission(plan({ phase: "honcho-primary", writes: { agentspine: true, honcho: true } }));
   assert.ok(cutover.blockers.some((item) => item.code === "cutover-write-boundary-invalid"));
 });
-
 test("production cutover requires host acceptance, deletion proof and AGPL source readiness", () => {
   const denied = evaluateHonchoAdmission(
     plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true } }), TRUSTED_OPTIONS
@@ -167,7 +154,6 @@ test("production cutover requires host acceptance, deletion proof and AGPL sourc
   }), TRUSTED_OPTIONS);
   assert.equal(accepted.admitted, true);
 });
-
 test("production cutover rejects one receipt reused across independent evidence gates", () => {
   const shared = "a".repeat(64);
   const result = evaluateHonchoAdmission(plan({
@@ -491,6 +477,20 @@ test("accessors and overwide plans fail closed before untrusted code can run", (
   const wide = plan({ metadata: Object.fromEntries(Array.from({ length: 4097 }, (_, index) => [`field${index}`, index])) });
   for (const result of [accessorResult, evaluateHonchoAdmission(wide)]) assert.deepEqual(result.blockers,
     [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
+});
+test("proxy traps cannot execute during plan validation", () => {
+  let traps = 0;
+  const trap = () => { traps += 1; throw new Error("untrusted proxy trap ran"); };
+  const root = new Proxy(plan(), { getPrototypeOf: trap, ownKeys: trap });
+  const nested = plan({ metadata: new Proxy({}, { getPrototypeOf: trap, ownKeys: trap }) });
+  const revoked = Proxy.revocable(plan(), {});
+  revoked.revoke();
+  for (const candidate of [root, nested, revoked.proxy]) {
+    let result;
+    assert.doesNotThrow(() => { result = evaluateHonchoAdmission(candidate); });
+    assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
+  }
+  assert.equal(traps, 0);
 });
 test("shared acyclic plan metadata does not look like a traversal cycle", () => {
   const shared = { label: "synthetic-shared-config" };
