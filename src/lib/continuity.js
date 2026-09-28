@@ -320,7 +320,9 @@ export async function purgeContinuity({ root = process.cwd(), subjectId, confirm
     state.history.push({ kind: "subject-purged", subjectId: digest(subjectId), at, authority: "context-only" });
     return { signalCount, continuityPath };
   });
-  const learning = await purgeLearningBySubject({ root, subjectId, now });
+  const learning = await purgeLearningBySubject({
+    root, subjectId, confirmation: "local-user-purge-confirmed", now
+  });
   return { subjectId, deletedSignals: result.signalCount, deletedLearning: learning.deleted, authority: "context-only" };
 }
 
