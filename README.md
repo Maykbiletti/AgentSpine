@@ -239,9 +239,10 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine attention-add …` | Record an unanswered question, promise, check-in, or meaningful change |
 | `agentspine attention-touch …` | Record only that an entity interaction occurred |
 | `agentspine attention-config …` | Configure limits, quiet hours, silence threshold, or disable attention |
-| `agentspine attention-delete …` | Permanently remove a cue and its retained attention history |
+| `agentspine attention-delete … --confirm-local-purge` | Permanently remove a cue and its retained attention history after explicit local user confirmation |
 | `agentspine attention-events …` | Inspect durable heartbeat, promise, and blocker events plus optional history |
-| `agentspine attention-event-delete …` | Permanently remove one lifecycle event, its receipts, history, and presentation state |
+| `agentspine attention-event-delete … --confirm-local-purge` | Permanently remove one lifecycle event, its receipts, history, and presentation state after explicit local user confirmation |
+| `agentspine attention-purge … --confirm-local-purge` | Permanently remove all attention state for one entity after explicit local user confirmation |
 | `agentspine learn-propose …` | Store an evidence-backed candidate outside accepted context |
 | `agentspine learn-evidence …` | Append evidence while retaining the previous candidate version |
 | `agentspine learn-review …` | Explicitly accept or reject a candidate |

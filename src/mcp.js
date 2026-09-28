@@ -200,11 +200,12 @@ const tools = [
   },
   {
     name: "delete_attention",
-    description: "Permanently delete one cue, one lifecycle event, or all attention data for one entity, including retained history, receipts, and presentation timestamps.",
+    description: "After explicit local user confirmation, permanently delete one cue, one lifecycle event, or all attention data for one entity, including retained history, receipts, and presentation timestamps.",
     inputSchema: {
-      type: "object",
+      type: "object", required: ["confirmation"], additionalProperties: false,
       properties: {
-        root: { type: "string" }, signalId: { type: "string" }, eventId: { type: "string" }, entityId: { type: "string" }
+        root: { type: "string" }, signalId: { type: "string" }, eventId: { type: "string" }, entityId: { type: "string" },
+        confirmation: { type: "string", enum: ["local-user-purge-confirmed"] }
       },
       oneOf: [{ required: ["signalId"] }, { required: ["eventId"] }, { required: ["entityId"] }]
     }

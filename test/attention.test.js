@@ -27,12 +27,16 @@ function hash(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function runCli(args, state) {
+function runCliProcess(args, state) {
   const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
-  const result = spawnSync(process.execPath, [cli, ...args], {
+  return spawnSync(process.execPath, [cli, ...args], {
     encoding: "utf8",
     env: { ...process.env, AGENTSPINE_STATE_DIR: state }
   });
+}
+
+function runCli(args, state) {
+  const result = runCliProcess(args, state);
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
@@ -71,7 +75,19 @@ test("attention prioritizes due cues without exposing private context or rewriti
   await resolveAttention({ root, id: "signal:question", status: "completed", now: "2027-01-02T12:00:00.000Z" });
   const { attention } = await loadAttention(root);
   assert.equal(attention.history.some((entry) => entry.value?.id === "signal:question" && entry.value.status === "open"), true);
-  await deleteAttention({ root, signalId: "signal:question" });
+  const attentionPath = (await loadAttention(root)).attentionPath;
+  const stateBytes = await readFile(attentionPath);
+  await assert.rejects(deleteAttention({ root, signalId: null }),
+    /explicit local user confirmation/,
+    "confirmation is checked before target validation or existence disclosure");
+  await assert.rejects(deleteAttention({
+    root, signalId: "signal:question", confirmation: "local-user-confirmed"
+  }), /explicit local user confirmation/);
+  assert.deepEqual(await readFile(attentionPath), stateBytes,
+    "rejected deletion must not change attention state bytes");
+  await deleteAttention({
+    root, signalId: "signal:question", confirmation: "local-user-purge-confirmed"
+  });
   const deleted = (await loadAttention(root)).attention;
   assert.equal(deleted.signals.some((signal) => signal.id === "signal:question"), false);
   assert.equal(deleted.history.some((entry) => entry.value?.id === "signal:question"), false);
@@ -180,7 +196,9 @@ test("concurrent activity writes are serialized and entity purge removes their t
     root, entityId: "agent:worker", at: new Date(Date.UTC(2027, 0, 1, 0, index)).toISOString(), privacy: "private"
   })));
   assert.equal((await loadAttention(root)).attention.activities.length, 12);
-  const purged = await deleteAttention({ root, entityId: "agent:worker" });
+  const purged = await deleteAttention({
+    root, entityId: "agent:worker", confirmation: "local-user-purge-confirmed"
+  });
   assert.equal(purged.deletedActivities, 12);
   assert.equal((await loadAttention(root)).attention.activities.length, 0);
 });
@@ -245,6 +263,13 @@ test("CLI attention workflow creates, presents, resolves, and disables cues", as
   assert.equal(due.items[0].key, "cue:signal:cli");
   const resolved = runCli(["attention-resolve", "signal:cli", "--root", root, "--status", "completed", "--json"], state);
   assert.equal(resolved.signal.status, "completed");
+  const rejected = runCliProcess(["attention-delete", "signal:cli", "--root", root, "--json"], state);
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /explicit local user confirmation/);
+  const deleted = runCli([
+    "attention-delete", "signal:cli", "--root", root, "--confirm-local-purge", "--json"
+  ], state);
+  assert.equal(deleted.deleted, true);
   runCli(["attention-config", root, "--enabled", "false", "--json"], state);
   const disabled = runCli(["attention", root, "--json"], state);
   assert.equal(disabled.suppressed, "disabled");

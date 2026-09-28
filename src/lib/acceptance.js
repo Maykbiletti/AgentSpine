@@ -386,7 +386,9 @@ process.stdin.on("end", () => {
     addCheck(checks, "checkpoint", "Dauerhaftes Checkpointing", "Effekt, Ergebnis-Digest, Stop und Resume besitzen idempotente externe Receipts.", durable.receipts.map((item) => [item.id, item.event, item.digest]));
 
     await purgeContinuity({ root: projectRoot, subjectId: "person:lucia", confirmation: "local-user-confirmed", now: "2031-04-05T09:11:00.000Z" });
-    await deleteAttention({ root: projectRoot, entityId: "person:lucia" });
+    await deleteAttention({
+      root: projectRoot, entityId: "person:lucia", confirmation: "local-user-purge-confirmed"
+    });
     const purged = packet(await runHook({
       hook_event_name: "SessionStart", host: "codex", cwd: projectRoot,
       entity_id: "person:lucia", project_id: "project:brisa", task_id: "task:brisa",

@@ -63,15 +63,24 @@ export async function runAttentionCommand({ command, flags, positional, json }) 
   }
 
   if (command === "attention-delete") {
-    return output(await deleteAttention({ root: flags.root || process.cwd(), signalId: positional[0] }), json);
+    return output(await deleteAttention({
+      root: flags.root || process.cwd(), signalId: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
+    }), json);
   }
 
   if (command === "attention-event-delete") {
-    return output(await deleteAttention({ root: flags.root || process.cwd(), eventId: positional[0] }), json);
+    return output(await deleteAttention({
+      root: flags.root || process.cwd(), eventId: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
+    }), json);
   }
 
   if (command === "attention-purge") {
-    return output(await deleteAttention({ root: flags.root || process.cwd(), entityId: positional[0] }), json);
+    return output(await deleteAttention({
+      root: flags.root || process.cwd(), entityId: positional[0],
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
+    }), json);
   }
 
   if (command === "attention-config") {

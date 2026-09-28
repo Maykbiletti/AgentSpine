@@ -31,9 +31,9 @@ Usage:
   agentspine attention-add [id] --kind promise --summary text [--entity id] [--group id] [--due date]
   agentspine attention-resolve <id> [--status completed|dismissed|open]
   agentspine attention-touch <entity-id> [--kind interaction] [--at date]
-  agentspine attention-delete <signal-id>
-  agentspine attention-event-delete <event-id>
-  agentspine attention-purge <entity-id>
+  agentspine attention-delete <signal-id> --confirm-local-purge
+  agentspine attention-event-delete <event-id> --confirm-local-purge
+  agentspine attention-purge <entity-id> --confirm-local-purge
   agentspine attention-config [root] [--enabled true|false] [--quiet-start 22 --quiet-end 7 --utc-offset 120]
   agentspine learn-propose [id] --kind preference|behavior --claim text --evidence text [--persona id --user id --tenant id --project id --group id --task id]
   agentspine learn-evidence <id> --summary text [--type interaction] [--source path.md]

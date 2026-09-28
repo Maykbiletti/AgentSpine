@@ -104,15 +104,15 @@ agentspine attention-config . --enabled false
 Delete one cue and its retained attention history, or purge all attention data associated with an entity:
 
 ```bash
-agentspine attention-delete signal:handoff
+agentspine attention-delete signal:handoff --confirm-local-purge
 agentspine attention-events . --include-history --json
-agentspine attention-event-delete event:blocker:alpha
-agentspine attention-purge agent:builder
+agentspine attention-event-delete event:blocker:alpha --confirm-local-purge
+agentspine attention-purge agent:builder --confirm-local-purge
 ```
 
 ## History and deletion
 
-Updating or resolving a cue or lifecycle event first retains its previous value in private attention history. This preserves how relevance changed without rewriting source Markdown. Permanent event deletion removes the active event, its receipts, retained versions, and presentation timestamp. Entity purge additionally removes matching events, receipts, activity timestamps, and relationship-silence presentation state.
+Updating or resolving a cue or lifecycle event first retains its previous value in private attention history. This preserves how relevance changed without rewriting source Markdown. Every permanent attention deletion requires explicit local user confirmation. Event deletion removes the active event, its receipts, retained versions, and presentation timestamp. Entity purge additionally removes matching events, receipts, activity timestamps, and relationship-silence presentation state.
 
 ## Concurrency and limits
 
