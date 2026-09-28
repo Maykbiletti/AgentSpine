@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   captureContinuityPrompt, configureContinuity, loadContinuity, purgeContinuity
 } from "../src/lib/continuity.js";
@@ -40,6 +42,13 @@ async function fixture(t) {
 
 function injected(result) {
   return JSON.parse(result.context);
+}
+
+function runCli(args, state) {
+  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
+  return spawnSync(process.execPath, [cli, ...args], {
+    encoding: "utf8", env: { ...process.env, AGENTSPINE_STATE_DIR: state }
+  });
 }
 
 test("automatic capture remains off until one explicit local opt-in", async (t) => {
@@ -171,6 +180,32 @@ test("parallel prompt hooks serialize receipts and promote at most one accepted 
   assert.equal(learning.candidates[0].automatic, true);
 });
 
+test("permanent continuity deletion requires the strong purge confirmation before target validation", async (t) => {
+  const { root, state, before } = await fixture(t);
+  await configureContinuity({ root, config: { enabled: true }, confirmation: "local-user-opt-in" });
+  await captureContinuityPrompt({
+    root, entityId: "person:alpha", eventId: "event:purge", prompt: "Bitte antworte immer kurz."
+  });
+  const { continuityPath } = await loadContinuity(root);
+  const { learningPath } = await loadLearning(root);
+  const stateBefore = await Promise.all([readFile(continuityPath), readFile(learningPath)]);
+  await assert.rejects(purgeContinuity({ root, subjectId: "invalid subject" }), /purge confirmation/);
+  await assert.rejects(purgeContinuity({
+    root, subjectId: "person:alpha", confirmation: "local-user-confirmed"
+  }), /purge confirmation/);
+  const denied = runCli(["continuity-purge", "person:alpha", "--root", root, "--json"], state);
+  assert.notEqual(denied.status, 0);
+  assert.match(denied.stderr, /purge confirmation/);
+  assert.deepEqual(await Promise.all([readFile(continuityPath), readFile(learningPath)]), stateBefore);
+  for (const [name, expected] of Object.entries(before)) assert.equal(hash(await readFile(join(root, name))), expected);
+  const allowed = runCli([
+    "continuity-purge", "person:alpha", "--root", root, "--confirm-local-purge", "--json"
+  ], state);
+  assert.equal(allowed.status, 0, allowed.stderr);
+  assert.equal(JSON.parse(allowed.stdout).subjectId, "person:alpha");
+  assert.equal((await loadContinuity(root)).continuity.signals.length, 0);
+});
+
 test("correction, rollback and confirmed purge remain effective across restarts without touching sources", async (t) => {
   const { root, before } = await fixture(t);
   await configureContinuity({ root, config: { enabled: true }, confirmation: "local-user-opt-in" });
@@ -188,7 +223,7 @@ test("correction, rollback and confirmed purge remain effective across restarts 
   const rolledBack = injected(await runHook({ hook_event_name: "PostCompact", cwd: root, entity_id: "person:alpha" }));
   assert.equal(rolledBack.briefing.learning.some((item) => item.kind === "correction"), false);
   assert.equal(rolledBack.briefing.learning.some((item) => item.kind === "preference"), true);
-  await purgeContinuity({ root, subjectId: "person:alpha", confirmation: "local-user-confirmed" });
+  await purgeContinuity({ root, subjectId: "person:alpha", confirmation: "local-user-purge-confirmed" });
   const purged = injected(await runHook({ hook_event_name: "SessionStart", cwd: root, entity_id: "person:alpha" }));
   assert.equal(purged.briefing.learning.length, 0);
   assert.equal((await learningContext({ root, includePrivate: true, subjectIds: ["person:alpha"] })).items.length, 0);

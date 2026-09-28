@@ -51,7 +51,7 @@ export async function runContinuityCommand({ command, flags, positional, json })
   if (command === "continuity-purge") {
     return output(await purgeContinuity({
       root: flags.root || process.cwd(), subjectId: positional[0],
-      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-confirmed" : null
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
     }), json);
   }
 

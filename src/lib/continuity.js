@@ -310,8 +310,10 @@ export async function captureContinuityPrompt({
 }
 
 export async function purgeContinuity({ root = process.cwd(), subjectId, confirmation = null, now = new Date() }) {
+  if (confirmation !== "local-user-purge-confirmed") {
+    throw new Error("continuity purge requires explicit local user purge confirmation");
+  }
   if (!ID_RE.test(subjectId || "")) throw new Error("subjectId is required");
-  if (confirmation !== "local-user-confirmed") throw new Error("continuity purge requires explicit local user confirmation");
   const at = timestamp(now);
   const result = await mutate(root, (state, _catalog, continuityPath) => {
     const signalCount = state.signals.filter((item) => item.subjectId === subjectId).length;

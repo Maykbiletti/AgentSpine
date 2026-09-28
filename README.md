@@ -267,7 +267,7 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine learn-delete … --confirm-local-purge` | Permanently remove one candidate and its learning history after explicit local user confirmation; retain only content-free evidence and source digests so renaming or paraphrasing unchanged source bytes cannot silently restore it |
 | `agentspine continuity-config …` | Enable, disable, scope, and budget automatic continuity after local opt-in |
 | `agentspine continuity-status …` | Inspect configuration and minimal signal counts without transcript content |
-| `agentspine continuity-purge … --confirm-local-purge` | Permanently remove one identity's automatic signals and learned context after explicit local user confirmation |
+| `agentspine continuity-purge … --confirm-local-purge` | Permanently remove one identity's automatic signals and learned context after explicit local user purge confirmation |
 | `agentspine source-status …` | Inspect host-native user, project, and memory roots without exposing source contents |
 | `agentspine source-bind …` | Bind existing user-wide continuity after an explicit local confirmation |
 | `agentspine source-rollback …` | Disable one source binding while retaining its append-only audit history |
