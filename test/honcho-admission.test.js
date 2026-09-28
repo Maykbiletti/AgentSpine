@@ -104,6 +104,25 @@ test("production cutover requires host acceptance, deletion proof and AGPL sourc
   assert.equal(accepted.admitted, true);
 });
 
+test("production cutover rejects one receipt reused across independent evidence gates", () => {
+  const shared = "a".repeat(64);
+  const result = evaluateHonchoAdmission(plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true },
+    governance: { dataResidency: "blun-self-hosted", upstreamLicense: "AGPL-3.0", sourceOfferDigest: shared },
+    acceptance: { serverHealth: shared, embeddingCompatibility: shared,
+      derivationIsolation: shared, crossSessionRecall: shared, deletion: shared }
+  }));
+  assert.equal(result.admitted, false);
+  assert.deepEqual(result.blockers.filter((item) => item.code === "production-evidence-reused"), [
+    { code: "production-evidence-reused", field: "acceptance.serverHealth,acceptance.embeddingCompatibility" },
+    { code: "production-evidence-reused", field: "acceptance.serverHealth,acceptance.derivationIsolation" },
+    { code: "production-evidence-reused", field: "acceptance.serverHealth,acceptance.crossSessionRecall" },
+    { code: "production-evidence-reused", field: "acceptance.serverHealth,acceptance.deletion" },
+    { code: "production-evidence-reused", field: "acceptance.serverHealth,governance.sourceOfferDigest" }
+  ]);
+  assert.equal(JSON.stringify(result).includes(shared), false);
+});
+
 test("managed Honcho, unapproved origins, raw credentials, missing scope and unsafe derivation fail closed", () => {
   const value = plan({
     honcho: { serverUrl: "https://api.honcho.dev", apiKey: "must-not-live-here" },
