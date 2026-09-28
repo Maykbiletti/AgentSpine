@@ -454,6 +454,21 @@ test("credential containers and common access-key aliases cannot hide raw materi
   }
 });
 
+test("numeric token metrics do not masquerade as raw credentials", () => {
+  const quota = { maxTokens: 2048, maxInputTokens: 1536, maxOutputTokens: 512, inputTokens: 320,
+    outputTokens: 160, promptTokens: 320, completionTokens: 160, cachedInputTokens: 64, reasoningTokens: 32, totalTokens: 480 };
+  assert.equal(evaluateHonchoAdmission(plan({ derivation: { ...plan().derivation, quota } })).admitted, true);
+  for (const [key, unsafe] of [["maxTokens", "synthetic-access-material"],
+    ["maxInputTokens", ["synthetic-access-material"]], ["accessToken", 1234], ["tokens", 2048]]) {
+    const result = evaluateHonchoAdmission(plan({
+      derivation: { ...plan().derivation, quota: { [key]: unsafe } }
+    }));
+    assert.deepEqual(result.blockers.filter((item) => item.code === "raw-credential-forbidden"),
+      [{ code: "raw-credential-forbidden", field: `derivation.quota.${key}` }]);
+    assert.equal(JSON.stringify(result).includes("synthetic-access-material"), false);
+  }
+});
+
 test("cyclic and overdeep plans cannot bypass the recursive credential gate", () => {
   const cyclic = plan({ metadata: {} });
   cyclic.metadata.self = cyclic.metadata;

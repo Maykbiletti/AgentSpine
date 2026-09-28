@@ -22,6 +22,10 @@ const RAW_CREDENTIAL_KEY_SUFFIXES = [
   "authentication", "cookie", "privatekey", "passphrase", "accesskey", "accesskeyid",
   "secretkey"
 ];
+const NUMERIC_TOKEN_METRIC_KEYS = new Set([
+  "maxtokens", "maxinputtokens", "maxoutputtokens", "inputtokens", "outputtokens",
+  "prompttokens", "completiontokens", "cachedinputtokens", "reasoningtokens", "totaltokens"
+]);
 
 function blocker(code, field) { return { code, field }; }
 
@@ -116,8 +120,10 @@ function receiptSignature(value) {
   return bytes.toString("base64") === value ? bytes : null;
 }
 
-function rawCredentialKey(value) {
+function rawCredentialKey(value, child) {
   const canonical = value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (NUMERIC_TOKEN_METRIC_KEYS.has(canonical)
+    && Number.isSafeInteger(child) && child >= 0) return false;
   const candidates = canonical.endsWith("s")
     ? [canonical, canonical.slice(0, -1)]
     : [canonical];
@@ -138,7 +144,7 @@ function rawCredentialScan(value, path = "", ancestors = new WeakSet(), depth = 
   ancestors.add(value);
   for (const [key, child] of Object.entries(value)) {
     const childPath = path ? `${path}.${key}` : key;
-    if (rawCredentialKey(key) && rawCredentialValue(child)) {
+    if (rawCredentialKey(key, child) && rawCredentialValue(child)) {
       ancestors.delete(value);
       return { kind: "credential", path: childPath };
     }
