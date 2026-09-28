@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const HONCHO_ADMISSION_SCHEMA = "agentspine.honcho-admission/v1";
 
 const PHASES = new Set(["evaluation", "honcho-primary"]);
@@ -6,6 +8,9 @@ const PRODUCTION_EVIDENCE = [
   "serverHealth", "embeddingCompatibility", "derivationIsolation", "crossSessionRecall", "deletion"
 ];
 const SHA256 = /^[a-f0-9]{64}$/;
+const PRODUCTION_EVIDENCE_PATHS = new Set([
+  ...PRODUCTION_EVIDENCE.map((field) => `acceptance.${field}`), "governance.sourceOfferDigest"
+]);
 
 function blocker(code, field) { return { code, field }; }
 
@@ -52,6 +57,14 @@ function isPrivateNetworkHost(hostname) {
 
 function boundedText(value, maximum = 256) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= maximum;
+}
+
+export function honchoEvidenceBindingDigest(field, evidenceDigest, scope) {
+  if (!PRODUCTION_EVIDENCE_PATHS.has(field) || !SHA256.test(evidenceDigest)
+    || SCOPE_FIELDS.some((name) => !boundedText(scope?.[name]))) return null;
+  const payload = JSON.stringify({ schema: HONCHO_ADMISSION_SCHEMA, field, evidenceDigest,
+    scope: Object.fromEntries(SCOPE_FIELDS.map((name) => [name, scope[name]])) });
+  return createHash("sha256").update(payload, "utf8").digest("hex");
 }
 
 function rawCredentialPath(value, path = "", seen = new WeakSet(), depth = 0) {
@@ -117,15 +130,22 @@ function checkRuntimeOwnership(plan, blockers) {
 }
 
 function checkProductionEvidence(plan, blockers) {
-  const evidence = PRODUCTION_EVIDENCE.map((field) =>
-    [`acceptance.${field}`, plan?.acceptance?.[field]]);
-  evidence.push(["governance.sourceOfferDigest", plan?.governance?.sourceOfferDigest]);
+  const evidence = PRODUCTION_EVIDENCE.map((field) => ({
+    field: `acceptance.${field}`, digest: plan?.acceptance?.[field],
+    binding: plan?.acceptance?.evidenceBindings?.[field], bindingField: `acceptance.evidenceBindings.${field}`
+  }));
+  evidence.push({ field: "governance.sourceOfferDigest", digest: plan?.governance?.sourceOfferDigest,
+    binding: plan?.governance?.sourceOfferBinding, bindingField: "governance.sourceOfferBinding" });
   const seen = new Map();
-  for (const [field, digest] of evidence) {
+  for (const { field, digest, binding, bindingField } of evidence) {
     if (!SHA256.test(digest)) {
       blockers.push(blocker(field === "governance.sourceOfferDigest"
         ? "agpl-source-offer-not-ready" : "production-evidence-missing", field));
       continue;
+    }
+    const expected = honchoEvidenceBindingDigest(field, digest, plan.scope);
+    if (!SHA256.test(binding) || binding !== expected) {
+      blockers.push(blocker("production-evidence-scope-mismatch", bindingField));
     }
     const previous = seen.get(digest);
     if (previous) blockers.push(blocker("production-evidence-reused", `${previous},${field}`));
