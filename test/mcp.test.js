@@ -13,7 +13,6 @@ import { recordDeliveryBriefingUse, recordDeliveryKnowledgeUse } from "../src/li
 import { upsertEntity } from "../src/lib/graph.js";
 import { proposeLearning, reviewLearning } from "../src/lib/learning.js";
 import { initDirectoryAdapter, publishLearning, pullShared, reviewShared } from "../src/lib/sharing.js";
-
 function closeMcpChild(child) {
   return new Promise((resolve, reject) => {
     if (child.exitCode !== null || child.signalCode !== null) return resolve();
@@ -95,6 +94,7 @@ test("MCP server initializes and lists its read and graph tools", async () => {
   assert.equal(timelineCapture.inputSchema.properties.eventId.pattern, "^timeline-event:[a-f0-9]{32}$");
   const deleteLearning = messages[1].result.tools.find((tool) => tool.name === "delete_learning"); assert.deepEqual(
     [deleteLearning.inputSchema.required, deleteLearning.inputSchema.additionalProperties, deleteLearning.inputSchema.properties.confirmation.enum], [["id", "confirmation"], false, ["local-user-purge-confirmed"]]);
+  const deleteAttention = messages[1].result.tools.find((tool) => tool.name === "delete_attention"); assert.deepEqual([deleteAttention.inputSchema.required, deleteAttention.inputSchema.additionalProperties, deleteAttention.inputSchema.properties.confirmation.enum], [["confirmation"], false, ["local-user-purge-confirmed"]]);
   const premortem = messages[1].result.tools.find(tool => tool.name === "record_delivery_premortem");
   assert.deepEqual(premortem.inputSchema.required, ["root", "requirementId", "items"]);
   assert.equal(premortem.inputSchema.properties.root.type, "string");

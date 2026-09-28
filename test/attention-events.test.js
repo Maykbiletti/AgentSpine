@@ -175,7 +175,9 @@ test("blocker transitions persist across hooks and focus, quiet hours, and delet
     agent_spine_attention: { id: "event:blocker:alpha", kind: "blocker", summary: "Blocker: synthetic dependency", status: "resolved" }
   });
   assert.equal((await loadAttention(root)).attention.events[0].status, "resolved");
-  const removed = await deleteAttention({ root, eventId: "event:blocker:alpha" });
+  const removed = await deleteAttention({
+    root, eventId: "event:blocker:alpha", confirmation: "local-user-purge-confirmed"
+  });
   assert.equal(removed.deleted, true);
   assert.equal((await loadAttention(root)).attention.events.length, 0);
   assert.equal((await loadAttention(root)).attention.history.some((entry) => entry.recordId === "event:blocker:alpha"), false);
@@ -245,7 +247,9 @@ test("entity purge removes lifecycle events, receipts, history, and presentation
     root, entityId: "person:alpha", projectId: "project:alpha", currentTaskId: "task:alpha",
     includePrivate: true, focusActive: true, markPresented: true, now: "2027-01-01T10:01:00.000Z"
   });
-  const purged = await deleteAttention({ root, entityId: "person:alpha" });
+  const purged = await deleteAttention({
+    root, entityId: "person:alpha", confirmation: "local-user-purge-confirmed"
+  });
   assert.equal(purged.deletedEvents, 1);
   const state = (await loadAttention(root)).attention;
   assert.equal(state.events.length, 0);

@@ -121,7 +121,12 @@ export async function configureAttention({ root = process.cwd(), config = {}, no
   });
 }
 
-export async function deleteAttention({ root = process.cwd(), signalId = null, eventId = null, entityId = null }) {
+export async function deleteAttention({
+  root = process.cwd(), signalId = null, eventId = null, entityId = null, confirmation = null
+}) {
+  if (confirmation !== "local-user-purge-confirmed") {
+    throw new Error("permanent attention deletion requires explicit local user confirmation");
+  }
   if ([signalId, eventId, entityId].filter(Boolean).length !== 1) throw new Error("provide exactly one of signalId, eventId, or entityId");
   return attentionMutation(root, (state, _catalog, attentionPath) => {
     if (signalId) {
