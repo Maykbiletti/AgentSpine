@@ -9,20 +9,26 @@ const DEFAULT_SCOPE = {
   projectId: "project:a", threadId: "thread:a"
 };
 
-function productionEvidence(scope = DEFAULT_SCOPE, digests = {}) {
+function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = new Date().toISOString()) {
   const values = { serverHealth: "b".repeat(64), embeddingCompatibility: "c".repeat(64),
     derivationIsolation: "d".repeat(64), crossSessionRecall: "e".repeat(64),
     deletion: "f".repeat(64), sourceOffer: "a".repeat(64), ...digests };
   const acceptance = {};
   const evidenceBindings = {};
+  const evidenceObservedAt = {};
   for (const field of ["serverHealth", "embeddingCompatibility", "derivationIsolation", "crossSessionRecall", "deletion"]) {
     acceptance[field] = values[field];
-    evidenceBindings[field] = honchoEvidenceBindingDigest(`acceptance.${field}`, values[field], scope);
+    evidenceObservedAt[field] = observedAt;
+    evidenceBindings[field] = honchoEvidenceBindingDigest(`acceptance.${field}`, values[field], scope, observedAt);
   }
   acceptance.evidenceBindings = evidenceBindings;
+  acceptance.evidenceObservedAt = evidenceObservedAt;
   return { acceptance, governance: { dataResidency: "blun-self-hosted", upstreamLicense: "AGPL-3.0",
     sourceOfferDigest: values.sourceOffer,
-    sourceOfferBinding: honchoEvidenceBindingDigest("governance.sourceOfferDigest", values.sourceOffer, scope) } };
+    sourceOfferObservedAt: observedAt,
+    sourceOfferBinding: honchoEvidenceBindingDigest(
+      "governance.sourceOfferDigest", values.sourceOffer, scope, observedAt
+    ) } };
 }
 
 function plan(overrides = {}) {
@@ -154,6 +160,18 @@ test("production evidence from one tenant and thread cannot unlock another scope
   }));
   assert.equal(replay.admitted, false);
   assert.equal(replay.blockers.filter((item) => item.code === "production-evidence-scope-mismatch").length, 6);
+});
+
+test("scope-correct production evidence expires before a later cutover", () => {
+  const staleObservedAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const result = evaluateHonchoAdmission(plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true },
+    ...productionEvidence(DEFAULT_SCOPE, {}, staleObservedAt)
+  }));
+  assert.equal(result.admitted, false);
+  assert.equal(result.blockers.filter((item) => item.code === "production-evidence-stale").length, 6);
+  assert.equal(result.blockers.some((item) => item.code === "production-evidence-scope-mismatch"), false);
+  assert.equal(JSON.stringify(result).includes(staleObservedAt), false);
 });
 
 test("managed Honcho, unapproved origins, raw credentials, missing scope and unsafe derivation fail closed", () => {

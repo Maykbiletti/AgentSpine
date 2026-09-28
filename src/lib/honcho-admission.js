@@ -11,6 +11,9 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const PRODUCTION_EVIDENCE_PATHS = new Set([
   ...PRODUCTION_EVIDENCE.map((field) => `acceptance.${field}`), "governance.sourceOfferDigest"
 ]);
+const PRODUCTION_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const PRODUCTION_EVIDENCE_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 function blocker(code, field) { return { code, field }; }
 
@@ -59,11 +62,19 @@ function boundedText(value, maximum = 256) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= maximum;
 }
 
-export function honchoEvidenceBindingDigest(field, evidenceDigest, scope) {
+function evidenceTimestamp(value) {
+  if (!UTC_TIMESTAMP.test(value)) return null;
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value
+    ? milliseconds : null;
+}
+
+export function honchoEvidenceBindingDigest(field, evidenceDigest, scope, observedAt) {
   if (!PRODUCTION_EVIDENCE_PATHS.has(field) || !SHA256.test(evidenceDigest)
-    || SCOPE_FIELDS.some((name) => !boundedText(scope?.[name]))) return null;
+    || SCOPE_FIELDS.some((name) => !boundedText(scope?.[name]))
+    || evidenceTimestamp(observedAt) === null) return null;
   const payload = JSON.stringify({ schema: HONCHO_ADMISSION_SCHEMA, field, evidenceDigest,
-    scope: Object.fromEntries(SCOPE_FIELDS.map((name) => [name, scope[name]])) });
+    observedAt, scope: Object.fromEntries(SCOPE_FIELDS.map((name) => [name, scope[name]])) });
   return createHash("sha256").update(payload, "utf8").digest("hex");
 }
 
@@ -130,22 +141,37 @@ function checkRuntimeOwnership(plan, blockers) {
 }
 
 function checkProductionEvidence(plan, blockers) {
+  const now = Date.now();
   const evidence = PRODUCTION_EVIDENCE.map((field) => ({
     field: `acceptance.${field}`, digest: plan?.acceptance?.[field],
-    binding: plan?.acceptance?.evidenceBindings?.[field], bindingField: `acceptance.evidenceBindings.${field}`
+    binding: plan?.acceptance?.evidenceBindings?.[field], bindingField: `acceptance.evidenceBindings.${field}`,
+    observedAt: plan?.acceptance?.evidenceObservedAt?.[field],
+    observedAtField: `acceptance.evidenceObservedAt.${field}`
   }));
   evidence.push({ field: "governance.sourceOfferDigest", digest: plan?.governance?.sourceOfferDigest,
-    binding: plan?.governance?.sourceOfferBinding, bindingField: "governance.sourceOfferBinding" });
+    binding: plan?.governance?.sourceOfferBinding, bindingField: "governance.sourceOfferBinding",
+    observedAt: plan?.governance?.sourceOfferObservedAt,
+    observedAtField: "governance.sourceOfferObservedAt" });
   const seen = new Map();
-  for (const { field, digest, binding, bindingField } of evidence) {
+  for (const { field, digest, binding, bindingField, observedAt, observedAtField } of evidence) {
     if (!SHA256.test(digest)) {
       blockers.push(blocker(field === "governance.sourceOfferDigest"
         ? "agpl-source-offer-not-ready" : "production-evidence-missing", field));
       continue;
     }
-    const expected = honchoEvidenceBindingDigest(field, digest, plan.scope);
-    if (!SHA256.test(binding) || binding !== expected) {
-      blockers.push(blocker("production-evidence-scope-mismatch", bindingField));
+    const observedMilliseconds = evidenceTimestamp(observedAt);
+    if (observedMilliseconds === null) {
+      blockers.push(blocker("production-evidence-time-invalid", observedAtField));
+    } else {
+      if (observedMilliseconds > now + PRODUCTION_EVIDENCE_FUTURE_SKEW_MS) {
+        blockers.push(blocker("production-evidence-from-future", observedAtField));
+      } else if (now - observedMilliseconds > PRODUCTION_EVIDENCE_MAX_AGE_MS) {
+        blockers.push(blocker("production-evidence-stale", observedAtField));
+      }
+      const expected = honchoEvidenceBindingDigest(field, digest, plan.scope, observedAt);
+      if (!SHA256.test(binding) || binding !== expected) {
+        blockers.push(blocker("production-evidence-scope-mismatch", bindingField));
+      }
     }
     const previous = seen.get(digest);
     if (previous) blockers.push(blocker("production-evidence-reused", `${previous},${field}`));
