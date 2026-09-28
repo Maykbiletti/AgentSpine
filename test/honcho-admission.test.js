@@ -1,6 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateHonchoAdmission, HONCHO_ADMISSION_SCHEMA } from "../src/lib/honcho-admission.js";
+import {
+  evaluateHonchoAdmission, honchoEvidenceBindingDigest, HONCHO_ADMISSION_SCHEMA
+} from "../src/lib/honcho-admission.js";
+
+const DEFAULT_SCOPE = {
+  tenantId: "tenant:a", workspaceId: "workspace:a", userId: "user:a",
+  projectId: "project:a", threadId: "thread:a"
+};
+
+function productionEvidence(scope = DEFAULT_SCOPE, digests = {}) {
+  const values = { serverHealth: "b".repeat(64), embeddingCompatibility: "c".repeat(64),
+    derivationIsolation: "d".repeat(64), crossSessionRecall: "e".repeat(64),
+    deletion: "f".repeat(64), sourceOffer: "a".repeat(64), ...digests };
+  const acceptance = {};
+  const evidenceBindings = {};
+  for (const field of ["serverHealth", "embeddingCompatibility", "derivationIsolation", "crossSessionRecall", "deletion"]) {
+    acceptance[field] = values[field];
+    evidenceBindings[field] = honchoEvidenceBindingDigest(`acceptance.${field}`, values[field], scope);
+  }
+  acceptance.evidenceBindings = evidenceBindings;
+  return { acceptance, governance: { dataResidency: "blun-self-hosted", upstreamLicense: "AGPL-3.0",
+    sourceOfferDigest: values.sourceOffer,
+    sourceOfferBinding: honchoEvidenceBindingDigest("governance.sourceOfferDigest", values.sourceOffer, scope) } };
+}
 
 function plan(overrides = {}) {
   return {
@@ -18,7 +41,7 @@ function plan(overrides = {}) {
     derivation: { baseUrl: "http://100.74.238.1:8000/v1", transport: "openai-compatible", model: "king",
       asynchronous: true, failOpen: true, maxRetries: 0, tools: false, parentHistory: false },
     governance: { dataResidency: "blun-self-hosted", upstreamLicense: "AGPL-3.0" },
-    scope: { tenantId: "tenant:a", workspaceId: "workspace:a", userId: "user:a", projectId: "project:a", threadId: "thread:a" },
+    scope: { ...DEFAULT_SCOPE },
     ...overrides
   };
 }
@@ -97,9 +120,7 @@ test("production cutover requires host acceptance, deletion proof and AGPL sourc
   assert.equal(denied.blockers.filter((item) => item.code === "production-evidence-missing").length, 5);
   const accepted = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true },
-    governance: { dataResidency: "blun-self-hosted", upstreamLicense: "AGPL-3.0", sourceOfferDigest: "a".repeat(64) },
-    acceptance: { serverHealth: "b".repeat(64), embeddingCompatibility: "c".repeat(64),
-      derivationIsolation: "d".repeat(64), crossSessionRecall: "e".repeat(64), deletion: "f".repeat(64) }
+    ...productionEvidence()
   }));
   assert.equal(accepted.admitted, true);
 });
@@ -108,9 +129,8 @@ test("production cutover rejects one receipt reused across independent evidence 
   const shared = "a".repeat(64);
   const result = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true },
-    governance: { dataResidency: "blun-self-hosted", upstreamLicense: "AGPL-3.0", sourceOfferDigest: shared },
-    acceptance: { serverHealth: shared, embeddingCompatibility: shared,
-      derivationIsolation: shared, crossSessionRecall: shared, deletion: shared }
+    ...productionEvidence(DEFAULT_SCOPE, { serverHealth: shared, embeddingCompatibility: shared,
+      derivationIsolation: shared, crossSessionRecall: shared, deletion: shared, sourceOffer: shared })
   }));
   assert.equal(result.admitted, false);
   assert.deepEqual(result.blockers.filter((item) => item.code === "production-evidence-reused"), [
@@ -121,6 +141,19 @@ test("production cutover rejects one receipt reused across independent evidence 
     { code: "production-evidence-reused", field: "acceptance.serverHealth,governance.sourceOfferDigest" }
   ]);
   assert.equal(JSON.stringify(result).includes(shared), false);
+});
+
+test("production evidence from one tenant and thread cannot unlock another scope", () => {
+  const evidence = productionEvidence(DEFAULT_SCOPE);
+  assert.equal(evaluateHonchoAdmission(plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...evidence
+  })).admitted, true);
+  const otherScope = { ...DEFAULT_SCOPE, tenantId: "tenant:b", userId: "user:b", threadId: "thread:b" };
+  const replay = evaluateHonchoAdmission(plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true }, scope: otherScope, ...evidence
+  }));
+  assert.equal(replay.admitted, false);
+  assert.equal(replay.blockers.filter((item) => item.code === "production-evidence-scope-mismatch").length, 6);
 });
 
 test("managed Honcho, unapproved origins, raw credentials, missing scope and unsafe derivation fail closed", () => {
