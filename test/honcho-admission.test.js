@@ -45,6 +45,45 @@ test("the supplied native Ollama api/embed endpoint is not claimed as direct ups
   assert.ok(result.blockers.some((item) => item.code === "embedding-protocol-unverified"));
 });
 
+test("an allowlisted public endpoint cannot satisfy BLUN self-hosted data residency", () => {
+  const value = plan({
+    honcho: { serverUrl: "https://memory.example" },
+    network: { approvedOrigins: [
+      "https://memory.example", "http://100.74.238.1:11434", "http://100.74.238.1:8000"
+    ] }
+  });
+  const result = evaluateHonchoAdmission(value);
+  assert.equal(result.admitted, false);
+  assert.deepEqual(result.blockers.filter((item) => item.code === "endpoint-not-private-network"), [
+    { code: "endpoint-not-private-network", field: "server" }
+  ]);
+});
+
+test("loopback, RFC1918, Tailscale CGNAT and IPv6 ULA hosts are private-network eligible", () => {
+  const serverUrls = ["http://localhost:18000", "http://10.0.0.4:18000",
+    "http://172.31.0.4:18000", "http://192.168.0.4:18000", "http://100.127.255.254:18000",
+    "http://[fd7a:115c:a1e0::1]:18000"];
+  for (const serverUrl of serverUrls) {
+    const origin = new URL(serverUrl).origin;
+    const value = plan({ honcho: { serverUrl }, network: { approvedOrigins: [
+      origin, "http://100.74.238.1:11434", "http://100.74.238.1:8000"
+    ] } });
+    assert.equal(evaluateHonchoAdmission(value).admitted, true, serverUrl);
+  }
+});
+
+test("public, link-local and ambiguous hostname forms fail the private-network boundary", () => {
+  for (const serverUrl of ["https://203.0.113.10", "http://169.254.169.254", "http://internal.example",
+    "http://010.0.0.4", "http://localhost.example"]) {
+    const origin = new URL(serverUrl).origin;
+    const value = plan({ honcho: { serverUrl }, network: { approvedOrigins: [
+      origin, "http://100.74.238.1:11434", "http://100.74.238.1:8000"
+    ] } });
+    assert.ok(evaluateHonchoAdmission(value).blockers.some((item) =>
+      item.code === "endpoint-not-private-network" && item.field === "server"), serverUrl);
+  }
+});
+
 test("evaluation and cutover reject parallel memory writers", () => {
   const evaluation = evaluateHonchoAdmission(plan({ writes: { agentspine: true, honcho: true } }));
   assert.ok(evaluation.blockers.some((item) => item.code === "memory-writer-not-exclusive"));
