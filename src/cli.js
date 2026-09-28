@@ -104,7 +104,7 @@ Usage:
   agentspine job-register <job-id> --grant grant:id [--max-retries 3] [--lease-seconds 120] --confirm-local-execution
   agentspine jobs [root] [--actor id] [--project id] [--task id] [--include-terminal]
   agentspine job-cancel <job-id> --reason text --confirm-local-execution
-  agentspine job-delete <job-id> --confirm-local-execution
+  agentspine job-delete <job-id> --confirm-local-purge
   agentspine channel-bind <binding-id> --provider telegram --tenant id --account id --chat id --senders id,id --agent agent:id --project project:id --session key --secret-env VARIABLE [--outbound-secret-env VARIABLE] --confirm-local-channel
   agentspine channel-revoke <binding-id> --reason text --confirm-local-channel
   agentspine channel-policy [root]

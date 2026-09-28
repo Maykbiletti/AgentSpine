@@ -283,7 +283,7 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine job-register …` | Register a waiting job with its initial content-bound checkpoint |
 | `agentspine jobs …` | Inspect durable status, retry, blocker, lease, and checkpoint metadata |
 | `agentspine job-cancel …` | Stop a job through an explicit local owner decision |
-| `agentspine job-delete …` | Permanently purge an unleased job, history, and receipts |
+| `agentspine job-delete … --confirm-local-purge` | Permanently purge an unleased job, history, and receipts after dedicated local purge confirmation |
 | `agentspine channel-bind …` | Create or replace one exact locally confirmed provider-to-agent route |
 | `agentspine channel-revoke …` | Revoke a route and cancel its pending or leased events |
 | `agentspine channel-policy …` | Inspect local channel bindings without exposing secret values |
