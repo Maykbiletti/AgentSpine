@@ -14,6 +14,7 @@ AgentSpine may act as the scope and policy gateway for a self-hosted Honcho depl
 - Telemetry is disabled and raw credentials are forbidden in the admission plan. A later transport may refer to a separately managed credential environment variable, but must not persist its value.
 - Background derivation is asynchronous, tool-less, parent-history-free, fail-open, and has no automatic retries.
 - A production cutover requires a distinct SHA-256-bound receipt for each of live server health, embedding compatibility, derivation isolation, cross-session recall, deletion, and AGPL source availability. Every receipt also carries a field-domain-separated binding over its digest, canonical UTC observation time, and the exact tenant, workspace, user, project, and thread scope. Receipts older than 24 hours or more than five minutes in the future are rejected. Boolean claims, cross-gate replay, unchanged cross-scope replay, and stale same-scope replay are insufficient.
+- Every production receipt is signed separately with Ed25519 over its binding digest. The trusted BLUN host public key is supplied to the evaluator from local deployment configuration, outside the untrusted admission plan; the plan carries only the matching SHA-256 SPKI fingerprint. A key substituted inside the plan, a missing signature, or a signature copied between evidence fields fails closed. Private signing keys never belong in AgentSpine state or the plan.
 
 ## BLUN endpoint status
 

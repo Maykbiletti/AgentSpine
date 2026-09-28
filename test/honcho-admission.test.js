@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { generateKeyPairSync, sign as signMessage } from "node:crypto";
 import {
-  evaluateHonchoAdmission, honchoEvidenceBindingDigest, HONCHO_ADMISSION_SCHEMA
+  evaluateHonchoAdmission, honchoEvidenceBindingDigest, honchoReceiptPublicKeyDigest,
+  HONCHO_ADMISSION_SCHEMA
 } from "../src/lib/honcho-admission.js";
 
 const DEFAULT_SCOPE = {
@@ -9,26 +11,46 @@ const DEFAULT_SCOPE = {
   projectId: "project:a", threadId: "thread:a"
 };
 
-function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = new Date().toISOString()) {
+function signer() {
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  return { privateKey, publicKey: publicKey.export({ format: "pem", type: "spki" }).toString("utf8") };
+}
+
+const TRUSTED_SIGNER = signer();
+const TRUSTED_OPTIONS = { trustedReceiptPublicKey: TRUSTED_SIGNER.publicKey };
+
+function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = new Date().toISOString(),
+  receiptSigner = TRUSTED_SIGNER) {
   const values = { serverHealth: "b".repeat(64), embeddingCompatibility: "c".repeat(64),
     derivationIsolation: "d".repeat(64), crossSessionRecall: "e".repeat(64),
     deletion: "f".repeat(64), sourceOffer: "a".repeat(64), ...digests };
   const acceptance = {};
   const evidenceBindings = {};
+  const evidenceSignatures = {};
   const evidenceObservedAt = {};
   for (const field of ["serverHealth", "embeddingCompatibility", "derivationIsolation", "crossSessionRecall", "deletion"]) {
     acceptance[field] = values[field];
     evidenceObservedAt[field] = observedAt;
-    evidenceBindings[field] = honchoEvidenceBindingDigest(`acceptance.${field}`, values[field], scope, observedAt);
+    const binding = honchoEvidenceBindingDigest(`acceptance.${field}`, values[field], scope, observedAt);
+    evidenceBindings[field] = binding;
+    evidenceSignatures[field] = signMessage(
+      null, Buffer.from(binding, "utf8"), receiptSigner.privateKey
+    ).toString("base64");
   }
   acceptance.evidenceBindings = evidenceBindings;
+  acceptance.evidenceSignatures = evidenceSignatures;
   acceptance.evidenceObservedAt = evidenceObservedAt;
+  const sourceOfferBinding = honchoEvidenceBindingDigest(
+    "governance.sourceOfferDigest", values.sourceOffer, scope, observedAt
+  );
   return { acceptance, governance: { dataResidency: "blun-self-hosted", upstreamLicense: "AGPL-3.0",
+    receiptIssuerKeyDigest: honchoReceiptPublicKeyDigest(receiptSigner.publicKey),
     sourceOfferDigest: values.sourceOffer,
     sourceOfferObservedAt: observedAt,
-    sourceOfferBinding: honchoEvidenceBindingDigest(
-      "governance.sourceOfferDigest", values.sourceOffer, scope, observedAt
-    ) } };
+    sourceOfferBinding,
+    sourceOfferSignature: signMessage(
+      null, Buffer.from(sourceOfferBinding, "utf8"), receiptSigner.privateKey
+    ).toString("base64") } };
 }
 
 function plan(overrides = {}) {
@@ -121,13 +143,15 @@ test("evaluation and cutover reject parallel memory writers", () => {
 });
 
 test("production cutover requires host acceptance, deletion proof and AGPL source readiness", () => {
-  const denied = evaluateHonchoAdmission(plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true } }));
+  const denied = evaluateHonchoAdmission(
+    plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true } }), TRUSTED_OPTIONS
+  );
   assert.equal(denied.admitted, false);
   assert.equal(denied.blockers.filter((item) => item.code === "production-evidence-missing").length, 5);
   const accepted = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true },
     ...productionEvidence()
-  }));
+  }), TRUSTED_OPTIONS);
   assert.equal(accepted.admitted, true);
 });
 
@@ -137,7 +161,7 @@ test("production cutover rejects one receipt reused across independent evidence 
     phase: "honcho-primary", writes: { agentspine: false, honcho: true },
     ...productionEvidence(DEFAULT_SCOPE, { serverHealth: shared, embeddingCompatibility: shared,
       derivationIsolation: shared, crossSessionRecall: shared, deletion: shared, sourceOffer: shared })
-  }));
+  }), TRUSTED_OPTIONS);
   assert.equal(result.admitted, false);
   assert.deepEqual(result.blockers.filter((item) => item.code === "production-evidence-reused"), [
     { code: "production-evidence-reused", field: "acceptance.serverHealth,acceptance.embeddingCompatibility" },
@@ -153,11 +177,11 @@ test("production evidence from one tenant and thread cannot unlock another scope
   const evidence = productionEvidence(DEFAULT_SCOPE);
   assert.equal(evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...evidence
-  })).admitted, true);
+  }), TRUSTED_OPTIONS).admitted, true);
   const otherScope = { ...DEFAULT_SCOPE, tenantId: "tenant:b", userId: "user:b", threadId: "thread:b" };
   const replay = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true }, scope: otherScope, ...evidence
-  }));
+  }), TRUSTED_OPTIONS);
   assert.equal(replay.admitted, false);
   assert.equal(replay.blockers.filter((item) => item.code === "production-evidence-scope-mismatch").length, 6);
 });
@@ -167,11 +191,35 @@ test("scope-correct production evidence expires before a later cutover", () => {
   const result = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true },
     ...productionEvidence(DEFAULT_SCOPE, {}, staleObservedAt)
-  }));
+  }), TRUSTED_OPTIONS);
   assert.equal(result.admitted, false);
   assert.equal(result.blockers.filter((item) => item.code === "production-evidence-stale").length, 6);
   assert.equal(result.blockers.some((item) => item.code === "production-evidence-scope-mismatch"), false);
   assert.equal(JSON.stringify(result).includes(staleObservedAt), false);
+});
+
+test("production evidence requires the externally pinned BLUN host signer", () => {
+  const rogueSigner = signer();
+  const substituted = evaluateHonchoAdmission(plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true },
+    ...productionEvidence(DEFAULT_SCOPE, {}, new Date().toISOString(), rogueSigner)
+  }), TRUSTED_OPTIONS);
+  assert.equal(substituted.admitted, false);
+  assert.deepEqual(substituted.blockers.filter((item) =>
+    item.code === "production-evidence-issuer-untrusted"), [
+    { code: "production-evidence-issuer-untrusted", field: "governance.receiptIssuerKeyDigest" }
+  ]);
+
+  const unsigned = productionEvidence();
+  unsigned.acceptance.evidenceSignatures = {};
+  delete unsigned.governance.sourceOfferSignature;
+  const missingSignatures = evaluateHonchoAdmission(plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...unsigned
+  }), TRUSTED_OPTIONS);
+  assert.equal(missingSignatures.admitted, false);
+  assert.equal(missingSignatures.blockers.filter((item) =>
+    item.code === "production-evidence-signature-invalid").length, 6);
+  assert.equal(JSON.stringify(substituted).includes(rogueSigner.publicKey), false);
 });
 
 test("managed Honcho, unapproved origins, raw credentials, missing scope and unsafe derivation fail closed", () => {

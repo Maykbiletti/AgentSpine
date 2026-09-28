@@ -55,7 +55,8 @@ export {
 export { createTelegramAdapter } from "./lib/telegram-adapter.js";
 export { evaluateVoiceOutput, voiceCue } from "./lib/voice-runtime.js";
 export {
-  evaluateHonchoAdmission, honchoEvidenceBindingDigest, HONCHO_ADMISSION_SCHEMA
+  evaluateHonchoAdmission, honchoEvidenceBindingDigest, honchoReceiptPublicKeyDigest,
+  HONCHO_ADMISSION_SCHEMA
 } from "./lib/honcho-admission.js";
 export {
   MUST_REMEMBER_SCHEMA, PREFLIGHT_POLICY_SCHEMA, PREFLIGHT_SCHEMA, RETRIEVAL_QUERY_SCHEMA,
