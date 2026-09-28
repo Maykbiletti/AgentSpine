@@ -13,6 +13,8 @@ const PRODUCTION_EVIDENCE_PATHS = new Set([
 ]);
 const PRODUCTION_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PRODUCTION_EVIDENCE_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const RECEIPT_TRUSTED_KEY_LIMIT = 8;
+const RECEIPT_REVOKED_KEY_LIMIT = 32;
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 function blocker(code, field) { return { code, field }; }
@@ -79,7 +81,8 @@ export function honchoEvidenceBindingDigest(field, evidenceDigest, scope, observ
 }
 
 function receiptPublicKey(value) {
-  if (typeof value !== "string" || value.length === 0 || value.length > 8192) return null;
+  if (typeof value !== "string" || value.length === 0 || value.length > 8192
+    || !/^-----BEGIN PUBLIC KEY-----\r?\n[\s\S]+\r?\n-----END PUBLIC KEY-----\r?\n?$/.test(value)) return null;
   try {
     const key = createPublicKey(value);
     return key.asymmetricKeyType === "ed25519" ? key : null;
@@ -166,9 +169,40 @@ function checkRuntimeOwnership(plan, blockers) {
   if (plan?.agentSpineRole !== "scope-gateway") blockers.push(blocker("agentspine-role-invalid", "agentSpineRole"));
 }
 
-function trustedReceiptKey(plan, configuredKey, blockers) {
-  const key = receiptPublicKey(configuredKey);
-  if (!key || plan?.governance?.receiptIssuerKeyDigest !== receiptKeyDigest(key)) {
+function receiptTrustStore(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const publicKeys = value.publicKeys;
+  const revokedKeyDigests = value.revokedKeyDigests;
+  if (!Array.isArray(publicKeys) || publicKeys.length === 0
+    || publicKeys.length > RECEIPT_TRUSTED_KEY_LIMIT
+    || !Array.isArray(revokedKeyDigests) || revokedKeyDigests.length > RECEIPT_REVOKED_KEY_LIMIT
+    || revokedKeyDigests.some((digest) => !SHA256.test(digest))) return null;
+  const keys = new Map();
+  for (const value of publicKeys) {
+    const key = receiptPublicKey(value);
+    if (!key) return null;
+    const digest = receiptKeyDigest(key);
+    if (keys.has(digest)) return null;
+    keys.set(digest, key);
+  }
+  const revoked = new Set(revokedKeyDigests);
+  if (revoked.size !== revokedKeyDigests.length) return null;
+  return { keys, revoked };
+}
+
+function trustedReceiptKey(plan, configuredStore, blockers) {
+  const store = receiptTrustStore(configuredStore);
+  if (!store) {
+    blockers.push(blocker("production-evidence-trust-store-invalid", "receiptTrustStore"));
+    return null;
+  }
+  const digest = plan?.governance?.receiptIssuerKeyDigest;
+  if (store.revoked.has(digest)) {
+    blockers.push(blocker("production-evidence-issuer-revoked", "governance.receiptIssuerKeyDigest"));
+    return null;
+  }
+  const key = store.keys.get(digest);
+  if (!key) {
     blockers.push(blocker("production-evidence-issuer-untrusted", "governance.receiptIssuerKeyDigest"));
     return null;
   }
@@ -253,7 +287,7 @@ export function evaluateHonchoAdmission(plan, options = {}) {
   const credential = rawCredentialPath(plan);
   if (credential) blockers.push(blocker("raw-credential-forbidden", credential));
   if (plan.phase === "honcho-primary") {
-    const verifierKey = trustedReceiptKey(plan, options?.trustedReceiptPublicKey, blockers);
+    const verifierKey = trustedReceiptKey(plan, options?.receiptTrustStore, blockers);
     checkProductionEvidence(plan, blockers, verifierKey);
   }
   return { schema: HONCHO_ADMISSION_SCHEMA, admitted: blockers.length === 0,
