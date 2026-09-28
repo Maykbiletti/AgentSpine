@@ -19,7 +19,8 @@ const RECEIPT_REVOKED_KEY_LIMIT = 32;
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const RAW_CREDENTIAL_KEY_SUFFIXES = [
   "apikey", "token", "secret", "password", "passwort", "credential", "authorization",
-  "cookie", "privatekey"
+  "authentication", "cookie", "privatekey", "passphrase", "accesskey", "accesskeyid",
+  "secretkey"
 ];
 
 function blocker(code, field) { return { code, field }; }
@@ -117,7 +118,12 @@ function receiptSignature(value) {
 
 function rawCredentialKey(value) {
   const canonical = value.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return RAW_CREDENTIAL_KEY_SUFFIXES.some((suffix) => canonical.endsWith(suffix));
+  const candidates = canonical.endsWith("s")
+    ? [canonical, canonical.slice(0, -1)]
+    : [canonical];
+  return canonical === "auth"
+    || candidates.some((candidate) => RAW_CREDENTIAL_KEY_SUFFIXES.some((suffix) =>
+      candidate.endsWith(suffix)));
 }
 
 function rawCredentialValue(value) {
