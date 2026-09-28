@@ -71,12 +71,15 @@ function evidenceTimestamp(value) {
     ? milliseconds : null;
 }
 
-export function honchoEvidenceBindingDigest(field, evidenceDigest, scope, observedAt) {
+export function honchoEvidenceBindingDigest(field, evidenceDigest, scope, observedAt,
+  receiptTrustRevision) {
   if (!PRODUCTION_EVIDENCE_PATHS.has(field) || !SHA256.test(evidenceDigest)
     || SCOPE_FIELDS.some((name) => !boundedText(scope?.[name]))
-    || evidenceTimestamp(observedAt) === null) return null;
+    || evidenceTimestamp(observedAt) === null || !Number.isSafeInteger(receiptTrustRevision)
+    || receiptTrustRevision <= 0) return null;
   const payload = JSON.stringify({ schema: HONCHO_ADMISSION_SCHEMA, field, evidenceDigest,
-    observedAt, scope: Object.fromEntries(SCOPE_FIELDS.map((name) => [name, scope[name]])) });
+    observedAt, receiptTrustRevision,
+    scope: Object.fromEntries(SCOPE_FIELDS.map((name) => [name, scope[name]])) });
   return createHash("sha256").update(payload, "utf8").digest("hex");
 }
 
@@ -173,7 +176,8 @@ function receiptTrustStore(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const publicKeys = value.publicKeys;
   const revokedKeyDigests = value.revokedKeyDigests;
-  if (!Array.isArray(publicKeys) || publicKeys.length === 0
+  if (!Number.isSafeInteger(value.revision) || value.revision <= 0
+    || !Array.isArray(publicKeys) || publicKeys.length === 0
     || publicKeys.length > RECEIPT_TRUSTED_KEY_LIMIT
     || !Array.isArray(revokedKeyDigests) || revokedKeyDigests.length > RECEIPT_REVOKED_KEY_LIMIT
     || revokedKeyDigests.some((digest) => !SHA256.test(digest))) return null;
@@ -187,13 +191,26 @@ function receiptTrustStore(value) {
   }
   const revoked = new Set(revokedKeyDigests);
   if (revoked.size !== revokedKeyDigests.length) return null;
-  return { keys, revoked };
+  return { keys, revoked, revision: value.revision };
 }
 
-function trustedReceiptKey(plan, configuredStore, blockers) {
+function trustedReceiptKey(plan, configuredStore, minimumRevision, blockers) {
   const store = receiptTrustStore(configuredStore);
   if (!store) {
     blockers.push(blocker("production-evidence-trust-store-invalid", "receiptTrustStore"));
+    return null;
+  }
+  if (!Number.isSafeInteger(minimumRevision) || minimumRevision <= 0) {
+    blockers.push(blocker("production-evidence-trust-floor-invalid", "minimumReceiptTrustRevision"));
+    return null;
+  }
+  if (store.revision < minimumRevision) {
+    blockers.push(blocker("production-evidence-trust-store-rollback", "receiptTrustStore.revision"));
+    return null;
+  }
+  if (plan?.governance?.receiptTrustRevision !== store.revision) {
+    blockers.push(blocker("production-evidence-trust-revision-mismatch",
+      "governance.receiptTrustRevision"));
     return null;
   }
   const digest = plan?.governance?.receiptIssuerKeyDigest;
@@ -242,7 +259,8 @@ function checkProductionEvidence(plan, blockers, verifierKey) {
       } else if (now - observedMilliseconds > PRODUCTION_EVIDENCE_MAX_AGE_MS) {
         blockers.push(blocker("production-evidence-stale", observedAtField));
       }
-      const expected = honchoEvidenceBindingDigest(field, digest, plan.scope, observedAt);
+      const expected = honchoEvidenceBindingDigest(field, digest, plan.scope, observedAt,
+        plan?.governance?.receiptTrustRevision);
       const bindingMatches = SHA256.test(binding) && binding === expected;
       if (!bindingMatches) {
         blockers.push(blocker("production-evidence-scope-mismatch", bindingField));
@@ -287,7 +305,8 @@ export function evaluateHonchoAdmission(plan, options = {}) {
   const credential = rawCredentialPath(plan);
   if (credential) blockers.push(blocker("raw-credential-forbidden", credential));
   if (plan.phase === "honcho-primary") {
-    const verifierKey = trustedReceiptKey(plan, options?.receiptTrustStore, blockers);
+    const verifierKey = trustedReceiptKey(plan, options?.receiptTrustStore,
+      options?.minimumReceiptTrustRevision, blockers);
     checkProductionEvidence(plan, blockers, verifierKey);
   }
   return { schema: HONCHO_ADMISSION_SCHEMA, admitted: blockers.length === 0,
