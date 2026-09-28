@@ -430,6 +430,30 @@ test("credential aliases and provider environment keys cannot hide raw access ma
   })).admitted, true);
 });
 
+test("credential containers and common access-key aliases cannot hide raw material", () => {
+  const cases = [
+    { overrides: { credentials: { bearer: "synthetic-access-material" } }, field: "credentials" },
+    { overrides: { secrets: ["synthetic-access-material"] }, field: "secrets" },
+    { overrides: { tokens: ["synthetic-access-material"] }, field: "tokens" },
+    { overrides: { passwords: { primary: "synthetic-access-material" } }, field: "passwords" },
+    { overrides: { cookies: { session: "synthetic-access-material" } }, field: "cookies" },
+    { overrides: { privateKeys: ["synthetic-access-material"] }, field: "privateKeys" },
+    { overrides: { auth: { bearer: "synthetic-access-material" } }, field: "auth" },
+    { overrides: { passphrase: "synthetic-access-material" }, field: "passphrase" },
+    { overrides: { environment: { AWS_ACCESS_KEY_ID: "synthetic-access-material" } },
+      field: "environment.AWS_ACCESS_KEY_ID" },
+    { overrides: { headers: { Authentication: "synthetic-access-material" } },
+      field: "headers.Authentication" }
+  ];
+  for (const { overrides, field } of cases) {
+    const result = evaluateHonchoAdmission(plan(overrides));
+    assert.deepEqual(result.blockers.filter((item) => item.code === "raw-credential-forbidden"), [
+      { code: "raw-credential-forbidden", field }
+    ]);
+    assert.equal(JSON.stringify(result).includes("synthetic-access-material"), false);
+  }
+});
+
 test("cyclic and overdeep plans cannot bypass the recursive credential gate", () => {
   const cyclic = plan({ metadata: {} });
   cyclic.metadata.self = cyclic.metadata;
