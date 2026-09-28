@@ -171,7 +171,6 @@ test("production cutover rejects one receipt reused across independent evidence 
   ]);
   assert.equal(JSON.stringify(result).includes(shared), false);
 });
-
 test("production evidence from one tenant and thread cannot unlock another scope", () => {
   const evidence = productionEvidence(DEFAULT_SCOPE);
   assert.equal(evaluateHonchoAdmission(plan({
@@ -184,7 +183,6 @@ test("production evidence from one tenant and thread cannot unlock another scope
   assert.equal(replay.admitted, false);
   assert.equal(replay.blockers.filter((item) => item.code === "production-evidence-scope-mismatch").length, 6);
 });
-
 test("scope-correct production evidence expires before a later cutover", () => {
   const staleObservedAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const result = evaluateHonchoAdmission(plan({
@@ -196,7 +194,6 @@ test("scope-correct production evidence expires before a later cutover", () => {
   assert.equal(result.blockers.some((item) => item.code === "production-evidence-scope-mismatch"), false);
   assert.equal(JSON.stringify(result).includes(staleObservedAt), false);
 });
-
 test("production evidence requires the externally pinned BLUN host signer", () => {
   const rogueSigner = signer();
   const substituted = evaluateHonchoAdmission(plan({
@@ -478,14 +475,17 @@ test("accessors and overwide plans fail closed before untrusted code can run", (
   for (const result of [accessorResult, evaluateHonchoAdmission(wide)]) assert.deepEqual(result.blockers,
     [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
 });
-test("proxy traps cannot execute during plan validation", () => {
+test("proxy traps and callable values cannot execute during plan validation", () => {
   let traps = 0;
   const trap = () => { traps += 1; throw new Error("untrusted proxy trap ran"); };
   const root = new Proxy(plan(), { getPrototypeOf: trap, ownKeys: trap });
   const nested = plan({ metadata: new Proxy({}, { getPrototypeOf: trap, ownKeys: trap }) });
+  const callable = new Proxy(() => {}, { get: trap, getPrototypeOf: trap, ownKeys: trap });
+  const executable = () => { throw new Error("untrusted function ran"); };
   const revoked = Proxy.revocable(plan(), {});
   revoked.revoke();
-  for (const candidate of [root, nested, revoked.proxy]) {
+  for (const candidate of [root, nested, revoked.proxy, plan({ scope: callable }),
+    plan({ metadata: executable })]) {
     let result;
     assert.doesNotThrow(() => { result = evaluateHonchoAdmission(candidate); });
     assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
