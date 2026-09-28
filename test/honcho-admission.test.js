@@ -399,3 +399,33 @@ test("managed Honcho, unapproved origins, raw credentials, missing scope and uns
     "scope-binding-missing", "derivation-isolation-incomplete"]) assert.ok(codes.has(code), code);
   assert.equal(JSON.stringify(result).includes("must-not-live-here"), false);
 });
+
+test("credential aliases and provider environment keys cannot hide raw access material", () => {
+  const cases = [
+    { overrides: { honcho: { serverUrl: "http://127.0.0.1:18000",
+      headers: { Authorization: "Bearer synthetic-access-material" } } },
+    field: "honcho.headers.Authorization" },
+    { overrides: { embedding: { ...plan().embedding, access_token: "synthetic-access-material" } },
+      field: "embedding.access_token" },
+    { overrides: { derivation: { ...plan().derivation, clientSecret: "synthetic-access-material" } },
+      field: "derivation.clientSecret" },
+    { overrides: { environment: { OPENAI_API_KEY: "synthetic-access-material" } },
+      field: "environment.OPENAI_API_KEY" },
+    { overrides: { honcho: { serverUrl: "http://127.0.0.1:18000",
+      authToken: `synthetic-${"x".repeat(5000)}` } }, field: "honcho.authToken" },
+    { overrides: { honcho: { serverUrl: "http://127.0.0.1:18000",
+      authorization: { scheme: "Bearer", value: "synthetic-access-material" } } },
+    field: "honcho.authorization" }
+  ];
+  for (const { overrides, field } of cases) {
+    const result = evaluateHonchoAdmission(plan(overrides));
+    assert.deepEqual(result.blockers.filter((item) => item.code === "raw-credential-forbidden"), [
+      { code: "raw-credential-forbidden", field }
+    ]);
+    assert.equal(JSON.stringify(result).includes("synthetic-access-material"), false);
+  }
+
+  assert.equal(evaluateHonchoAdmission(plan({
+    credentialEnv: "HONCHO_API_KEY"
+  })).admitted, true);
+});

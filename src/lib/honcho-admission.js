@@ -17,6 +17,10 @@ const PRODUCTION_EVIDENCE_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const RECEIPT_TRUSTED_KEY_LIMIT = 8;
 const RECEIPT_REVOKED_KEY_LIMIT = 32;
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const RAW_CREDENTIAL_KEY_SUFFIXES = [
+  "apikey", "token", "secret", "password", "passwort", "credential", "authorization",
+  "cookie", "privatekey"
+];
 
 function blocker(code, field) { return { code, field }; }
 
@@ -111,13 +115,23 @@ function receiptSignature(value) {
   return bytes.toString("base64") === value ? bytes : null;
 }
 
+function rawCredentialKey(value) {
+  const canonical = value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return RAW_CREDENTIAL_KEY_SUFFIXES.some((suffix) => canonical.endsWith(suffix));
+}
+
+function rawCredentialValue(value) {
+  if (typeof value === "string") return /\S/.test(value);
+  return value !== null && value !== undefined && value !== false;
+}
+
 function rawCredentialPath(value, path = "", seen = new WeakSet(), depth = 0) {
   if (!value || typeof value !== "object") return null;
   if (seen.has(value) || depth > 20) return null;
   seen.add(value);
   for (const [key, child] of Object.entries(value)) {
     const childPath = path ? `${path}.${key}` : key;
-    if (/^(?:apiKey|token|authorization|password|secret)$/i.test(key) && boundedText(child, 4096)) return childPath;
+    if (rawCredentialKey(key) && rawCredentialValue(child)) return childPath;
     const nested = rawCredentialPath(child, childPath, seen, depth + 1);
     if (nested) return nested;
   }
