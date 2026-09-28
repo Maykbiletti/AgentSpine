@@ -70,6 +70,8 @@ agentspine continuity-purge person:me --root /path/to/project --confirm-local-pu
 agentspine audit /path/to/project --json
 ```
 
+The purge command requires the dedicated local purge confirmation. A normal continuity opt-in or user confirmation cannot authorize permanent deletion.
+
 Generated state remains in the operating system's private user-state directory. `SOUL.md`, `AGENTS.md`, `CLAUDE.md`, and every other existing Markdown source remain byte-for-byte unchanged during learning, rollback, purge, upgrade, and uninstall.
 
 Existing opted-in user continuity can be made repository-independent only through the explicit, reversible `source-bind --scope state-user` flow. No state is blindly copied between root hashes. See [host-native source roots](source-roots.md).
