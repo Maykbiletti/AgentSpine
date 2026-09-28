@@ -230,7 +230,7 @@ agentspine share-rollback shared:release-process-v2 \
   --reason "The replacement was incorrect"
 ```
 
-Permanent local deletion is CLI-only, requires `--confirm-local-share`, and removes the selected import plus retained local versions. It does not delete the immutable event from the shared adapter.
+Permanent local deletion is CLI-only, requires the dedicated `--confirm-local-purge`, and removes the selected import plus retained local versions. The general `--confirm-local-share` attestation remains limited to sharing setup and publication; it cannot authorize irreversible deletion. Deletion does not remove the immutable event from the shared adapter.
 
 ## Privacy and groups
 

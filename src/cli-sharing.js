@@ -218,7 +218,7 @@ export async function runSharingCommand({ command, flags, positional, json }) {
   if (command === "share-delete") {
     return output(await deleteShared({
       root: flags.root || process.cwd(), id: positional[0],
-      confirmation: booleanFlag(flags["confirm-local-share"]) ? "local-share-confirmed" : null
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
     }), json);
   }
 

@@ -139,7 +139,7 @@ Usage:
   agentspine share-review <id> --decision accept|reject --reason text [--confirmed-by-user]
   agentspine share-context [root] [--scope team:id] [--group group:id] [--kind preference,goal]
   agentspine share-rollback <id> --reason text
-  agentspine share-delete <id> [--confirm-local-share]
+  agentspine share-delete <id> --confirm-local-purge
   agentspine share-config [root] --max-items 12
   agentspine audit [root] [--json]
   agentspine acceptance [--json]

@@ -825,7 +825,7 @@ export async function configureSharing({ root = process.cwd(), maxContextItems }
 }
 
 export async function deleteShared({ root = process.cwd(), id, confirmation }) {
-  requireConfirmation(confirmation);
+  if (confirmation !== "local-user-purge-confirmed") throw new Error("permanent shared-memory deletion requires explicit local user purge confirmation");
   if (!ID_RE.test(id || "")) throw new Error("shared event id is required");
   return mutation(root, (state, _catalog, sharingPath) => {
     const record = state.records.find((item) => item.event.id === id);
