@@ -116,6 +116,23 @@ function checkRuntimeOwnership(plan, blockers) {
   if (plan?.agentSpineRole !== "scope-gateway") blockers.push(blocker("agentspine-role-invalid", "agentSpineRole"));
 }
 
+function checkProductionEvidence(plan, blockers) {
+  const evidence = PRODUCTION_EVIDENCE.map((field) =>
+    [`acceptance.${field}`, plan?.acceptance?.[field]]);
+  evidence.push(["governance.sourceOfferDigest", plan?.governance?.sourceOfferDigest]);
+  const seen = new Map();
+  for (const [field, digest] of evidence) {
+    if (!SHA256.test(digest)) {
+      blockers.push(blocker(field === "governance.sourceOfferDigest"
+        ? "agpl-source-offer-not-ready" : "production-evidence-missing", field));
+      continue;
+    }
+    const previous = seen.get(digest);
+    if (previous) blockers.push(blocker("production-evidence-reused", `${previous},${field}`));
+    else seen.set(digest, field);
+  }
+}
+
 export function evaluateHonchoAdmission(plan) {
   const blockers = [];
   if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
@@ -143,14 +160,7 @@ export function evaluateHonchoAdmission(plan) {
   }
   const credential = rawCredentialPath(plan);
   if (credential) blockers.push(blocker("raw-credential-forbidden", credential));
-  if (plan.phase === "honcho-primary") {
-    for (const field of PRODUCTION_EVIDENCE) {
-      if (!SHA256.test(plan?.acceptance?.[field])) blockers.push(blocker("production-evidence-missing", `acceptance.${field}`));
-    }
-    if (!SHA256.test(plan?.governance?.sourceOfferDigest)) {
-      blockers.push(blocker("agpl-source-offer-not-ready", "governance.sourceOfferDigest"));
-    }
-  }
+  if (plan.phase === "honcho-primary") checkProductionEvidence(plan, blockers);
   return { schema: HONCHO_ADMISSION_SCHEMA, admitted: blockers.length === 0,
     phase: PHASES.has(plan.phase) ? plan.phase : null, blockers };
 }

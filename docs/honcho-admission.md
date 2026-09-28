@@ -13,7 +13,7 @@ AgentSpine may act as the scope and policy gateway for a self-hosted Honcho depl
 - Every request binds tenant, workspace, user, project, and thread identifiers. Only confirmed private sources are eligible.
 - Telemetry is disabled and raw credentials are forbidden in the admission plan. A later transport may refer to a separately managed credential environment variable, but must not persist its value.
 - Background derivation is asynchronous, tool-less, parent-history-free, fail-open, and has no automatic retries.
-- A production cutover requires SHA-256-bound receipts for live server health, embedding compatibility, derivation isolation, cross-session recall, deletion, and AGPL source availability. Boolean claims are insufficient.
+- A production cutover requires a distinct SHA-256-bound receipt for each of live server health, embedding compatibility, derivation isolation, cross-session recall, deletion, and AGPL source availability. Boolean claims and one receipt replayed across multiple gates are insufficient.
 
 ## BLUN endpoint status
 
