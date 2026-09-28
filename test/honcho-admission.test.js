@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, sign as signMessage } from "node:crypto";
 import {
   evaluateHonchoAdmission, honchoEvidenceBindingDigest, honchoReceiptPublicKeyDigest,
-  HONCHO_ADMISSION_SCHEMA
+  honchoReceiptTrustStoreDigest, HONCHO_ADMISSION_SCHEMA
 } from "../src/lib/honcho-admission.js";
 
 const DEFAULT_SCOPE = {
@@ -19,13 +19,18 @@ function signer() {
 const TRUSTED_SIGNER = signer();
 const ROTATED_SIGNER = signer();
 const TRUST_REVISION = 7;
-const TRUSTED_OPTIONS = { receiptTrustStore: {
+const TRUST_STORE = {
   revision: TRUST_REVISION,
   publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey], revokedKeyDigests: []
-}, minimumReceiptTrustRevision: TRUST_REVISION };
+};
+const TRUST_STORE_DIGEST = honchoReceiptTrustStoreDigest(TRUST_STORE);
+const TRUSTED_OPTIONS = { receiptTrustStore: TRUST_STORE,
+  minimumReceiptTrustRevision: TRUST_REVISION,
+  trustedReceiptTrustStoreDigest: TRUST_STORE_DIGEST };
 
 function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = new Date().toISOString(),
-  receiptSigner = TRUSTED_SIGNER, receiptTrustRevision = TRUST_REVISION) {
+  receiptSigner = TRUSTED_SIGNER, receiptTrustRevision = TRUST_REVISION,
+  receiptTrustStoreDigest = TRUST_STORE_DIGEST) {
   const values = { serverHealth: "b".repeat(64), embeddingCompatibility: "c".repeat(64),
     derivationIsolation: "d".repeat(64), crossSessionRecall: "e".repeat(64),
     deletion: "f".repeat(64), sourceOffer: "a".repeat(64), ...digests };
@@ -37,7 +42,7 @@ function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = ne
     acceptance[field] = values[field];
     evidenceObservedAt[field] = observedAt;
     const binding = honchoEvidenceBindingDigest(`acceptance.${field}`, values[field], scope, observedAt,
-      receiptTrustRevision);
+      receiptTrustRevision, receiptTrustStoreDigest);
     evidenceBindings[field] = binding;
     evidenceSignatures[field] = signMessage(
       null, Buffer.from(binding, "utf8"), receiptSigner.privateKey
@@ -47,11 +52,12 @@ function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = ne
   acceptance.evidenceSignatures = evidenceSignatures;
   acceptance.evidenceObservedAt = evidenceObservedAt;
   const sourceOfferBinding = honchoEvidenceBindingDigest(
-    "governance.sourceOfferDigest", values.sourceOffer, scope, observedAt, receiptTrustRevision
+    "governance.sourceOfferDigest", values.sourceOffer, scope, observedAt, receiptTrustRevision,
+    receiptTrustStoreDigest
   );
   return { acceptance, governance: { dataResidency: "blun-self-hosted", upstreamLicense: "AGPL-3.0",
     receiptIssuerKeyDigest: honchoReceiptPublicKeyDigest(receiptSigner.publicKey),
-    receiptTrustRevision,
+    receiptTrustRevision, receiptTrustStoreDigest,
     sourceOfferDigest: values.sourceOffer,
     sourceOfferObservedAt: observedAt,
     sourceOfferBinding,
@@ -237,14 +243,16 @@ test("receipt issuer rotation admits the new key while explicit revocation wins"
   assert.equal(evaluateHonchoAdmission(rotatedPlan, TRUSTED_OPTIONS).admitted, true);
 
   const revokedDigest = honchoReceiptPublicKeyDigest(TRUSTED_SIGNER.publicKey);
+  const revokedStore = { revision: TRUST_REVISION,
+    publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey],
+    revokedKeyDigests: [revokedDigest] };
+  const revokedStoreDigest = honchoReceiptTrustStoreDigest(revokedStore);
   const revoked = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true },
-    ...productionEvidence()
-  }), { receiptTrustStore: {
-    revision: TRUST_REVISION,
-    publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey],
-    revokedKeyDigests: [revokedDigest]
-  }, minimumReceiptTrustRevision: TRUST_REVISION });
+    ...productionEvidence(DEFAULT_SCOPE, {}, new Date().toISOString(), TRUSTED_SIGNER,
+      TRUST_REVISION, revokedStoreDigest)
+  }), { receiptTrustStore: revokedStore, minimumReceiptTrustRevision: TRUST_REVISION,
+    trustedReceiptTrustStoreDigest: revokedStoreDigest });
   assert.equal(revoked.admitted, false);
   assert.deepEqual(revoked.blockers.filter((item) =>
     item.code === "production-evidence-issuer-revoked"), [
@@ -269,7 +277,8 @@ test("malformed receipt trust stores fail closed without inspecting signatures",
       revokedKeyDigests: [] }
   ]) {
     const result = evaluateHonchoAdmission(value, {
-      receiptTrustStore, minimumReceiptTrustRevision: TRUST_REVISION
+      receiptTrustStore, minimumReceiptTrustRevision: TRUST_REVISION,
+      trustedReceiptTrustStoreDigest: TRUST_STORE_DIGEST
     });
     assert.equal(result.admitted, false);
     assert.deepEqual(result.blockers.filter((item) =>
@@ -281,26 +290,36 @@ test("malformed receipt trust stores fail closed without inspecting signatures",
 
 test("a protected trust revision floor rejects rolled-back stores and mismatched plans", () => {
   const nextRevision = TRUST_REVISION + 1;
-  const currentOptions = { receiptTrustStore: {
+  const currentStore = {
     revision: nextRevision,
     publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey], revokedKeyDigests: []
-  }, minimumReceiptTrustRevision: nextRevision };
+  };
+  const currentStoreDigest = honchoReceiptTrustStoreDigest(currentStore);
+  const currentOptions = { receiptTrustStore: currentStore,
+    minimumReceiptTrustRevision: nextRevision,
+    trustedReceiptTrustStoreDigest: currentStoreDigest };
   const current = plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true },
-    ...productionEvidence(DEFAULT_SCOPE, {}, new Date().toISOString(), ROTATED_SIGNER, nextRevision) });
+    ...productionEvidence(DEFAULT_SCOPE, {}, new Date().toISOString(), ROTATED_SIGNER, nextRevision,
+      currentStoreDigest) });
   assert.equal(evaluateHonchoAdmission(current, currentOptions).admitted, true);
 
   const rolledBack = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...productionEvidence()
   }), { receiptTrustStore: {
     revision: TRUST_REVISION, publicKeys: [TRUSTED_SIGNER.publicKey], revokedKeyDigests: []
-  }, minimumReceiptTrustRevision: nextRevision });
+  }, minimumReceiptTrustRevision: nextRevision,
+  trustedReceiptTrustStoreDigest: honchoReceiptTrustStoreDigest({
+    revision: TRUST_REVISION, publicKeys: [TRUSTED_SIGNER.publicKey], revokedKeyDigests: []
+  }) });
   assert.deepEqual(rolledBack.blockers.filter((item) =>
     item.code === "production-evidence-trust-store-rollback"), [
     { code: "production-evidence-trust-store-rollback", field: "receiptTrustStore.revision" }
   ]);
 
   const mismatched = evaluateHonchoAdmission(plan({
-    phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...productionEvidence()
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true },
+    ...productionEvidence(DEFAULT_SCOPE, {}, new Date().toISOString(), TRUSTED_SIGNER,
+      TRUST_REVISION, currentStoreDigest)
   }), currentOptions);
   assert.deepEqual(mismatched.blockers.filter((item) =>
     item.code === "production-evidence-trust-revision-mismatch"), [
@@ -308,7 +327,8 @@ test("a protected trust revision floor rejects rolled-back stores and mismatched
   ]);
 
   const missingFloor = evaluateHonchoAdmission(current, {
-    receiptTrustStore: currentOptions.receiptTrustStore
+    receiptTrustStore: currentOptions.receiptTrustStore,
+    trustedReceiptTrustStoreDigest: currentStoreDigest
   });
   assert.deepEqual(missingFloor.blockers.filter((item) =>
     item.code === "production-evidence-trust-floor-invalid"), [
@@ -317,11 +337,52 @@ test("a protected trust revision floor rejects rolled-back stores and mismatched
 
   const relabelledEvidence = productionEvidence();
   relabelledEvidence.governance.receiptTrustRevision = nextRevision;
+  relabelledEvidence.governance.receiptTrustStoreDigest = currentStoreDigest;
   const relabelled = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...relabelledEvidence
   }), currentOptions);
   assert.equal(relabelled.blockers.filter((item) =>
     item.code === "production-evidence-scope-mismatch").length, 6);
+});
+
+test("a protected digest rejects same-revision trust-store substitution", () => {
+  const rogueSigner = signer();
+  const substitutedStore = { revision: TRUST_REVISION,
+    publicKeys: [rogueSigner.publicKey, ROTATED_SIGNER.publicKey], revokedKeyDigests: [] };
+  const substitutedDigest = honchoReceiptTrustStoreDigest(substitutedStore);
+  const substitutedEvidence = productionEvidence(DEFAULT_SCOPE, {}, new Date().toISOString(),
+    rogueSigner, TRUST_REVISION, substitutedDigest);
+  const result = evaluateHonchoAdmission(plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...substitutedEvidence
+  }), { receiptTrustStore: substitutedStore, minimumReceiptTrustRevision: TRUST_REVISION,
+    trustedReceiptTrustStoreDigest: TRUST_STORE_DIGEST });
+  assert.deepEqual(result.blockers.filter((item) =>
+    item.code === "production-evidence-trust-store-tampered"), [
+    { code: "production-evidence-trust-store-tampered", field: "receiptTrustStore" }
+  ]);
+  assert.equal(JSON.stringify(result).includes(rogueSigner.publicKey), false);
+
+  const missingAnchor = evaluateHonchoAdmission(plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...productionEvidence()
+  }), { receiptTrustStore: TRUST_STORE, minimumReceiptTrustRevision: TRUST_REVISION });
+  assert.deepEqual(missingAnchor.blockers.filter((item) =>
+    item.code === "production-evidence-trust-anchor-invalid"), [
+    { code: "production-evidence-trust-anchor-invalid", field: "trustedReceiptTrustStoreDigest" }
+  ]);
+});
+
+test("trust-store digests are canonical across key and revocation ordering", () => {
+  const first = honchoReceiptPublicKeyDigest(TRUSTED_SIGNER.publicKey);
+  const second = honchoReceiptPublicKeyDigest(ROTATED_SIGNER.publicKey);
+  const forward = { revision: TRUST_REVISION,
+    publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey],
+    revokedKeyDigests: [first, second] };
+  const reverse = { revision: TRUST_REVISION,
+    publicKeys: [ROTATED_SIGNER.publicKey, TRUSTED_SIGNER.publicKey],
+    revokedKeyDigests: [second, first] };
+  assert.equal(honchoReceiptTrustStoreDigest(forward), honchoReceiptTrustStoreDigest(reverse));
+  assert.equal(honchoReceiptTrustStoreDigest({ ...forward, revision: TRUST_REVISION + 1 })
+    === honchoReceiptTrustStoreDigest(forward), false);
 });
 
 test("managed Honcho, unapproved origins, raw credentials, missing scope and unsafe derivation fail closed", () => {

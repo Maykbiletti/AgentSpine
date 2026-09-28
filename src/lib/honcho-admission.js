@@ -1,6 +1,7 @@
 import { createHash, createPublicKey, verify as verifySignature } from "node:crypto";
 
 export const HONCHO_ADMISSION_SCHEMA = "agentspine.honcho-admission/v1";
+export const HONCHO_RECEIPT_TRUST_STORE_SCHEMA = "agentspine.honcho-receipt-trust-store/v1";
 
 const PHASES = new Set(["evaluation", "honcho-primary"]);
 const SCOPE_FIELDS = ["tenantId", "workspaceId", "userId", "projectId", "threadId"];
@@ -72,13 +73,13 @@ function evidenceTimestamp(value) {
 }
 
 export function honchoEvidenceBindingDigest(field, evidenceDigest, scope, observedAt,
-  receiptTrustRevision) {
+  receiptTrustRevision, receiptTrustStoreDigest) {
   if (!PRODUCTION_EVIDENCE_PATHS.has(field) || !SHA256.test(evidenceDigest)
     || SCOPE_FIELDS.some((name) => !boundedText(scope?.[name]))
     || evidenceTimestamp(observedAt) === null || !Number.isSafeInteger(receiptTrustRevision)
-    || receiptTrustRevision <= 0) return null;
+    || receiptTrustRevision <= 0 || !SHA256.test(receiptTrustStoreDigest)) return null;
   const payload = JSON.stringify({ schema: HONCHO_ADMISSION_SCHEMA, field, evidenceDigest,
-    observedAt, receiptTrustRevision,
+    observedAt, receiptTrustRevision, receiptTrustStoreDigest,
     scope: Object.fromEntries(SCOPE_FIELDS.map((name) => [name, scope[name]])) });
   return createHash("sha256").update(payload, "utf8").digest("hex");
 }
@@ -191,10 +192,19 @@ function receiptTrustStore(value) {
   }
   const revoked = new Set(revokedKeyDigests);
   if (revoked.size !== revokedKeyDigests.length) return null;
-  return { keys, revoked, revision: value.revision };
+  const digestPayload = JSON.stringify({ schema: HONCHO_RECEIPT_TRUST_STORE_SCHEMA,
+    revision: value.revision,
+    publicKeyDigests: [...keys.keys()].sort(),
+    revokedKeyDigests: [...revoked].sort() });
+  const digest = createHash("sha256").update(digestPayload, "utf8").digest("hex");
+  return { keys, revoked, revision: value.revision, digest };
 }
 
-function trustedReceiptKey(plan, configuredStore, minimumRevision, blockers) {
+export function honchoReceiptTrustStoreDigest(value) {
+  return receiptTrustStore(value)?.digest ?? null;
+}
+
+function trustedReceiptKey(plan, configuredStore, minimumRevision, protectedDigest, blockers) {
   const store = receiptTrustStore(configuredStore);
   if (!store) {
     blockers.push(blocker("production-evidence-trust-store-invalid", "receiptTrustStore"));
@@ -204,8 +214,22 @@ function trustedReceiptKey(plan, configuredStore, minimumRevision, blockers) {
     blockers.push(blocker("production-evidence-trust-floor-invalid", "minimumReceiptTrustRevision"));
     return null;
   }
+  if (!SHA256.test(protectedDigest)) {
+    blockers.push(blocker("production-evidence-trust-anchor-invalid",
+      "trustedReceiptTrustStoreDigest"));
+    return null;
+  }
+  if (store.digest !== protectedDigest) {
+    blockers.push(blocker("production-evidence-trust-store-tampered", "receiptTrustStore"));
+    return null;
+  }
   if (store.revision < minimumRevision) {
     blockers.push(blocker("production-evidence-trust-store-rollback", "receiptTrustStore.revision"));
+    return null;
+  }
+  if (plan?.governance?.receiptTrustStoreDigest !== protectedDigest) {
+    blockers.push(blocker("production-evidence-trust-store-digest-mismatch",
+      "governance.receiptTrustStoreDigest"));
     return null;
   }
   if (plan?.governance?.receiptTrustRevision !== store.revision) {
@@ -260,7 +284,7 @@ function checkProductionEvidence(plan, blockers, verifierKey) {
         blockers.push(blocker("production-evidence-stale", observedAtField));
       }
       const expected = honchoEvidenceBindingDigest(field, digest, plan.scope, observedAt,
-        plan?.governance?.receiptTrustRevision);
+        plan?.governance?.receiptTrustRevision, plan?.governance?.receiptTrustStoreDigest);
       const bindingMatches = SHA256.test(binding) && binding === expected;
       if (!bindingMatches) {
         blockers.push(blocker("production-evidence-scope-mismatch", bindingField));
@@ -306,7 +330,7 @@ export function evaluateHonchoAdmission(plan, options = {}) {
   if (credential) blockers.push(blocker("raw-credential-forbidden", credential));
   if (plan.phase === "honcho-primary") {
     const verifierKey = trustedReceiptKey(plan, options?.receiptTrustStore,
-      options?.minimumReceiptTrustRevision, blockers);
+      options?.minimumReceiptTrustRevision, options?.trustedReceiptTrustStoreDigest, blockers);
     checkProductionEvidence(plan, blockers, verifierKey);
   }
   return { schema: HONCHO_ADMISSION_SCHEMA, admitted: blockers.length === 0,
