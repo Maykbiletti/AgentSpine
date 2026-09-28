@@ -111,6 +111,6 @@ export async function runContinuityCommand({ command, flags, positional, json })
 
   if (command === "source-purge") {
     return output(await purgeSourceBinding({ id: positional[0],
-      confirmation: booleanFlag(flags["confirm-local-binding"]) ? "local-user-confirmed" : null }), json);
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null }), json);
   }
 }

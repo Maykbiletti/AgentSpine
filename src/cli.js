@@ -86,7 +86,7 @@ Usage:
   agentspine doctor --host claude [--cwd path] [--offline-memory-orphans]
   agentspine source-bind <state-root> --host all|claude|codex --scope state-user --project path --host-home path --confirm-local-binding
   agentspine source-rollback <binding-id> --confirm-local-binding
-  agentspine source-purge <binding-id> --confirm-local-binding
+  agentspine source-purge <binding-id> --confirm-local-purge
   agentspine timeline-receipt --root path
   agentspine timeline-enroll --root path --receipt asthr_… --confirm-local-timeline
   agentspine timeline-enrollment-recover --root path --confirm-local-timeline-recovery
