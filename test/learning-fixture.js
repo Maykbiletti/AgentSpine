@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   addLearningEvidence, beginLearningRevalidation, configureLearning, deleteLearning, evaluateLearning,
   learningContext, learningOutcomeStatus, loadLearning, proposeLearning,
-  purgeLearningBySubject, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
+  purgeLearningBySubject as commitSubjectPurge, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications, recordLearningDeliveries,
   recordLearningMeasurement, recordLearningOutcome as commitLearningOutcome, registerLearningEvaluation,
   registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator, revokeLearningEvidence,
   revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningMeasurement, revokeLearningOutcome, revokeLearningTrialFailure, revokeLearningValidation,
@@ -35,6 +35,11 @@ export function hash(value) {
 
 export function evidence(id, confidence = 0.9) {
   return { id, type: "user-statement", summary: `Synthetic evidence ${id}`, confidence };
+}
+
+export async function purgeLearningBySubject(input) {
+  return commitSubjectPurge({ ...input, confirmation: Object.hasOwn(input, "confirmation")
+    ? input.confirmation : "local-user-purge-confirmed" });
 }
 
 export const scopedTurn = {
@@ -215,7 +220,7 @@ export {
   commitLearningOutcome,
   addLearningEvidence,
   beginLearningRevalidation, configureLearning, deleteLearning, evaluateLearning, learningContext, learningOutcomeStatus,
-  loadLearning, proposeLearning, purgeLearningBySubject, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications,
+  loadLearning, proposeLearning, purgeStaleLearningApplications, purgeStaleLearningMeasurements, recordLearningApplications,
   recordLearningDeliveries, recordLearningMeasurement, registerLearningEvaluation, registerLearningEvaluator, renewLearningValidation, revokeLearningEvaluator,
   revokeLearningEvidence, revokeLearningApplication, revokeLearningDelivery, revokeLearningEvaluation, revokeLearningMeasurement, revokeLearningOutcome,
   revokeLearningTrialFailure, revokeLearningValidation, revokeLearningEvidenceSourceAttestation, reviewLearning, rollbackLearning, linkEntities,

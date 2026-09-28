@@ -452,7 +452,12 @@ export async function deleteLearning({ root = process.cwd(), id, confirmation = 
   });
 }
 
-export async function purgeLearningBySubject({ root = process.cwd(), subjectId, now = new Date() }) {
+export async function purgeLearningBySubject({
+  root = process.cwd(), subjectId, confirmation = null, now = new Date()
+}) {
+  if (confirmation !== "local-user-purge-confirmed") {
+    throw new Error("permanent subject learning purge requires explicit local user confirmation");
+  }
   if (!ID_RE.test(subjectId || "")) throw new Error("subjectId is required");
   const timestamp = date(now, "now");
   return mutation(root, (state, _catalog, learningPath) => {
