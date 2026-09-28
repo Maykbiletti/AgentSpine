@@ -403,24 +403,19 @@ test("managed Honcho, unapproved origins, raw credentials, missing scope and uns
 test("credential aliases and provider environment keys cannot hide raw access material", () => {
   const cases = [
     { overrides: { honcho: { serverUrl: "http://127.0.0.1:18000",
-      headers: { Authorization: "Bearer synthetic-access-material" } } },
-    field: "honcho.headers.Authorization" },
-    { overrides: { embedding: { ...plan().embedding, access_token: "synthetic-access-material" } },
-      field: "embedding.access_token" },
-    { overrides: { derivation: { ...plan().derivation, clientSecret: "synthetic-access-material" } },
-      field: "derivation.clientSecret" },
-    { overrides: { environment: { OPENAI_API_KEY: "synthetic-access-material" } },
-      field: "environment.OPENAI_API_KEY" },
+      headers: { Authorization: "Bearer synthetic-access-material" } } } },
+    { overrides: { embedding: { ...plan().embedding, access_token: "synthetic-access-material" } } },
+    { overrides: { derivation: { ...plan().derivation, clientSecret: "synthetic-access-material" } } },
+    { overrides: { environment: { OPENAI_API_KEY: "synthetic-access-material" } } },
     { overrides: { honcho: { serverUrl: "http://127.0.0.1:18000",
-      authToken: `synthetic-${"x".repeat(5000)}` } }, field: "honcho.authToken" },
+      authToken: `synthetic-${"x".repeat(5000)}` } } },
     { overrides: { honcho: { serverUrl: "http://127.0.0.1:18000",
-      authorization: { scheme: "Bearer", value: "synthetic-access-material" } } },
-    field: "honcho.authorization" }
+      authorization: { scheme: "Bearer", value: "synthetic-access-material" } } } }
   ];
-  for (const { overrides, field } of cases) {
+  for (const { overrides } of cases) {
     const result = evaluateHonchoAdmission(plan(overrides));
     assert.deepEqual(result.blockers.filter((item) => item.code === "raw-credential-forbidden"), [
-      { code: "raw-credential-forbidden", field }
+      { code: "raw-credential-forbidden", field: "plan.<credential>" }
     ]);
     assert.equal(JSON.stringify(result).includes("synthetic-access-material"), false);
   }
@@ -432,23 +427,18 @@ test("credential aliases and provider environment keys cannot hide raw access ma
 
 test("credential containers and common access-key aliases cannot hide raw material", () => {
   const cases = [
-    { overrides: { credentials: { bearer: "synthetic-access-material" } }, field: "credentials" },
-    { overrides: { secrets: ["synthetic-access-material"] }, field: "secrets" },
-    { overrides: { tokens: ["synthetic-access-material"] }, field: "tokens" },
-    { overrides: { passwords: { primary: "synthetic-access-material" } }, field: "passwords" },
-    { overrides: { cookies: { session: "synthetic-access-material" } }, field: "cookies" },
-    { overrides: { privateKeys: ["synthetic-access-material"] }, field: "privateKeys" },
-    { overrides: { auth: { bearer: "synthetic-access-material" } }, field: "auth" },
-    { overrides: { passphrase: "synthetic-access-material" }, field: "passphrase" },
-    { overrides: { environment: { AWS_ACCESS_KEY_ID: "synthetic-access-material" } },
-      field: "environment.AWS_ACCESS_KEY_ID" },
-    { overrides: { headers: { Authentication: "synthetic-access-material" } },
-      field: "headers.Authentication" }
+    { credentials: { bearer: "synthetic-access-material" } },
+    { secrets: ["synthetic-access-material"] }, { tokens: ["synthetic-access-material"] },
+    { passwords: { primary: "synthetic-access-material" } },
+    { cookies: { session: "synthetic-access-material" } }, { privateKeys: ["synthetic-access-material"] },
+    { auth: { bearer: "synthetic-access-material" } }, { passphrase: "synthetic-access-material" },
+    { environment: { AWS_ACCESS_KEY_ID: "synthetic-access-material" } },
+    { headers: { Authentication: "synthetic-access-material" } }
   ];
-  for (const { overrides, field } of cases) {
+  for (const overrides of cases) {
     const result = evaluateHonchoAdmission(plan(overrides));
     assert.deepEqual(result.blockers.filter((item) => item.code === "raw-credential-forbidden"), [
-      { code: "raw-credential-forbidden", field }
+      { code: "raw-credential-forbidden", field: "plan.<credential>" }
     ]);
     assert.equal(JSON.stringify(result).includes("synthetic-access-material"), false);
   }
@@ -464,7 +454,7 @@ test("numeric token metrics do not masquerade as raw credentials", () => {
       derivation: { ...plan().derivation, quota: { [key]: unsafe } }
     }));
     assert.deepEqual(result.blockers.filter((item) => item.code === "raw-credential-forbidden"),
-      [{ code: "raw-credential-forbidden", field: `derivation.quota.${key}` }]);
+      [{ code: "raw-credential-forbidden", field: "plan.<credential>" }]);
     assert.equal(JSON.stringify(result).includes("synthetic-access-material"), false);
   }
 });
@@ -474,7 +464,7 @@ test("cyclic and overdeep plans cannot bypass the recursive credential gate", ()
   cyclic.metadata.self = cyclic.metadata;
   const cyclicResult = evaluateHonchoAdmission(cyclic);
   assert.deepEqual(cyclicResult.blockers.filter((item) => item.code === "plan-traversal-invalid"), [
-    { code: "plan-traversal-invalid", field: "metadata.self" }
+    { code: "plan-traversal-invalid", field: "plan.<traversal>" }
   ]);
 
   const overdeep = plan({ metadata: {} });
@@ -487,9 +477,19 @@ test("cyclic and overdeep plans cannot bypass the recursive credential gate", ()
   const overdeepResult = evaluateHonchoAdmission(overdeep);
   assert.equal(overdeepResult.admitted, false);
   assert.deepEqual(overdeepResult.blockers.filter((item) => item.code === "plan-traversal-invalid"), [
-    { code: "plan-traversal-invalid", field: `metadata.${Array(20).fill("next").join(".")}` }
+    { code: "plan-traversal-invalid", field: "plan.<traversal>" }
   ]);
   assert.equal(JSON.stringify(overdeepResult).includes("synthetic-access-material"), false);
+});
+
+test("untrusted plan keys cannot escape through blocker diagnostics", () => {
+  const marker = "synthetic-diagnostic-secret-marker";
+  const credentialResult = evaluateHonchoAdmission(plan({ [`${marker}-secret`]: "value" }));
+  const cyclic = plan({ [marker]: {} });
+  cyclic[marker].self = cyclic[marker];
+  const traversalResult = evaluateHonchoAdmission(cyclic);
+  assert.equal(JSON.stringify(credentialResult).includes(marker), false);
+  assert.equal(JSON.stringify(traversalResult).includes(marker), false);
 });
 
 test("shared acyclic plan metadata does not look like a traversal cycle", () => {

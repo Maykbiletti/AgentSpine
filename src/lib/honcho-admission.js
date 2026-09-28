@@ -26,6 +26,8 @@ const NUMERIC_TOKEN_METRIC_KEYS = new Set([
   "maxtokens", "maxinputtokens", "maxoutputtokens", "inputtokens", "outputtokens",
   "prompttokens", "completiontokens", "cachedinputtokens", "reasoningtokens", "totaltokens"
 ]);
+const PLAN_CREDENTIAL_DIAGNOSTIC = "plan.<credential>";
+const PLAN_TRAVERSAL_DIAGNOSTIC = "plan.<traversal>";
 
 function blocker(code, field) { return { code, field }; }
 
@@ -362,9 +364,9 @@ export function evaluateHonchoAdmission(plan, options = {}) {
   }
   const credentialScan = rawCredentialScan(plan);
   if (credentialScan?.kind === "credential") {
-    blockers.push(blocker("raw-credential-forbidden", credentialScan.path));
+    blockers.push(blocker("raw-credential-forbidden", PLAN_CREDENTIAL_DIAGNOSTIC));
   } else if (credentialScan) {
-    blockers.push(blocker("plan-traversal-invalid", credentialScan.path));
+    blockers.push(blocker("plan-traversal-invalid", PLAN_TRAVERSAL_DIAGNOSTIC));
   }
   if (plan.phase === "honcho-primary") {
     const verifierKey = trustedReceiptKey(plan, options?.receiptTrustStore,
