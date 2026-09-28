@@ -443,7 +443,6 @@ test("credential containers and common access-key aliases cannot hide raw materi
     assert.equal(JSON.stringify(result).includes("synthetic-access-material"), false);
   }
 });
-
 test("numeric token metrics do not masquerade as raw credentials", () => {
   const quota = { maxTokens: 2048, maxInputTokens: 1536, maxOutputTokens: 512, inputTokens: 320,
     outputTokens: 160, promptTokens: 320, completionTokens: 160, cachedInputTokens: 64, reasoningTokens: 32, totalTokens: 480 };
@@ -458,40 +457,41 @@ test("numeric token metrics do not masquerade as raw credentials", () => {
     assert.equal(JSON.stringify(result).includes("synthetic-access-material"), false);
   }
 });
-
 test("cyclic and overdeep plans cannot bypass the recursive credential gate", () => {
   const cyclic = plan({ metadata: {} });
   cyclic.metadata.self = cyclic.metadata;
   const cyclicResult = evaluateHonchoAdmission(cyclic);
-  assert.deepEqual(cyclicResult.blockers.filter((item) => item.code === "plan-traversal-invalid"), [
-    { code: "plan-traversal-invalid", field: "plan.<traversal>" }
-  ]);
+  assert.deepEqual(cyclicResult.blockers.filter((item) => item.code === "plan-traversal-invalid"),
+    [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
 
   const overdeep = plan({ metadata: {} });
   let cursor = overdeep.metadata;
-  for (let index = 0; index < 21; index += 1) {
-    cursor.next = {};
-    cursor = cursor.next;
-  }
+  for (let index = 0; index < 21; index += 1) { cursor.next = {}; cursor = cursor.next; }
   cursor.accessToken = "synthetic-access-material";
   const overdeepResult = evaluateHonchoAdmission(overdeep);
   assert.equal(overdeepResult.admitted, false);
-  assert.deepEqual(overdeepResult.blockers.filter((item) => item.code === "plan-traversal-invalid"), [
-    { code: "plan-traversal-invalid", field: "plan.<traversal>" }
-  ]);
+  assert.deepEqual(overdeepResult.blockers.filter((item) => item.code === "plan-traversal-invalid"),
+    [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
   assert.equal(JSON.stringify(overdeepResult).includes("synthetic-access-material"), false);
 });
-
 test("untrusted plan keys cannot escape through blocker diagnostics", () => {
   const marker = "synthetic-diagnostic-secret-marker";
-  const credentialResult = evaluateHonchoAdmission(plan({ [`${marker}-secret`]: "value" }));
   const cyclic = plan({ [marker]: {} });
   cyclic[marker].self = cyclic[marker];
-  const traversalResult = evaluateHonchoAdmission(cyclic);
-  assert.equal(JSON.stringify(credentialResult).includes(marker), false);
-  assert.equal(JSON.stringify(traversalResult).includes(marker), false);
+  const results = [evaluateHonchoAdmission(plan({ [`${marker}-secret`]: "value" })),
+    evaluateHonchoAdmission(cyclic)];
+  for (const result of results) assert.equal(JSON.stringify(result).includes(marker), false);
 });
-
+test("accessors and overwide plans fail closed before untrusted code can run", () => {
+  let reads = 0, accessorResult;
+  const accessor = plan();
+  Object.defineProperty(accessor, "schema", { enumerable: true, get() { reads += 1; throw new Error("untrusted getter ran"); } });
+  assert.doesNotThrow(() => { accessorResult = evaluateHonchoAdmission(accessor); });
+  assert.equal(reads, 0);
+  const wide = plan({ metadata: Object.fromEntries(Array.from({ length: 4097 }, (_, index) => [`field${index}`, index])) });
+  for (const result of [accessorResult, evaluateHonchoAdmission(wide)]) assert.deepEqual(result.blockers,
+    [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
+});
 test("shared acyclic plan metadata does not look like a traversal cycle", () => {
   const shared = { label: "synthetic-shared-config" };
   const result = evaluateHonchoAdmission(plan({ metadata: { first: shared, second: shared } }));

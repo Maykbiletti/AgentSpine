@@ -28,6 +28,9 @@ const NUMERIC_TOKEN_METRIC_KEYS = new Set([
 ]);
 const PLAN_CREDENTIAL_DIAGNOSTIC = "plan.<credential>";
 const PLAN_TRAVERSAL_DIAGNOSTIC = "plan.<traversal>";
+const PLAN_SCAN_MAX_DEPTH = 20;
+const PLAN_SCAN_MAX_PROPERTIES = 4096;
+const PLAN_SCAN_MAX_KEY_BYTES = 256;
 
 function blocker(code, field) { return { code, field }; }
 
@@ -139,18 +142,31 @@ function rawCredentialValue(value) {
   return value !== null && value !== undefined && value !== false;
 }
 
-function rawCredentialScan(value, path = "", ancestors = new WeakSet(), depth = 0) {
+function scanPlanValue(value, ancestors, depth, state) {
   if (!value || typeof value !== "object") return null;
-  if (depth > 20) return { kind: "traversal", path };
-  if (ancestors.has(value)) return { kind: "traversal", path };
+  if (depth > PLAN_SCAN_MAX_DEPTH || ancestors.has(value)) return { kind: "traversal" };
+  let descriptors;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== null && prototype !== Object.prototype
+      && !(Array.isArray(value) && prototype === Array.prototype)) return { kind: "traversal" };
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch { return { kind: "traversal" }; }
   ancestors.add(value);
-  for (const [key, child] of Object.entries(value)) {
-    const childPath = path ? `${path}.${key}` : key;
-    if (rawCredentialKey(key, child) && rawCredentialValue(child)) {
+  for (const key of Reflect.ownKeys(descriptors)) {
+    const descriptor = descriptors[key];
+    state.properties += 1;
+    if (typeof key !== "string" || descriptor.get || descriptor.set
+      || Buffer.byteLength(key, "utf8") > PLAN_SCAN_MAX_KEY_BYTES
+      || state.properties > PLAN_SCAN_MAX_PROPERTIES) {
       ancestors.delete(value);
-      return { kind: "credential", path: childPath };
+      return { kind: "traversal" };
     }
-    const nested = rawCredentialScan(child, childPath, ancestors, depth + 1);
+    const child = descriptor.value;
+    if (rawCredentialKey(key, child) && rawCredentialValue(child)) {
+      state.credential = true;
+    }
+    const nested = scanPlanValue(child, ancestors, depth + 1, state);
     if (nested) {
       ancestors.delete(value);
       return nested;
@@ -158,6 +174,12 @@ function rawCredentialScan(value, path = "", ancestors = new WeakSet(), depth = 
   }
   ancestors.delete(value);
   return null;
+}
+
+function rawCredentialScan(value) {
+  const state = { credential: false, properties: 0 };
+  const invalid = scanPlanValue(value, new WeakSet(), 0, state);
+  return invalid ?? (state.credential ? { kind: "credential" } : null);
 }
 
 function checkEndpointRoles(plan, blockers) {
@@ -343,6 +365,11 @@ export function evaluateHonchoAdmission(plan, options = {}) {
     return { schema: HONCHO_ADMISSION_SCHEMA, admitted: false, phase: null,
       blockers: [blocker("plan-invalid", "plan")] };
   }
+  const credentialScan = rawCredentialScan(plan);
+  if (credentialScan?.kind === "traversal") {
+    return { schema: HONCHO_ADMISSION_SCHEMA, admitted: false, phase: null,
+      blockers: [blocker("plan-traversal-invalid", PLAN_TRAVERSAL_DIAGNOSTIC)] };
+  }
   if (plan.schema !== HONCHO_ADMISSION_SCHEMA) blockers.push(blocker("schema-invalid", "schema"));
   if (!PHASES.has(plan.phase)) blockers.push(blocker("phase-invalid", "phase"));
   checkRuntimeOwnership(plan, blockers);
@@ -362,11 +389,8 @@ export function evaluateHonchoAdmission(plan, options = {}) {
     || plan?.derivation?.parentHistory !== false) {
     blockers.push(blocker("derivation-isolation-incomplete", "derivation"));
   }
-  const credentialScan = rawCredentialScan(plan);
   if (credentialScan?.kind === "credential") {
     blockers.push(blocker("raw-credential-forbidden", PLAN_CREDENTIAL_DIAGNOSTIC));
-  } else if (credentialScan) {
-    blockers.push(blocker("plan-traversal-invalid", PLAN_TRAVERSAL_DIAGNOSTIC));
   }
   if (plan.phase === "honcho-primary") {
     const verifierKey = trustedReceiptKey(plan, options?.receiptTrustStore,
