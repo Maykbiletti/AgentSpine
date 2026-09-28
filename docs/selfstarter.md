@@ -69,7 +69,12 @@ agentspine job-cancel job:release \
   --reason "Work is no longer required" \
   --confirm-local-execution \
   --root /path/to/project
+agentspine job-delete job:release \
+  --confirm-local-purge \
+  --root /path/to/project
 ```
+
+Cancellation is reversible through retained history and uses the execution confirmation. Permanent deletion removes the job, its retained history, and its receipts, so it requires the separate local purge confirmation.
 
 Execution-policy mutation and job administration are absent from MCP. Hooks cannot invent grants, acknowledge host trust, widen capabilities, send messages, administer transports, or select credentials.
 

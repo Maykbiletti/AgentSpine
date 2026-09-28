@@ -115,7 +115,9 @@ export async function cancelJob({ root = process.cwd(), id, reason, confirmation
 }
 
 export async function deleteJob({ root = process.cwd(), id, confirmation }) {
-  requireOwnerConfirmation(confirmation);
+  if (confirmation !== "local-user-purge-confirmed") {
+    throw new Error("permanent self-starter job deletion requires explicit local user purge confirmation");
+  }
   stableId(id, "jobId");
   return lockedStates(root, ({ state, paths }) => {
     const job = state.jobs.find((item) => item.id === id);

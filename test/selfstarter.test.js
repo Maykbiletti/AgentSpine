@@ -26,12 +26,16 @@ function packet(result) {
 }
 
 function runCli(args, stateRoot) {
-  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
-  const result = spawnSync(process.execPath, [cli, ...args], {
-    encoding: "utf8", env: { ...process.env, AGENTSPINE_STATE_DIR: stateRoot }
-  });
+  const result = runCliResult(args, stateRoot);
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
+}
+
+function runCliResult(args, stateRoot) {
+  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
+  return spawnSync(process.execPath, [cli, ...args], {
+    encoding: "utf8", env: { ...process.env, AGENTSPINE_STATE_DIR: stateRoot }
+  });
 }
 
 async function fixture(t, { host = "claude", maxRetries = 2, leaseSeconds = 30 } = {}) {
@@ -350,7 +354,17 @@ test("retry budget, exponential checkpoint backoff, cancellation, and purge are 
   const cancellable = await fixture(t);
   const context = await selfstarterContext({ root: cancellable.root });
   assert.equal(context.items.length, 1);
-  await deleteJob({ root: cancellable.root, id: "job:build", confirmation: "local-owner-confirmed" });
+  const loaded = await loadSelfstarter(cancellable.root);
+  const stateBeforeDeniedPurge = await readFile(loaded.selfstarterPath);
+  await assert.rejects(deleteJob({ root: cancellable.root, id: "job:missing" }), /purge confirmation/);
+  await assert.rejects(deleteJob({
+    root: cancellable.root, id: "job:build", confirmation: "local-owner-confirmed"
+  }), /purge confirmation/);
+  assert.deepEqual(await readFile(loaded.selfstarterPath), stateBeforeDeniedPurge);
+  for (const [name, expected] of Object.entries(cancellable.before)) {
+    assert.equal(hash(await readFile(join(cancellable.root, name))), expected);
+  }
+  await deleteJob({ root: cancellable.root, id: "job:build", confirmation: "local-user-purge-confirmed" });
   const state = (await loadSelfstarter(cancellable.root)).state;
   assert.equal(state.jobs.length, 0);
   assert.equal(state.history.length, 0);
@@ -407,6 +421,14 @@ test("CLI keeps execution policy and job administration local and explicitly con
     "job-cancel", "job:cli", "--reason", "The job is no longer needed.",
     "--confirm-local-execution", "--root", root, "--json"
   ], stateRoot);
-  runCli(["job-delete", "job:cli", "--confirm-local-execution", "--root", root, "--json"], stateRoot);
+  const { selfstarterPath } = await loadSelfstarter(root);
+  const stateBeforeDeniedPurge = await readFile(selfstarterPath);
+  const denied = runCliResult([
+    "job-delete", "job:cli", "--confirm-local-execution", "--root", root, "--json"
+  ], stateRoot);
+  assert.notEqual(denied.status, 0);
+  assert.match(denied.stderr, /purge confirmation/);
+  assert.deepEqual(await readFile(selfstarterPath), stateBeforeDeniedPurge);
+  runCli(["job-delete", "job:cli", "--confirm-local-purge", "--root", root, "--json"], stateRoot);
   assert.equal(runCli(["jobs", root, "--include-terminal", "--json"], stateRoot).items.length, 0);
 });

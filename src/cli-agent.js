@@ -208,7 +208,7 @@ export async function runAgentCommand({ command, flags, positional, json }) {
   if (command === "job-delete") {
     return output(await deleteJob({
       root: flags.root || process.cwd(), id: positional[0],
-      confirmation: booleanFlag(flags["confirm-local-execution"]) ? "local-owner-confirmed" : null
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
     }), json);
   }
 
