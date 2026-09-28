@@ -429,3 +429,33 @@ test("credential aliases and provider environment keys cannot hide raw access ma
     credentialEnv: "HONCHO_API_KEY"
   })).admitted, true);
 });
+
+test("cyclic and overdeep plans cannot bypass the recursive credential gate", () => {
+  const cyclic = plan({ metadata: {} });
+  cyclic.metadata.self = cyclic.metadata;
+  const cyclicResult = evaluateHonchoAdmission(cyclic);
+  assert.deepEqual(cyclicResult.blockers.filter((item) => item.code === "plan-traversal-invalid"), [
+    { code: "plan-traversal-invalid", field: "metadata.self" }
+  ]);
+
+  const overdeep = plan({ metadata: {} });
+  let cursor = overdeep.metadata;
+  for (let index = 0; index < 21; index += 1) {
+    cursor.next = {};
+    cursor = cursor.next;
+  }
+  cursor.accessToken = "synthetic-access-material";
+  const overdeepResult = evaluateHonchoAdmission(overdeep);
+  assert.equal(overdeepResult.admitted, false);
+  assert.deepEqual(overdeepResult.blockers.filter((item) => item.code === "plan-traversal-invalid"), [
+    { code: "plan-traversal-invalid", field: `metadata.${Array(20).fill("next").join(".")}` }
+  ]);
+  assert.equal(JSON.stringify(overdeepResult).includes("synthetic-access-material"), false);
+});
+
+test("shared acyclic plan metadata does not look like a traversal cycle", () => {
+  const shared = { label: "synthetic-shared-config" };
+  const result = evaluateHonchoAdmission(plan({ metadata: { first: shared, second: shared } }));
+  assert.equal(result.admitted, true);
+  assert.equal(result.blockers.some((item) => item.code === "plan-traversal-invalid"), false);
+});
