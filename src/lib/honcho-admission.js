@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createPublicKey, verify as verifySignature } from "node:crypto";
 
 export const HONCHO_ADMISSION_SCHEMA = "agentspine.honcho-admission/v1";
 
@@ -78,6 +78,32 @@ export function honchoEvidenceBindingDigest(field, evidenceDigest, scope, observ
   return createHash("sha256").update(payload, "utf8").digest("hex");
 }
 
+function receiptPublicKey(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 8192) return null;
+  try {
+    const key = createPublicKey(value);
+    return key.asymmetricKeyType === "ed25519" ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+function receiptKeyDigest(key) {
+  return createHash("sha256").update(key.export({ format: "der", type: "spki" })).digest("hex");
+}
+
+export function honchoReceiptPublicKeyDigest(value) {
+  const key = receiptPublicKey(value);
+  return key ? receiptKeyDigest(key) : null;
+}
+
+function receiptSignature(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 512
+    || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return null;
+  const bytes = Buffer.from(value, "base64");
+  return bytes.toString("base64") === value ? bytes : null;
+}
+
 function rawCredentialPath(value, path = "", seen = new WeakSet(), depth = 0) {
   if (!value || typeof value !== "object") return null;
   if (seen.has(value) || depth > 20) return null;
@@ -140,20 +166,34 @@ function checkRuntimeOwnership(plan, blockers) {
   if (plan?.agentSpineRole !== "scope-gateway") blockers.push(blocker("agentspine-role-invalid", "agentSpineRole"));
 }
 
-function checkProductionEvidence(plan, blockers) {
+function trustedReceiptKey(plan, configuredKey, blockers) {
+  const key = receiptPublicKey(configuredKey);
+  if (!key || plan?.governance?.receiptIssuerKeyDigest !== receiptKeyDigest(key)) {
+    blockers.push(blocker("production-evidence-issuer-untrusted", "governance.receiptIssuerKeyDigest"));
+    return null;
+  }
+  return key;
+}
+
+function checkProductionEvidence(plan, blockers, verifierKey) {
   const now = Date.now();
   const evidence = PRODUCTION_EVIDENCE.map((field) => ({
     field: `acceptance.${field}`, digest: plan?.acceptance?.[field],
     binding: plan?.acceptance?.evidenceBindings?.[field], bindingField: `acceptance.evidenceBindings.${field}`,
+    signature: plan?.acceptance?.evidenceSignatures?.[field],
+    signatureField: `acceptance.evidenceSignatures.${field}`,
     observedAt: plan?.acceptance?.evidenceObservedAt?.[field],
     observedAtField: `acceptance.evidenceObservedAt.${field}`
   }));
   evidence.push({ field: "governance.sourceOfferDigest", digest: plan?.governance?.sourceOfferDigest,
     binding: plan?.governance?.sourceOfferBinding, bindingField: "governance.sourceOfferBinding",
+    signature: plan?.governance?.sourceOfferSignature,
+    signatureField: "governance.sourceOfferSignature",
     observedAt: plan?.governance?.sourceOfferObservedAt,
     observedAtField: "governance.sourceOfferObservedAt" });
   const seen = new Map();
-  for (const { field, digest, binding, bindingField, observedAt, observedAtField } of evidence) {
+  for (const { field, digest, binding, bindingField, signature, signatureField,
+    observedAt, observedAtField } of evidence) {
     if (!SHA256.test(digest)) {
       blockers.push(blocker(field === "governance.sourceOfferDigest"
         ? "agpl-source-offer-not-ready" : "production-evidence-missing", field));
@@ -169,8 +209,14 @@ function checkProductionEvidence(plan, blockers) {
         blockers.push(blocker("production-evidence-stale", observedAtField));
       }
       const expected = honchoEvidenceBindingDigest(field, digest, plan.scope, observedAt);
-      if (!SHA256.test(binding) || binding !== expected) {
+      const bindingMatches = SHA256.test(binding) && binding === expected;
+      if (!bindingMatches) {
         blockers.push(blocker("production-evidence-scope-mismatch", bindingField));
+      } else if (verifierKey) {
+        const signatureBytes = receiptSignature(signature);
+        if (!signatureBytes || !verifySignature(null, Buffer.from(expected, "utf8"), verifierKey, signatureBytes)) {
+          blockers.push(blocker("production-evidence-signature-invalid", signatureField));
+        }
       }
     }
     const previous = seen.get(digest);
@@ -179,7 +225,7 @@ function checkProductionEvidence(plan, blockers) {
   }
 }
 
-export function evaluateHonchoAdmission(plan) {
+export function evaluateHonchoAdmission(plan, options = {}) {
   const blockers = [];
   if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
     return { schema: HONCHO_ADMISSION_SCHEMA, admitted: false, phase: null,
@@ -206,7 +252,10 @@ export function evaluateHonchoAdmission(plan) {
   }
   const credential = rawCredentialPath(plan);
   if (credential) blockers.push(blocker("raw-credential-forbidden", credential));
-  if (plan.phase === "honcho-primary") checkProductionEvidence(plan, blockers);
+  if (plan.phase === "honcho-primary") {
+    const verifierKey = trustedReceiptKey(plan, options?.trustedReceiptPublicKey, blockers);
+    checkProductionEvidence(plan, blockers, verifierKey);
+  }
   return { schema: HONCHO_ADMISSION_SCHEMA, admitted: blockers.length === 0,
     phase: PHASES.has(plan.phase) ? plan.phase : null, blockers };
 }
