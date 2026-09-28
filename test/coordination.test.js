@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  checkDelegation, createTask, grantDelegation, loadCoordination, loadDelegationPolicy,
+  checkDelegation, createTask, deleteTask, grantDelegation, loadCoordination, loadDelegationPolicy,
   revokeDelegation, taskContext, updateTask
 } from "../src/lib/coordination.js";
 import { linkEntities, upsertEntity } from "../src/lib/graph.js";
@@ -30,12 +30,16 @@ function hash(value) {
 }
 
 function runCli(args, state) {
-  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
-  const result = spawnSync(process.execPath, [cli, ...args], {
-    encoding: "utf8", env: { ...process.env, AGENTSPINE_STATE_DIR: state }
-  });
+  const result = runCliResult(args, state);
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
+}
+
+function runCliResult(args, state) {
+  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
+  return spawnSync(process.execPath, [cli, ...args], {
+    encoding: "utf8", env: { ...process.env, AGENTSPINE_STATE_DIR: state }
+  });
 }
 
 async function grant(root, actions = ["assign"], targetIds = ["agent:worker"]) {
@@ -186,6 +190,25 @@ test("CLI supports explicit policy, task lifecycle, context, and revocation", as
   ], state);
   runCli(["task-update", "task:cli", "--root", root, "--actor", "agent:worker", "--status", "completed", "--json"], state);
   assert.equal(runCli(["tasks", root, "--closed", "--json"], state).items[0].status, "completed");
+  const loaded = await loadCoordination(root);
+  const stateBeforeDeniedPurge = await readFile(loaded.coordinationPath);
+  const sourceBeforeDeniedPurge = await readFile(join(root, "AGENTS.md"));
+  await assert.rejects(deleteTask({ root, id: "task:missing" }), /purge confirmation/);
+  await assert.rejects(deleteTask({
+    root, id: "task:cli", confirmation: "local-owner-confirmed"
+  }), /purge confirmation/);
+  const denied = runCliResult([
+    "task-delete", "task:cli", "--root", root, "--confirm-local-policy", "--json"
+  ], state);
+  assert.notEqual(denied.status, 0);
+  assert.match(denied.stderr, /purge confirmation/);
+  assert.deepEqual(await readFile(loaded.coordinationPath), stateBeforeDeniedPurge);
+  assert.equal(hash(await readFile(join(root, "AGENTS.md"))), hash(sourceBeforeDeniedPurge));
+  assert.equal(runCli([
+    "task-delete", "task:cli", "--root", root, "--confirm-local-purge", "--json"
+  ], state).deleted, true);
+  assert.equal(runCli(["tasks", root, "--closed", "--json"], state).items.length, 0);
+  assert.equal(hash(await readFile(join(root, "AGENTS.md"))), hash(sourceBeforeDeniedPurge));
   runCli([
     "delegation-revoke", "grant:cli", "--root", root, "--reason", "CLI fixture ended.",
     "--confirm-local-policy", "--json"

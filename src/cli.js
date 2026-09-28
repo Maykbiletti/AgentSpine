@@ -97,7 +97,7 @@ Usage:
   agentspine task-create [id] --actor id --title text [--assignee id] [--kind task|open-thread|handoff] [--privacy private|shared|group]
   agentspine task-update <id> --actor id [--status in-progress] [--assignee id|--unassign]
   agentspine tasks [root] [--assignee id] [--project id] [--include-private] [--group id]
-  agentspine task-delete <id> [--confirm-local-policy]
+  agentspine task-delete <id> --confirm-local-purge
   agentspine execution-grant <job-id> --actor id --task task:id --target id --project project:id --host claude|codex --capabilities tool:Write --reason text [--expires date] --confirm-local-execution
   agentspine execution-revoke <grant-id> --reason text --confirm-local-execution
   agentspine execution-policy [root]
