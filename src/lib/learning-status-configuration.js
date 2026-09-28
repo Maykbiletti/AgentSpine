@@ -18,6 +18,9 @@ import {
   candidateEvidenceLineageReceipts
 } from "./learning-evidence-contracts.js";
 import {
+  recordDeletionTombstone
+} from "./learning-deletions.js";
+import {
   date, number, integer, loadLearning, mutation, preserve
 } from "./learning-storage.js";
 
@@ -400,11 +403,12 @@ export async function configureLearning({ root = process.cwd(), config = {}, now
   });
 }
 
-export async function deleteLearning({ root = process.cwd(), id, confirmation = null }) {
+export async function deleteLearning({ root = process.cwd(), id, confirmation = null, now = new Date() }) {
   if (confirmation !== "local-user-purge-confirmed") {
     throw new Error("permanent learning deletion requires explicit local user confirmation");
   }
   if (!ID_RE.test(id || "")) throw new Error("id is required");
+  const timestamp = date(now, "now");
   return mutation(root, (state, _catalog, learningPath) => {
     const candidate = state.candidates.find((entry) => entry.id === id);
     if (candidate?.status === "accepted" && candidate.supersededIds?.length) {
@@ -420,6 +424,7 @@ export async function deleteLearning({ root = process.cwd(), id, confirmation = 
       throw new Error("purge the shared subject atomically to delete a trial-retry lineage");
     }
     const existed = Boolean(candidate);
+    if (candidate) recordDeletionTombstone(state, candidate, timestamp);
     const evaluationIds = new Set(state.evaluations.filter((entry) => entry.learningId === id).map((entry) => entry.id));
     state.candidates = state.candidates.filter((entry) => entry.id !== id);
     state.outcomes = state.outcomes.filter((entry) => entry.learningId !== id);
@@ -447,10 +452,13 @@ export async function deleteLearning({ root = process.cwd(), id, confirmation = 
   });
 }
 
-export async function purgeLearningBySubject({ root = process.cwd(), subjectId }) {
+export async function purgeLearningBySubject({ root = process.cwd(), subjectId, now = new Date() }) {
   if (!ID_RE.test(subjectId || "")) throw new Error("subjectId is required");
+  const timestamp = date(now, "now");
   return mutation(root, (state, _catalog, learningPath) => {
-    const ids = new Set(state.candidates.filter((entry) => entry.subjectId === subjectId).map((entry) => entry.id));
+    const candidates = state.candidates.filter((entry) => entry.subjectId === subjectId);
+    const ids = new Set(candidates.map((entry) => entry.id));
+    for (const candidate of candidates) recordDeletionTombstone(state, candidate, timestamp);
     const evaluationIds = new Set(state.evaluations.filter((entry) => ids.has(entry.learningId)).map((entry) => entry.id));
     state.candidates = state.candidates.filter((entry) => entry.subjectId !== subjectId);
     state.outcomes = state.outcomes.filter((entry) => !ids.has(entry.learningId));

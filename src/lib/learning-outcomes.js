@@ -306,6 +306,9 @@ export async function acceptContinuityLearning({
     if (revokedEvidence(state, candidate)) throw new Error("learning evidence was revoked; propose a new candidate before promotion");
     if (candidate.status === "accepted") return { candidate, learningPath, unchanged: true };
     if (candidate.status !== "candidate") throw new Error("only an active candidate can be promoted");
+    if (candidate.requiresLocalReview) {
+      throw new Error("learning candidate requires explicit local review before acceptance");
+    }
     if (!CONTINUITY_AUTO_KINDS.has(candidate.kind)) throw new Error("learning kind is not eligible for continuity promotion");
     const minConfidence = number(proof.minConfidence, "proof.minConfidence", 0.9, 1);
     const minEvidence = integer(proof.minEvidence, "proof.minEvidence", 1, 10);
