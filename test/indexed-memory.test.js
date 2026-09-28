@@ -230,7 +230,7 @@ test("project-memory binding rollback and purge remove cached snapshots immediat
 
   const second = await bind();
   await resolveHostSourceCatalog({ host: "claude", cwd: project });
-  await purgeSourceBinding({ id: second.binding.id, confirmation: "local-user-confirmed" });
+  await purgeSourceBinding({ id: second.binding.id, confirmation: "local-user-purge-confirmed" });
   cache = JSON.parse(await readFile(join(state, "indexed-memory-cache.json"), "utf8"));
   assert.equal(Object.keys(cache.roots).length, 0);
 });

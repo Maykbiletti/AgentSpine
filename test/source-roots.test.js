@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,10 @@ import {
 
 function hash(value) { return createHash("sha256").update(value).digest("hex"); }
 function packet(result) { return JSON.parse(result.context); }
+function runCli(args) {
+  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
+  return spawnSync(process.execPath, [cli, ...args], { encoding: "utf8", env: process.env });
+}
 
 test("installed lifecycle resolves host-native user, project, and memory roots without cwd coupling or broad home scans", async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), "agentspine-live-roots-"));
@@ -143,10 +148,26 @@ test("installed lifecycle resolves host-native user, project, and memory roots w
   await mkdir(conflictingState);
   await assert.rejects(bindSourceRoot({ host: "all", hostHome: conflictingState, projectRoot: projectB,
     sourceRoot: conflictingState, scope: "state-user", confirmation: "local-user-confirmed" }), /conflicting all state-user source binding/);
+  const registryBeforeRejectedPurge = await readFile(registry.registryPath);
+  await assert.rejects(purgeSourceBinding({ id: "binding:missing" }), /purge confirmation/);
+  await assert.rejects(purgeSourceBinding({
+    id: binding.binding.id, confirmation: "local-user-confirmed"
+  }), /purge confirmation/);
+  const deniedPurge = runCli([
+    "source-purge", binding.binding.id, "--confirm-local-binding", "--json"
+  ]);
+  assert.notEqual(deniedPurge.status, 0);
+  assert.match(deniedPurge.stderr, /purge confirmation/);
+  assert.deepEqual(await readFile(registry.registryPath), registryBeforeRejectedPurge);
   await rollbackSourceBinding({ id: binding.binding.id, confirmation: "local-user-confirmed" });
   assert.equal((await inspectSourceRegistry()).registry.bindings.find((item) => item.id === binding.binding.id).active, false);
-  await purgeSourceBinding({ id: binding.binding.id, confirmation: "local-user-confirmed" });
+  const allowedPurge = runCli([
+    "source-purge", binding.binding.id, "--confirm-local-purge", "--json"
+  ]);
+  assert.equal(allowedPurge.status, 0, allowedPurge.stderr);
+  assert.equal(JSON.parse(allowedPurge.stdout).purged, true);
   assert.equal((await inspectSourceRegistry()).registry.bindings.some((item) => item.id === binding.binding.id), false);
+  for (const [path, expected] of Object.entries(before)) assert.equal(hash(await readFile(path)), expected);
 });
 
 test("BLUN lifecycle uses BLUN_HOME as the isolated Codex-compatible host profile", async (t) => {

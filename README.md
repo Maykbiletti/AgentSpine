@@ -271,7 +271,7 @@ Read the full [preservation contract](docs/preservation-contract.md), including 
 | `agentspine source-status …` | Inspect host-native user, project, and memory roots without exposing source contents |
 | `agentspine source-bind …` | Bind existing user-wide continuity after an explicit local confirmation |
 | `agentspine source-rollback …` | Disable one source binding while retaining its append-only audit history |
-| `agentspine source-purge …` | Permanently remove one binding while retaining only its non-reversible digest receipt |
+| `agentspine source-purge … --confirm-local-purge` | Permanently remove one binding after dedicated local purge confirmation while retaining only its non-reversible digest receipt |
 | `agentspine delegation-check …` | Check explicit actor/action/target coordination policy; default deny |
 | `agentspine delegation-grant …` | Owner-confirmed local CLI grant for task coordination only |
 | `agentspine delegation-revoke …` | Revoke future coordination and retain policy history |

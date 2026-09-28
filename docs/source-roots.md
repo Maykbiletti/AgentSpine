@@ -91,10 +91,10 @@ Only portable low-risk learning and the known person relationship context are re
 ```bash
 agentspine source-status --host claude --cwd /current/project --json
 agentspine source-rollback binding:ID --confirm-local-binding
-agentspine source-purge binding:ID --confirm-local-binding
+agentspine source-purge binding:ID --confirm-local-purge
 ```
 
-Bindings and their provenance are context-only. They cannot create identity equivalence, roles, permissions, delegation, host trust, or self-starter rights.
+Rollback uses the ordinary binding confirmation because it is reversible. Permanent purge requires the dedicated local purge confirmation. Bindings and their provenance are context-only. They cannot create identity equivalence, roles, permissions, delegation, host trust, or self-starter rights.
 
 ## Empty and damaged state
 

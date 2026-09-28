@@ -209,7 +209,7 @@ if (result.binding.scope === "project-memory") await purgeIndexedMemoryCache(res
 return result;
 }
 export async function purgeSourceBinding({ id, confirmation, env = process.env }) {
-if (confirmation !== "local-user-confirmed") throw new Error("source binding purge requires explicit local user confirmation");
+if (confirmation !== "local-user-purge-confirmed") throw new Error("source binding purge requires explicit local user purge confirmation");
 const result = await mutateRegistry((registry) => {
 const removed = registry.bindings.find((item) => item.id === id);
 const before = registry.bindings.length;
