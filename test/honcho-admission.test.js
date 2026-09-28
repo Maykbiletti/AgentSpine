@@ -31,8 +31,7 @@ function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = ne
     derivationIsolation: "d".repeat(64), crossSessionRecall: "e".repeat(64),
     deletion: "f".repeat(64), sourceOffer: "a".repeat(64), ...digests };
   const acceptance = {};
-  const evidenceBindings = {};
-  const evidenceSignatures = {};
+  const evidenceBindings = {}, evidenceSignatures = {};
   const evidenceObservedAt = {};
   for (const field of ["serverHealth", "embeddingCompatibility", "derivationIsolation", "crossSessionRecall", "deletion"]) {
     acceptance[field] = values[field];
@@ -475,7 +474,7 @@ test("accessors and overwide plans fail closed before untrusted code can run", (
   for (const result of [accessorResult, evaluateHonchoAdmission(wide)]) assert.deepEqual(result.blockers,
     [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
 });
-test("proxy traps and callable values cannot execute during plan validation", () => {
+test("proxy traps, callables and non-JSON primitives fail before policy access", () => {
   let traps = 0;
   const trap = () => { traps += 1; throw new Error("untrusted proxy trap ran"); };
   const root = new Proxy(plan(), { getPrototypeOf: trap, ownKeys: trap });
@@ -485,7 +484,8 @@ test("proxy traps and callable values cannot execute during plan validation", ()
   const revoked = Proxy.revocable(plan(), {});
   revoked.revoke();
   for (const candidate of [root, nested, revoked.proxy, plan({ scope: callable }),
-    plan({ metadata: executable })]) {
+    plan({ metadata: executable }), ...[undefined, Symbol("synthetic"), 1n, NaN, Infinity,
+      -Infinity].map((value) => plan({ metadata: { value } }))]) {
     let result;
     assert.doesNotThrow(() => { result = evaluateHonchoAdmission(candidate); });
     assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);

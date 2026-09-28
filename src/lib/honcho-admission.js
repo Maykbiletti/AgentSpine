@@ -145,8 +145,9 @@ function rawCredentialValue(value) {
 
 function scanPlanValue(value, ancestors, depth, state) {
   const type = typeof value;
-  if (!value || (type !== "object" && type !== "function")) return null;
-  if (type === "function" || isProxy(value) || depth > PLAN_SCAN_MAX_DEPTH
+  if (value === null || type === "string" || type === "boolean"
+    || (type === "number" && Number.isFinite(value))) return null;
+  if (type !== "object" || isProxy(value) || depth > PLAN_SCAN_MAX_DEPTH
     || ancestors.has(value)) return { kind: "traversal" };
   let descriptors;
   try {
