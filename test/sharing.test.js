@@ -40,12 +40,16 @@ function hash(value) {
 }
 
 function runCli(args, state) {
-  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
-  const result = spawnSync(process.execPath, [cli, ...args], {
-    encoding: "utf8", env: { ...process.env, AGENTSPINE_STATE_DIR: state }
-  });
+  const result = runCliResult(args, state);
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
+}
+
+function runCliResult(args, state) {
+  const cli = fileURLToPath(new URL("../bin/agentspine.js", import.meta.url));
+  return spawnSync(process.execPath, [cli, ...args], {
+    encoding: "utf8", env: { ...process.env, AGENTSPINE_STATE_DIR: state }
+  });
 }
 
 async function acceptedLearning(root, { id, kind = "project-fact", claim, privacy = "shared", groupId = null, subjectId = null, supersedesId = null }) {
@@ -181,7 +185,7 @@ test("shared supersession retains history and rollback restores the prior accept
   await reviewShared({ root: rootB, id: "shared:new", decision: "accept", reason: "Accepted changed state.", confirmedByUser: true });
   assert.deepEqual((await sharedContext({ root: rootB })).items.map((item) => item.id), ["shared:new"]);
   await assert.rejects(
-    deleteShared({ root: rootB, id: "shared:old", confirmation: "local-share-confirmed" }),
+    deleteShared({ root: rootB, id: "shared:old", confirmation: "local-user-purge-confirmed" }),
     /roll back accepted superseding/
   );
   const rolledBack = await rollbackShared({ root: rootB, id: "shared:new", reason: "Synthetic correction." });
@@ -259,7 +263,23 @@ test("CLI publishes, quarantines, reviews, reads, configures, and deletes shared
   ], state);
   assert.equal(runCli(["share-context", rootB, "--scope", "team:synthetic", "--json"], state).items[0].id, "shared:cli");
   assert.equal(runCli(["share-config", rootB, "--max-items", "7", "--json"], state).config.maxContextItems, 7);
-  assert.equal(runCli([
+  const loaded = await loadSharing(rootB);
+  const stateBeforeDeniedPurge = await readFile(loaded.sharingPath);
+  const sourceBeforeDeniedPurge = await readFile(join(rootB, "CLAUDE.md"));
+  await assert.rejects(deleteShared({ root: rootB, id: "shared:missing" }), /purge confirmation/);
+  await assert.rejects(deleteShared({
+    root: rootB, id: "shared:cli", confirmation: "local-share-confirmed"
+  }), /purge confirmation/);
+  const denied = runCliResult([
     "share-delete", "shared:cli", "--root", rootB, "--confirm-local-share", "--json"
+  ], state);
+  assert.notEqual(denied.status, 0);
+  assert.match(denied.stderr, /purge confirmation/);
+  assert.deepEqual(await readFile(loaded.sharingPath), stateBeforeDeniedPurge);
+  assert.equal(hash(await readFile(join(rootB, "CLAUDE.md"))), hash(sourceBeforeDeniedPurge));
+  assert.equal(runCli([
+    "share-delete", "shared:cli", "--root", rootB, "--confirm-local-purge", "--json"
   ], state).deleted, true);
+  assert.equal((await loadSharing(rootB)).sharing.records.length, 0);
+  assert.equal(hash(await readFile(join(rootB, "CLAUDE.md"))), hash(sourceBeforeDeniedPurge));
 });
