@@ -28,6 +28,28 @@ function endpoint(value, field, blockers) {
   return { origin: parsed.origin, path: parsed.pathname, hostname: parsed.hostname.toLowerCase() };
 }
 
+function isPrivateIpv4(hostname) {
+  const parts = hostname.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^(?:0|[1-9]\d{0,2})$/.test(part))) return false;
+  const octets = parts.map(Number);
+  if (octets.some((part) => part > 255)) return false;
+  const [first, second] = octets;
+  return first === 10
+    || first === 127
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168)
+    || (first === 100 && second >= 64 && second <= 127);
+}
+
+function isPrivateNetworkHost(hostname) {
+  const host = hostname.startsWith("[") && hostname.endsWith("]")
+    ? hostname.slice(1, -1)
+    : hostname;
+  if (host === "localhost" || host === "::1") return true;
+  if (isPrivateIpv4(host)) return true;
+  return /^f[cd][0-9a-f]{2}:/i.test(host);
+}
+
 function boundedText(value, maximum = 256) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= maximum;
 }
@@ -53,6 +75,9 @@ function checkEndpointRoles(plan, blockers) {
   const origins = new Map();
   for (const [role, current] of Object.entries(endpoints)) {
     if (!current) continue;
+    if (!isPrivateNetworkHost(current.hostname)) {
+      blockers.push(blocker("endpoint-not-private-network", role));
+    }
     const previous = origins.get(current.origin);
     if (previous) blockers.push(blocker("endpoint-role-collision", `${previous},${role}`));
     else origins.set(current.origin, role);
