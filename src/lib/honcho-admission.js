@@ -125,16 +125,24 @@ function rawCredentialValue(value) {
   return value !== null && value !== undefined && value !== false;
 }
 
-function rawCredentialPath(value, path = "", seen = new WeakSet(), depth = 0) {
+function rawCredentialScan(value, path = "", ancestors = new WeakSet(), depth = 0) {
   if (!value || typeof value !== "object") return null;
-  if (seen.has(value) || depth > 20) return null;
-  seen.add(value);
+  if (depth > 20) return { kind: "traversal", path };
+  if (ancestors.has(value)) return { kind: "traversal", path };
+  ancestors.add(value);
   for (const [key, child] of Object.entries(value)) {
     const childPath = path ? `${path}.${key}` : key;
-    if (rawCredentialKey(key) && rawCredentialValue(child)) return childPath;
-    const nested = rawCredentialPath(child, childPath, seen, depth + 1);
-    if (nested) return nested;
+    if (rawCredentialKey(key) && rawCredentialValue(child)) {
+      ancestors.delete(value);
+      return { kind: "credential", path: childPath };
+    }
+    const nested = rawCredentialScan(child, childPath, ancestors, depth + 1);
+    if (nested) {
+      ancestors.delete(value);
+      return nested;
+    }
   }
+  ancestors.delete(value);
   return null;
 }
 
@@ -340,8 +348,12 @@ export function evaluateHonchoAdmission(plan, options = {}) {
     || plan?.derivation?.parentHistory !== false) {
     blockers.push(blocker("derivation-isolation-incomplete", "derivation"));
   }
-  const credential = rawCredentialPath(plan);
-  if (credential) blockers.push(blocker("raw-credential-forbidden", credential));
+  const credentialScan = rawCredentialScan(plan);
+  if (credentialScan?.kind === "credential") {
+    blockers.push(blocker("raw-credential-forbidden", credentialScan.path));
+  } else if (credentialScan) {
+    blockers.push(blocker("plan-traversal-invalid", credentialScan.path));
+  }
   if (plan.phase === "honcho-primary") {
     const verifierKey = trustedReceiptKey(plan, options?.receiptTrustStore,
       options?.minimumReceiptTrustRevision, options?.trustedReceiptTrustStoreDigest, blockers);
