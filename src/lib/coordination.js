@@ -515,7 +515,7 @@ export async function taskContext({
 }
 
 export async function deleteTask({ root = process.cwd(), id, confirmation }) {
-  requireOwnerConfirmation(confirmation);
+  if (confirmation !== "local-user-purge-confirmed") throw new Error("permanent coordination task deletion requires explicit local user purge confirmation");
   if (!ID_RE.test(id || "")) throw new Error("task id is required");
   return coordinationMutation(root, ({ coordination, coordinationPath }) => {
     const existed = coordination.tasks.some((task) => task.id === id);

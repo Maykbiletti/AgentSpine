@@ -156,7 +156,7 @@ export async function runAgentCommand({ command, flags, positional, json }) {
   if (command === "task-delete") {
     return output(await deleteTask({
       root: flags.root || process.cwd(), id: positional[0],
-      confirmation: booleanFlag(flags["confirm-local-policy"]) ? "local-owner-confirmed" : null
+      confirmation: booleanFlag(flags["confirm-local-purge"]) ? "local-user-purge-confirmed" : null
     }), json);
   }
 

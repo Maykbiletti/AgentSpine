@@ -110,11 +110,15 @@ agentspine task-update task:release \
   --root /path/to/project
 
 agentspine tasks /path/to/project --assignee agent:builder --json
+
+agentspine task-delete task:release \
+  --confirm-local-purge \
+  --root /path/to/project
 ```
 
 The MCP equivalents are `create_task`, `update_task`, and `task_context`. Returned context omits the internal delegation snapshot. Each mutation retains the complete previous task value before replacing the active view. New information therefore changes current relevance without erasing what was previously understood.
 
-Permanent task deletion is CLI-only and requires the same explicit local confirmation marker. It removes the active record and all retained versions; use it for privacy removal, not routine completion.
+Permanent task deletion is CLI-only and requires the dedicated local purge confirmation. It removes the active record and all retained versions; use it for privacy removal, not routine completion. Policy confirmation cannot authorize this irreversible deletion.
 
 ## Privacy and groups
 
