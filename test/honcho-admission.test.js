@@ -17,7 +17,10 @@ function signer() {
 }
 
 const TRUSTED_SIGNER = signer();
-const TRUSTED_OPTIONS = { trustedReceiptPublicKey: TRUSTED_SIGNER.publicKey };
+const ROTATED_SIGNER = signer();
+const TRUSTED_OPTIONS = { receiptTrustStore: {
+  publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey], revokedKeyDigests: []
+} };
 
 function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = new Date().toISOString(),
   receiptSigner = TRUSTED_SIGNER) {
@@ -220,6 +223,49 @@ test("production evidence requires the externally pinned BLUN host signer", () =
   assert.equal(missingSignatures.blockers.filter((item) =>
     item.code === "production-evidence-signature-invalid").length, 6);
   assert.equal(JSON.stringify(substituted).includes(rogueSigner.publicKey), false);
+});
+
+test("receipt issuer rotation admits the new key while explicit revocation wins", () => {
+  const rotatedPlan = plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true },
+    ...productionEvidence(DEFAULT_SCOPE, {}, new Date().toISOString(), ROTATED_SIGNER)
+  });
+  assert.equal(evaluateHonchoAdmission(rotatedPlan, TRUSTED_OPTIONS).admitted, true);
+
+  const revokedDigest = honchoReceiptPublicKeyDigest(TRUSTED_SIGNER.publicKey);
+  const revoked = evaluateHonchoAdmission(plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true },
+    ...productionEvidence()
+  }), { receiptTrustStore: {
+    publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey],
+    revokedKeyDigests: [revokedDigest]
+  } });
+  assert.equal(revoked.admitted, false);
+  assert.deepEqual(revoked.blockers.filter((item) =>
+    item.code === "production-evidence-issuer-revoked"), [
+    { code: "production-evidence-issuer-revoked", field: "governance.receiptIssuerKeyDigest" }
+  ]);
+  assert.equal(JSON.stringify(revoked).includes(revokedDigest), false);
+});
+
+test("malformed receipt trust stores fail closed without inspecting signatures", () => {
+  const value = plan({
+    phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...productionEvidence()
+  });
+  for (const receiptTrustStore of [
+    null,
+    { publicKeys: [TRUSTED_SIGNER.publicKey, TRUSTED_SIGNER.publicKey], revokedKeyDigests: [] },
+    { publicKeys: [TRUSTED_SIGNER.publicKey], revokedKeyDigests: ["not-a-digest"] },
+    { publicKeys: [TRUSTED_SIGNER.privateKey.export({ format: "pem", type: "pkcs8" }).toString("utf8")],
+      revokedKeyDigests: [] }
+  ]) {
+    const result = evaluateHonchoAdmission(value, { receiptTrustStore });
+    assert.equal(result.admitted, false);
+    assert.deepEqual(result.blockers.filter((item) =>
+      item.code === "production-evidence-trust-store-invalid"), [
+      { code: "production-evidence-trust-store-invalid", field: "receiptTrustStore" }
+    ]);
+  }
 });
 
 test("managed Honcho, unapproved origins, raw credentials, missing scope and unsafe derivation fail closed", () => {
