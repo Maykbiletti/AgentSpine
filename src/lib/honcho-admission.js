@@ -1,4 +1,5 @@
 import { createHash, createPublicKey, verify as verifySignature } from "node:crypto";
+import { isProxy } from "node:util/types";
 
 export const HONCHO_ADMISSION_SCHEMA = "agentspine.honcho-admission/v1";
 export const HONCHO_RECEIPT_TRUST_STORE_SCHEMA = "agentspine.honcho-receipt-trust-store/v1";
@@ -144,7 +145,8 @@ function rawCredentialValue(value) {
 
 function scanPlanValue(value, ancestors, depth, state) {
   if (!value || typeof value !== "object") return null;
-  if (depth > PLAN_SCAN_MAX_DEPTH || ancestors.has(value)) return { kind: "traversal" };
+  if (isProxy(value) || depth > PLAN_SCAN_MAX_DEPTH
+    || ancestors.has(value)) return { kind: "traversal" };
   let descriptors;
   try {
     const prototype = Object.getPrototypeOf(value);
@@ -361,7 +363,15 @@ function checkProductionEvidence(plan, blockers, verifierKey) {
 
 export function evaluateHonchoAdmission(plan, options = {}) {
   const blockers = [];
-  if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
+  if (!plan || typeof plan !== "object") {
+    return { schema: HONCHO_ADMISSION_SCHEMA, admitted: false, phase: null,
+      blockers: [blocker("plan-invalid", "plan")] };
+  }
+  if (isProxy(plan)) {
+    return { schema: HONCHO_ADMISSION_SCHEMA, admitted: false, phase: null,
+      blockers: [blocker("plan-traversal-invalid", PLAN_TRAVERSAL_DIAGNOSTIC)] };
+  }
+  if (Array.isArray(plan)) {
     return { schema: HONCHO_ADMISSION_SCHEMA, admitted: false, phase: null,
       blockers: [blocker("plan-invalid", "plan")] };
   }
