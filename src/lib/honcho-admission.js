@@ -17,7 +17,7 @@ const PRODUCTION_EVIDENCE_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const RECEIPT_TRUSTED_KEY_LIMIT = 8;
 const RECEIPT_REVOKED_KEY_LIMIT = 32;
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const RAW_CREDENTIAL_KEY_SUFFIXES = ["apikey", "token", "secret", "password", "passwort", "credential", "authorization", "authentication", "cookie", "privatekey", "passphrase", "accesskey", "accesskeyid", "secretkey"];
+const RAW_CREDENTIAL_KEY_SUFFIXES = ["apikey", "token", "secret", "password", "passwort", "credential", "authorization", "authentication", "bearer", "cookie", "privatekey", "passphrase", "accesskey", "accesskeyid", "secretkey"];
 const RAW_CREDENTIAL_KEY_EMBEDDED = ["apikey", "accesstoken", "clientsecret", "password", "passwort", "credential", "authorization", "authentication", "privatekey", "passphrase", "accesskey", "accesskeyid", "secretkey"];
 const NUMERIC_TOKEN_METRIC_KEYS = new Set(["maxtokens", "maxinputtokens", "maxoutputtokens", "inputtokens", "outputtokens",
   "prompttokens", "completiontokens", "cachedinputtokens", "reasoningtokens", "totaltokens"
