@@ -1,6 +1,5 @@
 import { createHash, createPublicKey, verify as verifySignature } from "node:crypto";
 import { isProxy } from "node:util/types";
-
 export const HONCHO_ADMISSION_SCHEMA = "agentspine.honcho-admission/v1";
 export const HONCHO_RECEIPT_TRUST_STORE_SCHEMA = "agentspine.honcho-receipt-trust-store/v1";
 
@@ -225,7 +224,7 @@ function rawCredentialScan(value) {
 }
 
 function approvedOriginSet(values) {
-  if (!Array.isArray(values) || values.length === 0 || values.length > 8) return null;
+  if (!Array.isArray(values) || values.length !== 3) return null;
   const origins = new Set();
   for (const value of values) {
     if (typeof value !== "string" || value.length > 2048) return null;
@@ -277,6 +276,8 @@ function checkEndpointRoles(plan, protectedOrigins, blockers) {
   }
   const approved = approvedOriginSet(protectedOrigins);
   if (!approved) blockers.push(blocker("approved-origin-policy-invalid", "options.approvedOrigins"));
+  const protectedRoles = approved ? { server: protectedOrigins[0],
+    embedding: protectedOrigins[1], derivation: protectedOrigins[2] } : null;
   if (declared && approved && (declared.size !== approved.size
     || [...declared].some((origin) => !approved.has(origin)))) {
     blockers.push(blocker("approved-origin-policy-mismatch", "network.approvedOrigins"));
@@ -285,9 +286,11 @@ function checkEndpointRoles(plan, protectedOrigins, blockers) {
     if (current && approved && !approved.has(current.origin)) {
       blockers.push(blocker("origin-not-approved", role));
     }
+    if (current && protectedRoles && current.origin !== protectedRoles[role]) {
+      blockers.push(blocker("origin-role-policy-mismatch", role));
+    }
   }
 }
-
 function checkInferencePolicy(plan, policy, blockers) {
   const valid = policy && typeof policy === "object" && !Array.isArray(policy)
     && boundedText(policy.embeddingModel, 128)
@@ -300,7 +303,6 @@ function checkInferencePolicy(plan, policy, blockers) {
   if (plan?.derivation?.model !== policy.derivationModel)
     blockers.push(blocker("derivation-model-policy-mismatch", "derivation.model"));
 }
-
 function checkRuntimeOwnership(plan, blockers) {
   const agentspine = plan?.writes?.agentspine === true;
   const honcho = plan?.writes?.honcho === true;
@@ -313,7 +315,6 @@ function checkRuntimeOwnership(plan, blockers) {
   }
   if (plan?.agentSpineRole !== "scope-gateway") blockers.push(blocker("agentspine-role-invalid", "agentSpineRole"));
 }
-
 function receiptTrustStore(value) {
   if (!value || typeof value !== "object" || isProxy(value) || Array.isArray(value)
     || rawCredentialScan(value)) return null;
@@ -341,7 +342,6 @@ function receiptTrustStore(value) {
   const digest = createHash("sha256").update(digestPayload, "utf8").digest("hex");
   return { keys, revoked, revision: value.revision, digest };
 }
-
 export function honchoReceiptTrustStoreDigest(value) {
   return receiptTrustStore(value)?.digest ?? null;
 }
