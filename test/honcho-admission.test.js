@@ -1,17 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign as signMessage } from "node:crypto";
-import {
-  evaluateHonchoAdmission, honchoEvidenceBindingDigest, honchoReceiptPublicKeyDigest,
-  honchoReceiptTrustStoreDigest, HONCHO_ADMISSION_SCHEMA } from "../src/lib/honcho-admission.js";
-const DEFAULT_SCOPE = {
-  tenantId: "tenant:a", workspaceId: "workspace:a", userId: "user:a",
-  projectId: "project:a", threadId: "thread:a"
-};
-function signer() {
-  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  return { privateKey, publicKey: publicKey.export({ format: "pem", type: "spki" }).toString("utf8") };
-}
+import { isProxy } from "node:util/types";
+import { evaluateHonchoAdmission as evaluateHonchoAdmissionRaw, honchoEvidenceBindingDigest, honchoReceiptPublicKeyDigest, honchoReceiptTrustStoreDigest, HONCHO_ADMISSION_SCHEMA } from "../src/lib/honcho-admission.js";
+const OWNER_APPROVED_ORIGINS = ["http://127.0.0.1:18000", "http://100.74.238.1:11434", "http://100.74.238.1:8000"];
+const evaluateHonchoAdmission = (value, options = {}) => !options || typeof options !== "object" || isProxy(options) || Array.isArray(options) ? evaluateHonchoAdmissionRaw(value, options) : evaluateHonchoAdmissionRaw(value, { approvedOrigins: OWNER_APPROVED_ORIGINS, ...options });
+const DEFAULT_SCOPE = { tenantId: "tenant:a", workspaceId: "workspace:a", userId: "user:a",
+  projectId: "project:a", threadId: "thread:a" };
+function signer() { const { privateKey, publicKey } = generateKeyPairSync("ed25519"); return {
+  privateKey, publicKey: publicKey.export({ format: "pem", type: "spki" }).toString("utf8") }; }
 const TRUSTED_SIGNER = signer();
 const ROTATED_SIGNER = signer();
 const TRUST_REVISION = 7;
@@ -20,8 +17,7 @@ const TRUST_STORE = {
   publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey], revokedKeyDigests: []
 };
 const TRUST_STORE_DIGEST = honchoReceiptTrustStoreDigest(TRUST_STORE);
-const TRUSTED_OPTIONS = { receiptTrustStore: TRUST_STORE,
-  minimumReceiptTrustRevision: TRUST_REVISION, trustedReceiptTrustStoreDigest: TRUST_STORE_DIGEST };
+const TRUSTED_OPTIONS = { receiptTrustStore: TRUST_STORE, minimumReceiptTrustRevision: TRUST_REVISION, trustedReceiptTrustStoreDigest: TRUST_STORE_DIGEST };
 function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = new Date().toISOString(),
   receiptSigner = TRUSTED_SIGNER, receiptTrustRevision = TRUST_REVISION,
   receiptTrustStoreDigest = TRUST_STORE_DIGEST) {
@@ -66,9 +62,7 @@ function plan(overrides = {}) {
     writes: { agentspine: true, honcho: false },
     sourcePolicy: "confirmed-private-only",
     telemetryEnabled: false,
-    network: { approvedOrigins: [
-      "http://127.0.0.1:18000", "http://100.74.238.1:11434", "http://100.74.238.1:8000"
-    ] },
+    network: { approvedOrigins: [...OWNER_APPROVED_ORIGINS] },
     honcho: { serverUrl: "http://127.0.0.1:18000" },
     embedding: { baseUrl: "http://100.74.238.1:11434/v1", transport: "openai-compatible", model: "bge-m3", dimensions: 1024 },
     derivation: { baseUrl: "http://100.74.238.1:8000/v1", transport: "openai-compatible", model: "king",
@@ -79,9 +73,14 @@ function plan(overrides = {}) {
   };
 }
 test("evaluation admits one AgentSpine writer and three separately approved self-hosted endpoint roles", () => {
-  assert.deepEqual(evaluateHonchoAdmission(plan()), {
-    schema: HONCHO_ADMISSION_SCHEMA, admitted: true, phase: "evaluation", blockers: []
-  });
+  assert.deepEqual(evaluateHonchoAdmission(plan()), { schema: HONCHO_ADMISSION_SCHEMA,
+    admitted: true, phase: "evaluation", blockers: [] }); });
+test("an admission plan cannot self-approve an origin outside the protected owner policy", () => {
+  const selfApproved = "http://100.74.238.2:18000", value = plan({ honcho: { serverUrl: selfApproved }, network: { approvedOrigins: [selfApproved, "http://100.74.238.1:11434", "http://100.74.238.1:8000"] } }), result = evaluateHonchoAdmissionRaw(value, { approvedOrigins: OWNER_APPROVED_ORIGINS });
+  assert.equal(result.admitted, false);
+  assert.deepEqual(result.blockers.filter((item) => /origin-(?:policy-mismatch|not-approved)/.test(item.code)), [
+    { code: "approved-origin-policy-mismatch", field: "network.approvedOrigins" },
+    { code: "origin-not-approved", field: "server" } ]);
 });
 test("King vLLM cannot be mistaken for Honcho through a different scheme on the same socket", () => {
   const value = plan({ honcho: { serverUrl: "http://100.74.238.1:8000" }, derivation: { ...plan().derivation, baseUrl: "https://100.74.238.1:8000/v1" },
@@ -120,7 +119,7 @@ test("loopback, RFC1918, Tailscale CGNAT and IPv6 ULA hosts are private-network 
     const value = plan({ honcho: { serverUrl }, network: { approvedOrigins: [
       origin, "http://100.74.238.1:11434", "http://100.74.238.1:8000"
     ] } });
-    assert.equal(evaluateHonchoAdmission(value).admitted, true, serverUrl);
+    assert.equal(evaluateHonchoAdmission(value, { approvedOrigins: value.network.approvedOrigins }).admitted, true, serverUrl);
   }
 });
 test("public, link-local and ambiguous hostname forms fail the private-network boundary", () => {
