@@ -297,7 +297,6 @@ test("a protected trust revision floor rejects rolled-back stores and mismatched
     item.code === "production-evidence-trust-store-rollback"), [
     { code: "production-evidence-trust-store-rollback", field: "receiptTrustStore.revision" }
   ]);
-
   const mismatched = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true },
     ...productionEvidence(DEFAULT_SCOPE, {}, new Date().toISOString(), TRUSTED_SIGNER,
@@ -307,7 +306,6 @@ test("a protected trust revision floor rejects rolled-back stores and mismatched
     item.code === "production-evidence-trust-revision-mismatch"), [
     { code: "production-evidence-trust-revision-mismatch", field: "governance.receiptTrustRevision" }
   ]);
-
   const missingFloor = evaluateHonchoAdmission(current, {
     receiptTrustStore: currentOptions.receiptTrustStore,
     trustedReceiptTrustStoreDigest: currentStoreDigest
@@ -316,7 +314,6 @@ test("a protected trust revision floor rejects rolled-back stores and mismatched
     item.code === "production-evidence-trust-floor-invalid"), [
     { code: "production-evidence-trust-floor-invalid", field: "minimumReceiptTrustRevision" }
   ]);
-
   const relabelledEvidence = productionEvidence();
   relabelledEvidence.governance.receiptTrustRevision = nextRevision;
   relabelledEvidence.governance.receiptTrustStoreDigest = currentStoreDigest;
@@ -477,10 +474,10 @@ test("accessors and overwide plans fail closed before untrusted code can run", (
 test("proxy traps, callables and non-JSON shapes fail before policy access", () => {
   let traps = 0;
   const trap = () => { traps += 1; throw new Error("untrusted proxy trap ran"); };
-  const root = new Proxy(plan(), { getPrototypeOf: trap, ownKeys: trap });
-  const nested = plan({ metadata: new Proxy({}, { getPrototypeOf: trap, ownKeys: trap }) });
-  const callable = new Proxy(() => {}, { get: trap, getPrototypeOf: trap, ownKeys: trap });
-  const executable = () => { throw new Error("untrusted function ran"); };
+  const root = new Proxy(plan(), { getPrototypeOf: trap, ownKeys: trap }),
+    nested = plan({ metadata: new Proxy({}, { getPrototypeOf: trap, ownKeys: trap }) });
+  const callable = new Proxy(() => {}, { get: trap, getPrototypeOf: trap, ownKeys: trap }),
+    executable = () => { throw new Error("untrusted function ran"); };
   const revoked = Proxy.revocable(plan(), {});
   revoked.revoke();
   for (const candidate of [root, nested, revoked.proxy, plan({ scope: callable }),
@@ -490,11 +487,14 @@ test("proxy traps, callables and non-JSON shapes fail before policy access", () 
     assert.doesNotThrow(() => { result = evaluateHonchoAdmission(candidate); });
     assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
   }
+  const cutover = plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true } });
+  let optionResult;
+  assert.doesNotThrow(() => { optionResult = evaluateHonchoAdmission(cutover, new Proxy({}, { get: trap })); });
+  assert.ok(optionResult.blockers.some((item) => item.code === "production-evidence-options-invalid"));
   assert.equal(traps, 0);
 });
 test("shared acyclic plan metadata does not look like a traversal cycle", () => {
-  const shared = { label: "synthetic-shared-config" };
-  const result = evaluateHonchoAdmission(plan({ metadata: { first: shared, second: shared } }));
-  assert.equal(result.admitted, true);
-  assert.equal(result.blockers.some((item) => item.code === "plan-traversal-invalid"), false);
+  const shared = { label: "synthetic-shared-config" },
+    result = evaluateHonchoAdmission(plan({ metadata: { first: shared, second: shared } }));
+  assert.equal(result.admitted, true); assert.equal(result.blockers.some((item) => item.code === "plan-traversal-invalid"), false);
 });

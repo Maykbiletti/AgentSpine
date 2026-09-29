@@ -416,8 +416,13 @@ export function evaluateHonchoAdmission(plan, options = {}) {
     blockers.push(blocker("raw-credential-forbidden", PLAN_CREDENTIAL_DIAGNOSTIC));
   }
   if (plan.phase === "honcho-primary") {
-    const verifierKey = trustedReceiptKey(plan, options?.receiptTrustStore,
-      options?.minimumReceiptTrustRevision, options?.trustedReceiptTrustStoreDigest, blockers);
+    let verifierKey = null;
+    const optionScan = !options || typeof options !== "object" || Array.isArray(options)
+      ? { kind: "traversal" } : rawCredentialScan(options);
+    if (optionScan) {
+      blockers.push(blocker("production-evidence-options-invalid", "options"));
+    } else verifierKey = trustedReceiptKey(plan, options.receiptTrustStore,
+      options.minimumReceiptTrustRevision, options.trustedReceiptTrustStoreDigest, blockers);
     checkProductionEvidence(plan, blockers, verifierKey);
   }
   return { schema: HONCHO_ADMISSION_SCHEMA, admitted: blockers.length === 0,
