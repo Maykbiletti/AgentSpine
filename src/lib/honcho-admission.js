@@ -162,6 +162,7 @@ function rawCredentialValue(value) {
   return value !== null && value !== undefined && value !== false;
 }
 function rawCredentialMaterial(value) { return typeof value === "string" && /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/.test(value); }
+function rawJwkMaterial(descriptors) { const text = (key) => { const item = descriptors[key]; return item && !item.get && !item.set && item.enumerable === true && typeof item.value === "string" ? item.value : null; }, kty = text("kty"); return (["RSA", "EC", "OKP"].includes(kty) && rawCredentialValue(text("d"))) || (kty === "oct" && rawCredentialValue(text("k"))); }
 
 function scanPlanValue(value, ancestors, depth, state) {
   const type = typeof value;
@@ -184,7 +185,7 @@ function scanPlanValue(value, ancestors, depth, state) {
       && !(Array.isArray(value) && prototype === Array.prototype)) return { kind: "traversal" };
     descriptors = Object.getOwnPropertyDescriptors(value);
   } catch { return { kind: "traversal" }; }
-  const keys = Reflect.ownKeys(descriptors);
+  if (state.detectCredentialMaterial && rawJwkMaterial(descriptors)) state.credential = true; const keys = Reflect.ownKeys(descriptors);
   const array = Array.isArray(value);
   if (array) {
     const length = descriptors.length?.value;
