@@ -278,8 +278,8 @@ function checkEndpointRoles(plan, protectedOrigins, blockers) {
   if (!approved) blockers.push(blocker("approved-origin-policy-invalid", "options.approvedOrigins"));
   const protectedRoles = approved ? { server: protectedOrigins[0],
     embedding: protectedOrigins[1], derivation: protectedOrigins[2] } : null;
-  if (declared && approved && (declared.size !== approved.size
-    || [...declared].some((origin) => !approved.has(origin)))) {
+  if (declared && approved && protectedOrigins.some((origin, index) =>
+    plan.network.approvedOrigins[index] !== origin)) {
     blockers.push(blocker("approved-origin-policy-mismatch", "network.approvedOrigins"));
   }
   for (const [role, current] of Object.entries(endpoints)) {
