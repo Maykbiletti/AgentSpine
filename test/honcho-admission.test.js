@@ -22,8 +22,7 @@ const TRUST_STORE = {
 };
 const TRUST_STORE_DIGEST = honchoReceiptTrustStoreDigest(TRUST_STORE);
 const TRUSTED_OPTIONS = { receiptTrustStore: TRUST_STORE,
-  minimumReceiptTrustRevision: TRUST_REVISION,
-  trustedReceiptTrustStoreDigest: TRUST_STORE_DIGEST };
+  minimumReceiptTrustRevision: TRUST_REVISION, trustedReceiptTrustStoreDigest: TRUST_STORE_DIGEST };
 function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = new Date().toISOString(),
   receiptSigner = TRUSTED_SIGNER, receiptTrustRevision = TRUST_REVISION,
   receiptTrustStoreDigest = TRUST_STORE_DIGEST) {
@@ -485,13 +484,14 @@ test("proxy traps, callables and non-JSON shapes fail before policy access", () 
     assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
   }
   const cutover = plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true } });
-  let optionResult, digestResult;
+  let optionResult, digestResult, bindingResult;
   assert.doesNotThrow(() => {
     optionResult = evaluateHonchoAdmission(cutover, new Proxy({}, { get: trap }));
     digestResult = honchoReceiptTrustStoreDigest(new Proxy({}, { get: trap }));
+    bindingResult = honchoEvidenceBindingDigest("acceptance.serverHealth", "a".repeat(64), new Proxy({}, { get: trap }), new Date().toISOString(), TRUST_REVISION, TRUST_STORE_DIGEST);
   });
   assert.ok(optionResult.blockers.some((item) => item.code === "production-evidence-options-invalid"));
-  assert.equal(digestResult, null); assert.equal(traps, 0);
+  assert.equal(digestResult, null); assert.equal(bindingResult, null); assert.equal(traps, 0);
 });
 test("shared acyclic plan metadata does not look like a traversal cycle", () => {
   const shared = { label: "synthetic-shared-config" },
