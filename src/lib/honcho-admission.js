@@ -19,9 +19,9 @@ const RECEIPT_REVOKED_KEY_LIMIT = 32;
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const RAW_CREDENTIAL_KEY_SUFFIXES = [
   "apikey", "token", "secret", "password", "passwort", "credential", "authorization",
-  "authentication", "cookie", "privatekey", "passphrase", "accesskey", "accesskeyid",
-  "secretkey"
+  "authentication", "cookie", "privatekey", "passphrase", "accesskey", "accesskeyid", "secretkey"
 ];
+const RAW_CREDENTIAL_KEY_QUALIFIER = /(?:backup|copy|current|legacy|old|previous|primary|secondary|value)+$/;
 const NUMERIC_TOKEN_METRIC_KEYS = new Set([
   "maxtokens", "maxinputtokens", "maxoutputtokens", "inputtokens", "outputtokens",
   "prompttokens", "completiontokens", "cachedinputtokens", "reasoningtokens", "totaltokens"
@@ -146,9 +146,9 @@ function rawCredentialKey(value, child) {
     /[a-z0-9]/.test(character) ? character : /[\p{L}\p{N}]/u.test(character) ? "?" : "").join("");
   if (NUMERIC_TOKEN_METRIC_KEYS.has(canonical)
     && Number.isSafeInteger(child) && child >= 0) return false;
-  const candidates = /[s?]$/.test(canonical)
-    ? [canonical, canonical.slice(0, -1)]
-    : [canonical];
+  const aliases = [canonical, canonical.replace(RAW_CREDENTIAL_KEY_QUALIFIER, "")];
+  const candidates = aliases.flatMap((alias) => /[s?]$/.test(alias)
+    ? [alias, alias.slice(0, -1)] : [alias]);
   const matches = (candidate, suffix) => candidate.length >= suffix.length
     && [...candidate.slice(-suffix.length)].every((character, index) =>
       character === "?" || character === suffix[index]);
