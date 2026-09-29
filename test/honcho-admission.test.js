@@ -215,7 +215,6 @@ test("production evidence requires the externally pinned BLUN host signer", () =
     item.code === "production-evidence-signature-invalid").length, 6);
   assert.equal(JSON.stringify(substituted).includes(rogueSigner.publicKey), false);
 });
-
 test("receipt issuer rotation admits the new key while explicit revocation wins", () => {
   const rotatedPlan = plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true },
@@ -246,12 +245,10 @@ test("malformed receipt trust stores fail closed without inspecting signatures",
     phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...productionEvidence()
   });
   for (const receiptTrustStore of [
-    null,
-    { revision: 0, publicKeys: [TRUSTED_SIGNER.publicKey], revokedKeyDigests: [] },
-    { revision: TRUST_REVISION,
-      publicKeys: [TRUSTED_SIGNER.publicKey, TRUSTED_SIGNER.publicKey], revokedKeyDigests: [] },
-    { revision: TRUST_REVISION,
-      publicKeys: [TRUSTED_SIGNER.publicKey], revokedKeyDigests: ["not-a-digest"] },
+    null, { revision: 0, publicKeys: [TRUSTED_SIGNER.publicKey], revokedKeyDigests: [] },
+    { revision: TRUST_REVISION, publicKeys: [TRUSTED_SIGNER.publicKey, TRUSTED_SIGNER.publicKey], revokedKeyDigests: [] },
+    { revision: TRUST_REVISION, publicKeys: [TRUSTED_SIGNER.publicKey], revokedKeyDigests: ["not-a-digest"] },
+    { revision: TRUST_REVISION, publicKeys: [TRUSTED_SIGNER.publicKey], revokedKeyDigests: [Object.create(null)] },
     { revision: TRUST_REVISION,
       publicKeys: [TRUSTED_SIGNER.privateKey.export({ format: "pem", type: "pkcs8" }).toString("utf8")],
       revokedKeyDigests: [] }
@@ -336,7 +333,6 @@ test("a protected digest rejects same-revision trust-store substitution", () => 
     { code: "production-evidence-trust-store-tampered", field: "receiptTrustStore" }
   ]);
   assert.equal(JSON.stringify(result).includes(rogueSigner.publicKey), false);
-
   const missingAnchor = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...productionEvidence()
   }), { receiptTrustStore: TRUST_STORE, minimumReceiptTrustRevision: TRUST_REVISION });
@@ -345,7 +341,6 @@ test("a protected digest rejects same-revision trust-store substitution", () => 
     { code: "production-evidence-trust-anchor-invalid", field: "trustedReceiptTrustStoreDigest" }
   ]);
 });
-
 test("trust-store digests are canonical across key and revocation ordering", () => {
   const first = honchoReceiptPublicKeyDigest(TRUSTED_SIGNER.publicKey);
   const second = honchoReceiptPublicKeyDigest(ROTATED_SIGNER.publicKey);
@@ -359,7 +354,6 @@ test("trust-store digests are canonical across key and revocation ordering", () 
   assert.equal(honchoReceiptTrustStoreDigest({ ...forward, revision: TRUST_REVISION + 1 })
     === honchoReceiptTrustStoreDigest(forward), false);
 });
-
 test("managed Honcho, unapproved origins, raw credentials, missing scope and unsafe derivation fail closed", () => {
   const value = plan({
     honcho: { serverUrl: "https://api.honcho.dev", apiKey: "must-not-live-here" },
@@ -374,7 +368,6 @@ test("managed Honcho, unapproved origins, raw credentials, missing scope and uns
     "scope-binding-missing", "derivation-isolation-incomplete"]) assert.ok(codes.has(code), code);
   assert.equal(JSON.stringify(result).includes("must-not-live-here"), false);
 });
-
 test("credential aliases and provider environment keys cannot hide raw access material", () => {
   const cases = [
     { overrides: { honcho: { serverUrl: "http://127.0.0.1:18000",
@@ -482,15 +475,22 @@ test("proxy traps, callables and non-JSON shapes fail before policy access", () 
     assert.doesNotThrow(() => { result = evaluateHonchoAdmission(candidate); });
     assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
   }
-  const cutover = plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true } });
-  let optionResults, digestResult;
+  const cutover = plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true } }), nil = Object.create(null);
+  const unsafeEvidence = productionEvidence(); unsafeEvidence.acceptance.serverHealth = nil;
+  unsafeEvidence.acceptance.evidenceObservedAt.embeddingCompatibility = nil;
+  let optionResults, digestResult, anchorResult, evidenceResult;
   assert.doesNotThrow(() => {
     optionResults = [new Proxy({}, { get: trap }), revoked.proxy].map((options) => evaluateHonchoAdmission(cutover, options));
+    anchorResult = evaluateHonchoAdmission(cutover, { ...TRUSTED_OPTIONS, trustedReceiptTrustStoreDigest: nil });
+    evidenceResult = evaluateHonchoAdmission(plan({ ...cutover, ...unsafeEvidence }), TRUSTED_OPTIONS);
     digestResult = honchoReceiptTrustStoreDigest(new Proxy({}, { get: trap }));
+    assert.equal(honchoReceiptTrustStoreDigest({ ...TRUST_STORE, revokedKeyDigests: [nil] }), null);
     const bindingArgs = ["acceptance.serverHealth", "a".repeat(64), DEFAULT_SCOPE, new Date().toISOString(), TRUST_REVISION, TRUST_STORE_DIGEST];
     for (const index of [1, 2, 3, 5]) { const args = [...bindingArgs]; args[index] = new Proxy({}, { get: trap }); assert.equal(honchoEvidenceBindingDigest(...args), null); }
   });
   for (const result of optionResults) assert.ok(result.blockers.some((item) => item.code === "production-evidence-options-invalid"));
+  assert.ok(anchorResult.blockers.some((item) => item.code === "production-evidence-trust-anchor-invalid"));
+  assert.ok(evidenceResult.blockers.some((item) => item.code === "production-evidence-missing")); assert.ok(evidenceResult.blockers.some((item) => item.code === "production-evidence-time-invalid"));
   assert.equal(digestResult, null); assert.equal(traps, 0);
 });
 test("shared acyclic plan metadata does not look like a traversal cycle", () => {
