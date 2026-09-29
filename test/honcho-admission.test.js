@@ -242,7 +242,6 @@ test("receipt issuer rotation admits the new key while explicit revocation wins"
   ]);
   assert.equal(JSON.stringify(revoked).includes(revokedDigest), false);
 });
-
 test("malformed receipt trust stores fail closed without inspecting signatures", () => {
   const value = plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...productionEvidence()
@@ -269,7 +268,6 @@ test("malformed receipt trust stores fail closed without inspecting signatures",
     ]);
   }
 });
-
 test("a protected trust revision floor rejects rolled-back stores and mismatched plans", () => {
   const nextRevision = TRUST_REVISION + 1;
   const currentStore = {
@@ -323,7 +321,6 @@ test("a protected trust revision floor rejects rolled-back stores and mismatched
   assert.equal(relabelled.blockers.filter((item) =>
     item.code === "production-evidence-scope-mismatch").length, 6);
 });
-
 test("a protected digest rejects same-revision trust-store substitution", () => {
   const rogueSigner = signer();
   const substitutedStore = { revision: TRUST_REVISION,
@@ -488,10 +485,13 @@ test("proxy traps, callables and non-JSON shapes fail before policy access", () 
     assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
   }
   const cutover = plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true } });
-  let optionResult;
-  assert.doesNotThrow(() => { optionResult = evaluateHonchoAdmission(cutover, new Proxy({}, { get: trap })); });
+  let optionResult, digestResult;
+  assert.doesNotThrow(() => {
+    optionResult = evaluateHonchoAdmission(cutover, new Proxy({}, { get: trap }));
+    digestResult = honchoReceiptTrustStoreDigest(new Proxy({}, { get: trap }));
+  });
   assert.ok(optionResult.blockers.some((item) => item.code === "production-evidence-options-invalid"));
-  assert.equal(traps, 0);
+  assert.equal(digestResult, null); assert.equal(traps, 0);
 });
 test("shared acyclic plan metadata does not look like a traversal cycle", () => {
   const shared = { label: "synthetic-shared-config" },
