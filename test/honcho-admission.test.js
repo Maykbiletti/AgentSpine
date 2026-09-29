@@ -401,7 +401,7 @@ test("credential containers and common access-key aliases cannot hide raw materi
     { cookies: { session: "synthetic-access-material" } }, { privateKeys: ["synthetic-access-material"] },
     { auth: { bearer: "synthetic-access-material" } }, { passphrase: "synthetic-access-material" },
     { environment: { AWS_ACCESS_KEY_ID: "synthetic-access-material" } },
-    { headers: { Authentication: "synthetic-access-material" } }
+    { headers: { Authentication: "synthetic-access-material" } }, { metadata: { "ＡＰＩ＿ＫＥＹ": "synthetic-access-material" } }
   ];
   for (const overrides of cases) {
     const result = evaluateHonchoAdmission(plan(overrides));
