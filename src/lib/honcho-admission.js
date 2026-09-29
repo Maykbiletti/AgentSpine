@@ -218,7 +218,22 @@ function rawCredentialScan(value) {
   return invalid ?? (state.credential ? { kind: "credential" } : null);
 }
 
-function checkEndpointRoles(plan, blockers) {
+function approvedOriginSet(values) {
+  if (!Array.isArray(values) || values.length === 0 || values.length > 8) return null;
+  const origins = new Set();
+  for (const value of values) {
+    if (typeof value !== "string" || value.length > 2048) return null;
+    let parsed;
+    try { parsed = new URL(value); } catch { return null; }
+    if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password
+      || parsed.search || parsed.hash || parsed.pathname !== "/" || parsed.origin !== value
+      || origins.has(value)) return null;
+    origins.add(value);
+  }
+  return origins;
+}
+
+function checkEndpointRoles(plan, protectedOrigins, blockers) {
   const server = endpoint(plan?.honcho?.serverUrl, "honcho.serverUrl", blockers);
   const embedding = endpoint(plan?.embedding?.baseUrl, "embedding.baseUrl", blockers);
   const derivation = endpoint(plan?.derivation?.baseUrl, "derivation.baseUrl", blockers);
@@ -244,14 +259,20 @@ function checkEndpointRoles(plan, blockers) {
   if (derivation && (derivation.path !== "/v1" || plan?.derivation?.transport !== "openai-compatible")) {
     blockers.push(blocker("derivation-protocol-unverified", "derivation"));
   }
-  const approvedValues = Array.isArray(plan?.network?.approvedOrigins) ? plan.network.approvedOrigins : [];
-  if (approvedValues.length === 0 || approvedValues.length > 8
-    || approvedValues.some((value) => typeof value !== "string" || value.length > 2048)) {
+  const declared = approvedOriginSet(plan?.network?.approvedOrigins);
+  if (!declared) {
     blockers.push(blocker("approved-origin-list-invalid", "network.approvedOrigins"));
   }
-  const approved = new Set(approvedValues);
+  const approved = approvedOriginSet(protectedOrigins);
+  if (!approved) blockers.push(blocker("approved-origin-policy-invalid", "options.approvedOrigins"));
+  if (declared && approved && (declared.size !== approved.size
+    || [...declared].some((origin) => !approved.has(origin)))) {
+    blockers.push(blocker("approved-origin-policy-mismatch", "network.approvedOrigins"));
+  }
   for (const [role, current] of Object.entries(endpoints)) {
-    if (current && !approved.has(current.origin)) blockers.push(blocker("origin-not-approved", role));
+    if (current && approved && !approved.has(current.origin)) {
+      blockers.push(blocker("origin-not-approved", role));
+    }
   }
 }
 
@@ -416,10 +437,14 @@ export function evaluateHonchoAdmission(plan, options = {}) {
     return { schema: HONCHO_ADMISSION_SCHEMA, admitted: false, phase: null,
       blockers: [blocker("plan-traversal-invalid", PLAN_TRAVERSAL_DIAGNOSTIC)] };
   }
+  const optionScan = !options || typeof options !== "object" || isProxy(options) || Array.isArray(options)
+    ? { kind: "traversal" } : rawCredentialScan(options);
+  if (optionScan) blockers.push(blocker(plan.phase === "honcho-primary"
+    ? "production-evidence-options-invalid" : "admission-options-invalid", "options"));
   if (plan.schema !== HONCHO_ADMISSION_SCHEMA) blockers.push(blocker("schema-invalid", "schema"));
   if (!PHASES.has(plan.phase)) blockers.push(blocker("phase-invalid", "phase"));
   checkRuntimeOwnership(plan, blockers);
-  checkEndpointRoles(plan, blockers);
+  checkEndpointRoles(plan, optionScan ? null : options.approvedOrigins, blockers);
   if (plan?.sourcePolicy !== "confirmed-private-only") blockers.push(blocker("source-policy-invalid", "sourcePolicy"));
   if (plan?.telemetryEnabled !== false) blockers.push(blocker("telemetry-not-disabled", "telemetryEnabled"));
   if (plan?.governance?.dataResidency !== "blun-self-hosted") blockers.push(blocker("data-residency-invalid", "governance.dataResidency"));
@@ -440,11 +465,7 @@ export function evaluateHonchoAdmission(plan, options = {}) {
   }
   if (plan.phase === "honcho-primary") {
     let verifierKey = null;
-    const optionScan = !options || typeof options !== "object" || isProxy(options) || Array.isArray(options)
-      ? { kind: "traversal" } : rawCredentialScan(options);
-    if (optionScan) {
-      blockers.push(blocker("production-evidence-options-invalid", "options"));
-    } else verifierKey = trustedReceiptKey(plan, options.receiptTrustStore,
+    if (!optionScan) verifierKey = trustedReceiptKey(plan, options.receiptTrustStore,
       options.minimumReceiptTrustRevision, options.trustedReceiptTrustStoreDigest, blockers);
     checkProductionEvidence(plan, blockers, verifierKey);
   }
