@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, sign as signMessage } from "node:crypto";
 import {
   evaluateHonchoAdmission, honchoEvidenceBindingDigest, honchoReceiptPublicKeyDigest,
-  honchoReceiptTrustStoreDigest, HONCHO_ADMISSION_SCHEMA
-} from "../src/lib/honcho-admission.js";
+  honchoReceiptTrustStoreDigest, HONCHO_ADMISSION_SCHEMA } from "../src/lib/honcho-admission.js";
 const DEFAULT_SCOPE = {
   tenantId: "tenant:a", workspaceId: "workspace:a", userId: "user:a",
   projectId: "project:a", threadId: "thread:a"
@@ -84,8 +83,9 @@ test("evaluation admits one AgentSpine writer and three separately approved self
     schema: HONCHO_ADMISSION_SCHEMA, admitted: true, phase: "evaluation", blockers: []
   });
 });
-test("King vLLM cannot be mistaken for the Honcho server even when both use port 8000", () => {
-  const value = plan({ honcho: { serverUrl: "http://100.74.238.1:8000" } });
+test("King vLLM cannot be mistaken for Honcho through a different scheme on the same socket", () => {
+  const value = plan({ honcho: { serverUrl: "http://100.74.238.1:8000" }, derivation: { ...plan().derivation, baseUrl: "https://100.74.238.1:8000/v1" },
+    network: { approvedOrigins: ["http://100.74.238.1:8000", "http://100.74.238.1:11434", "https://100.74.238.1:8000"] } });
   const result = evaluateHonchoAdmission(value);
   assert.equal(result.admitted, false);
   assert.ok(result.blockers.some((item) => item.code === "endpoint-role-collision"));
