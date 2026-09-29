@@ -392,7 +392,6 @@ test("credential aliases and provider environment keys cannot hide raw access ma
     credentialEnv: "HONCHO_API_KEY"
   })).admitted, true);
 });
-
 test("credential containers and common access-key aliases cannot hide raw material", () => {
   const cases = [
     { credentials: { bearer: "synthetic-access-material" } },
@@ -401,7 +400,7 @@ test("credential containers and common access-key aliases cannot hide raw materi
     { cookies: { session: "synthetic-access-material" } }, { privateKeys: ["synthetic-access-material"] },
     { auth: { bearer: "synthetic-access-material" } }, { passphrase: "synthetic-access-material" },
     { environment: { AWS_ACCESS_KEY_ID: "synthetic-access-material" } },
-    { headers: { Authentication: "synthetic-access-material" } }, { metadata: { "ＡＰＩ＿ＫＥＹ": "synthetic-access-material" } }
+    { headers: { Authentication: "synthetic-access-material" } }, { metadata: { "ＡＰＩ＿ＫＥＹ": "synthetic-access-material" } }, { metadata: { "аpiKey": "synthetic-access-material" } }
   ];
   for (const overrides of cases) {
     const result = evaluateHonchoAdmission(plan(overrides));
@@ -410,6 +409,7 @@ test("credential containers and common access-key aliases cannot hide raw materi
     ]);
     assert.equal(JSON.stringify(result).includes("synthetic-access-material"), false);
   }
+  assert.equal(evaluateHonchoAdmission(plan({ metadata: { "notiz-über": "synthetic-benign-value" } })).admitted, true);
 });
 test("numeric token metrics do not masquerade as raw credentials", () => {
   const quota = { maxTokens: 2048, maxInputTokens: 1536, maxOutputTokens: 512, inputTokens: 320,

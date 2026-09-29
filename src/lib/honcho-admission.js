@@ -136,15 +136,19 @@ function receiptSignature(value) {
 }
 
 function rawCredentialKey(value, child) {
-  const canonical = value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const canonical = [...value.normalize("NFKC").toLowerCase()].map((character) =>
+    /[a-z0-9]/.test(character) ? character : /[\p{L}\p{N}]/u.test(character) ? "?" : "").join("");
   if (NUMERIC_TOKEN_METRIC_KEYS.has(canonical)
     && Number.isSafeInteger(child) && child >= 0) return false;
-  const candidates = canonical.endsWith("s")
+  const candidates = /[s?]$/.test(canonical)
     ? [canonical, canonical.slice(0, -1)]
     : [canonical];
-  return canonical === "auth"
+  const matches = (candidate, suffix) => candidate.length >= suffix.length
+    && [...candidate.slice(-suffix.length)].every((character, index) =>
+      character === "?" || character === suffix[index]);
+  return matches(canonical, "auth")
     || candidates.some((candidate) => RAW_CREDENTIAL_KEY_SUFFIXES.some((suffix) =>
-      candidate.endsWith(suffix)));
+      matches(candidate, suffix)));
 }
 
 function rawCredentialValue(value) {
