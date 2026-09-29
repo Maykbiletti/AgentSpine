@@ -80,8 +80,12 @@ function boundedText(value, maximum = 256) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= maximum;
 }
 
+function sha256Digest(value) {
+  return typeof value === "string" && SHA256.test(value);
+}
+
 function evidenceTimestamp(value) {
-  if (!UTC_TIMESTAMP.test(value)) return null;
+  if (typeof value !== "string" || !UTC_TIMESTAMP.test(value)) return null;
   const milliseconds = Date.parse(value);
   return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value
     ? milliseconds : null;
@@ -92,10 +96,10 @@ export function honchoEvidenceBindingDigest(field, evidenceDigest, scope, observ
   if (typeof field !== "string" || typeof evidenceDigest !== "string"
     || typeof observedAt !== "string" || typeof receiptTrustStoreDigest !== "string"
     || !scope || typeof scope !== "object" || rawCredentialScan(scope)
-    || !PRODUCTION_EVIDENCE_PATHS.has(field) || !SHA256.test(evidenceDigest)
+    || !PRODUCTION_EVIDENCE_PATHS.has(field) || !sha256Digest(evidenceDigest)
     || SCOPE_FIELDS.some((name) => !boundedText(scope?.[name]))
     || evidenceTimestamp(observedAt) === null || !Number.isSafeInteger(receiptTrustRevision)
-    || receiptTrustRevision <= 0 || !SHA256.test(receiptTrustStoreDigest)) return null;
+    || receiptTrustRevision <= 0 || !sha256Digest(receiptTrustStoreDigest)) return null;
   const payload = JSON.stringify({ schema: HONCHO_ADMISSION_SCHEMA, field, evidenceDigest,
     observedAt, receiptTrustRevision, receiptTrustStoreDigest,
     scope: Object.fromEntries(SCOPE_FIELDS.map((name) => [name, scope[name]])) });
@@ -258,7 +262,7 @@ function receiptTrustStore(value) {
     || !Array.isArray(publicKeys) || publicKeys.length === 0
     || publicKeys.length > RECEIPT_TRUSTED_KEY_LIMIT
     || !Array.isArray(revokedKeyDigests) || revokedKeyDigests.length > RECEIPT_REVOKED_KEY_LIMIT
-    || revokedKeyDigests.some((digest) => !SHA256.test(digest))) return null;
+    || revokedKeyDigests.some((digest) => !sha256Digest(digest))) return null;
   const keys = new Map();
   for (const value of publicKeys) {
     const key = receiptPublicKey(value);
@@ -291,7 +295,7 @@ function trustedReceiptKey(plan, configuredStore, minimumRevision, protectedDige
     blockers.push(blocker("production-evidence-trust-floor-invalid", "minimumReceiptTrustRevision"));
     return null;
   }
-  if (!SHA256.test(protectedDigest)) {
+  if (!sha256Digest(protectedDigest)) {
     blockers.push(blocker("production-evidence-trust-anchor-invalid",
       "trustedReceiptTrustStoreDigest"));
     return null;
@@ -346,7 +350,7 @@ function checkProductionEvidence(plan, blockers, verifierKey) {
   const seen = new Map();
   for (const { field, digest, binding, bindingField, signature, signatureField,
     observedAt, observedAtField } of evidence) {
-    if (!SHA256.test(digest)) {
+    if (!sha256Digest(digest)) {
       blockers.push(blocker(field === "governance.sourceOfferDigest"
         ? "agpl-source-offer-not-ready" : "production-evidence-missing", field));
       continue;
@@ -362,7 +366,7 @@ function checkProductionEvidence(plan, blockers, verifierKey) {
       }
       const expected = honchoEvidenceBindingDigest(field, digest, plan.scope, observedAt,
         plan?.governance?.receiptTrustRevision, plan?.governance?.receiptTrustStoreDigest);
-      const bindingMatches = SHA256.test(binding) && binding === expected;
+      const bindingMatches = sha256Digest(binding) && binding === expected;
       if (!bindingMatches) {
         blockers.push(blocker("production-evidence-scope-mismatch", bindingField));
       } else if (verifierKey) {
