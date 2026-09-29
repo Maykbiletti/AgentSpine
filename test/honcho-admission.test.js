@@ -485,7 +485,7 @@ test("proxy traps, callables and non-JSON shapes fail before policy access", () 
   revoked.revoke();
   for (const candidate of [root, nested, revoked.proxy, plan({ scope: callable }),
     plan({ metadata: executable }), ...[undefined, Symbol("synthetic"), 1n, NaN, Infinity,
-      -Infinity, Array(1), Object.assign([], { extra: true }), Object.defineProperty({}, "hidden", { value: true })].map((value) => plan({ metadata: { value } }))]) {
+      -Infinity, -0, Array(1), Object.assign([], { extra: true }), Object.defineProperty({}, "hidden", { value: true })].map((value) => plan({ metadata: { value } }))]) {
     let result;
     assert.doesNotThrow(() => { result = evaluateHonchoAdmission(candidate); });
     assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
