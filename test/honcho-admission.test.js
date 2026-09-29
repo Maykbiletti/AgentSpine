@@ -376,7 +376,7 @@ test("credential aliases and provider environment keys cannot hide raw access ma
       headers: { Authorization: "Bearer synthetic-access-material" } } } },
     { overrides: { embedding: { ...plan().embedding, access_token: "synthetic-access-material" } } },
     { overrides: { derivation: { ...plan().derivation, clientSecret: "synthetic-access-material" } } },
-    { overrides: { environment: { OPENAI_API_KEY: "synthetic-access-material" } } },
+    { overrides: { environment: { OPENAI_API_KEY: "synthetic-access-material" } } }, { overrides: { environment: { OPENAI_API_KEY_BACKUP: "synthetic-access-material" } } }, { overrides: { environment: { accessTokenPrevious: "synthetic-access-material" } } }, { overrides: { environment: { accessTokenPreviousBackup: "synthetic-access-material" } } },
     { overrides: { honcho: { serverUrl: "http://127.0.0.1:18000",
       authToken: `synthetic-${"x".repeat(5000)}` } } },
     { overrides: { honcho: { serverUrl: "http://127.0.0.1:18000",
