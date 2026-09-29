@@ -288,6 +288,19 @@ function checkEndpointRoles(plan, protectedOrigins, blockers) {
   }
 }
 
+function checkInferencePolicy(plan, policy, blockers) {
+  const valid = policy && typeof policy === "object" && !Array.isArray(policy)
+    && boundedText(policy.embeddingModel, 128)
+    && Number.isSafeInteger(policy.embeddingDimensions) && policy.embeddingDimensions > 0
+    && boundedText(policy.derivationModel, 128);
+  if (!valid) return void blockers.push(blocker("inference-policy-invalid", "options.inferencePolicy"));
+  if (plan?.embedding?.model !== policy.embeddingModel
+    || plan?.embedding?.dimensions !== policy.embeddingDimensions)
+    blockers.push(blocker("embedding-policy-mismatch", "embedding"));
+  if (plan?.derivation?.model !== policy.derivationModel)
+    blockers.push(blocker("derivation-model-policy-mismatch", "derivation.model"));
+}
+
 function checkRuntimeOwnership(plan, blockers) {
   const agentspine = plan?.writes?.agentspine === true;
   const honcho = plan?.writes?.honcho === true;
@@ -457,6 +470,7 @@ export function evaluateHonchoAdmission(plan, options = {}) {
   if (!PHASES.has(plan.phase)) blockers.push(blocker("phase-invalid", "phase"));
   checkRuntimeOwnership(plan, blockers);
   checkEndpointRoles(plan, optionScan ? null : options.approvedOrigins, blockers);
+  checkInferencePolicy(plan, optionScan ? null : options.inferencePolicy, blockers);
   if (plan?.sourcePolicy !== "confirmed-private-only") blockers.push(blocker("source-policy-invalid", "sourcePolicy"));
   if (plan?.telemetryEnabled !== false) blockers.push(blocker("telemetry-not-disabled", "telemetryEnabled"));
   if (plan?.governance?.dataResidency !== "blun-self-hosted") blockers.push(blocker("data-residency-invalid", "governance.dataResidency"));

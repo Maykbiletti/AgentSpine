@@ -7,7 +7,7 @@ AgentSpine may act as the scope and policy gateway for a self-hosted Honcho depl
 ## Required boundaries
 
 - `honcho.serverUrl` is the root URL of a separately deployed Honcho API, never the managed Honcho service and never an LLM or embedding URL.
-- Server, embedding, and derivation roles use distinct host/port sockets; changing only the URL scheme or mixing `localhost` with a numeric loopback alias cannot bypass that separation. Every exact origin is pinned separately in protected evaluator configuration. The plan may declare only the same canonical origin set and cannot approve a new private endpoint for itself.
+- Server, embedding, and derivation roles use distinct host/port sockets; changing only the URL scheme or mixing `localhost` with a numeric loopback alias cannot bypass that separation. Every exact origin, embedding model and dimension count, and derivation model is pinned separately in protected evaluator configuration. The plan may only mirror that policy and cannot approve a new private endpoint or select another model for itself.
 - Every endpoint host must also be a numeric private-network address, loopback, or `localhost`. RFC 1918, Tailscale CGNAT (`100.64.0.0/10`), and IPv6 ULA addresses are eligible. An allowlist entry alone cannot turn a public address or DNS name into a BLUN-internal endpoint.
 - Evaluation keeps AgentSpine as the only writer and Honcho read/write disabled. Cutover reverses that ownership and leaves AgentSpine as `scope-gateway`.
 - Every request binds tenant, workspace, user, project, and thread identifiers. Only confirmed private sources are eligible.
