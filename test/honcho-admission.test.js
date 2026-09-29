@@ -450,15 +450,15 @@ test("untrusted plan keys cannot escape through blocker diagnostics", () => {
     evaluateHonchoAdmission(cyclic)];
   for (const result of results) assert.equal(JSON.stringify(result).includes(marker), false);
 });
-test("accessors and overwide plans fail closed before untrusted code can run", () => {
+test("accessors and oversized or overwide plans fail closed before untrusted code can run", () => {
   let reads = 0, accessorResult;
   const accessor = plan();
   Object.defineProperty(accessor, "schema", { enumerable: true, get() { reads += 1; throw new Error("untrusted getter ran"); } });
   assert.doesNotThrow(() => { accessorResult = evaluateHonchoAdmission(accessor); });
   assert.equal(reads, 0);
-  const wide = plan({ metadata: Object.fromEntries(Array.from({ length: 4097 }, (_, index) => [`field${index}`, index])) });
-  for (const result of [accessorResult, evaluateHonchoAdmission(wide)]) assert.deepEqual(result.blockers,
-    [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
+  const wide = plan({ metadata: Object.fromEntries(Array.from({ length: 4097 }, (_, index) => [`field${index}`, index])) }), oversized = [{ padding: "x".repeat(8193) }, { padding: "ü".repeat(4097) }, Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`field${index}`, "x".repeat(8192)]))];
+  for (const result of [accessorResult, evaluateHonchoAdmission(wide), ...oversized.map((metadata) => evaluateHonchoAdmission(plan({ metadata })))]) assert.deepEqual(result.blockers,
+    [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]); for (const padding of ["x".repeat(8192), "ü".repeat(4096)]) assert.equal(evaluateHonchoAdmission(plan({ metadata: { padding } })).admitted, true);
 });
 test("proxy traps, callables and non-JSON shapes fail before policy access", () => {
   let traps = 0;

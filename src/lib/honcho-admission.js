@@ -32,6 +32,8 @@ const PLAN_TRAVERSAL_DIAGNOSTIC = "plan.<traversal>";
 const PLAN_SCAN_MAX_DEPTH = 20;
 const PLAN_SCAN_MAX_PROPERTIES = 4096;
 const PLAN_SCAN_MAX_KEY_BYTES = 256;
+const PLAN_SCAN_MAX_STRING_BYTES = 8 * 1024;
+const PLAN_SCAN_MAX_TOTAL_STRING_BYTES = 128 * 1024;
 
 function blocker(code, field) { return { code, field }; }
 
@@ -146,13 +148,20 @@ function rawCredentialKey(value, child) {
 }
 
 function rawCredentialValue(value) {
-  if (typeof value === "string") return /\S/.test(value);
+  if (typeof value === "string") return value.length > PLAN_SCAN_MAX_STRING_BYTES || /\S/.test(value);
   return value !== null && value !== undefined && value !== false;
 }
 
 function scanPlanValue(value, ancestors, depth, state) {
   const type = typeof value;
-  if (value === null || type === "string" || type === "boolean"
+  if (type === "string") {
+    if (value.length > PLAN_SCAN_MAX_STRING_BYTES) return { kind: "traversal" };
+    const bytes = Buffer.byteLength(value, "utf8");
+    state.stringBytes += bytes;
+    return bytes > PLAN_SCAN_MAX_STRING_BYTES
+      || state.stringBytes > PLAN_SCAN_MAX_TOTAL_STRING_BYTES ? { kind: "traversal" } : null;
+  }
+  if (value === null || type === "boolean"
     || (type === "number" && Number.isFinite(value) && !Object.is(value, -0))) return null;
   if (type !== "object" || isProxy(value) || depth > PLAN_SCAN_MAX_DEPTH
     || ancestors.has(value)) return { kind: "traversal" };
@@ -199,7 +208,7 @@ function scanPlanValue(value, ancestors, depth, state) {
 }
 
 function rawCredentialScan(value) {
-  const state = { credential: false, properties: 0 };
+  const state = { credential: false, properties: 0, stringBytes: 0 };
   const invalid = scanPlanValue(value, new WeakSet(), 0, state);
   return invalid ?? (state.credential ? { kind: "credential" } : null);
 }
