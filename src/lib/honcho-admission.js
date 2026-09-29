@@ -17,13 +17,9 @@ const PRODUCTION_EVIDENCE_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const RECEIPT_TRUSTED_KEY_LIMIT = 8;
 const RECEIPT_REVOKED_KEY_LIMIT = 32;
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const RAW_CREDENTIAL_KEY_SUFFIXES = [
-  "apikey", "token", "secret", "password", "passwort", "credential", "authorization",
-  "authentication", "cookie", "privatekey", "passphrase", "accesskey", "accesskeyid", "secretkey"
-];
-const RAW_CREDENTIAL_KEY_QUALIFIER = /(?:backup|copy|current|legacy|old|previous|primary|secondary|value)+$/;
-const NUMERIC_TOKEN_METRIC_KEYS = new Set([
-  "maxtokens", "maxinputtokens", "maxoutputtokens", "inputtokens", "outputtokens",
+const RAW_CREDENTIAL_KEY_SUFFIXES = ["apikey", "token", "secret", "password", "passwort", "credential", "authorization", "authentication", "cookie", "privatekey", "passphrase", "accesskey", "accesskeyid", "secretkey"];
+const RAW_CREDENTIAL_KEY_EMBEDDED = ["apikey", "accesstoken", "clientsecret", "password", "passwort", "credential", "authorization", "authentication", "privatekey", "passphrase", "accesskey", "accesskeyid", "secretkey"];
+const NUMERIC_TOKEN_METRIC_KEYS = new Set(["maxtokens", "maxinputtokens", "maxoutputtokens", "inputtokens", "outputtokens",
   "prompttokens", "completiontokens", "cachedinputtokens", "reasoningtokens", "totaltokens"
 ]);
 const PLAN_CREDENTIAL_DIAGNOSTIC = "plan.<credential>";
@@ -142,21 +138,25 @@ function receiptSignature(value) {
 }
 
 function rawCredentialKey(value, child) {
-  const canonical = [...value.normalize("NFKC").toLowerCase()].map((character) =>
-    /[a-z0-9]/.test(character) ? character : /[\p{L}\p{N}]/u.test(character) ? "?" : "").join("");
+  const normalized = value.normalize("NFKC");
+  const canonicalize = (text) => [...text.toLowerCase()].map((character) => /[a-z0-9]/.test(character) ? character : /[\p{L}\p{N}]/u.test(character) ? "?" : "").join("");
+  const canonical = canonicalize(normalized);
   if (NUMERIC_TOKEN_METRIC_KEYS.has(canonical)
     && Number.isSafeInteger(child) && child >= 0) return false;
-  const aliases = [canonical, canonical.replace(RAW_CREDENTIAL_KEY_QUALIFIER, "")];
+  if (canonical === "credentialenv" && typeof child === "string" && /^[A-Z][A-Z0-9_]{0,127}$/.test(child)) return false;
+  const words = normalized.replace(/([\p{Lu}])([\p{Lu}][\p{Ll}])/gu, "$1 $2").replace(/([\p{Ll}\p{N}])([\p{Lu}])/gu, "$1 $2").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  let prefix = ""; const aliases = [canonical, ...words.map((word) => (prefix += canonicalize(word)))];
   const candidates = aliases.flatMap((alias) => /[s?]$/.test(alias)
     ? [alias, alias.slice(0, -1)] : [alias]);
   const matches = (candidate, suffix) => candidate.length >= suffix.length
     && [...candidate.slice(-suffix.length)].every((character, index) =>
       character === "?" || character === suffix[index]);
+  const contains = (candidate, alias) => [...candidate].some((_, offset) => [...alias].every((character, index) => candidate[offset + index] === "?" || candidate[offset + index] === character));
   return matches(canonical, "auth")
+    || RAW_CREDENTIAL_KEY_EMBEDDED.some((alias) => contains(canonical, alias))
     || candidates.some((candidate) => RAW_CREDENTIAL_KEY_SUFFIXES.some((suffix) =>
       matches(candidate, suffix)));
 }
-
 function rawCredentialValue(value) {
   if (typeof value === "string") return value.length > PLAN_SCAN_MAX_STRING_BYTES || /\S/.test(value);
   return value !== null && value !== undefined && value !== false;
