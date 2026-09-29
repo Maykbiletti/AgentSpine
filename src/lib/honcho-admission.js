@@ -161,7 +161,7 @@ function rawCredentialValue(value) {
   if (typeof value === "string") return value.length > PLAN_SCAN_MAX_STRING_BYTES || /\S/.test(value);
   return value !== null && value !== undefined && value !== false;
 }
-function rawCredentialMaterial(value) { return typeof value === "string" && /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/.test(value); }
+function rawCredentialMaterial(value) { return typeof value === "string" && /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/.test(value); }
 
 function scanPlanValue(value, ancestors, depth, state) {
   const type = typeof value;

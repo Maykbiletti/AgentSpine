@@ -395,7 +395,7 @@ test("credential aliases and provider environment keys cannot hide raw access ma
   assert.equal(evaluateHonchoAdmission(plan({ metadata: { tokenizerModel: "bge-m3", author: "synthetic-user" } })).admitted, true); });
 test("credential containers and common access-key aliases cannot hide raw material", () => {
   const cases = [
-    { credentials: { bearer: "synthetic-access-material" } }, { metadata: { certificate: "-----BEGIN PRIVATE KEY-----\nsynthetic-access-material\n-----END PRIVATE KEY-----" } },
+    { credentials: { bearer: "synthetic-access-material" } }, { metadata: { certificate: "-----BEGIN PRIVATE KEY-----\nsynthetic-access-material\n-----END PRIVATE KEY-----" } }, { metadata: { archive: "-----BEGIN PGP PRIVATE KEY BLOCK-----\nsynthetic-access-material\n-----END PGP PRIVATE KEY BLOCK-----" } },
     { secrets: ["synthetic-access-material"] }, { tokens: ["synthetic-access-material"] },
     { passwords: { primary: "synthetic-access-material" } },
     { cookies: { session: "synthetic-access-material" } }, { privateKeys: ["synthetic-access-material"] },
