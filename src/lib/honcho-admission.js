@@ -89,7 +89,9 @@ function evidenceTimestamp(value) {
 
 export function honchoEvidenceBindingDigest(field, evidenceDigest, scope, observedAt,
   receiptTrustRevision, receiptTrustStoreDigest) {
-  if (!scope || typeof scope !== "object" || rawCredentialScan(scope)
+  if (typeof field !== "string" || typeof evidenceDigest !== "string"
+    || typeof observedAt !== "string" || typeof receiptTrustStoreDigest !== "string"
+    || !scope || typeof scope !== "object" || rawCredentialScan(scope)
     || !PRODUCTION_EVIDENCE_PATHS.has(field) || !SHA256.test(evidenceDigest)
     || SCOPE_FIELDS.some((name) => !boundedText(scope?.[name]))
     || evidenceTimestamp(observedAt) === null || !Number.isSafeInteger(receiptTrustRevision)
