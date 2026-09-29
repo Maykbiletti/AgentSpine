@@ -247,7 +247,8 @@ function checkRuntimeOwnership(plan, blockers) {
 }
 
 function receiptTrustStore(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!value || typeof value !== "object" || isProxy(value) || Array.isArray(value)
+    || rawCredentialScan(value)) return null;
   const publicKeys = value.publicKeys;
   const revokedKeyDigests = value.revokedKeyDigests;
   if (!Number.isSafeInteger(value.revision) || value.revision <= 0
