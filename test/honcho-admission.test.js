@@ -14,10 +14,8 @@ function signer() { const { privateKey, publicKey } = generateKeyPairSync("ed255
 const TRUSTED_SIGNER = signer();
 const ROTATED_SIGNER = signer();
 const TRUST_REVISION = 7;
-const TRUST_STORE = {
-  revision: TRUST_REVISION,
-  publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey], revokedKeyDigests: []
-};
+const TRUST_STORE = { revision: TRUST_REVISION,
+  publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey], revokedKeyDigests: [] };
 const TRUST_STORE_DIGEST = honchoReceiptTrustStoreDigest(TRUST_STORE);
 const TRUSTED_OPTIONS = { receiptTrustStore: TRUST_STORE, minimumReceiptTrustRevision: TRUST_REVISION, trustedReceiptTrustStoreDigest: TRUST_STORE_DIGEST };
 function productionEvidence(scope = DEFAULT_SCOPE, digests = {}, observedAt = new Date().toISOString(),
@@ -87,6 +85,7 @@ test("an admission plan cannot self-approve an origin outside the protected owne
     { code: "approved-origin-policy-mismatch", field: "network.approvedOrigins" },
     { code: "origin-not-approved", field: "server" } ]);
 });
+test("approved origins remain pinned to their server, embedding and derivation roles", () => { const value = plan({ embedding: { ...plan().embedding, baseUrl: "http://100.74.238.1:8000/v1" }, derivation: { ...plan().derivation, baseUrl: "http://100.74.238.1:11434/v1" } }), result = evaluateHonchoAdmission(value); assert.equal(result.admitted, false); assert.deepEqual(result.blockers.filter((item) => item.code === "origin-role-policy-mismatch"), [{ code: "origin-role-policy-mismatch", field: "embedding" }, { code: "origin-role-policy-mismatch", field: "derivation" }]); });
 test("endpoint roles cannot share a socket through scheme changes or localhost aliases", () => {
   const values = [plan({ honcho: { serverUrl: "http://100.74.238.1:8000" }, derivation: { ...plan().derivation, baseUrl: "https://100.74.238.1:8000/v1" },
     network: { approvedOrigins: ["http://100.74.238.1:8000", "http://100.74.238.1:11434", "https://100.74.238.1:8000"] } }), plan({ honcho: { serverUrl: "http://localhost:18000" }, embedding: { ...plan().embedding, baseUrl: "http://127.0.0.1:18000/v1" },
