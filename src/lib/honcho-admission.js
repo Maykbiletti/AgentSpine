@@ -152,7 +152,7 @@ function rawCredentialKey(value, child) {
     && [...candidate.slice(-suffix.length)].every((character, index) =>
       character === "?" || character === suffix[index]);
   const contains = (candidate, alias) => [...candidate].some((_, offset) => [...alias].every((character, index) => candidate[offset + index] === "?" || candidate[offset + index] === character));
-  return matches(canonical, "auth")
+  return candidates.some((candidate) => matches(candidate, "auth"))
     || RAW_CREDENTIAL_KEY_EMBEDDED.some((alias) => contains(canonical, alias))
     || candidates.some((candidate) => RAW_CREDENTIAL_KEY_SUFFIXES.some((suffix) =>
       matches(candidate, suffix)));
