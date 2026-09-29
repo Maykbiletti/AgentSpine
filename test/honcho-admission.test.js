@@ -4,7 +4,9 @@ import { generateKeyPairSync, sign as signMessage } from "node:crypto";
 import { isProxy } from "node:util/types";
 import { evaluateHonchoAdmission as evaluateHonchoAdmissionRaw, honchoEvidenceBindingDigest, honchoReceiptPublicKeyDigest, honchoReceiptTrustStoreDigest, HONCHO_ADMISSION_SCHEMA } from "../src/lib/honcho-admission.js";
 const OWNER_APPROVED_ORIGINS = ["http://127.0.0.1:18000", "http://100.74.238.1:11434", "http://100.74.238.1:8000"];
-const evaluateHonchoAdmission = (value, options = {}) => !options || typeof options !== "object" || isProxy(options) || Array.isArray(options) ? evaluateHonchoAdmissionRaw(value, options) : evaluateHonchoAdmissionRaw(value, { approvedOrigins: OWNER_APPROVED_ORIGINS, ...options });
+const OWNER_INFERENCE_POLICY = { embeddingModel: "bge-m3", embeddingDimensions: 1024, derivationModel: "king" };
+const OWNER_OPTIONS = { approvedOrigins: OWNER_APPROVED_ORIGINS, inferencePolicy: OWNER_INFERENCE_POLICY };
+const evaluateHonchoAdmission = (value, options = {}) => !options || typeof options !== "object" || isProxy(options) || Array.isArray(options) ? evaluateHonchoAdmissionRaw(value, options) : evaluateHonchoAdmissionRaw(value, { ...OWNER_OPTIONS, ...options });
 const DEFAULT_SCOPE = { tenantId: "tenant:a", workspaceId: "workspace:a", userId: "user:a",
   projectId: "project:a", threadId: "thread:a" };
 function signer() { const { privateKey, publicKey } = generateKeyPairSync("ed25519"); return {
@@ -75,8 +77,11 @@ function plan(overrides = {}) {
 test("evaluation admits one AgentSpine writer and three separately approved self-hosted endpoint roles", () => {
   assert.deepEqual(evaluateHonchoAdmission(plan()), { schema: HONCHO_ADMISSION_SCHEMA,
     admitted: true, phase: "evaluation", blockers: [] }); });
+test("a plan cannot select inference models or dimensions outside protected owner policy", () => { const result = evaluateHonchoAdmission(plan({ embedding: { ...plan().embedding, model: "unapproved-embedding", dimensions: 7 }, derivation: { ...plan().derivation, model: "unapproved-derivation" } }));
+  assert.equal(result.admitted, false); assert.deepEqual(result.blockers.filter((item) => item.code.endsWith("policy-mismatch")), [{ code: "embedding-policy-mismatch", field: "embedding" }, { code: "derivation-model-policy-mismatch", field: "derivation.model" } ]);
+  assert.deepEqual(evaluateHonchoAdmissionRaw(plan(), { approvedOrigins: OWNER_APPROVED_ORIGINS }).blockers.filter((item) => item.code === "inference-policy-invalid"), [{ code: "inference-policy-invalid", field: "options.inferencePolicy" }]); });
 test("an admission plan cannot self-approve an origin outside the protected owner policy", () => {
-  const selfApproved = "http://100.74.238.2:18000", value = plan({ honcho: { serverUrl: selfApproved }, network: { approvedOrigins: [selfApproved, "http://100.74.238.1:11434", "http://100.74.238.1:8000"] } }), result = evaluateHonchoAdmissionRaw(value, { approvedOrigins: OWNER_APPROVED_ORIGINS });
+  const selfApproved = "http://100.74.238.2:18000", value = plan({ honcho: { serverUrl: selfApproved }, network: { approvedOrigins: [selfApproved, "http://100.74.238.1:11434", "http://100.74.238.1:8000"] } }), result = evaluateHonchoAdmissionRaw(value, OWNER_OPTIONS);
   assert.equal(result.admitted, false);
   assert.deepEqual(result.blockers.filter((item) => /origin-(?:policy-mismatch|not-approved)/.test(item.code)), [
     { code: "approved-origin-policy-mismatch", field: "network.approvedOrigins" },
@@ -203,7 +208,6 @@ test("production evidence requires the externally pinned BLUN host signer", () =
     item.code === "production-evidence-issuer-untrusted"), [
     { code: "production-evidence-issuer-untrusted", field: "governance.receiptIssuerKeyDigest" }
   ]);
-
   const unsigned = productionEvidence();
   unsigned.acceptance.evidenceSignatures = {};
   delete unsigned.governance.sourceOfferSignature;
@@ -221,7 +225,6 @@ test("receipt issuer rotation admits the new key while explicit revocation wins"
     ...productionEvidence(DEFAULT_SCOPE, {}, new Date().toISOString(), ROTATED_SIGNER)
   });
   assert.equal(evaluateHonchoAdmission(rotatedPlan, TRUSTED_OPTIONS).admitted, true);
-
   const revokedDigest = honchoReceiptPublicKeyDigest(TRUSTED_SIGNER.publicKey);
   const revokedStore = { revision: TRUST_REVISION,
     publicKeys: [TRUSTED_SIGNER.publicKey, ROTATED_SIGNER.publicKey],
@@ -278,7 +281,6 @@ test("a protected trust revision floor rejects rolled-back stores and mismatched
     ...productionEvidence(DEFAULT_SCOPE, {}, new Date().toISOString(), ROTATED_SIGNER, nextRevision,
       currentStoreDigest) });
   assert.equal(evaluateHonchoAdmission(current, currentOptions).admitted, true);
-
   const rolledBack = evaluateHonchoAdmission(plan({
     phase: "honcho-primary", writes: { agentspine: false, honcho: true }, ...productionEvidence()
   }), { receiptTrustStore: {
@@ -387,7 +389,6 @@ test("credential aliases and provider environment keys cannot hide raw access ma
     ]);
     assert.equal(JSON.stringify(result).includes("synthetic-access-material"), false);
   }
-
   assert.equal(evaluateHonchoAdmission(plan({
     credentialEnv: "HONCHO_API_KEY"
   })).admitted, true);
@@ -431,7 +432,6 @@ test("cyclic and overdeep plans cannot bypass the recursive credential gate", ()
   const cyclicResult = evaluateHonchoAdmission(cyclic);
   assert.deepEqual(cyclicResult.blockers.filter((item) => item.code === "plan-traversal-invalid"),
     [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
-
   const overdeep = plan({ metadata: {} });
   let cursor = overdeep.metadata;
   for (let index = 0; index < 21; index += 1) { cursor.next = {}; cursor = cursor.next; }
