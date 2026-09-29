@@ -421,7 +421,7 @@ export function evaluateHonchoAdmission(plan, options = {}) {
   }
   if (plan.phase === "honcho-primary") {
     let verifierKey = null;
-    const optionScan = !options || typeof options !== "object" || Array.isArray(options)
+    const optionScan = !options || typeof options !== "object" || isProxy(options) || Array.isArray(options)
       ? { kind: "traversal" } : rawCredentialScan(options);
     if (optionScan) {
       blockers.push(blocker("production-evidence-options-invalid", "options"));
