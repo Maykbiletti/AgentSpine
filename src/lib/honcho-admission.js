@@ -136,7 +136,7 @@ function receiptSignature(value) {
 }
 
 function rawCredentialKey(value, child) {
-  const canonical = value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const canonical = value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g, "");
   if (NUMERIC_TOKEN_METRIC_KEYS.has(canonical)
     && Number.isSafeInteger(child) && child >= 0) return false;
   const candidates = canonical.endsWith("s")
