@@ -474,8 +474,7 @@ test("proxy traps, callables and non-JSON shapes fail before policy access", () 
     nested = plan({ metadata: new Proxy({}, { getPrototypeOf: trap, ownKeys: trap }) });
   const callable = new Proxy(() => {}, { get: trap, getPrototypeOf: trap, ownKeys: trap }),
     executable = () => { throw new Error("untrusted function ran"); };
-  const revoked = Proxy.revocable(plan(), {});
-  revoked.revoke();
+  const revoked = Proxy.revocable(plan(), {}); revoked.revoke();
   for (const candidate of [root, nested, revoked.proxy, plan({ scope: callable }),
     plan({ metadata: executable }), ...[undefined, Symbol("synthetic"), 1n, NaN, Infinity,
       -Infinity, -0, Array(1), Object.assign([], { extra: true }), Object.defineProperty({}, "hidden", { value: true })].map((value) => plan({ metadata: { value } }))]) {
@@ -484,14 +483,15 @@ test("proxy traps, callables and non-JSON shapes fail before policy access", () 
     assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
   }
   const cutover = plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true } });
-  let optionResult, digestResult, bindingResult;
+  let optionResult, digestResult;
   assert.doesNotThrow(() => {
     optionResult = evaluateHonchoAdmission(cutover, new Proxy({}, { get: trap }));
     digestResult = honchoReceiptTrustStoreDigest(new Proxy({}, { get: trap }));
-    bindingResult = honchoEvidenceBindingDigest("acceptance.serverHealth", "a".repeat(64), new Proxy({}, { get: trap }), new Date().toISOString(), TRUST_REVISION, TRUST_STORE_DIGEST);
+    const bindingArgs = ["acceptance.serverHealth", "a".repeat(64), DEFAULT_SCOPE, new Date().toISOString(), TRUST_REVISION, TRUST_STORE_DIGEST];
+    for (const index of [1, 2, 3, 5]) { const args = [...bindingArgs]; args[index] = new Proxy({}, { get: trap }); assert.equal(honchoEvidenceBindingDigest(...args), null); }
   });
   assert.ok(optionResult.blockers.some((item) => item.code === "production-evidence-options-invalid"));
-  assert.equal(digestResult, null); assert.equal(bindingResult, null); assert.equal(traps, 0);
+  assert.equal(digestResult, null); assert.equal(traps, 0);
 });
 test("shared acyclic plan metadata does not look like a traversal cycle", () => {
   const shared = { label: "synthetic-shared-config" },
