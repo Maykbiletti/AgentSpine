@@ -53,7 +53,8 @@ function endpoint(value, field, blockers) {
     return null;
   }
   parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
-  return { origin: parsed.origin, path: parsed.pathname, hostname: parsed.hostname.toLowerCase() };
+  return { origin: parsed.origin, path: parsed.pathname, hostname: parsed.hostname.toLowerCase(),
+    port: parsed.port || (parsed.protocol === "http:" ? "80" : "443") };
 }
 
 function isPrivateIpv4(hostname) {
@@ -222,15 +223,16 @@ function checkEndpointRoles(plan, blockers) {
   const embedding = endpoint(plan?.embedding?.baseUrl, "embedding.baseUrl", blockers);
   const derivation = endpoint(plan?.derivation?.baseUrl, "derivation.baseUrl", blockers);
   const endpoints = { server, embedding, derivation };
-  const origins = new Map();
+  const sockets = new Map();
   for (const [role, current] of Object.entries(endpoints)) {
     if (!current) continue;
     if (!isPrivateNetworkHost(current.hostname)) {
       blockers.push(blocker("endpoint-not-private-network", role));
     }
-    const previous = origins.get(current.origin);
+    const socket = `${current.hostname}\0${current.port}`;
+    const previous = sockets.get(socket);
     if (previous) blockers.push(blocker("endpoint-role-collision", `${previous},${role}`));
-    else origins.set(current.origin, role);
+    else sockets.set(socket, role);
   }
   if (server && (server.path !== "/" || server.hostname === "api.honcho.dev"
     || server.hostname.endsWith(".honcho.dev"))) {
