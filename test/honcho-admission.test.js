@@ -483,14 +483,14 @@ test("proxy traps, callables and non-JSON shapes fail before policy access", () 
     assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
   }
   const cutover = plan({ phase: "honcho-primary", writes: { agentspine: false, honcho: true } });
-  let optionResult, digestResult;
+  let optionResults, digestResult;
   assert.doesNotThrow(() => {
-    optionResult = evaluateHonchoAdmission(cutover, new Proxy({}, { get: trap }));
+    optionResults = [new Proxy({}, { get: trap }), revoked.proxy].map((options) => evaluateHonchoAdmission(cutover, options));
     digestResult = honchoReceiptTrustStoreDigest(new Proxy({}, { get: trap }));
     const bindingArgs = ["acceptance.serverHealth", "a".repeat(64), DEFAULT_SCOPE, new Date().toISOString(), TRUST_REVISION, TRUST_STORE_DIGEST];
     for (const index of [1, 2, 3, 5]) { const args = [...bindingArgs]; args[index] = new Proxy({}, { get: trap }); assert.equal(honchoEvidenceBindingDigest(...args), null); }
   });
-  assert.ok(optionResult.blockers.some((item) => item.code === "production-evidence-options-invalid"));
+  for (const result of optionResults) assert.ok(result.blockers.some((item) => item.code === "production-evidence-options-invalid"));
   assert.equal(digestResult, null); assert.equal(traps, 0);
 });
 test("shared acyclic plan metadata does not look like a traversal cycle", () => {
