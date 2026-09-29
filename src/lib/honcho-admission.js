@@ -161,10 +161,12 @@ function rawCredentialValue(value) {
   if (typeof value === "string") return value.length > PLAN_SCAN_MAX_STRING_BYTES || /\S/.test(value);
   return value !== null && value !== undefined && value !== false;
 }
+function rawCredentialMaterial(value) { return typeof value === "string" && /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/.test(value); }
 
 function scanPlanValue(value, ancestors, depth, state) {
   const type = typeof value;
   if (type === "string") {
+    if (state.detectCredentialMaterial && rawCredentialMaterial(value)) state.credential = true;
     if (value.length > PLAN_SCAN_MAX_STRING_BYTES) return { kind: "traversal" };
     const bytes = Buffer.byteLength(value, "utf8");
     state.stringBytes += bytes;
@@ -217,8 +219,8 @@ function scanPlanValue(value, ancestors, depth, state) {
   return null;
 }
 
-function rawCredentialScan(value) {
-  const state = { credential: false, properties: 0, stringBytes: 0 };
+function rawCredentialScan(value, detectCredentialMaterial = false) {
+  const state = { credential: false, properties: 0, stringBytes: 0, detectCredentialMaterial };
   const invalid = scanPlanValue(value, new WeakSet(), 0, state);
   return invalid ?? (state.credential ? { kind: "credential" } : null);
 }
@@ -454,7 +456,7 @@ export function evaluateHonchoAdmission(plan, options = {}) {
     return { schema: HONCHO_ADMISSION_SCHEMA, admitted: false, phase: null,
       blockers: [blocker("plan-invalid", "plan")] };
   }
-  const credentialScan = rawCredentialScan(plan);
+  const credentialScan = rawCredentialScan(plan, true);
   if (credentialScan?.kind === "traversal") {
     return { schema: HONCHO_ADMISSION_SCHEMA, admitted: false, phase: null,
       blockers: [blocker("plan-traversal-invalid", PLAN_TRAVERSAL_DIAGNOSTIC)] };
