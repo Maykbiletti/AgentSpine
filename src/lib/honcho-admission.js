@@ -244,21 +244,18 @@ function checkEndpointRoles(plan, protectedOrigins, blockers) {
   const derivation = endpoint(plan?.derivation?.baseUrl, "derivation.baseUrl", blockers);
   const endpoints = { server, embedding, derivation };
   const sockets = new Map();
-  const localhostPorts = new Map();
-  const numericLoopbackPorts = new Map();
+  const loopbackPorts = new Map();
   for (const [role, current] of Object.entries(endpoints)) {
     if (!current) continue;
     if (!isPrivateNetworkHost(current.hostname)) {
       blockers.push(blocker("endpoint-not-private-network", role));
     }
     const socket = `${current.hostname}\0${current.port}`;
-    const previous = sockets.get(socket)
-      || (current.hostname === "localhost" ? numericLoopbackPorts.get(current.port) : null)
-      || (isNumericLoopbackHost(current.hostname) ? localhostPorts.get(current.port) : null);
+    const loopback = current.hostname === "localhost" || isNumericLoopbackHost(current.hostname);
+    const previous = sockets.get(socket) || (loopback ? loopbackPorts.get(current.port) : null);
     if (previous) blockers.push(blocker("endpoint-role-collision", `${previous},${role}`));
     sockets.set(socket, role);
-    if (current.hostname === "localhost") localhostPorts.set(current.port, role);
-    else if (isNumericLoopbackHost(current.hostname)) numericLoopbackPorts.set(current.port, role);
+    if (loopback) loopbackPorts.set(current.port, role);
   }
   if (server && (server.path !== "/" || server.hostname === "api.honcho.dev"
     || server.hostname.endsWith(".honcho.dev"))) {
