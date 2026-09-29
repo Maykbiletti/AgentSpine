@@ -474,7 +474,7 @@ test("accessors and overwide plans fail closed before untrusted code can run", (
   for (const result of [accessorResult, evaluateHonchoAdmission(wide)]) assert.deepEqual(result.blockers,
     [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);
 });
-test("proxy traps, callables and non-JSON primitives fail before policy access", () => {
+test("proxy traps, callables and non-JSON shapes fail before policy access", () => {
   let traps = 0;
   const trap = () => { traps += 1; throw new Error("untrusted proxy trap ran"); };
   const root = new Proxy(plan(), { getPrototypeOf: trap, ownKeys: trap });
@@ -485,7 +485,7 @@ test("proxy traps, callables and non-JSON primitives fail before policy access",
   revoked.revoke();
   for (const candidate of [root, nested, revoked.proxy, plan({ scope: callable }),
     plan({ metadata: executable }), ...[undefined, Symbol("synthetic"), 1n, NaN, Infinity,
-      -Infinity].map((value) => plan({ metadata: { value } }))]) {
+      -Infinity, Array(1), Object.assign([], { extra: true })].map((value) => plan({ metadata: { value } }))]) {
     let result;
     assert.doesNotThrow(() => { result = evaluateHonchoAdmission(candidate); });
     assert.deepEqual(result.blockers, [{ code: "plan-traversal-invalid", field: "plan.<traversal>" }]);

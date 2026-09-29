@@ -156,8 +156,17 @@ function scanPlanValue(value, ancestors, depth, state) {
       && !(Array.isArray(value) && prototype === Array.prototype)) return { kind: "traversal" };
     descriptors = Object.getOwnPropertyDescriptors(value);
   } catch { return { kind: "traversal" }; }
+  const keys = Reflect.ownKeys(descriptors);
+  if (Array.isArray(value)) {
+    const length = descriptors.length?.value;
+    if (!Number.isSafeInteger(length) || length < 0 || length > PLAN_SCAN_MAX_PROPERTIES
+      || keys.length !== length + 1 || keys.some((key) => key !== "length"
+        && (typeof key !== "string" || !/^(?:0|[1-9]\d*)$/.test(key) || Number(key) >= length))) {
+      return { kind: "traversal" };
+    }
+  }
   ancestors.add(value);
-  for (const key of Reflect.ownKeys(descriptors)) {
+  for (const key of keys) {
     const descriptor = descriptors[key];
     state.properties += 1;
     if (typeof key !== "string" || descriptor.get || descriptor.set
