@@ -79,6 +79,12 @@ function isPrivateNetworkHost(hostname) {
   return /^f[cd][0-9a-f]{2}:/i.test(host);
 }
 
+function isNumericLoopbackHost(hostname) {
+  const host = hostname.startsWith("[") && hostname.endsWith("]")
+    ? hostname.slice(1, -1) : hostname;
+  return host === "::1" || (host.split(".")[0] === "127" && isPrivateIpv4(host));
+}
+
 function boundedText(value, maximum = 256) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= maximum;
 }
@@ -239,15 +245,21 @@ function checkEndpointRoles(plan, protectedOrigins, blockers) {
   const derivation = endpoint(plan?.derivation?.baseUrl, "derivation.baseUrl", blockers);
   const endpoints = { server, embedding, derivation };
   const sockets = new Map();
+  const localhostPorts = new Map();
+  const numericLoopbackPorts = new Map();
   for (const [role, current] of Object.entries(endpoints)) {
     if (!current) continue;
     if (!isPrivateNetworkHost(current.hostname)) {
       blockers.push(blocker("endpoint-not-private-network", role));
     }
     const socket = `${current.hostname}\0${current.port}`;
-    const previous = sockets.get(socket);
+    const previous = sockets.get(socket)
+      || (current.hostname === "localhost" ? numericLoopbackPorts.get(current.port) : null)
+      || (isNumericLoopbackHost(current.hostname) ? localhostPorts.get(current.port) : null);
     if (previous) blockers.push(blocker("endpoint-role-collision", `${previous},${role}`));
-    else sockets.set(socket, role);
+    sockets.set(socket, role);
+    if (current.hostname === "localhost") localhostPorts.set(current.port, role);
+    else if (isNumericLoopbackHost(current.hostname)) numericLoopbackPorts.set(current.port, role);
   }
   if (server && (server.path !== "/" || server.hostname === "api.honcho.dev"
     || server.hostname.endsWith(".honcho.dev"))) {

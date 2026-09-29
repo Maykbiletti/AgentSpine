@@ -82,13 +82,14 @@ test("an admission plan cannot self-approve an origin outside the protected owne
     { code: "approved-origin-policy-mismatch", field: "network.approvedOrigins" },
     { code: "origin-not-approved", field: "server" } ]);
 });
-test("King vLLM cannot be mistaken for Honcho through a different scheme on the same socket", () => {
-  const value = plan({ honcho: { serverUrl: "http://100.74.238.1:8000" }, derivation: { ...plan().derivation, baseUrl: "https://100.74.238.1:8000/v1" },
-    network: { approvedOrigins: ["http://100.74.238.1:8000", "http://100.74.238.1:11434", "https://100.74.238.1:8000"] } });
-  const result = evaluateHonchoAdmission(value);
-  assert.equal(result.admitted, false);
-  assert.ok(result.blockers.some((item) => item.code === "endpoint-role-collision"));
-});
+test("endpoint roles cannot share a socket through scheme changes or localhost aliases", () => {
+  const values = [plan({ honcho: { serverUrl: "http://100.74.238.1:8000" }, derivation: { ...plan().derivation, baseUrl: "https://100.74.238.1:8000/v1" },
+    network: { approvedOrigins: ["http://100.74.238.1:8000", "http://100.74.238.1:11434", "https://100.74.238.1:8000"] } }), plan({ honcho: { serverUrl: "http://localhost:18000" }, embedding: { ...plan().embedding, baseUrl: "http://127.0.0.1:18000/v1" },
+    network: { approvedOrigins: ["http://localhost:18000", "http://127.0.0.1:18000", "http://100.74.238.1:8000"] } }), plan({ honcho: { serverUrl: "http://127.0.0.1:18000" }, embedding: { ...plan().embedding, baseUrl: "http://localhost:18000/v1" }, network: { approvedOrigins: ["http://127.0.0.1:18000", "http://localhost:18000", "http://100.74.238.1:8000"] } })];
+  for (const value of values) {
+    const result = evaluateHonchoAdmission(value, { approvedOrigins: value.network.approvedOrigins }); assert.equal(result.admitted, false);
+    assert.ok(result.blockers.some((item) => item.code === "endpoint-role-collision"));
+  } });
 test("the supplied native Ollama api/embed endpoint is not claimed as direct upstream Honcho compatibility", () => {
   const value = plan({ embedding: {
     baseUrl: "http://100.74.238.1:11434/api/embed", transport: "ollama-native", model: "bge-m3", dimensions: 1024
