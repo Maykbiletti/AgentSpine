@@ -290,6 +290,8 @@ test("audit detects a private key that no longer matches its public identity", a
 
 test("concurrent identity generation and trust imports retain every distinct key", async (t) => {
   const { rootA, rootB, state } = await fixture(t);
+  const sourcePath = join(rootB, "CLAUDE.md");
+  const sourceBefore = await readFile(sourcePath);
   const identities = await Promise.all(Array.from({ length: 6 }, (_, index) => createSigner(
     rootA, state, `signer:parallel-${index}`, `parallel-${index}.json`
   )));
@@ -297,7 +299,10 @@ test("concurrent identity generation and trust imports retain every distinct key
     root: rootB, publicIdentityPath: identity.publicOut, confirmation: "local-share-confirmed"
   })));
   assert.equal((await listSigningIdentities({ root: rootA })).signers.length, 6);
-  assert.equal((await loadTrust(rootB)).trust.records.length, 6);
+  const loaded = await loadTrust(rootB);
+  assert.equal(loaded.trust.records.length, 6);
+  await assert.rejects(readFile(`${loaded.trustPath}.lock`), /ENOENT/);
+  assert.deepEqual(await readFile(sourcePath), sourceBefore);
 });
 
 test("CLI completes the signed adapter lifecycle without exposing private keys", async (t) => {

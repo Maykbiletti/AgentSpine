@@ -3,11 +3,12 @@ import {
   sign as cryptoSign, verify as cryptoVerify
 } from "node:crypto";
 import {
-  chmod, lstat, mkdir, open, readFile, stat, unlink, writeFile
+  chmod, lstat, mkdir, readFile, stat, unlink, writeFile
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { buildCatalog } from "./catalog.js";
-import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
+import { replaceFileWithRetry } from "./filesystem-retry.js";
+import { withOwnedFileLock } from "./owned-file-lock.js";
 import { projectId, projectStateDir, statePathIsScanExcluded, stateRoot } from "./paths.js";
 
 const AUTH_CONFIRMATION = "local-share-confirmed";
@@ -198,40 +199,18 @@ async function atomicWrite(path, value, mode = 0o600) {
   await replaceFileWithRetry(temporary, path);
 }
 
-async function acquireLock(path) {
-  const lockPath = `${path}.lock`;
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    try {
-      return { handle: await open(lockPath, "wx", 0o600), lockPath };
-    } catch (error) {
-      if (!isFileLockContention(error)) throw error;
-      try {
-        const metadata = await stat(lockPath);
-        if (Date.now() - metadata.mtimeMs > 15000) await unlink(lockPath);
-      } catch (lockError) {
-        if (lockError.code !== "ENOENT") throw lockError;
-      }
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
-    }
-  }
-  throw new Error("authentication state is busy; retry shortly");
-}
-
 async function mutate(path, read, findings, operation) {
-  const { handle, lockPath } = await acquireLock(path);
-  try {
+  return withOwnedFileLock(`${path}.lock`, async ({ assertOwned }) => {
     const state = await read();
     const before = findings(state);
     if (before.length) throw new Error(`authentication state failed closed: ${before.join(", ")}`);
     const result = await operation(state);
     const after = findings(state);
     if (after.length) throw new Error(`authentication mutation failed closed: ${after.join(", ")}`);
+    await assertOwned();
     await atomicWrite(path, state);
     return result;
-  } finally {
-    await handle.close();
-    await unlink(lockPath).catch((error) => { if (error.code !== "ENOENT") throw error; });
-  }
+  });
 }
 
 function normalizeRegistry(value) {
