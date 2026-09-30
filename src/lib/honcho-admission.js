@@ -161,7 +161,7 @@ function rawCredentialValue(value) {
   if (typeof value === "string") return value.length > PLAN_SCAN_MAX_STRING_BYTES || /\S/.test(value);
   return value !== null && value !== undefined && value !== false;
 }
-function rawCredentialMaterial(value) { return typeof value === "string" && /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/.test(value); }
+function rawCredentialMaterial(value) { return typeof value === "string" && (/-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/.test(value) || /AGE-SECRET-KEY(?:-PQ)?-1[0-9A-Z]{16,}/.test(value) || /(?:^|\r?\n)PuTTY-User-Key-File-[1-9]\d*:[^\r\n]*\r?\n[\s\S]*?(?:^|\r?\n)Private-Lines:[ \t]*[1-9]\d*[ \t]*(?:\r?\n|$)/.test(value)); }
 function rawJwkMaterial(descriptors) { const text = (key) => { const item = descriptors[key]; return item && !item.get && !item.set && item.enumerable === true && typeof item.value === "string" ? item.value : null; }, kty = text("kty"); return (["RSA", "EC", "OKP"].includes(kty) && rawCredentialValue(text("d"))) || (kty === "oct" && rawCredentialValue(text("k"))); }
 
 function scanPlanValue(value, ancestors, depth, state) {
