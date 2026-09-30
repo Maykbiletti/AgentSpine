@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveHostSourceCatalog } from "../src/lib/source-roots.js";
@@ -86,6 +86,29 @@ test("parallel first turns converge on one signing key", async (t) => {
   assert.equal(prepared.length, 8);
   assert.equal((await readFile(join(setup.state, "policy", "preflight-signing.key"))).byteLength, 32);
   await assert.rejects(readFile(join(setup.state, "policy", "preflight-signing.key.lock")), { code: "ENOENT" });
+  const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  assert.deepEqual(after, before);
+});
+
+test("preflight rejects linked signing keys without changing private sources", async (t) => {
+  const setup = await fixture(t);
+  const keyDirectory = join(setup.state, "policy");
+  const key = join(keyDirectory, "preflight-signing.key");
+  const external = join(setup.home, "external-signing.key");
+  const externalBytes = Buffer.alloc(32, 0x61);
+  const before = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  await mkdir(keyDirectory, { recursive: true });
+  await writeFile(external, externalBytes, { mode: 0o600 });
+  await link(external, key);
+  assert.equal((await lstat(key, { bigint: true })).nlink > 1n, true);
+  await assert.rejects(runPreflight({ ...setup, prompt: setup.input.prompt }), /preflight signing key is corrupt/);
+  await rm(key);
+  if (process.platform !== "win32") {
+    await symlink(external, key);
+    await assert.rejects(runPreflight({ ...turn(setup, "turn:symlink-key"), prompt: setup.input.prompt }),
+      /preflight signing key is corrupt/);
+  }
+  assert.deepEqual(await readFile(external), externalBytes);
   const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
   assert.deepEqual(after, before);
 });

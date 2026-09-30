@@ -160,9 +160,22 @@ function envelopeBody(envelope) {
 async function signingKey(paths) {
   await mkdir(dirname(paths.key), { recursive: true, mode: 0o700 });
   const readKey = async () => {
-    const value = await readFile(paths.key);
-    if (value.byteLength !== 32) throw new Error("preflight signing key is corrupt; turn blocked");
-    return value;
+    const metadata = await lstat(paths.key, { bigint: true });
+    const privateMode = process.platform !== "win32" && (metadata.mode & 0o077n) !== 0n, foreignOwner = typeof process.getuid === "function" && metadata.uid !== BigInt(process.getuid());
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1n || metadata.size !== 32n
+      || privateMode || foreignOwner)
+      throw new Error("preflight signing key is corrupt; turn blocked");
+    const handle = await open(paths.key, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
+    try {
+      const before = await handle.stat({ bigint: true });
+      const sameFile = (left, right) => left.dev === right.dev && left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
+      if (!sameFile(metadata, before)) throw new Error("preflight signing key is corrupt; turn blocked");
+      const value = await handle.readFile();
+      const after = await handle.stat({ bigint: true });
+      if (!sameFile(before, after) || after.nlink !== 1n || value.byteLength !== 32)
+        throw new Error("preflight signing key is corrupt; turn blocked");
+      return value;
+    } finally { await handle.close(); }
   };
   try { return await readKey(); }
   catch (error) {
