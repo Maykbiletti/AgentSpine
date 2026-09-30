@@ -55,7 +55,7 @@ test("unreadable directories are skipped by both walkers and never deny PreToolU
     const denied = icacls(restricted, ["/inheritance:r", "/deny", `*${sid}:(OI)(CI)(F)`]);
     assert.equal(denied.status, 0, denied.stderr || denied.stdout);
   } else {
-    await Promise.all([chmod(workspace, 0o755), chmod(root, 0o755), chmod(state, 0o777), chmod(host, 0o755)]);
+    await Promise.all([chmod(workspace, 0o755), chmod(root, 0o755), chmod(state, 0o700), chmod(host, 0o755)]);
     await chmod(restricted, 0o000);
   }
 
