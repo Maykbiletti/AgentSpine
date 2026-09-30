@@ -77,6 +77,19 @@ test("required CLAUDE hierarchy and Mnemo result create one fresh exact-turn rec
   assert.deepEqual(after, before);
 });
 
+test("parallel first turns converge on one signing key", async (t) => {
+  const setup = await fixture(t);
+  const before = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  const prepared = await Promise.all(Array.from({ length: 8 }, (_, index) => runPreflight({
+    ...turn(setup, `turn:key-race:${index}`), prompt: setup.input.prompt
+  })));
+  assert.equal(prepared.length, 8);
+  assert.equal((await readFile(join(setup.state, "policy", "preflight-signing.key"))).byteLength, 32);
+  await assert.rejects(readFile(join(setup.state, "policy", "preflight-signing.key.lock")), { code: "ENOENT" });
+  const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  assert.deepEqual(after, before);
+});
+
 test("required recall distinguishes a valid empty result from no call or failure", async (t) => {
   const setup = await fixture(t);
   await configurePreflightPolicy({ profile: providerProfile(), confirmation: "local-owner-confirmed", env: setup.env });
