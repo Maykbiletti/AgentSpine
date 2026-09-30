@@ -135,7 +135,7 @@ function receiptSignature(value) {
 }
 
 function rawCredentialKey(value, child) {
-  let decoded = value; for (let previous; previous !== decoded;) { previous = decoded; decoded = decoded.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex) => String.fromCharCode(Number.parseInt(hex, 16))); } const normalized = decoded.normalize("NFKC");
+  let decoded = value; for (let previous; previous !== decoded;) { previous = decoded; decoded = decoded.replace(/(?:%[0-9A-Fa-f]{2})+/g, (octets) => Buffer.from(octets.match(/[0-9A-Fa-f]{2}/g).map((hex) => Number.parseInt(hex, 16))).toString("utf8")); } const normalized = decoded.normalize("NFKC");
   const canonicalize = (text) => [...text.toLowerCase()].map((character) => /[a-z0-9]/.test(character) ? character : /[\p{L}\p{N}]/u.test(character) ? "?" : "").join("");
   const canonical = canonicalize(normalized);
   if (NUMERIC_TOKEN_METRIC_KEYS.has(canonical)
