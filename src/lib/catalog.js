@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { open, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { canonicalPath, comparablePath, isInside, projectStateDir, stateRoot } from "./paths.js";
 import { discoverDocuments } from "./documents.js";
-import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
+import { replaceFileWithRetry } from "./filesystem-retry.js";
+import { withOwnedFileLock } from "./owned-file-lock.js";
 
 export const CATALOG_SCHEMA = "agentspine.catalog/v1";
 
@@ -95,33 +95,17 @@ export async function saveCatalog(catalog) {
   const directory = await projectStateDir(catalog.root);
   const target = join(directory, "catalog.json");
   const lockPath = `${target}.lock`;
-  let handle;
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  return withOwnedFileLock(lockPath, async ({ assertOwned }) => {
+    const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
     try {
-      handle = await open(lockPath, "wx", 0o600);
-      break;
-    } catch (error) {
-      if (!isFileLockContention(error)) throw error;
-      try {
-        const metadata = await stat(lockPath);
-        if (Date.now() - metadata.mtimeMs > 15000) await unlink(lockPath);
-      } catch (lockError) {
-        if (lockError.code !== "ENOENT") throw lockError;
-      }
-      await delay(25);
+      await writeFile(temporary, `${JSON.stringify(catalog, null, 2)}\n`, { mode: 0o600 });
+      await assertOwned();
+      await replaceFileWithRetry(temporary, target);
+      return target;
+    } finally {
+      await unlink(temporary).catch((error) => { if (error.code !== "ENOENT") throw error; });
     }
-  }
-  if (!handle) throw new Error("catalog state is busy; retry later");
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, `${JSON.stringify(catalog, null, 2)}\n`, { mode: 0o600 });
-    await replaceFileWithRetry(temporary, target);
-    return target;
-  } finally {
-    await handle.close();
-    await unlink(temporary).catch((error) => { if (error.code !== "ENOENT") throw error; });
-    await unlink(lockPath).catch((error) => { if (error.code !== "ENOENT") throw error; });
-  }
+  });
 }
 
 export async function scanAndSave(root) {
