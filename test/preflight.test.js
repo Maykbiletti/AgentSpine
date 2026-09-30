@@ -72,6 +72,7 @@ test("required CLAUDE hierarchy and Mnemo result create one fresh exact-turn rec
     verifyPreflightReceipt({ ...setup, receipt: preflight.receipt, prompt: setup.input.prompt, consume: true })
   ]);
   assert.deepEqual(parallelConsume.sort(), [false, true]);
+  await assert.rejects(readFile(join(setup.state, "preflight", "preflight.lock")), { code: "ENOENT" });
   const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
   assert.deepEqual(after, before);
 });

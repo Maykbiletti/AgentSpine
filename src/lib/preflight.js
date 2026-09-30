@@ -3,7 +3,8 @@ import { constants as fsConstants } from "node:fs";
 import { spawn } from "node:child_process";
 import { lstat, mkdir, open, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { isFileLockContention, replaceFileWithRetry } from "./filesystem-retry.js";
+import { replaceFileWithRetry } from "./filesystem-retry.js";
+import { withOwnedFileLock } from "./owned-file-lock.js";
 import { ancestorsBetween, isInside, stateRoot } from "./paths.js";
 import { preflightDeliveryId } from "./preflight-delivery-id.js";
 import { resolveHostSourceCatalog } from "./source-roots.js";
@@ -67,13 +68,14 @@ async function readJson(path, maximum, fallback) {
     throw error;
   }
 }
-async function writeJson(path, value, maximum = MAX_STATE_BYTES) {
+async function writeJson(path, value, maximum = MAX_STATE_BYTES, assertOwned = null) {
   const body = `${JSON.stringify(value, null, 2)}\n`;
   if (Buffer.byteLength(body) > maximum) throw new Error(`${basename(path)} exceeds its state limit`);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, body, { mode: 0o600 });
+    await assertOwned?.();
     await replaceFileWithRetry(temporary, path);
   } finally {
     await unlink(temporary).catch((error) => { if (error.code !== "ENOENT") throw error; });
@@ -81,22 +83,12 @@ async function writeJson(path, value, maximum = MAX_STATE_BYTES) {
 }
 async function withLock(paths, task) {
   await mkdir(paths.directory, { recursive: true, mode: 0o700 });
-  let handle;
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    try { handle = await open(paths.lock, "wx", 0o600); break; } catch (error) {
-      if (!isFileLockContention(error)) throw error;
-      try {
-        const metadata = await stat(paths.lock);
-        if (Date.now() - metadata.mtimeMs > 90_000) await unlink(paths.lock);
-      } catch (lockError) { if (lockError.code !== "ENOENT") throw lockError; }
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
-    }
-  }
-  if (!handle) throw new Error("preflight state is busy; turn blocked");
-  try { return await task(); } finally {
-    await handle.close();
-    await unlink(paths.lock).catch((error) => { if (error.code !== "ENOENT") throw error; });
-  }
+  return withOwnedFileLock(paths.lock, task, {
+    staleAfterMs: 90_000,
+    heartbeatIntervalMs: 10_000,
+    retryDelayMs: 25,
+    maxAttempts: 120
+  });
 }
 
 function normalizeProvider(provider) {
@@ -202,13 +194,13 @@ async function readVerifiedState(paths) {
 export async function configurePreflightPolicy({ profile, confirmation, env = process.env }) {
   if (confirmation !== CONFIRM_POLICY) throw new Error("preflight policy changes require explicit local owner confirmation");
   const paths = storagePaths(env);
-  return withLock(paths, async () => {
+  return withLock(paths, async ({ assertOwned }) => {
     const policy = validatePolicy(await readJson(paths.policy, MAX_POLICY_BYTES, emptyPolicy));
     const normalized = normalizeProfile(profile);
     policy.profiles = [...policy.profiles.filter((item) => item.id !== normalized.id), normalized];
     policy.revision += 1;
     policy.history.push({ event: "profile-configured", profileId: normalized.id, at: timestamp(), authority: "authenticated-local-policy" });
-    await writeJson(paths.policy, policy, MAX_POLICY_BYTES);
+    await writeJson(paths.policy, policy, MAX_POLICY_BYTES, assertOwned);
     return { profile: normalized, revision: policy.revision, policyPath: paths.policy };
   });
 }
@@ -231,7 +223,7 @@ export async function proposeMustRemember({ claim, kind = "critical", sourceDige
   const exactScope = memoryScope(scope);
   const normalized = safeClaim(claim);
   const id = `remember-candidate:${sha256(canonical({ claim: normalized, ...exactScope })).slice(0, 32)}`;
-  return withLock(paths, async () => {
+  return withLock(paths, async ({ assertOwned }) => {
     const state = validateMemories(await readJson(paths.memories, MAX_STATE_BYTES, emptyMemories));
     const existing = state.candidates.find((item) => item.id === id);
     if (existing) return { candidate: existing, duplicate: true };
@@ -239,7 +231,7 @@ export async function proposeMustRemember({ claim, kind = "critical", sourceDige
       status: "pending-confirmation", observedAt: timestamp(), authority: "context-only" };
     state.candidates.push(candidate); state.revision += 1;
     state.history.push({ event: "proposed", id, at: candidate.observedAt, authority: "context-only" });
-    await writeJson(paths.memories, state);
+    await writeJson(paths.memories, state, MAX_STATE_BYTES, assertOwned);
     return { candidate, duplicate: false };
   });
 }
@@ -258,7 +250,7 @@ export async function captureMustRememberPrompt({ prompt, receipt, env = process
 export async function confirmMustRemember({ candidateId, confirmation, supersedes = null }, env = process.env) {
   if (confirmation !== CONFIRM_MEMORY) throw new Error("must-remember activation requires explicit local user confirmation");
   const paths = storagePaths(env);
-  return withLock(paths, async () => {
+  return withLock(paths, async ({ assertOwned }) => {
     const state = validateMemories(await readJson(paths.memories, MAX_STATE_BYTES, emptyMemories));
     const candidate = state.candidates.find((item) => item.id === candidateId && item.status === "pending-confirmation");
     if (!candidate) throw new Error("pending must-remember candidate not found");
@@ -277,14 +269,14 @@ export async function confirmMustRemember({ candidateId, confirmation, supersede
     if (previous) previous.status = "superseded";
     state.entries.push(entry); state.revision += 1;
     state.history.push({ event: "confirmed", id, supersedes: entry.supersedes, at: entry.confirmedAt, authority: "context-only" });
-    await writeJson(paths.memories, state);
+    await writeJson(paths.memories, state, MAX_STATE_BYTES, assertOwned);
     return { entry, revision: state.revision };
   });
 }
 export async function rollbackMustRemember({ id, confirmation }, env = process.env) {
   if (confirmation !== CONFIRM_MEMORY) throw new Error("must-remember rollback requires explicit local user confirmation");
   const paths = storagePaths(env);
-  return withLock(paths, async () => {
+  return withLock(paths, async ({ assertOwned }) => {
     const state = validateMemories(await readJson(paths.memories, MAX_STATE_BYTES, emptyMemories));
     const target = state.entries.find((item) => item.id === id);
     if (!target) throw new Error("must-remember entry not found");
@@ -293,21 +285,21 @@ export async function rollbackMustRemember({ id, confirmation }, env = process.e
       && item.kind === target.kind && item.status === "active") item.status = "superseded";
     target.status = "active"; state.revision += 1;
     state.history.push({ event: "rolled-back", id, at: timestamp(), authority: "context-only" });
-    await writeJson(paths.memories, state);
+    await writeJson(paths.memories, state, MAX_STATE_BYTES, assertOwned);
     return { entry: target, revision: state.revision };
   });
 }
 export async function purgeMustRemember({ id, confirmation }, env = process.env) {
   if (confirmation !== "local-user-purge-confirmed") throw new Error("permanent must-remember deletion requires explicit local user purge confirmation");
   const paths = storagePaths(env);
-  return withLock(paths, async () => {
+  return withLock(paths, async ({ assertOwned }) => {
     const state = validateMemories(await readJson(paths.memories, MAX_STATE_BYTES, emptyMemories));
     const removed = state.entries.find((item) => item.id === id);
     if (!removed) throw new Error("must-remember entry not found");
     state.entries = state.entries.filter((item) => item.id !== id);
     state.candidates = state.candidates.filter((item) => item.id !== removed.candidateId);
     state.revision += 1; state.history.push({ event: "purged", idDigest: sha256(id), at: timestamp(), authority: "context-only" });
-    await writeJson(paths.memories, state);
+    await writeJson(paths.memories, state, MAX_STATE_BYTES, assertOwned);
     return { purged: true, idDigest: sha256(id), revision: state.revision };
   });
 }
@@ -548,7 +540,7 @@ export async function runPreflight({ input, scope, resolvedSources, prompt, now 
   const key = await signingKey(paths); const bodyDigest = digestObject(receiptBody);
   const receipt = { id: `preflight:${bodyDigest.slice(0, 32)}`, ...receiptBody, bodyDigest,
     signature: createHmac("sha256", key).update(bodyDigest).digest("hex") };
-  await withLock(paths, async () => {
+  await withLock(paths, async ({ assertOwned }) => {
     const state = await readVerifiedState(paths);
     state.receipts = state.receipts.filter((item) => new Date(item.receipt?.expiresAt || 0).getTime() >= new Date(createdAt).getTime() - RECEIPT_TTL_MS);
     if (state.receipts.some((item) => item.receipt?.deliveryId === receipt.deliveryId && !item.invalidatedAt)) {
@@ -562,7 +554,7 @@ export async function runPreflight({ input, scope, resolvedSources, prompt, now 
         providerId: item.providerId, status: item.status, rejected: item.rejected
       })), cwdDigest: receipt.cwdDigest, authority: "diagnostic-only" };
     state.history.push({ event: "ready", receiptId: receipt.id, at: createdAt, authority: "preflight-proof-only" });
-    await writeJson(paths.state, state);
+    await writeJson(paths.state, state, MAX_STATE_BYTES, assertOwned);
   });
   return { receipt, briefing, policy: { configured: Boolean(profile), requiredProviderIds } };
 }
@@ -619,7 +611,7 @@ export async function verifyPreflightReceipt({ receipt, input, scope, resolvedSo
   } catch { return false; }
   if (consume) {
     const paths = storagePaths(env);
-    const consumed = await withLock(paths, async () => {
+    const consumed = await withLock(paths, async ({ assertOwned }) => {
       const state = await readVerifiedState(paths);
       const stored = state.receipts.find((item) => item.receipt?.id === receipt.id && item.receipt?.bodyDigest === receipt.bodyDigest);
       if (!stored || stored.consumedAt !== null || stored.invalidatedAt) return false;
@@ -628,7 +620,7 @@ export async function verifyPreflightReceipt({ receipt, input, scope, resolvedSo
       state.lastTurn = { ...(state.lastTurn || {}), status: "consumed", receiptId: receipt.id,
         at: stored.consumedAt, authority: "diagnostic-only" };
       state.history.push({ event: "consumed", receiptId: receipt.id, at: stored.consumedAt, authority: "preflight-proof-only" });
-      await writeJson(paths.state, state);
+      await writeJson(paths.state, state, MAX_STATE_BYTES, assertOwned);
       return true;
     });
     if (!consumed) return false;
@@ -648,7 +640,7 @@ function failureCode(error) {
 export async function recordPreflightFailure({ receiptId = null, input = {}, host = null, error,
   now = new Date(), env = process.env }) {
   const paths = storagePaths(env);
-  return withLock(paths, async () => {
+  return withLock(paths, async ({ assertOwned }) => {
     const state = await readVerifiedState(paths);
     const at = timestamp(now);
     if (receiptId) {
@@ -665,7 +657,7 @@ export async function recordPreflightFailure({ receiptId = null, input = {}, hos
       deliveryDigest: sha256(String(input.event_id ?? input.hook_event_id ?? "missing")), authority: "diagnostic-only" };
     state.revision += 1;
     state.history.push({ event: "blocked", code, receiptId, at, authority: "preflight-proof-only" });
-    await writeJson(paths.state, state);
+    await writeJson(paths.state, state, MAX_STATE_BYTES, assertOwned);
     return state.lastTurn;
   });
 }
