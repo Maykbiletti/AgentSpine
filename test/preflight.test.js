@@ -113,6 +113,22 @@ test("preflight rejects linked signing keys without changing private sources", a
   assert.deepEqual(after, before);
 });
 
+test("preflight never creates its signing key through a linked state directory", {
+  skip: process.platform === "win32"
+}, async (t) => {
+  const setup = await fixture(t);
+  const externalDirectory = join(setup.home, "external-policy");
+  const linkedDirectory = join(setup.state, "policy");
+  const externalKey = join(externalDirectory, "preflight-signing.key");
+  const before = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  await mkdir(externalDirectory);
+  await symlink(externalDirectory, linkedDirectory, "dir");
+  await assert.rejects(runPreflight({ ...setup, prompt: setup.input.prompt }), /signing key directory is unsafe/);
+  await assert.rejects(readFile(externalKey), { code: "ENOENT" });
+  const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  assert.deepEqual(after, before);
+});
+
 test("required recall distinguishes a valid empty result from no call or failure", async (t) => {
   const setup = await fixture(t);
   await configurePreflightPolicy({ profile: providerProfile(), confirmation: "local-owner-confirmed", env: setup.env });
