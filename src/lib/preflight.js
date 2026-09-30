@@ -159,16 +159,25 @@ function envelopeBody(envelope) {
 }
 async function signingKey(paths) {
   await mkdir(dirname(paths.key), { recursive: true, mode: 0o700 });
-  try {
+  const readKey = async () => {
     const value = await readFile(paths.key);
     if (value.byteLength !== 32) throw new Error("preflight signing key is corrupt; turn blocked");
     return value;
-  } catch (error) {
+  };
+  try { return await readKey(); }
+  catch (error) {
     if (error.code !== "ENOENT") throw error;
-    const value = randomBytes(32);
-    const handle = await open(paths.key, "wx", 0o600);
-    try { await handle.writeFile(value); } finally { await handle.close(); }
-    return value;
+    return withOwnedFileLock(`${paths.key}.lock`, async ({ assertOwned }) => {
+      try { return await readKey(); }
+      catch (lockError) {
+        if (lockError.code !== "ENOENT") throw lockError;
+        const value = randomBytes(32);
+        await assertOwned();
+        const handle = await open(paths.key, "wx", 0o600);
+        try { await handle.writeFile(value); } finally { await handle.close(); }
+        return value;
+      }
+    });
   }
 }
 
