@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { link, lstat, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveHostSourceCatalog } from "../src/lib/source-roots.js";
@@ -109,6 +109,35 @@ test("preflight rejects linked signing keys without changing private sources", a
       /preflight signing key is corrupt/);
   }
   assert.deepEqual(await readFile(external), externalBytes);
+  const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  assert.deepEqual(after, before);
+});
+
+test("preflight never creates its signing key through a linked state directory", {
+  skip: process.platform === "win32"
+}, async (t) => {
+  const setup = await fixture(t);
+  const externalDirectory = join(setup.home, "external-policy");
+  const linkedDirectory = join(setup.state, "policy");
+  const externalKey = join(externalDirectory, "preflight-signing.key");
+  const before = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  await mkdir(externalDirectory);
+  await symlink(externalDirectory, linkedDirectory, "dir");
+  await assert.rejects(runPreflight({ ...setup, prompt: setup.input.prompt }), /signing key directory is unsafe/);
+  await assert.rejects(readFile(externalKey), { code: "ENOENT" });
+  const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  assert.deepEqual(after, before);
+});
+
+test("preflight rejects a group-writable signing key state root", {
+  skip: process.platform === "win32"
+}, async (t) => {
+  const setup = await fixture(t);
+  const key = join(setup.state, "policy", "preflight-signing.key");
+  const before = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  await chmod(setup.state, 0o770);
+  await assert.rejects(runPreflight({ ...setup, prompt: setup.input.prompt }), /signing key directory is unsafe/);
+  await assert.rejects(readFile(key), { code: "ENOENT" });
   const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
   assert.deepEqual(after, before);
 });
