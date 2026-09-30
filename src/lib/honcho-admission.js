@@ -5,13 +5,10 @@ export const HONCHO_RECEIPT_TRUST_STORE_SCHEMA = "agentspine.honcho-receipt-trus
 
 const PHASES = new Set(["evaluation", "honcho-primary"]);
 const SCOPE_FIELDS = ["tenantId", "workspaceId", "userId", "projectId", "threadId"];
-const PRODUCTION_EVIDENCE = [
-  "serverHealth", "embeddingCompatibility", "derivationIsolation", "crossSessionRecall", "deletion"
-];
+const PRODUCTION_EVIDENCE = ["serverHealth", "embeddingCompatibility", "derivationIsolation",
+  "crossSessionRecall", "deletion"];
 const SHA256 = /^[a-f0-9]{64}$/;
-const PRODUCTION_EVIDENCE_PATHS = new Set([
-  ...PRODUCTION_EVIDENCE.map((field) => `acceptance.${field}`), "governance.sourceOfferDigest"
-]);
+const PRODUCTION_EVIDENCE_PATHS = new Set([...PRODUCTION_EVIDENCE.map((field) => `acceptance.${field}`), "governance.sourceOfferDigest"]);
 const PRODUCTION_EVIDENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PRODUCTION_EVIDENCE_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const RECEIPT_TRUSTED_KEY_LIMIT = 8;
@@ -161,7 +158,10 @@ function rawCredentialValue(value) {
   if (typeof value === "string") return value.length > PLAN_SCAN_MAX_STRING_BYTES || /\S/.test(value);
   return value !== null && value !== undefined && value !== false;
 }
-function rawCredentialMaterial(value) { return typeof value === "string" && (/-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/.test(value) || /AGE-SECRET-KEY(?:-PQ)?-1[0-9A-Z]{16,}/.test(value) || /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#@\s]+@[^/?#\s]+/.test(value) || /(?:^|\r?\n)(?:Authorization:[ \t]*)?(?:Bearer[ \t]+[A-Za-z0-9._~+/-]{16,}=*|Basic[ \t]+[A-Za-z0-9+/]{16,}={0,2})[ \t]*(?:\r?\n|$)/i.test(value) || /(?:^|\r?\n)PuTTY-User-Key-File-[1-9]\d*:[^\r\n]*\r?\n[\s\S]*?(?:^|\r?\n)Private-Lines:[ \t]*[1-9]\d*[ \t]*(?:\r?\n|$)/.test(value)); }
+function rawCredentialHeaderMaterial(value) {
+  return value.split(/\r?\n/).some((line) => { const match = /^([!#$%&'*+\-.^_`|~0-9A-Za-z]{1,256}):[ \t]*(.*\S)[ \t]*$/.exec(line); return match && rawCredentialKey(match[1], match[2]) && rawCredentialValue(match[2]); });
+}
+function rawCredentialMaterial(value) { return typeof value === "string" && (/-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/.test(value) || /AGE-SECRET-KEY(?:-PQ)?-1[0-9A-Z]{16,}/.test(value) || /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#@\s]+@[^/?#\s]+/.test(value) || /(?:^|\r?\n)(?:Authorization:[ \t]*)?(?:Bearer[ \t]+[A-Za-z0-9._~+/-]{16,}=*|Basic[ \t]+[A-Za-z0-9+/]{16,}={0,2})[ \t]*(?:\r?\n|$)/i.test(value) || rawCredentialHeaderMaterial(value) || /(?:^|\r?\n)PuTTY-User-Key-File-[1-9]\d*:[^\r\n]*\r?\n[\s\S]*?(?:^|\r?\n)Private-Lines:[ \t]*[1-9]\d*[ \t]*(?:\r?\n|$)/.test(value)); }
 function rawJwkMaterial(descriptors) { const text = (key) => { const item = descriptors[key]; return item && !item.get && !item.set && item.enumerable === true && typeof item.value === "string" ? item.value : null; }, kty = text("kty"); return (["RSA", "EC", "OKP"].includes(kty) && rawCredentialValue(text("d"))) || (kty === "oct" && rawCredentialValue(text("k"))); }
 
 function scanPlanValue(value, ancestors, depth, state) {
