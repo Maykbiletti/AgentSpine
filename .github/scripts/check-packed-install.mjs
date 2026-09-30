@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { formatPackedInstallFailure } from "./packed-install-diagnostic.mjs";
 
 const execute = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -255,6 +256,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`AgentSpine packed install check failed: ${error.stack || error.message}\n`);
+  process.stderr.write(`AgentSpine packed install check failed: ${formatPackedInstallFailure(error)}\n`);
   process.exitCode = 1;
 });
