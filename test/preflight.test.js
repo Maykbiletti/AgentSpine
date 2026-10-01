@@ -4,6 +4,7 @@ import { chmod, link, lstat, mkdtemp, mkdir, readFile, realpath, rename, rm, sym
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveHostSourceCatalog } from "../src/lib/source-roots.js";
+import { privateSigningKey } from "../src/lib/private-signing-key.js";
 import {
   PREFLIGHT_SCHEMA, RETRIEVAL_RESULT_SCHEMA, captureMustRememberPrompt, configurePreflightPolicy, confirmMustRemember,
   preflightStatus, proposeMustRemember, purgeMustRemember, recordPreflightFailure, rollbackMustRemember,
@@ -107,6 +108,29 @@ test("preflight recovers an interrupted signing key publication", async (t) => {
   assert.equal((await readFile(key)).byteLength, 32);
   assert.equal((await lstat(key, { bigint: true })).nlink, 1n);
   await assert.rejects(readFile(pending), { code: "ENOENT" });
+  const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  assert.deepEqual(after, before);
+});
+
+test("preflight rejects a substituted pending key before publication", async (t) => {
+  const setup = await fixture(t);
+  const key = join(setup.state, "policy", "preflight-signing.key");
+  const pending = `${key}.pending`;
+  const replacement = join(setup.home, "replacement-signing.key");
+  const replacementBytes = Buffer.alloc(32, 0x63);
+  const before = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  await writeFile(replacement, replacementBytes, { mode: 0o600 });
+
+  await assert.rejects(privateSigningKey(key, {
+    linkFile: (_staged, published) => link(replacement, published)
+  }), /preflight signing key is corrupt/);
+
+  await assert.rejects(readFile(key), { code: "ENOENT" });
+  await assert.rejects(readFile(pending), { code: "ENOENT" });
+  assert.deepEqual(await readFile(replacement), replacementBytes);
+  assert.equal((await lstat(replacement, { bigint: true })).nlink, 1n);
+  assert.equal((await privateSigningKey(key)).byteLength, 32);
+  assert.equal((await lstat(key, { bigint: true })).nlink, 1n);
   const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
   assert.deepEqual(after, before);
 });
