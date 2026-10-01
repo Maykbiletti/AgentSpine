@@ -109,38 +109,46 @@ export async function measureReads(action) {
   }
 }
 
-export async function processCall(root, name, args) {
+export async function processCall(root, name, args, {
+  spawnProcess = spawn, responseTimeoutMs = 5000
+} = {}) {
   const entry = fileURLToPath(new URL("../src/mcp.js", import.meta.url));
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [entry], { cwd: root, env: process.env,
+    const child = spawnProcess(process.execPath, [entry], { cwd: root, env: process.env,
       stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     let buffer = "";
-    let result;
-    let failure;
-    const timer = setTimeout(() => {
-      failure = new Error("MCP child timeout");
-      child.kill();
-    }, 5000);
-    child.once("error", error => {
+    let settled = false;
+    const stop = () => {
+      try { child.kill(); } catch {}
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.unref?.();
+    };
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      reject(error);
-    });
+      stop();
+      if (error) reject(error); else resolve(result);
+    };
+    const timer = setTimeout(() => {
+      finish(new Error("MCP child timeout"));
+    }, responseTimeoutMs);
+    child.once("error", error => finish(error));
     child.stdout.on("data", chunk => {
+      if (settled) return;
       buffer += chunk;
       if (!buffer.includes("\n")) return;
       try {
         const response = JSON.parse(buffer.slice(0, buffer.indexOf("\n"))).result;
-        result = { ...JSON.parse(response.content[0].text), isError: response.isError };
+        finish(null, { ...JSON.parse(response.content[0].text), isError: response.isError });
       } catch (error) {
-        failure = error;
+        finish(error);
       }
-      // Stop the actual server after the response; no graceful state rewrite.
-      child.kill();
     });
     child.once("close", () => {
-      clearTimeout(timer);
-      if (failure || !result) reject(failure || new Error("MCP child exited without result"));
-      else resolve(result);
+      finish(new Error("MCP child exited without result"));
     });
     child.stdin.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
       params: { name, arguments: args } }) + "\n");
