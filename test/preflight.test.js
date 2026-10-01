@@ -90,6 +90,27 @@ test("parallel first turns converge on one signing key", async (t) => {
   assert.deepEqual(after, before);
 });
 
+test("preflight recovers an interrupted signing key publication", async (t) => {
+  const setup = await fixture(t);
+  const keyDirectory = join(setup.state, "policy");
+  const key = join(keyDirectory, "preflight-signing.key");
+  const pending = `${key}.pending`;
+  const before = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  await mkdir(keyDirectory, { recursive: true });
+  await writeFile(pending, Buffer.alloc(32, 0x62), { mode: 0o600 });
+  await link(pending, key);
+  assert.equal((await lstat(key, { bigint: true })).nlink, 2n);
+
+  const preflight = await runPreflight({ ...setup, prompt: setup.input.prompt });
+
+  assert.equal(preflight.receipt.status, "ready");
+  assert.equal((await readFile(key)).byteLength, 32);
+  assert.equal((await lstat(key, { bigint: true })).nlink, 1n);
+  await assert.rejects(readFile(pending), { code: "ENOENT" });
+  const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  assert.deepEqual(after, before);
+});
+
 test("preflight rejects linked signing keys without changing private sources", async (t) => {
   const setup = await fixture(t);
   const keyDirectory = join(setup.state, "policy");

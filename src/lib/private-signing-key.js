@@ -30,6 +30,11 @@ function safeKey(metadata) {
     && metadata.size === BigInt(KEY_BYTES) && !foreignOwner(metadata) && !unsafeMode(metadata, 0o077n);
 }
 
+function safeInterruptedKey(metadata) {
+  return metadata.isFile() && !metadata.isSymbolicLink() && metadata.nlink === 2n
+    && metadata.size === BigInt(KEY_BYTES) && !foreignOwner(metadata) && !unsafeMode(metadata, 0o077n);
+}
+
 function sameNode(left, right) {
   return left.dev === right.dev && left.ino === right.ino;
 }
@@ -84,16 +89,50 @@ async function removePending(path, anchor, assertOwned) {
   await assertAnchor(anchor);
 }
 
+async function discardInterruptedPublication(path, pending, anchor, assertOwned) {
+  await assertOwned();
+  await assertAnchor(anchor);
+  let published; let staged;
+  try {
+    [published, staged] = await Promise.all([
+      lstat(path, { bigint: true }), lstat(pending, { bigint: true })
+    ]);
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+  if (!safeInterruptedKey(published) || !safeInterruptedKey(staged) || !sameFile(published, staged)) return false;
+  await assertOwned();
+  await assertAnchor(anchor);
+  const [currentPublished, currentStaged] = await Promise.all([
+    lstat(path, { bigint: true }), lstat(pending, { bigint: true })
+  ]);
+  if (!safeInterruptedKey(currentPublished) || !safeInterruptedKey(currentStaged)
+    || !sameFile(published, currentPublished) || !sameFile(staged, currentStaged)) throw new Error(KEY_ERROR);
+  await unlink(path);
+  await assertAnchor(anchor);
+  const remaining = await lstat(pending, { bigint: true });
+  if (!safeKey(remaining) || !sameNode(staged, remaining) || remaining.size !== staged.size) throw new Error(KEY_ERROR);
+  await assertOwned();
+  await unlink(pending);
+  await assertAnchor(anchor);
+  return true;
+}
+
 export async function privateSigningKey(path) {
   const anchor = await createAnchor(path);
+  const pending = `${path}.pending`;
   try { return await readKey(path, anchor); }
   catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    if (error.code !== "ENOENT" && error.message !== KEY_ERROR) throw error;
   }
   return withOwnedFileLock(`${path}.lock`, async ({ assertOwned }) => {
     try { return await readKey(path, anchor); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
-    const pending = `${path}.pending`;
+    catch (error) {
+      if (error.code !== "ENOENT"
+        && (error.message !== KEY_ERROR
+          || !await discardInterruptedPublication(path, pending, anchor, assertOwned))) throw error;
+    }
     await removePending(pending, anchor, assertOwned);
     const value = randomBytes(KEY_BYTES);
     let handle;
