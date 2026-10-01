@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, link, lstat, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveHostSourceCatalog } from "../src/lib/source-roots.js";
@@ -129,6 +129,30 @@ test("preflight rejects a substituted pending key before publication", async (t)
   await assert.rejects(readFile(pending), { code: "ENOENT" });
   assert.deepEqual(await readFile(replacement), replacementBytes);
   assert.equal((await lstat(replacement, { bigint: true })).nlink, 1n);
+  assert.equal((await privateSigningKey(key)).byteLength, 32);
+  assert.equal((await lstat(key, { bigint: true })).nlink, 1n);
+  const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  assert.deepEqual(after, before);
+});
+
+test("preflight rejects a signing key swapped after publication verification", async (t) => {
+  const setup = await fixture(t);
+  const key = join(setup.state, "policy", "preflight-signing.key");
+  const pending = `${key}.pending`;
+  const replacement = join(setup.home, "replacement-signing.key");
+  const before = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
+  await writeFile(replacement, Buffer.alloc(32, 0x64), { mode: 0o600 });
+
+  await assert.rejects(privateSigningKey(key, {
+    unlinkPending: async (staged) => {
+      await unlink(staged);
+      await unlink(key);
+      await rename(replacement, key);
+    }
+  }), /preflight signing key is corrupt/);
+
+  await assert.rejects(readFile(key), { code: "ENOENT" });
+  await assert.rejects(readFile(pending), { code: "ENOENT" });
   assert.equal((await privateSigningKey(key)).byteLength, 32);
   assert.equal((await lstat(key, { bigint: true })).nlink, 1n);
   const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));

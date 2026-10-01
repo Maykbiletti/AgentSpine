@@ -64,10 +64,10 @@ async function assertAnchor(anchor) {
   if (!safeDirectory(directory) || !sameNode(directory, anchor.directory.metadata)) throw new Error(DIRECTORY_ERROR);
 }
 
-async function readKey(path, anchor) {
+async function readKey(path, anchor, expectedNode = null) {
   await assertAnchor(anchor);
   const metadata = await lstat(path, { bigint: true });
-  if (!safeKey(metadata)) throw new Error(KEY_ERROR);
+  if (!safeKey(metadata) || (expectedNode && !sameNode(metadata, expectedNode))) throw new Error(KEY_ERROR);
   const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
   try {
     const before = await handle.stat({ bigint: true });
@@ -119,7 +119,7 @@ async function discardInterruptedPublication(path, pending, anchor, assertOwned)
   return true;
 }
 
-export async function privateSigningKey(path, { linkFile = link } = {}) {
+export async function privateSigningKey(path, { linkFile = link, unlinkPending = unlink } = {}) {
   const anchor = await createAnchor(path);
   const pending = `${path}.pending`;
   try { return await readKey(path, anchor); }
@@ -159,10 +159,11 @@ export async function privateSigningKey(path, { linkFile = link } = {}) {
       handle = null;
       await assertOwned();
       await assertAnchor(anchor);
-      await unlink(pending);
-      published = false;
+      await unlinkPending(pending);
       await assertAnchor(anchor);
-      return readKey(path, anchor);
+      const result = await readKey(path, anchor, stagedMetadata);
+      published = false;
+      return result;
     } finally {
       await handle?.close();
       await assertOwned();
