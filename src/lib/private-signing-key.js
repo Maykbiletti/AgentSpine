@@ -119,7 +119,7 @@ async function discardInterruptedPublication(path, pending, anchor, assertOwned)
   return true;
 }
 
-export async function privateSigningKey(path) {
+export async function privateSigningKey(path, { linkFile = link } = {}) {
   const anchor = await createAnchor(path);
   const pending = `${path}.pending`;
   try { return await readKey(path, anchor); }
@@ -136,6 +136,7 @@ export async function privateSigningKey(path) {
     await removePending(pending, anchor, assertOwned);
     const value = randomBytes(KEY_BYTES);
     let handle;
+    let published = false;
     try {
       await assertOwned();
       await assertAnchor(anchor);
@@ -144,18 +145,33 @@ export async function privateSigningKey(path) {
       await handle.sync();
       const metadata = await handle.stat({ bigint: true });
       if (!safeKey(metadata)) throw new Error(KEY_ERROR);
+      await assertOwned();
+      await assertAnchor(anchor);
+      await linkFile(pending, path);
+      published = true;
+      const [stagedMetadata, pendingMetadata, publishedMetadata] = await Promise.all([
+        handle.stat({ bigint: true }), lstat(pending, { bigint: true }), lstat(path, { bigint: true })
+      ]);
+      if (!safeInterruptedKey(stagedMetadata) || !safeInterruptedKey(pendingMetadata)
+        || !safeInterruptedKey(publishedMetadata) || !sameFile(stagedMetadata, pendingMetadata)
+        || !sameFile(pendingMetadata, publishedMetadata)) throw new Error(KEY_ERROR);
       await handle.close();
       handle = null;
       await assertOwned();
       await assertAnchor(anchor);
-      await link(pending, path);
       await unlink(pending);
+      published = false;
       await assertAnchor(anchor);
       return readKey(path, anchor);
     } finally {
       await handle?.close();
+      await assertOwned();
       await assertAnchor(anchor);
+      if (published) {
+        await unlink(path).catch((error) => { if (error.code !== "ENOENT") throw error; });
+      }
       await unlink(pending).catch((error) => { if (error.code !== "ENOENT") throw error; });
+      await assertAnchor(anchor);
     }
   }, { assertPath: () => assertAnchor(anchor) });
 }
