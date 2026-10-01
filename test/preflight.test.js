@@ -112,7 +112,7 @@ test("preflight recovers an interrupted signing key publication", async (t) => {
   assert.deepEqual(after, before);
 });
 
-test("preflight rejects a substituted pending key before publication", async (t) => {
+test("preflight preserves a substituted publication before rollback", async (t) => {
   const setup = await fixture(t);
   const key = join(setup.state, "policy", "preflight-signing.key");
   const pending = `${key}.pending`;
@@ -125,9 +125,11 @@ test("preflight rejects a substituted pending key before publication", async (t)
     linkFile: (_staged, published) => link(replacement, published)
   }), /preflight signing key is corrupt/);
 
-  await assert.rejects(readFile(key), { code: "ENOENT" });
+  assert.deepEqual(await readFile(key), replacementBytes);
   await assert.rejects(readFile(pending), { code: "ENOENT" });
   assert.deepEqual(await readFile(replacement), replacementBytes);
+  assert.equal((await lstat(replacement, { bigint: true })).nlink, 2n);
+  await unlink(key);
   assert.equal((await lstat(replacement, { bigint: true })).nlink, 1n);
   assert.equal((await privateSigningKey(key)).byteLength, 32);
   assert.equal((await lstat(key, { bigint: true })).nlink, 1n);
@@ -135,7 +137,7 @@ test("preflight rejects a substituted pending key before publication", async (t)
   assert.deepEqual(after, before);
 });
 
-test("preflight rejects a signing key swapped after publication verification", async (t) => {
+test("preflight preserves a signing key swapped before publication rollback", async (t) => {
   const setup = await fixture(t);
   const key = join(setup.state, "policy", "preflight-signing.key");
   const pending = `${key}.pending`;
@@ -151,8 +153,9 @@ test("preflight rejects a signing key swapped after publication verification", a
     }
   }), /preflight signing key is corrupt/);
 
-  await assert.rejects(readFile(key), { code: "ENOENT" });
+  assert.deepEqual(await readFile(key), Buffer.alloc(32, 0x64));
   await assert.rejects(readFile(pending), { code: "ENOENT" });
+  await unlink(key);
   assert.equal((await privateSigningKey(key)).byteLength, 32);
   assert.equal((await lstat(key, { bigint: true })).nlink, 1n);
   const after = await Promise.all(setup.resolvedSources.catalog.documents.map((item) => readFile(item.path)));
