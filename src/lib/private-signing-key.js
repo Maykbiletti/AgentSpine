@@ -89,6 +89,20 @@ async function removePending(path, anchor, assertOwned) {
   await assertAnchor(anchor);
 }
 
+async function unlinkCreatedNode(path, expected, anchor) {
+  await assertAnchor(anchor);
+  let current;
+  try { current = await lstat(path, { bigint: true }); }
+  catch (error) {
+    if (error.code === "ENOENT") return true;
+    throw error;
+  }
+  if (!expected || !sameNode(current, expected)) return false;
+  await unlink(path);
+  await assertAnchor(anchor);
+  return true;
+}
+
 async function discardInterruptedPublication(path, pending, anchor, assertOwned) {
   await assertOwned();
   await assertAnchor(anchor);
@@ -137,10 +151,12 @@ export async function privateSigningKey(path, { linkFile = link, unlinkPending =
     const value = randomBytes(KEY_BYTES);
     let handle;
     let published = false;
+    let createdNode = null;
     try {
       await assertOwned();
       await assertAnchor(anchor);
       handle = await open(pending, "wx", 0o600);
+      createdNode = await handle.stat({ bigint: true });
       await handle.writeFile(value);
       await handle.sync();
       const metadata = await handle.stat({ bigint: true });
@@ -168,11 +184,13 @@ export async function privateSigningKey(path, { linkFile = link, unlinkPending =
       await handle?.close();
       await assertOwned();
       await assertAnchor(anchor);
+      let cleanupMatched = true;
       if (published) {
-        await unlink(path).catch((error) => { if (error.code !== "ENOENT") throw error; });
+        cleanupMatched = await unlinkCreatedNode(path, createdNode, anchor);
       }
-      await unlink(pending).catch((error) => { if (error.code !== "ENOENT") throw error; });
+      cleanupMatched = await unlinkCreatedNode(pending, createdNode, anchor) && cleanupMatched;
       await assertAnchor(anchor);
+      if (!cleanupMatched) throw new Error(KEY_ERROR);
     }
   }, { assertPath: () => assertAnchor(anchor) });
 }
